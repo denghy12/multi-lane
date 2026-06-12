@@ -98,7 +98,7 @@ def main(args):
     if args.opt == 'sgd':
         args.opt_betas = None
 
-    if 'COCO' in args.dataset or 'VOC' in args.dataset:
+    if 'COCO' in args.dataset or 'VOC' in args.dataset or 'EMOTIC' in args.dataset:
         criterion = torch.nn.BCEWithLogitsLoss().to(device)
     else:
         criterion = torch.nn.CrossEntropyLoss().to(device)
