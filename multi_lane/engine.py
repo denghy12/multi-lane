@@ -12,9 +12,11 @@ Train and eval functions used in main.py
 import math
 import sys
 import os
+import json
 from typing import Iterable, List
 import wandb
 import datetime
+from html import escape
 
 import torch
 from torch import nn
@@ -26,6 +28,448 @@ from timm.utils import accuracy
 
 import multi_lane.utils as utils
 import multi_lane.datasets as datasets
+
+
+DETAIL_METRICS = [
+    'ap', 'f1', 'precision', 'recall', 'support',
+    'predicted_positive', 'tp', 'fp', 'fn', 'tn',
+]
+
+
+def _safe_divide(numerator, denominator):
+    return numerator / denominator if denominator > 0 else 0.0
+
+
+def _average_precision(scores: torch.Tensor, targets: torch.Tensor):
+    positives = int(targets.sum().item())
+    if positives == 0:
+        return 0.0
+
+    order = torch.argsort(scores, descending=True)
+    sorted_targets = targets[order].float()
+    true_positive_cumsum = torch.cumsum(sorted_targets, dim=0)
+    rank = torch.arange(1, sorted_targets.numel() + 1, device=scores.device).float()
+    precision_at_rank = true_positive_cumsum / rank
+    return float((precision_at_rank * sorted_targets).sum().item() / positives)
+
+
+def _multilabel_class_details(logits: torch.Tensor, targets: torch.Tensor, class_ids: List[int]):
+    scores = torch.sigmoid(logits.detach().cpu())
+    predictions = scores.gt(0.8)
+    targets = targets.detach().cpu().bool()
+    details = {}
+
+    for class_id in class_ids:
+        pred = predictions[:, class_id]
+        target = targets[:, class_id]
+
+        tp = int((pred & target).sum().item())
+        fp = int((pred & ~target).sum().item())
+        fn = int((~pred & target).sum().item())
+        tn = int((~pred & ~target).sum().item())
+        support = int(target.sum().item())
+        predicted_positive = int(pred.sum().item())
+        precision = _safe_divide(tp, predicted_positive)
+        recall = _safe_divide(tp, support)
+        f1 = _safe_divide(2 * precision * recall, precision + recall)
+
+        details[class_id] = {
+            'ap': _average_precision(scores[:, class_id], target.float()),
+            'f1': f1,
+            'precision': precision,
+            'recall': recall,
+            'support': support,
+            'predicted_positive': predicted_positive,
+            'tp': tp,
+            'fp': fp,
+            'fn': fn,
+            'tn': tn,
+        }
+
+    return details
+
+
+def _support_counts(targets, num_classes):
+    counts = [0 for _ in range(num_classes)]
+    for target in targets:
+        for class_id in target:
+            counts[int(class_id)] += 1
+    return counts
+
+
+def _class_task_map(class_mask):
+    mapping = {}
+    for task_id, classes in enumerate(class_mask):
+        for class_id in classes:
+            mapping[int(class_id)] = task_id
+    return mapping
+
+
+def _class_names(dataset, num_classes):
+    classes = getattr(dataset, 'classes', None)
+    if classes is None:
+        return [str(i) for i in range(num_classes)]
+    return [str(classes[i]) for i in range(num_classes)]
+
+
+def _detail_report_path(args):
+    run_name = args.name or args.dataset.replace('Split-', '').lower()
+    file_name = f'{run_name}_per_class_task_table.html'
+    return os.path.join(args.output_dir, 'detail', file_name)
+
+
+def _write_detail_report(path, title, table_columns, table_rows, overall_columns, overall_rows):
+    parent = os.path.abspath(os.path.dirname(path))
+    if not os.path.exists(parent):
+        os.makedirs(parent)
+
+    json_table_columns = json.dumps(table_columns, ensure_ascii=False)
+    json_table_rows = json.dumps(table_rows, ensure_ascii=False, allow_nan=False)
+    json_overall_columns = json.dumps(overall_columns, ensure_ascii=False)
+    json_overall_rows = json.dumps(overall_rows, ensure_ascii=False, allow_nan=False)
+    escaped_title = escape(title)
+
+    html = f'''<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{escaped_title}</title>
+  <style>
+    body {{
+      font-family: Arial, sans-serif;
+      margin: 24px;
+      color: #1f2937;
+    }}
+    h1 {{
+      margin: 0 0 14px;
+      font-size: 28px;
+      line-height: 1.2;
+    }}
+    h2 {{
+      margin: 18px 0 10px;
+      font-size: 18px;
+      line-height: 1.2;
+    }}
+    .toolbar {{
+      align-items: center;
+      display: flex;
+      gap: 12px;
+      margin-bottom: 12px;
+    }}
+    .segmented-control {{
+      display: inline-flex;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      overflow: hidden;
+      background: #ffffff;
+    }}
+    .segmented-control button {{
+      border: 0;
+      border-right: 1px solid #cbd5e1;
+      background: #ffffff;
+      color: #334155;
+      cursor: pointer;
+      font-size: 13px;
+      padding: 7px 12px;
+    }}
+    .segmented-control button:last-child {{
+      border-right: 0;
+    }}
+    .segmented-control button.active {{
+      background: #0f172a;
+      color: #ffffff;
+    }}
+    .layout-hint {{
+      color: #64748b;
+      font-size: 13px;
+    }}
+    .table-wrap {{
+      max-height: calc(100vh - 130px);
+      overflow: auto;
+      border: 1px solid #d1d5db;
+    }}
+    .overall-wrap {{
+      max-height: 240px;
+      overflow: auto;
+      border: 1px solid #d1d5db;
+      margin-bottom: 16px;
+    }}
+    table.metric-table {{
+      border-collapse: collapse;
+      font-size: 12px;
+      white-space: nowrap;
+    }}
+    .metric-table th,
+    .metric-table td {{
+      border: 1px solid #e5e7eb;
+      padding: 6px 8px;
+      text-align: right;
+    }}
+    .metric-table th {{
+      position: sticky;
+      top: 0;
+      background: #f3f4f6;
+      z-index: 2;
+    }}
+    .metric-table th:nth-child(1),
+    .metric-table td:nth-child(1) {{
+      position: sticky;
+      left: 0;
+      min-width: 64px;
+      text-align: left;
+      background: #ffffff;
+      z-index: 1;
+    }}
+    .metric-table th:nth-child(2),
+    .metric-table td:nth-child(2) {{
+      position: sticky;
+      left: 64px;
+      min-width: 150px;
+      text-align: left;
+      background: #ffffff;
+      z-index: 1;
+    }}
+    .metric-table th:nth-child(3),
+    .metric-table td:nth-child(3) {{
+      position: sticky;
+      left: 214px;
+      min-width: 80px;
+      text-align: left;
+      background: #ffffff;
+      z-index: 1;
+    }}
+    .metric-table th:nth-child(4),
+    .metric-table td:nth-child(4) {{
+      position: sticky;
+      left: 294px;
+      min-width: 80px;
+      text-align: right;
+      background: #ffffff;
+      z-index: 1;
+      box-shadow: 1px 0 0 #e5e7eb;
+    }}
+    .metric-table th:nth-child(-n+4) {{
+      background: #f3f4f6;
+      z-index: 3;
+    }}
+  </style>
+</head>
+<body>
+  <h1>{escaped_title}</h1>
+  <h2>总体指标</h2>
+  <div class="overall-wrap">
+    <table class="metric-table" id="overallTable"></table>
+  </div>
+  <div class="toolbar">
+    <div class="segmented-control" role="group" aria-label="column layout">
+      <button type="button" class="active" data-layout="task">按 task 分组</button>
+      <button type="button" data-layout="metric">按指标分组</button>
+    </div>
+    <span class="layout-hint" id="layoutHint"></span>
+  </div>
+  <div class="table-wrap">
+    <table class="metric-table" id="metricTable"></table>
+  </div>
+  <script>
+    const tableColumns = {json_table_columns};
+    const tableRows = {json_table_rows};
+    const overallColumns = {json_overall_columns};
+    const overallRows = {json_overall_rows};
+    const metricPreference = ["ap", "f1", "precision", "recall", "support", "predicted_positive", "tp", "fp", "fn", "tn"];
+    const frozenColumnCount = 4;
+    const indexColumns = tableColumns.slice(0, frozenColumnCount);
+    const metricColumns = tableColumns.slice(frozenColumnCount);
+
+    function parseMetricColumn(column) {{
+      const match = /^task(\\d+)_(.+)$/.exec(column);
+      if (!match) {{
+        return null;
+      }}
+      return {{
+        column,
+        task: Number(match[1]),
+        metric: match[2],
+      }};
+    }}
+
+    const parsedColumns = metricColumns
+      .map(parseMetricColumn)
+      .filter(Boolean);
+    const tasks = [...new Set(parsedColumns.map((item) => item.task))]
+      .sort((a, b) => a - b);
+    const discoveredMetrics = [...new Set(parsedColumns.map((item) => item.metric))];
+    const metrics = [
+      ...metricPreference.filter((metric) => discoveredMetrics.includes(metric)),
+      ...discoveredMetrics.filter((metric) => !metricPreference.includes(metric)),
+    ];
+    const knownMetricColumns = new Set(
+      parsedColumns.map((item) => item.column)
+    );
+    const extraColumns = metricColumns.filter(
+      (column) => !knownMetricColumns.has(column)
+    );
+
+    function taskFirstColumns() {{
+      return [
+        ...indexColumns,
+        ...tasks.flatMap((task) =>
+          metrics
+            .map((metric) => `task${{task}}_${{metric}}`)
+            .filter((column) => tableColumns.includes(column))
+        ),
+        ...extraColumns,
+      ];
+    }}
+
+    function metricFirstColumns() {{
+      return [
+        ...indexColumns,
+        ...metrics.flatMap((metric) =>
+          tasks
+            .map((task) => `task${{task}}_${{metric}}`)
+            .filter((column) => tableColumns.includes(column))
+        ),
+        ...extraColumns,
+      ];
+    }}
+
+    function formatValue(value) {{
+      if (value === null || value === undefined || Number.isNaN(value)) {{
+        return "NaN";
+      }}
+      if (typeof value === "number") {{
+        return Number.isInteger(value) ? String(value) : value.toFixed(6);
+      }}
+      return String(value);
+    }}
+
+    function renderStaticTable(tableId, columns, rows) {{
+      const table = document.getElementById(tableId);
+      const thead = document.createElement("thead");
+      const headerRow = document.createElement("tr");
+      columns.forEach((column) => {{
+        const th = document.createElement("th");
+        th.textContent = column;
+        headerRow.appendChild(th);
+      }});
+      thead.appendChild(headerRow);
+
+      const tbody = document.createElement("tbody");
+      rows.forEach((row) => {{
+        const tr = document.createElement("tr");
+        columns.forEach((column) => {{
+          const td = document.createElement("td");
+          td.textContent = formatValue(row[column]);
+          tr.appendChild(td);
+        }});
+        tbody.appendChild(tr);
+      }});
+
+      table.replaceChildren(thead, tbody);
+    }}
+
+    function renderTable(columns) {{
+      renderStaticTable("metricTable", columns, tableRows);
+    }}
+
+    function setLayout(layout) {{
+      const isMetricLayout = layout === "metric";
+      renderTable(isMetricLayout ? metricFirstColumns() : taskFirstColumns());
+      document.querySelectorAll("[data-layout]").forEach((button) => {{
+        button.classList.toggle("active", button.dataset.layout === layout);
+      }});
+      document.getElementById("layoutHint").textContent = isMetricLayout
+        ? "当前列顺序：task0-7 的 ap，然后 task0-7 的 f1，依次类推。"
+        : "当前列顺序：task0 的所有指标，然后 task1 的所有指标，依次类推。";
+    }}
+
+    renderStaticTable("overallTable", overallColumns, overallRows);
+    document.querySelectorAll("[data-layout]").forEach((button) => {{
+      button.addEventListener("click", () => setLayout(button.dataset.layout));
+    }});
+    setLayout("task");
+  </script>
+</body>
+</html>
+'''
+
+    with open(path, 'w', encoding='utf-8') as fp:
+        fp.write(html)
+
+    json_path = os.path.splitext(path)[0] + '.json'
+    with open(json_path, 'w', encoding='utf-8') as fp:
+        json.dump({
+            'table_columns': table_columns,
+            'table_rows': table_rows,
+            'overall_columns': overall_columns,
+            'overall_rows': overall_rows,
+        }, fp, ensure_ascii=False, indent=2, allow_nan=False)
+
+
+def _update_multilabel_detail_report(args, class_mask, val_dataset, task_id, predictions,
+                                     targets, loss, mAP, of1, cf1):
+    if not utils.is_main_process():
+        return
+
+    if not hasattr(args, 'detail_report_state'):
+        class_names = _class_names(val_dataset, args.num_classes)
+        class_tasks = _class_task_map(class_mask)
+        counts = _support_counts(val_dataset.targets, args.num_classes)
+        args.detail_report_state = {
+            'rows': [
+                {
+                    'class_id': class_id,
+                    'class_name': class_names[class_id],
+                    'class_task': class_tasks.get(class_id),
+                    'count': counts[class_id],
+                }
+                for class_id in range(args.num_classes)
+            ],
+            'overall_rows': [],
+        }
+
+    seen_classes = sorted([c for m in class_mask[:task_id + 1] for c in m])
+    details = _multilabel_class_details(predictions, targets, seen_classes)
+    for row in args.detail_report_state['rows']:
+        class_id = row['class_id']
+        class_task = row['class_task']
+        for metric in DETAIL_METRICS:
+            column = f'task{task_id}_{metric}'
+            row[column] = details[class_id][metric] if class_task <= task_id and class_id in details else None
+
+    args.detail_report_state['overall_rows'].append({
+        'task': task_id,
+        'seen_classes': len(seen_classes),
+        'samples': int(targets.shape[0]),
+        'mAP': float(mAP.item()),
+        'amAP': float(np.mean([row['mAP'] for row in args.detail_report_state['overall_rows']] + [mAP.item()])),
+        'oF1': float(of1.item()),
+        'cF1': float(cf1.item()),
+        'loss': float(loss),
+    })
+
+    table_columns = ['class_id', 'class_name', 'class_task', 'count']
+    for current_task in range(args.num_tasks):
+        for metric in DETAIL_METRICS:
+            table_columns.append(f'task{current_task}_{metric}')
+
+    for row in args.detail_report_state['rows']:
+        for column in table_columns:
+            if column not in row:
+                row[column] = None
+
+    overall_columns = ['task', 'seen_classes', 'samples', 'mAP', 'amAP', 'oF1', 'cF1', 'loss']
+    title = f'{args.name or args.dataset.replace("Split-", "").lower()}_per_class_metrics'
+    path = _detail_report_path(args)
+    _write_detail_report(
+        path=path,
+        title=title,
+        table_columns=table_columns,
+        table_rows=args.detail_report_state['rows'],
+        overall_columns=overall_columns,
+        overall_rows=args.detail_report_state['overall_rows'],
+    )
+    print(f"Saved detail report to {path}")
 
 
 def train_one_epoch(model: nn.Module, criterion, data_loader: Iterable, optimizer: torch.optim.Optimizer,
@@ -223,7 +667,8 @@ def evaluate_till_now(model: nn.Module, criterion, data_loader, device, task_id=
 
 @torch.no_grad()
 def evaluate_till_now_multi(model: nn.Module, criterion, data_loader, device: torch.device, 
-                            task_id=-1, mAP_vector=None, class_mask=None, run=None, args=None,):
+                            task_id=-1, mAP_vector=None, class_mask=None, run=None, args=None,
+                            val_dataset=None):
     metric_logger = utils.MetricLogger(delimiter="  ")
 
     # switch to evaluation mode
@@ -269,6 +714,20 @@ def evaluate_till_now_multi(model: nn.Module, criterion, data_loader, device: to
     result_str += f"\tmAP: {mAP.item():.4f}\tamAP: {mAP_vector[:task_id+1].mean():.4f}\toF1: {of1.item():.4f}\tcF1: {cf1.item():.4f}"
     result_str += f"\tLoss: {metric_logger.meters['Loss'].global_avg:.4f}"
     print(result_str)
+
+    if val_dataset is not None:
+        _update_multilabel_detail_report(
+            args=args,
+            class_mask=class_mask,
+            val_dataset=val_dataset,
+            task_id=task_id,
+            predictions=predictions,
+            targets=targets,
+            loss=metric_logger.meters['Loss'].global_avg,
+            mAP=mAP,
+            of1=of1,
+            cf1=cf1,
+        )
 
     wandb_dict = {}
     if run is not None:
@@ -333,23 +792,23 @@ def train_and_evaluate(model: nn.Module, model_without_ddp: nn.Module,
                                     class_mask=class_mask, run=run, args=args)
 
         else:
-            _, val_seen_dataset = datasets.get_dataset(args.dataset.replace('Split-', ''), 
-                                                     datasets.build_transform(is_train=True, args=args),
-                                                     datasets.build_transform(is_train=False, args=args),
-                                                     args=args)
+            _, val_dataset = datasets.get_dataset(args.dataset.replace('Split-', ''), 
+                                                  datasets.build_transform(is_train=True, args=args),
+                                                  datasets.build_transform(is_train=False, args=args),
+                                                  args=args)
             seen_classes = [c for m in class_mask[:task_id+1] for c in m]
             val_seen_indices = []
-            for k in range(len(val_seen_dataset.targets)):
-                if set(val_seen_dataset.targets[k]).intersection(set(seen_classes)) != set():
+            for k in range(len(val_dataset.targets)):
+                if set(val_dataset.targets[k]).intersection(set(seen_classes)) != set():
                     val_seen_indices.append(k)
                     
-            val_seen_dataset = torch.utils.data.Subset(val_seen_dataset, val_seen_indices)
+            val_seen_dataset = torch.utils.data.Subset(val_dataset, val_seen_indices)
             val_seen_dataloader = torch.utils.data.DataLoader(val_seen_dataset, batch_size=24, 
                                                               shuffle=False, num_workers=args.num_workers, 
                                                               pin_memory=True)
             stats = evaluate_till_now_multi(model=model, criterion=criterion, data_loader=val_seen_dataloader,
                                             device=device, task_id=task_id, mAP_vector=mAP_vector, 
-                                            class_mask=class_mask, run=run, args=args)
+                                            class_mask=class_mask, run=run, args=args, val_dataset=val_dataset)
             
     
         wandb_dict.update(stats)

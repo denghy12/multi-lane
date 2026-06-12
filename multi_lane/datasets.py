@@ -166,6 +166,10 @@ def get_dataset(dataset, transform_train, transform_val, args,):
     elif dataset == 'VOC':
         dataset_train = VOC(args.data_path, train=True, download=True, transform=transform_train)
         dataset_val = VOC(args.data_path, train=False, download=True, transform=transform_val)
+
+    elif dataset == 'EMOTIC':
+        dataset_train = EMOTIC(args.data_path, train=True, download=False, transform=transform_train)
+        dataset_val = EMOTIC(args.data_path, train=False, download=False, transform=transform_val)
     
     elif dataset == 'Places365':
         root = os.path.join(args.data_path, 'places365_standard')

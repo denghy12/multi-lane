@@ -903,6 +903,115 @@ class VOC(torch.utils.data.Dataset):
                 tar_ref.extractall(self.root)
 
 
+class EMOTIC(torch.utils.data.Dataset):
+    def __init__(
+        self,
+        root,
+        train=True,
+        transform=None,
+        download=False,
+        eval_splits=('val', 'test'),
+    ):
+        self.root = os.path.expanduser(root)
+        self.transform = transform
+        self.train = train
+        self.splits = ['train'] if self.train else list(eval_splits)
+        self.path = os.path.join(self.root, 'EMOTIC')
+        self.download = download
+
+        if self.download:
+            raise RuntimeError('EMOTIC must be prepared manually under the data path.')
+
+        annotation_path = os.path.join(self.path, 'CVPR17_Annotations.mat')
+        if not os.path.isfile(annotation_path):
+            raise RuntimeError(f'EMOTIC annotations not found at {annotation_path}')
+
+        try:
+            import scipy.io as sio
+        except ImportError:
+            raise RuntimeError("Scipy is not found. This dataset needs scipy installed: pip install scipy")
+
+        annotation_mat = sio.loadmat(annotation_path, squeeze_me=True, struct_as_record=False)
+        split_items = []
+        for split in self.splits:
+            split_items.extend(self._as_list(annotation_mat[split]))
+
+        category_names = set()
+        for split in ['train', 'val', 'test']:
+            for item in self._as_list(annotation_mat[split]):
+                for person in self._as_list(item.person):
+                    category_names.update(self._categories_from_person(person))
+
+        self.classes = sorted(category_names)
+        self.category_names = {i: name for i, name in enumerate(self.classes)}
+        self.class2idx = {name: i for i, name in self.category_names.items()}
+        self.category2name = {i: c for i, c in enumerate(self.classes)}
+
+        self.file_paths = []
+        self.targets = []
+        self.body_bboxes = []
+
+        for item in split_items:
+            img_path = os.path.join(self.path, 'cvpr_emotic', item.folder, item.filename)
+            if not os.path.isfile(img_path):
+                raise RuntimeError(f'EMOTIC image not found at {img_path}')
+
+            for person in self._as_list(item.person):
+                categories = self._categories_from_person(person)
+                target = sorted({self.class2idx[c] for c in categories if c in self.class2idx})
+                if len(target) == 0:
+                    continue
+
+                self.file_paths.append(img_path)
+                self.targets.append(target)
+                self.body_bboxes.append(person.body_bbox)
+
+    def __len__(self):
+        return len(self.file_paths)
+    
+    def __getitem__(self, idx):
+        img_path = self.file_paths[idx]
+        img = Image.open(img_path).convert("RGB")
+        if self.transform is not None:
+            img = self.transform(img)
+        else:
+            raise NotImplementedError
+        target = torch.nn.functional.one_hot(
+            torch.tensor(self.targets[idx]),
+            num_classes=len(self.classes)
+        ).sum(dim=0)
+        return img, target
+
+    def _as_list(self, value):
+        if isinstance(value, np.ndarray):
+            return value.ravel().tolist()
+        return [value]
+
+    def _str_list(self, value):
+        if isinstance(value, str):
+            return [value]
+        if isinstance(value, np.ndarray):
+            values = []
+            for item in value.ravel().tolist():
+                values.extend(self._str_list(item))
+            return values
+        if isinstance(value, (list, tuple)):
+            values = []
+            for item in value:
+                values.extend(self._str_list(item))
+            return values
+        return []
+
+    def _categories_from_person(self, person):
+        categories = []
+        for annotation in self._as_list(person.annotations_categories):
+            if hasattr(annotation, 'categories'):
+                categories.extend(self._str_list(annotation.categories))
+            else:
+                categories.extend(self._str_list(annotation))
+        return categories
+
+
 class FileDataset(torch.utils.data.Dataset):
     def __init__(self, path, file_path, transfom):
         super().__init__()
