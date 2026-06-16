@@ -55,8 +55,9 @@ def main(args):
     # train_dataloader, val_dataloader = tmp_dl(args)
     data_loader, class_mask = build_continual_dataloader(args)
 
+    model_name = args.backbone if getattr(args, 'backbone', None) else args.model
     model = create_model(
-        args.model,
+        model_name,
         pretrained=as_bool(args.pretrained),
         num_classes=args.num_classes,
         args=args,

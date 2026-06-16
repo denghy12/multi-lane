@@ -30,6 +30,9 @@ def get_args_parser(subparsers: argparse.ArgumentParser):
 
     # Model parameters
     subparsers.add_argument('--model', default='vit_base_patch16_224', type=str, metavar='MODEL', help='Name of model to train')
+    subparsers.add_argument('--backbone', default=None, type=str, help='Optional backbone override, e.g. clip_vit_b16_patch')
+    subparsers.add_argument('--clip_debug_shapes', '--clip_debug', action='store_true',
+                            help='Print CLIP token and classifier tensor shapes once')
     subparsers.add_argument('--input_size', default=224, type=int, help='images input size')
     subparsers.add_argument('--pretrained', default=True, help='Load pretrained model or not')
     subparsers.add_argument('--drop', type=float, default=0.0, metavar='PCT', help='Dropout rate (default: 0.)')

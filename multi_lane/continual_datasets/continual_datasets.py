@@ -881,11 +881,19 @@ class VOC(torch.utils.data.Dataset):
         self.trainval_url = 'http://host.robots.ox.ac.uk/pascal/VOC/voc2007/VOCtrainval_06-Nov-2007.tar'
         self.test_url = 'http://host.robots.ox.ac.uk/pascal/VOC/voc2007/VOCtest_06-Nov-2007.tar'
 
+        if self._is_extracted():
+            return
+
         url = self.trainval_url if self.train else self.test_url
         filename = url.split('/')[-1]
         
         self._check_if_downloaded(url, filename)
         self._check_if_extracted(filename)
+
+    def _is_extracted(self):
+        return os.path.exists(
+            os.path.join(self.root, 'VOCdevkit', 'VOC2007', 'ImageSets', 'Layout', self.split + '.txt')
+        )
 
     def _check_if_downloaded(self, url, file_path):
         fpath = os.path.join(self.root, file_path)
@@ -897,7 +905,7 @@ class VOC(torch.utils.data.Dataset):
                 download_url(url, self.root, filename=file_path)
 
     def _check_if_extracted(self, tar_path):
-        if not os.path.exists(os.path.join(self.root, 'VOCdevkit', 'VOC2007', 'ImageSets', 'Layout', self.split + '.txt')):
+        if not self._is_extracted():
             import tarfile
             with tarfile.open(os.path.join(self.root, tar_path), 'r') as tar_ref:
                 tar_ref.extractall(self.root)
@@ -911,6 +919,7 @@ class EMOTIC(torch.utils.data.Dataset):
         transform=None,
         download=False,
         eval_splits=('val', 'test'),
+        input_mode='full',
     ):
         self.root = os.path.expanduser(root)
         self.transform = transform
@@ -918,6 +927,9 @@ class EMOTIC(torch.utils.data.Dataset):
         self.splits = ['train'] if self.train else list(eval_splits)
         self.path = os.path.join(self.root, 'EMOTIC')
         self.download = download
+        if input_mode not in ('full', 'person_crop'):
+            raise ValueError(f"Invalid EMOTIC input_mode '{input_mode}'. Expected 'full' or 'person_crop'.")
+        self.input_mode = input_mode
 
         if self.download:
             raise RuntimeError('EMOTIC must be prepared manually under the data path.')
@@ -972,6 +984,8 @@ class EMOTIC(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         img_path = self.file_paths[idx]
         img = Image.open(img_path).convert("RGB")
+        if self.input_mode == 'person_crop':
+            img = self._crop_person(img, self.body_bboxes[idx])
         if self.transform is not None:
             img = self.transform(img)
         else:
@@ -981,6 +995,34 @@ class EMOTIC(torch.utils.data.Dataset):
             num_classes=len(self.classes)
         ).sum(dim=0)
         return img, target
+
+    def _crop_person(self, img, bbox):
+        try:
+            bbox = np.asarray(bbox, dtype=np.float32).ravel()
+        except (TypeError, ValueError):
+            return img
+        if bbox.size < 4:
+            return img
+        if not np.isfinite(bbox[:4]).all():
+            return img
+
+        width, height = img.size
+        x1, y1, x2, y2 = bbox[:4]
+        x1 = max(0.0, min(float(width), float(x1)))
+        y1 = max(0.0, min(float(height), float(y1)))
+        x2 = max(0.0, min(float(width), float(x2)))
+        y2 = max(0.0, min(float(height), float(y2)))
+
+        if x2 <= x1 or y2 <= y1:
+            return img
+
+        crop_box = (
+            int(np.floor(x1)),
+            int(np.floor(y1)),
+            int(np.ceil(x2)),
+            int(np.ceil(y2)),
+        )
+        return img.crop(crop_box)
 
     def _as_list(self, value):
         if isinstance(value, np.ndarray):

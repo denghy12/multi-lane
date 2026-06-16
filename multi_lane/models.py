@@ -8,10 +8,12 @@
 # ------------------------------------------
 from timm.models.registry import register_model
 
+from multi_lane.clip_vit import ClipViTB16Patch
 from multi_lane.vision_transformer import _create_vision_transformer
 
 __all__ = [
     'vit_tiny_patch16_224', 'vit_small_patch16_224', 'vit_base_patch16_224',
+    'clip_vit_b16_patch',
 ]
 
 @register_model
@@ -49,3 +51,9 @@ def vit_base_patch16_224_in21k(pretrained=False, **kwargs):
     model_kwargs = dict(patch_size=16, embed_dim=768, depth=12, num_heads=12, **kwargs)
     model = _create_vision_transformer('vit_base_patch16_224_in21k', pretrained=pretrained, **model_kwargs)
     return model
+
+
+@register_model
+def clip_vit_b16_patch(pretrained=False, **kwargs):
+    """Frozen CLIP ViT-B/16 patch tokens with MULTI-LANE task pathway."""
+    return ClipViTB16Patch(**kwargs)
