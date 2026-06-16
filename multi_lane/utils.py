@@ -348,6 +348,17 @@ def _load_checkpoint_for_ema(model_ema, checkpoint):
 
 
 def is_trainable(args, name: str) -> bool:
+    head_mode = getattr(args, 'head_mode', '')
+    clip_text_head = head_mode in ('clip_taskCLS_text', 'clip_task_cls_text')
+    if clip_text_head and 'head' in name:
+        return False
+    if clip_text_head and 'visual_proj' in name:
+        return True
+    if clip_text_head and name == 'text_logit_bias':
+        return True
+    if clip_text_head and getattr(args, 'train_logit_scale', False) \
+    and name == 'clip_model.logit_scale':
+        return True
     if 'prompts' in name or 'head' in name or 'keys' in name or 'selectors' in name \
     or 'identifier' in name or 'task_cls_token' in name or 'token_scale' in name:
         return True

@@ -19,3 +19,13 @@ def non_negative_float(x):
     if x < 0:
         raise argparse.ArgumentTypeError("%r is negative" % (x,))
     return x
+
+def str2bool(x):
+    if isinstance(x, bool):
+        return x
+    value = str(x).lower()
+    if value in ('true', '1', 'yes', 'y'):
+        return True
+    if value in ('false', '0', 'no', 'n'):
+        return False
+    raise argparse.ArgumentTypeError("%r is not a valid boolean value" % (x,))

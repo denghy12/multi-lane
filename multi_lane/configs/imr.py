@@ -22,7 +22,13 @@ def get_args_parser(subparsers: argparse.ArgumentParser):
     subparsers.add_argument('--prompt_init', default='orthogonal', type=str, choices=['orthogonal', 'uniform'])
     subparsers.add_argument('--normalize', type=str, choices=['none', 'pre-head'], default='pre-head', help='Normalize the prompt vectors')
     subparsers.add_argument('--temperature', type=float, default=1.0)
-    subparsers.add_argument('--head_mode', type=str, choices=['concat', 'task'], default='concat')
+    subparsers.add_argument('--head_mode', type=str,
+                            choices=['concat', 'task', 'learned_classifier', 'clip_taskCLS_text'],
+                            default='concat')
+    subparsers.add_argument('--text_template', type=str, default='a photo of a {}.')
+    subparsers.add_argument('--text_templates', type=str, nargs='+', default=None,
+                            help='Optional list of CLIP text prompt templates')
+    subparsers.add_argument('--train_logit_scale', type=str2bool, default=False)
     subparsers.add_argument('--accumulate_grad_batches', type=int, default=1)
     subparsers.add_argument('--store_model', action='store_true', help='Store the model')
     subparsers.add_argument('--wandb', action='store_true', help='Enable Weights and Biases')

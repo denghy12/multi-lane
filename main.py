@@ -6,6 +6,7 @@
 # Added code for MULTI_LANE
 # Author: Thomas De Min thomas.demin@unitn.it
 # ------------------------------------------
+
 import sys
 import argparse
 import datetime
@@ -39,6 +40,41 @@ def as_bool(value):
             return False
     raise ValueError(f'Invalid boolean value: {value}')
 
+def _dataset_class_names(dataset):
+    seen = set()
+    current = dataset
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+
+        classes = getattr(current, 'classes', None)
+        category_names = getattr(current, 'category_names', None)
+        category2name = getattr(current, 'category2name', None)
+
+        if isinstance(category_names, dict) and len(category_names) > 0:
+            values = [category_names[i] for i in sorted(category_names.keys())]
+            if all(isinstance(v, str) for v in values):
+                return [str(v) for v in values]
+
+        if isinstance(category2name, dict) and len(category2name) > 0:
+            values = [category2name[i] for i in sorted(category2name.keys())]
+            if all(isinstance(v, str) for v in values):
+                return [str(v) for v in values]
+
+        if classes is not None:
+            return [str(c) for c in classes]
+
+        current = getattr(current, 'dataset', None)
+
+    return None
+
+def _class_names_from_loaders(data_loader):
+    for task_loaders in data_loader:
+        for split in ('val', 'train'):
+            class_names = _dataset_class_names(task_loaders[split].dataset)
+            if class_names is not None:
+                return class_names
+    return None
+
 def main(args):
     utils.init_distributed_mode(args)
 
@@ -65,6 +101,9 @@ def main(args):
     model.init(args)
     model.to(device)
     model.class_mask = class_mask #! TMP
+    class_names = _class_names_from_loaders(data_loader)
+    if class_names is not None and hasattr(model, 'set_class_names'):
+        model.set_class_names(class_names)
         
     # freeze everything except head and layernorm
     learnable_params = []
