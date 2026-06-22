@@ -195,8 +195,12 @@ def split_single_dataset(dataset_train, dataset_val, args):
     """
     nb_classes = len(dataset_val.classes)
     # Calculate the number of classes per task
+    zero_base = args.base_classes == 0
     if args.num_tasks == 1:
         classes_per_task = nb_classes
+    elif zero_base:
+        assert nb_classes % args.num_tasks == 0, "Invalid number of tasks"
+        classes_per_task = nb_classes // args.num_tasks
     else:
         # (tot classes - classes in first task) / (num_tasks - 1)
         assert (nb_classes - args.base_classes) % (args.num_tasks - 1) == 0, "Invalid number of tasks"
@@ -215,7 +219,7 @@ def split_single_dataset(dataset_train, dataset_val, args):
         train_split_indices = []
         test_split_indices = []
         
-        if i == 0:
+        if i == 0 and not zero_base:
             scope = labels[:args.base_classes]
             labels = labels[args.base_classes:]
         else:

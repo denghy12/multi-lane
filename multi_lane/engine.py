@@ -492,6 +492,7 @@ def train_one_epoch(model: nn.Module, criterion, data_loader: Iterable, optimize
         logits, feats, frozen_feats, sim, tasks = model(input)
 
         # here is the trick to mask out classes of non-current tasks
+        ddp_head = args.head_mode in ('clip_ddp', 'ddp')
         fill_value = float('-inf') if type(criterion) == torch.nn.CrossEntropyLoss else 0
         logits = utils.mask_logits(logits, class_mask, args.num_classes, [task_id], fill_value=fill_value)
 
@@ -500,6 +501,10 @@ def train_one_epoch(model: nn.Module, criterion, data_loader: Iterable, optimize
 
         if type(criterion) == torch.nn.CrossEntropyLoss:
             loss = criterion(logits / args.temperature, target)
+        elif ddp_head:
+            loss_logits = utils.remove_logits(logits, class_mask, [task_id])
+            loss_target = utils.remove_logits(target, class_mask, [task_id])
+            loss = criterion(loss_logits, loss_target.float())
         else:
             loss = criterion(logits / args.temperature, target.float())
         
@@ -509,9 +514,12 @@ def train_one_epoch(model: nn.Module, criterion, data_loader: Iterable, optimize
         if type(criterion) == torch.nn.CrossEntropyLoss:
             acc1, acc5 = accuracy(logits, target, topk=(1, 5))
         else:
-            mAP = utils.mean_average_precision(logits, target)
             clean_logits = utils.remove_logits(logits, class_mask, [task_id])
             clean_target = utils.remove_logits(target, class_mask, [task_id])
+            if ddp_head:
+                mAP = utils.mean_average_precision(clean_logits, clean_target)
+            else:
+                mAP = utils.mean_average_precision(logits, target)
             of1 = utils.f1_score_overall(clean_logits, clean_target)
             cf1, _ = utils.f1_score_per_class(clean_logits, clean_target)
 
@@ -691,7 +699,12 @@ def evaluate_till_now_multi(model: nn.Module, criterion, data_loader, device: to
         target = utils.mask_logits(target, class_mask, args.num_classes, task_id=list(range(task_id+1)),
                                 fill_value=0)
         
-        loss = criterion(logits / args.temperature, target.float())
+        if args.head_mode in ('clip_ddp', 'ddp'):
+            clean_logits = utils.remove_logits(logits, class_mask, list(range(task_id+1)))
+            clean_target = utils.remove_logits(target, class_mask, list(range(task_id+1)))
+            loss = criterion(clean_logits, clean_target.float())
+        else:
+            loss = criterion(logits / args.temperature, target.float())
         metric_logger.meters['Loss'].update(loss.item(), n=input.shape[0])
 
         predictions.append(logits)
@@ -702,10 +715,13 @@ def evaluate_till_now_multi(model: nn.Module, criterion, data_loader, device: to
     #! ----------------------------------
     
     #$ ------- Calculate metrics ----------
-    mAP = utils.mean_average_precision(predictions, targets)
-    mAP_vector[task_id] = mAP.item()
     clean_predictions = utils.remove_logits(predictions, class_mask, list(range(task_id+1)))
     clean_targets = utils.remove_logits(targets, class_mask, list(range(task_id+1)))
+    if args.head_mode in ('clip_ddp', 'ddp'):
+        mAP = utils.mean_average_precision(clean_predictions, clean_targets)
+    else:
+        mAP = utils.mean_average_precision(predictions, targets)
+    mAP_vector[task_id] = mAP.item()
     of1 = utils.f1_score_overall(clean_predictions, clean_targets)
     cf1, class_wise_cf1 = utils.f1_score_per_class(clean_predictions, clean_targets)
     #$ ------------------------------------

@@ -349,6 +349,9 @@ def _load_checkpoint_for_ema(model_ema, checkpoint):
 
 def is_trainable(args, name: str) -> bool:
     head_mode = getattr(args, 'head_mode', '')
+    if head_mode in ('clip_ddp', 'ddp'):
+        return name in ('ddp_text_prompts', 'ddp_visual_prompts')
+
     clip_text_head = head_mode in ('clip_taskCLS_text', 'clip_task_cls_text')
     if clip_text_head and 'head' in name:
         return False
@@ -366,6 +369,10 @@ def is_trainable(args, name: str) -> bool:
 
 
 def get_optimizer(args, model):
+    if getattr(args, 'head_mode', '') in ('clip_ddp', 'ddp'):
+        prompt_params = [param for param in model.parameters() if param.requires_grad]
+        return create_optimizer(args, [{'params': prompt_params, 'weight_decay': 0.0}])
+
     backbone_params = [param for name, param in model.named_parameters() if 'head' not in name and param.requires_grad]
     head_params = [param for name, param in model.named_parameters() if 'head' in name and param.requires_grad]
     params = [
