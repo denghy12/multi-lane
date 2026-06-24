@@ -12,7 +12,14 @@
    - 正式入口：`run_emotic_ddp_official_semantic_tau2_20ep.sh`。
    - 预期产物：训练日志、checkpoint、8 个 task 的 score dump、class order JSON、
      per-class/task HTML 和 JSON。
-   - 下一步在用户确认 GPU 和完整配置后启动正式 20ep 训练；当前未自动占用 GPU。
+   - 1ep real-data smoke 已通过 `ddp_emotic_tau2_smoke_gpu0` 在 GPU0 启动；
+     当前无 OOM，完成后检查 NaN、8-task 流程和产物完整性。
+   - smoke 通过后，再向用户汇报完整配置并确认是否启动正式 20ep 训练。
+   - 用户已确认将正式协议改为与历史 EMOTIC 对照一致的 30 epochs/task；正式脚本为
+     `run_emotic_ddp_official_semantic_tau2_30ep.sh`，计划在 GPU0 的
+     `ddp_emotic_tau2_30ep_gpu0` 运行。batch 使用 8×32 accumulation 等效 256。
+   - 正式 30ep 已启动并稳定进入 task0；后续等待 1ep smoke 和正式实验完成，
+     同步 log/output 后分析 mAP、amAP、OF1、CF1、margin 与逐类指标。
 
 1. 当前已完成 margin-first 代码改动，下一步应先验证这些改动是否真的扩大正负 margin。
 

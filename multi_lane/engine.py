@@ -876,6 +876,7 @@ def train_one_epoch(model: nn.Module, criterion, data_loader: Iterable, optimize
                     class_mask=None, run=None, args=None,):
 
     model.train(set_training_mode)
+    optimizer.zero_grad()
 
     if args.distributed and utils.get_world_size() > 1:
         data_loader.sampler.set_epoch(epoch)
@@ -931,8 +932,13 @@ def train_one_epoch(model: nn.Module, criterion, data_loader: Iterable, optimize
             print("Loss is {}, stopping training".format(loss.item()))
             sys.exit(1)
         
-        loss.backward()
-        if i % args.accumulate_grad_batches == 0:
+        accumulation_steps = max(1, int(args.accumulate_grad_batches))
+        backward_loss = loss
+        if getattr(args, 'ddp_loss_mode', 'bce_mean') != 'paper_sum':
+            backward_loss = loss / accumulation_steps
+        backward_loss.backward()
+        should_step = (i + 1) % accumulation_steps == 0 or (i + 1) == len(data_loader)
+        if should_step:
             optimizer.step()
             optimizer.zero_grad()
 

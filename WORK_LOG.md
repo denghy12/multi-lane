@@ -1290,3 +1290,50 @@ paper B0-C4:                  90.2/94.8/80.8/76.9
   - DDP text/visual prompt shapes 为 `(26,2,16,512)` / `(26,2,16,768)`；
   - positive/negative semantic seeds 不相同；
   - 报告 smoke 成功生成 `.html` 和 `.json` 双文件。
+
+### 2026-06-24 EMOTIC B5-C3 real-data smoke
+
+- 用户确认在 GPU0 运行 1ep smoke。
+- 完整配置保持正式 20ep recipe 不变，仅使用 `epochs=1`；B5-C3、batch8、full image、
+  paper attention/loss/optimizer/scheduler/transform、semantic emotion prompts、
+  PCD tau2/gamma0.7，并保留 checkpoint、score dump、HTML/JSON。
+- 独立 tmux：`ddp_emotic_tau2_smoke_gpu0`
+- log：`./logs/emotic_ddp_official_semantic_tau2_g07_b5c3_smoke.log`
+- output：`./output/emotic_ddp_official_semantic_tau2_g07_b5c3_smoke`
+- 用户确认 GPU0 剩余显存足够后，取消等待并立即并行启动；未触碰
+  `/mnt/haoyuan/workspace/CODE_DDP` 的现有实验。
+- 启动后 GPU0 总占用约 `9.4/24.6GB`，本 smoke 进程约 `5.2GB`；
+  task0 首个训练 batch 正常完成，无 OOM。
+
+### 2026-06-24 EMOTIC B5-C3 30ep 正式配置
+
+- 参考对照：
+  `emotic_b5c3_alphabetical_valtest_clip_taskCLS_text_bias_lr001563_v1`
+- 对齐项：Split-EMOTIC、26 类字母序、B5-C3、full image、val+test、seed0、
+  224 输入、8 tasks、每 task 30 epochs、Adam、weight decay 0、相同 detail
+  HTML/JSON 指标口径。
+- batch 对齐采用 physical batch8、gradient accumulation32、effective batch256；
+  避免 class-wise positive/negative visual branches 在 physical batch256 下 OOM。
+- DDP 方法专属项保留当前最佳配置：drop_last、paper attention、
+  paper summed BCE `*0.03`、continual Adam 配置 LR `0.0059`、paper multistep、
+  semantic emotion prompts、PCD tau2/gamma0.7。
+- 旧 taskCLS 对照的 batch256、cosine scheduler 和 LR `0.001563` 不直接迁移，
+  其中 batch256 通过梯度累积等效实现；cosine scheduler 和 LR `0.001563` 不迁移，
+  因为当前最佳结果来自 official DDP 优化协议。
+- 修复 `train_one_epoch` 的 accumulation step 边界，并区分 mean loss 与
+  official `paper_sum` 的梯度缩放；accumulation1 行为保持不变。
+- 正式脚本：`run_emotic_ddp_official_semantic_tau2_30ep.sh`
+- tmux：`ddp_emotic_tau2_30ep_gpu0`
+- log：`./logs/emotic_ddp_official_semantic_tau2_g07_b5c3_30ep.log`
+- output：`./output/emotic_ddp_official_semantic_tau2_g07_b5c3_30ep`
+- 首次 tmux 启动在 Python 前退出，launcher log 确认非交互 shell 中
+  `/root/.bashrc` 提前 return，`conda` 未定义。EMOTIC 20ep/30ep 脚本已改为直接
+  source `/opt/conda/etc/profile.d/conda.sh`，不影响训练参数。
+- 第二次启动发现 tmux 继承的 `csc` 环境 deactivate hook 与 `set -u` 不兼容；
+  已仅在 `conda activate multilane` 前后临时切换 `set +u/set -u`。
+- 修复 shell 初始化后正式实验成功进入 task0 epoch1：
+  - accumulation32、pin_mem false、effective optimizer LR `0.0059` 配置均已解析；
+  - scheduler 初始化后的实际 LR 为 `0.000590`；
+  - 正式实验自身显存峰值约 `4.3GB`；
+  - GPU0 三个并行实验总占用约 `15.6/24.6GB`；
+  - 未发现 OOM、Traceback、RuntimeError 或 loss NaN。

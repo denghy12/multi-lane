@@ -187,4 +187,23 @@
   task sizes 为 `[5,3,3,3,3,3,3,3]`；text/visual prompt shapes 分别为
   `(26,2,16,512)` 和 `(26,2,16,768)`。情感正负 prompt seed 不相同，detail report
   smoke 同时生成了同名 HTML/JSON。
+- EMOTIC B5-C3 1ep real-data smoke 已在 GPU0 并行启动，tmux 为
+  `ddp_emotic_tau2_smoke_gpu0`。smoke 使用完整 official semantic tau2 配置，仅将
+  epochs 改为 1；启动后 GPU0 总显存约 `9.4/24.6GB`，本实验进程约 `5.2GB`，
+  task0 首个 batch 已正常完成，无 OOM。
+- EMOTIC 正式 30ep 配置新增脚本
+  `run_emotic_ddp_official_semantic_tau2_30ep.sh`。它与历史
+  `emotic_b5c3_alphabetical_valtest_clip_taskCLS_text_bias_lr001563_v1` 对齐
+  Split-EMOTIC、字母序 B5-C3、full image、val+test、seed0、224 输入和每 task
+  30 epochs。为对齐参考实验 batch256 且控制 DDP 显存，使用 physical batch8 与
+  accumulation32，effective batch 为 256；LR/scheduler/loss 保留当前最佳 official
+  DDP recipe。
+- 修正了 `train_one_epoch` 的 gradient accumulation 边界：从原先第 0 个
+  micro-batch 错误 step，改为每满 N 个或 epoch 最后一个 batch 才 step。普通 mean
+  loss 按 N 缩放，official DDP `paper_sum` 保留求和梯度，因此 batch8×32 与一次
+  batch256 的 summed loss 对齐。accumulation=1 的已有实验行为不变。
+- EMOTIC B5-C3 30ep 正式实验已在 GPU0 启动，tmux 为
+  `ddp_emotic_tau2_30ep_gpu0`。运行参数确认 accumulation32、pin_mem false 生效；
+  task0 epoch1 已正常推进，无 OOM/NaN。启动观察时 GPU0 三个实验合计约
+  `15.6/24.6GB`，本正式实验显存峰值约 `4.3GB`。
 - 运行任何训练前必须先向用户说明完整实验配置并等待确认。

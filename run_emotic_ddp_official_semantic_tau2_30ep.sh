@@ -17,16 +17,17 @@ torchrun --nproc_per_node=1 \
   --rdzv-endpoint=localhost:0 \
   --nnodes=1 \
   main.py emotic \
-  --name emotic_ddp_official_semantic_tau2_g07_b5c3_20ep \
-  --notes "EMOTIC B5-C3 with official DDP semantic recipe, emotion prompts, PCD tau2 gamma0.7, 20ep" \
+  --name emotic_ddp_official_semantic_tau2_g07_b5c3_30ep \
+  --notes "EMOTIC alphabetical B5-C3, 30ep/task, official DDP semantic recipe, emotion prompts, PCD tau2 gamma0.7" \
   --data_path ./datasets \
   --dataset Split-EMOTIC \
   --emotic_input_mode full \
-  --output_dir ./output/emotic_ddp_official_semantic_tau2_g07_b5c3_20ep \
+  --output_dir ./output/emotic_ddp_official_semantic_tau2_g07_b5c3_30ep \
   --num_tasks 8 \
   --base_classes 5 \
-  --epochs 20 \
+  --epochs 30 \
   --batch_size 8 \
+  --accumulate_grad_batches 32 \
   --drop_last \
   --backbone clip_vit_b16_patch \
   --head_mode clip_ddp \
@@ -63,6 +64,9 @@ torchrun --nproc_per_node=1 \
   --ddp_eval_score_mode logits \
   --ddp_eval_threshold 0.8 \
   --ddp_score_dump true \
+  --seed 0 \
+  --num_workers 4 \
+  --no_pin_mem \
   --store_model \
   "$@" \
-  2>&1 | tee ./logs/emotic_ddp_official_semantic_tau2_g07_b5c3_20ep.log
+  2>&1 | tee ./logs/emotic_ddp_official_semantic_tau2_g07_b5c3_30ep.log
