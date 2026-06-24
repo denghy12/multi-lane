@@ -122,25 +122,60 @@ class ClipViTB16Patch(nn.Module):
         self.ddp_gamma = float(getattr(args, 'ddp_gamma', 0.7))
         self.ddp_pcd = bool(getattr(args, 'ddp_pcd', True))
         self.ddp_similarity_aggregation = getattr(args, 'ddp_similarity_aggregation', 'mean')
+        self.ddp_similarity_topk = max(1, int(getattr(args, 'ddp_similarity_topk', 5)))
+        self.ddp_prompt_norm_mode = getattr(args, 'ddp_prompt_norm_mode', 'legacy')
+        self.ddp_logit_scale_mode = getattr(args, 'ddp_logit_scale_mode', 'clip')
+        self.ddp_text_init = getattr(args, 'ddp_text_init', 'random')
+        self.ddp_positive_text_template = getattr(
+            args, 'ddp_positive_text_template', 'a photo containing a {}.')
+        self.ddp_negative_text_template = getattr(
+            args, 'ddp_negative_text_template', 'a photo without a {}.')
+        self.ddp_train_text_prompts = bool(getattr(args, 'ddp_train_text_prompts', True))
+        self.ddp_train_visual_prompts = bool(getattr(args, 'ddp_train_visual_prompts', True))
+        self.ddp_prompt_polarity = getattr(args, 'ddp_prompt_polarity', 'both')
         self.ddp_class_chunk_size = max(1, int(getattr(args, 'ddp_class_chunk_size', 4)))
         self.text_width = self.clip_model.token_embedding.weight.shape[-1]
         self.context_length = self.clip_model.positional_embedding.shape[0]
+        self._ddp_semantic_prompts_initialized = False
+
+        if self.ddp_text_init not in ('random', 'same', 'semantic'):
+            raise ValueError(f'Unknown ddp_text_init: {self.ddp_text_init}')
 
         text_prompts = torch.empty(self.num_classes, 2, self.ddp_prompt_length, self.text_width)
         visual_prompts = torch.empty(self.num_classes, 2, self.ddp_prompt_length, self.embed_dim)
         nn.init.normal_(text_prompts, std=0.02)
         nn.init.normal_(visual_prompts, std=0.02)
+        if self.ddp_text_init == 'same':
+            text_prompts[:, 1].copy_(text_prompts[:, 0])
         self.ddp_text_prompts = nn.Parameter(text_prompts)
         self.ddp_visual_prompts = nn.Parameter(visual_prompts)
         self.register_buffer('ddp_trainable_class_mask', torch.zeros(self.num_classes), persistent=False)
-        self.ddp_text_prompts.register_hook(self._mask_ddp_prompt_grad)
-        self.ddp_visual_prompts.register_hook(self._mask_ddp_prompt_grad)
+        self.ddp_text_prompts.register_hook(
+            lambda grad: self._mask_ddp_prompt_grad(grad, modality='text'))
+        self.ddp_visual_prompts.register_hook(
+            lambda grad: self._mask_ddp_prompt_grad(grad, modality='visual'))
 
-    def _mask_ddp_prompt_grad(self, grad):
+    def _mask_ddp_prompt_grad(self, grad, modality):
         if grad is None:
             return None
+        if modality == 'text' and not self.ddp_train_text_prompts:
+            return torch.zeros_like(grad)
+        if modality == 'visual' and not self.ddp_train_visual_prompts:
+            return torch.zeros_like(grad)
+
         mask = self.ddp_trainable_class_mask.to(device=grad.device, dtype=grad.dtype)
-        return grad * mask.view(-1, 1, 1, 1)
+        grad = grad * mask.view(-1, 1, 1, 1)
+
+        if self.ddp_prompt_polarity != 'both':
+            polarity_mask = torch.zeros(2, device=grad.device, dtype=grad.dtype)
+            if self.ddp_prompt_polarity == 'positive':
+                polarity_mask[0] = 1.
+            elif self.ddp_prompt_polarity == 'negative':
+                polarity_mask[1] = 1.
+            else:
+                raise ValueError(f'Unknown ddp_prompt_polarity: {self.ddp_prompt_polarity}')
+            grad = grad * polarity_mask.view(1, 2, 1, 1)
+        return grad
 
     def _set_ddp_trainable_classes(self, class_ids):
         mask = torch.zeros_like(self.ddp_trainable_class_mask)
@@ -206,6 +241,8 @@ class ClipViTB16Patch(nn.Module):
     def set_class_names(self, class_names):
         self.class_names = [str(class_name) for class_name in class_names]
         self._text_feature_cache_key = None
+        if self._is_ddp_head():
+            self._initialize_ddp_semantic_text_prompts()
 
     def _get_class_names(self):
         if self.class_names is None:
@@ -291,6 +328,54 @@ class ClipViTB16Patch(nn.Module):
         rows = [row_by_class_id[int(class_id)] for class_id in class_ids.detach().cpu().tolist()]
         return torch.as_tensor(rows, device=device, dtype=torch.long)
 
+    def _ddp_template_prefix(self, template):
+        if '{}' in template:
+            text = template.split('{}', 1)[0]
+        else:
+            try:
+                text = template.format('').strip()
+            except (IndexError, KeyError):
+                text = template
+        return ' '.join(text.strip().rstrip('.,;:').split())
+
+    @torch.no_grad()
+    def _ddp_prompt_seed_embeddings(self, text, device):
+        if not text:
+            return torch.zeros(
+                self.ddp_prompt_length, self.text_width,
+                device=device, dtype=self.ddp_text_prompts.dtype)
+
+        token_ids = self.tokenizer([text])[0].to(device=device)
+        eot_pos = int(token_ids.argmax().item())
+        content_ids = token_ids[1:eot_pos]
+        if content_ids.numel() == 0:
+            return torch.zeros(
+                self.ddp_prompt_length, self.text_width,
+                device=device, dtype=self.ddp_text_prompts.dtype)
+
+        embeddings = self.clip_model.token_embedding(content_ids).float()
+        if embeddings.size(0) < self.ddp_prompt_length:
+            repeat = (self.ddp_prompt_length + embeddings.size(0) - 1) // embeddings.size(0)
+            embeddings = embeddings.repeat(repeat, 1)
+        return embeddings[:self.ddp_prompt_length].to(
+            device=device, dtype=self.ddp_text_prompts.dtype)
+
+    def _initialize_ddp_semantic_text_prompts(self):
+        if self.ddp_text_init != 'semantic' or self._ddp_semantic_prompts_initialized:
+            return
+
+        device = self.ddp_text_prompts.device
+        pos_prefix = self._ddp_template_prefix(self.ddp_positive_text_template)
+        neg_prefix = self._ddp_template_prefix(self.ddp_negative_text_template)
+        pos_seed = self._ddp_prompt_seed_embeddings(pos_prefix, device=device)
+        neg_seed = self._ddp_prompt_seed_embeddings(neg_prefix, device=device)
+        semantic_prompts = torch.stack((pos_seed, neg_seed), dim=0)
+        semantic_prompts = semantic_prompts.unsqueeze(0).expand(self.num_classes, -1, -1, -1)
+
+        with torch.no_grad():
+            self.ddp_text_prompts.copy_(semantic_prompts)
+        self._ddp_semantic_prompts_initialized = True
+
     def _ddp_class_text_tokens(self, class_id, class_name):
         cache_key = (int(class_id), class_name, self.ddp_prompt_length, self.context_length)
         cached = self._ddp_text_token_cache.get(cache_key)
@@ -350,9 +435,7 @@ class ClipViTB16Patch(nn.Module):
         text_features = text_features.reshape(class_ids.numel(), 2, self.clip_text_dim)
         return F.normalize(text_features.to(device=device, dtype=dtype), dim=-1)
 
-    def _forward_ddp_prompt_attention(self, attention, x, prompts):
-        prompt_len = prompts.size(1)
-        prompted = torch.cat((prompts, x), dim=1)
+    def _forward_ddp_prompt_attention(self, attention, prompted, prompt_len):
         batch_size, token_count, dim = prompted.shape
         qkv = attention.qkv(prompted)
         qkv = qkv.reshape(batch_size, token_count, 3, attention.num_heads, dim // attention.num_heads)
@@ -367,7 +450,16 @@ class ClipViTB16Patch(nn.Module):
         return x[:, prompt_len:]
 
     def _forward_ddp_prompt_block(self, block, x, prompts):
-        attn_out = self._forward_ddp_prompt_attention(block.attn, block.norm1(x), prompts)
+        prompt_len = prompts.size(1)
+        if self.ddp_prompt_norm_mode == 'prompted':
+            prompted = torch.cat((prompts, x), dim=1)
+            prompted = block.norm1(prompted)
+        elif self.ddp_prompt_norm_mode == 'legacy':
+            prompted = torch.cat((prompts, block.norm1(x)), dim=1)
+        else:
+            raise ValueError(f'Unknown ddp_prompt_norm_mode: {self.ddp_prompt_norm_mode}')
+
+        attn_out = self._forward_ddp_prompt_attention(block.attn, prompted, prompt_len)
         x = x + block.drop_path1(block.ls1(attn_out))
         x = x + block.drop_path2(block.ls2(block.mlp(block.norm2(x))))
         return x
@@ -392,13 +484,38 @@ class ClipViTB16Patch(nn.Module):
     def _aggregate_ddp_similarity(self, visual_tokens, text_features):
         text_features = text_features[:, :, None, None, :]
         similarities = (visual_tokens * text_features).sum(dim=-1)
+        patch_similarities = similarities[:, :, :, 1:]
         if self.ddp_similarity_aggregation == 'max':
             similarities = similarities.max(dim=-1).values
-        elif self.ddp_similarity_aggregation == 'cls':
+        elif self.ddp_similarity_aggregation in ('cls', 'pooled_cls'):
             similarities = similarities[:, :, :, 0]
+        elif self.ddp_similarity_aggregation == 'patch_mean':
+            similarities = patch_similarities.mean(dim=-1) \
+                if patch_similarities.size(-1) > 0 else similarities[:, :, :, 0]
+        elif self.ddp_similarity_aggregation == 'patch_max':
+            similarities = patch_similarities.max(dim=-1).values \
+                if patch_similarities.size(-1) > 0 else similarities[:, :, :, 0]
+        elif self.ddp_similarity_aggregation == 'cls_plus_patch_max':
+            cls_similarity = similarities[:, :, :, 0]
+            patch_similarity = patch_similarities.max(dim=-1).values \
+                if patch_similarities.size(-1) > 0 else cls_similarity
+            similarities = 0.5 * (cls_similarity + patch_similarity)
+        elif self.ddp_similarity_aggregation == 'topk_mean':
+            if patch_similarities.size(-1) == 0:
+                similarities = similarities[:, :, :, 0]
+            else:
+                topk = min(self.ddp_similarity_topk, patch_similarities.size(-1))
+                similarities = patch_similarities.topk(topk, dim=-1).values.mean(dim=-1)
         else:
             similarities = similarities.mean(dim=-1)
         return similarities.permute(2, 0, 1)
+
+    def _ddp_logit_scale(self, device, dtype):
+        if self.ddp_logit_scale_mode == 'none':
+            return torch.ones((), device=device, dtype=dtype)
+        if self.ddp_logit_scale_mode == 'clip':
+            return self.clip_model.logit_scale.exp().clamp(max=100).to(device=device, dtype=dtype)
+        raise ValueError(f'Unknown ddp_logit_scale_mode: {self.ddp_logit_scale_mode}')
 
     def _forward_ddp_head(self, x, eval=False):
         self.clip_model.eval()
@@ -419,8 +536,12 @@ class ClipViTB16Patch(nn.Module):
             task_ids = list(range(self.t + 1))
         class_ids = self._seen_class_ids(task_ids, device=device)
         tau = self._ddp_temperature(task_ids, device=device, dtype=dtype, eval=eval)
-        logit_scale = self.clip_model.logit_scale.exp().clamp(max=100).to(device=device, dtype=dtype)
+        logit_scale = self._ddp_logit_scale(device=device, dtype=dtype)
         final_logits = base_tokens.new_zeros((batch_size, self.num_classes))
+        s_pos_full = base_tokens.new_zeros((batch_size, self.num_classes))
+        s_neg_full = base_tokens.new_zeros((batch_size, self.num_classes))
+        margin_full = base_tokens.new_zeros((batch_size, self.num_classes))
+        ddp_prob_full = base_tokens.new_zeros((batch_size, self.num_classes))
         first_scores = None
 
         for start in range(0, class_ids.numel(), self.ddp_class_chunk_size):
@@ -428,11 +549,26 @@ class ClipViTB16Patch(nn.Module):
             text_features = self._ddp_text_features(chunk_class_ids, device=device, dtype=dtype)
             visual_features = self._ddp_visual_features_for_chunk(base_tokens, chunk_class_ids)
             scores = self._aggregate_ddp_similarity(visual_features, text_features)
-            logits = logit_scale * (scores[:, :, 0] - scores[:, :, 1]) / tau
+            s_pos = scores[:, :, 0]
+            s_neg = scores[:, :, 1]
+            margin = s_pos - s_neg
+            logits = logit_scale * margin / tau
             final_logits[:, chunk_class_ids] = logits
+            s_pos_full[:, chunk_class_ids] = s_pos
+            s_neg_full[:, chunk_class_ids] = s_neg
+            margin_full[:, chunk_class_ids] = margin
+            ddp_prob_full[:, chunk_class_ids] = torch.sigmoid(margin / tau)
             if first_scores is None:
                 first_scores = scores
 
+        self._last_ddp_score_tensors = {
+            's_pos': s_pos_full.detach(),
+            's_neg': s_neg_full.detach(),
+            'margin': margin_full.detach(),
+            'ddp_prob': ddp_prob_full.detach(),
+            'scaled_logit': final_logits.detach(),
+            'class_ids': class_ids.detach(),
+        }
         self._last_ddp_debug_shapes = {
             'base_tokens': tuple(base_tokens.shape),
             'class_ids': tuple(class_ids.shape),
@@ -441,6 +577,10 @@ class ClipViTB16Patch(nn.Module):
             'first_score_pair': tuple(first_scores.shape) if first_scores is not None else None,
             'tau': float(tau.detach().cpu().item()),
             'logit_scale': float(logit_scale.detach().cpu().item()),
+            'logit_scale_mode': self.ddp_logit_scale_mode,
+            'prompt_norm_mode': self.ddp_prompt_norm_mode,
+            'text_init': self.ddp_text_init,
+            'similarity_aggregation': self.ddp_similarity_aggregation,
             'final_logits': tuple(final_logits.shape),
         }
         sim = torch.ones((), device=device, dtype=dtype)

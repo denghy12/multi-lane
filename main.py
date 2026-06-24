@@ -11,6 +11,7 @@ import sys
 import argparse
 import datetime
 import random
+import os
 import numpy as np
 import time
 import torch
@@ -75,6 +76,28 @@ def _class_names_from_loaders(data_loader):
                 return class_names
     return None
 
+def _resolve_eval_checkpoint(args):
+    candidates = []
+    for path in (getattr(args, 'eval_checkpoint', None), getattr(args, 'eval_dir', None)):
+        if not path:
+            continue
+        if os.path.isdir(path):
+            candidates.append(os.path.join(path, 'checkpoints.pth'))
+        else:
+            candidates.append(path)
+
+    if getattr(args, 'output_dir', None):
+        candidates.append(os.path.join(args.output_dir, 'checkpoints.pth'))
+
+    for path in candidates:
+        if path and os.path.exists(path):
+            return path
+
+    raise FileNotFoundError(
+        'No evaluation checkpoint found. Pass --eval_checkpoint or point --eval_dir/output_dir '
+        'to a directory containing checkpoints.pth.'
+    )
+
 def main(args):
     utils.init_distributed_mode(args)
 
@@ -121,9 +144,6 @@ def main(args):
     print('Number of params:', n_parameters)
     print(args)
 
-    if args.eval:
-        raise NotImplementedError("Use the evaluation script.")
-
     model_without_ddp = model
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
@@ -142,6 +162,16 @@ def main(args):
         criterion = torch.nn.BCEWithLogitsLoss().to(device)
     else:
         criterion = torch.nn.CrossEntropyLoss().to(device)
+
+    if args.eval:
+        checkpoint_path = _resolve_eval_checkpoint(args)
+        print(f"Loading checkpoint from {checkpoint_path}")
+        checkpoint = torch.load(checkpoint_path, map_location='cpu')
+        state_dict = checkpoint['model'] if isinstance(checkpoint, dict) and 'model' in checkpoint else checkpoint
+        model_without_ddp.load_state_dict(state_dict, strict=True)
+        evaluate_checkpoint(model=model, criterion=criterion, data_loader=data_loader,
+                            device=device, class_mask=class_mask, args=args)
+        return
 
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()

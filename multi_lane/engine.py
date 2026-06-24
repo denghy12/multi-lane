@@ -33,7 +33,24 @@ import multi_lane.datasets as datasets
 DETAIL_METRICS = [
     'ap', 'f1', 'precision', 'recall', 'support',
     'predicted_positive', 'tp', 'fp', 'fn', 'tn',
+    'logit_mean', 'logit_p10', 'logit_p50', 'logit_p90',
+    'prob_mean', 'prob_p10', 'prob_p50', 'prob_p90',
+    'pos_prob_mean', 'pos_prob_p50', 'neg_prob_mean', 'neg_prob_p50',
+    's_pos_mean', 's_pos_p10', 's_pos_p50', 's_pos_p90',
+    's_neg_mean', 's_neg_p10', 's_neg_p50', 's_neg_p90',
+    'margin_mean', 'margin_p10', 'margin_p50', 'margin_p90',
+    'pos_margin_mean', 'pos_margin_p10', 'pos_margin_p50', 'pos_margin_p90',
+    'neg_margin_mean', 'neg_margin_p10', 'neg_margin_p50', 'neg_margin_p90',
+    'margin_gap_mean', 'pos_margin_gt_0_rate', 'neg_margin_gt_0_rate',
+    'ddp_prob_mean', 'ddp_prob_p10', 'ddp_prob_p50', 'ddp_prob_p90',
+    'pos_ddp_prob_mean', 'pos_ddp_prob_p10', 'pos_ddp_prob_p50', 'pos_ddp_prob_p90',
+    'neg_ddp_prob_mean', 'neg_ddp_prob_p10', 'neg_ddp_prob_p50', 'neg_ddp_prob_p90',
+    'pos_ddp_prob_gt_0_5', 'pos_ddp_prob_gt_0_6',
+    'neg_ddp_prob_gt_0_5', 'neg_ddp_prob_gt_0_6',
+    'scaled_logit_mean', 'scaled_logit_p10', 'scaled_logit_p50', 'scaled_logit_p90',
 ]
+
+DEFAULT_EVAL_THRESHOLD = 0.8
 
 
 def _safe_divide(numerator, denominator):
@@ -53,40 +70,369 @@ def _average_precision(scores: torch.Tensor, targets: torch.Tensor):
     return float((precision_at_rank * sorted_targets).sum().item() / positives)
 
 
-def _multilabel_class_details(logits: torch.Tensor, targets: torch.Tensor, class_ids: List[int]):
-    scores = torch.sigmoid(logits.detach().cpu())
-    predictions = scores.gt(0.8)
+def _distribution(prefix, values: torch.Tensor):
+    values = values.detach().float().reshape(-1)
+    keys = [f'{prefix}_mean', f'{prefix}_p10', f'{prefix}_p50', f'{prefix}_p90']
+    if values.numel() == 0:
+        return {key: None for key in keys}
+
+    quantiles = torch.quantile(values, torch.tensor([0.1, 0.5, 0.9], device=values.device))
+    return {
+        f'{prefix}_mean': float(values.mean().item()),
+        f'{prefix}_p10': float(quantiles[0].item()),
+        f'{prefix}_p50': float(quantiles[1].item()),
+        f'{prefix}_p90': float(quantiles[2].item()),
+    }
+
+
+def _rate_gt(values: torch.Tensor, threshold: float):
+    values = values.detach().float().reshape(-1)
+    if values.numel() == 0:
+        return None
+    return float(values.gt(float(threshold)).float().mean().item())
+
+
+def _binary_counts(predictions: torch.Tensor, targets: torch.Tensor):
+    tp = int((predictions & targets).sum().item())
+    fp = int((predictions & ~targets).sum().item())
+    fn = int((~predictions & targets).sum().item())
+    tn = int((~predictions & ~targets).sum().item())
+    predicted_positive = int(predictions.sum().item())
+    support = int(targets.sum().item())
+    precision = _safe_divide(tp, predicted_positive)
+    recall = _safe_divide(tp, support)
+    f1 = _safe_divide(2 * precision * recall, precision + recall)
+    return {
+        'support': support,
+        'predicted_positive': predicted_positive,
+        'tp': tp,
+        'fp': fp,
+        'fn': fn,
+        'tn': tn,
+        'precision': precision,
+        'recall': recall,
+        'f1': f1,
+    }
+
+
+def _threshold_label(threshold):
+    return f'{float(threshold):.2f}'.replace('.', '_')
+
+
+def _diagnostic_thresholds(args):
+    values = list(getattr(args, 'ddp_diagnostic_thresholds', []) or [])
+    values.append(_selected_eval_threshold(args))
+    return sorted({round(float(value), 6) for value in values})
+
+
+def _selected_eval_threshold(args):
+    return float(getattr(args, 'ddp_eval_threshold', DEFAULT_EVAL_THRESHOLD))
+
+
+def _metric_tensor(value, device):
+    return torch.as_tensor(value, dtype=torch.float32, device=device)
+
+
+def _mean_average_precision_from_scores(scores: torch.Tensor, targets: torch.Tensor):
+    scores = scores.detach()
+    targets = targets.detach().float()
+    ap_values = [
+        _average_precision(scores[:, class_id], targets[:, class_id])
+        for class_id in range(scores.size(1))
+    ]
+    value = float(np.mean(ap_values) * 100) if ap_values else 0.0
+    return _metric_tensor(value, scores.device)
+
+
+def _f1_score_overall_from_scores(scores: torch.Tensor, targets: torch.Tensor, threshold: float):
+    predictions = scores.detach().gt(float(threshold))
+    targets = targets.detach().bool()
+    counts = _binary_counts(predictions.cpu(), targets.cpu())
+    return _metric_tensor(counts['f1'] * 100, scores.device)
+
+
+def _f1_score_per_class_from_scores(scores: torch.Tensor, targets: torch.Tensor, threshold: float):
+    predictions = scores.detach().gt(float(threshold))
+    targets = targets.detach().bool()
+    class_f1 = []
+    for class_id in range(scores.size(1)):
+        counts = _binary_counts(predictions[:, class_id].cpu(), targets[:, class_id].cpu())
+        class_f1.append(counts['f1'])
+    if class_f1:
+        vector = torch.as_tensor(class_f1, dtype=torch.float32, device=scores.device)
+        return vector.mean() * 100, vector
+    vector = torch.zeros((0,), dtype=torch.float32, device=scores.device)
+    return _metric_tensor(0.0, scores.device), vector
+
+
+def _model_module(model):
+    return model.module if hasattr(model, 'module') else model
+
+
+def _last_ddp_score_tensors(model):
+    module = _model_module(model)
+    score_tensors = getattr(module, '_last_ddp_score_tensors', None)
+    if score_tensors is None:
+        return None
+    return {
+        key: value.detach()
+        for key, value in score_tensors.items()
+        if torch.is_tensor(value) and key != 'class_ids'
+    }
+
+
+def _cat_ddp_score_batches(score_batches):
+    if not score_batches:
+        return None
+    keys = sorted(score_batches[0].keys())
+    return {key: torch.cat([batch[key] for batch in score_batches], dim=0) for key in keys}
+
+
+def _ddp_eval_scores(logits: torch.Tensor, args, score_tensors=None):
+    mode = getattr(args, 'ddp_eval_score_mode', 'logits')
+    if mode == 'probability' and score_tensors is not None and 'ddp_prob' in score_tensors:
+        return score_tensors['ddp_prob'].to(device=logits.device, dtype=logits.dtype)
+    return torch.sigmoid(logits)
+
+
+def _score_tensor_distribution(diagnostics, prefix, values):
+    diagnostics.update(_distribution(prefix, values))
+    return diagnostics
+
+
+def _add_score_tensor_distributions(row, score_tensors, class_id, target=None):
+    if score_tensors is None:
+        return row
+    for key in ('s_pos', 's_neg', 'margin', 'ddp_prob', 'scaled_logit'):
+        if key not in score_tensors:
+            continue
+        row.update(_distribution(key, score_tensors[key][:, class_id]))
+
+    if target is None:
+        return row
+
+    target = target.detach().cpu().bool()
+    if 'margin' in score_tensors:
+        margins = score_tensors['margin'][:, class_id]
+        pos_margin = margins[target]
+        neg_margin = margins[~target]
+        row.update(_distribution('pos_margin', pos_margin))
+        row.update(_distribution('neg_margin', neg_margin))
+        pos_mean = row.get('pos_margin_mean')
+        neg_mean = row.get('neg_margin_mean')
+        row['margin_gap_mean'] = None if pos_mean is None or neg_mean is None else pos_mean - neg_mean
+        row['pos_margin_gt_0_rate'] = _rate_gt(pos_margin, 0.0)
+        row['neg_margin_gt_0_rate'] = _rate_gt(neg_margin, 0.0)
+
+    if 'ddp_prob' in score_tensors:
+        ddp_prob = score_tensors['ddp_prob'][:, class_id]
+        pos_prob = ddp_prob[target]
+        neg_prob = ddp_prob[~target]
+        row.update(_distribution('pos_ddp_prob', pos_prob))
+        row.update(_distribution('neg_ddp_prob', neg_prob))
+        row['pos_ddp_prob_gt_0_5'] = _rate_gt(pos_prob, 0.5)
+        row['pos_ddp_prob_gt_0_6'] = _rate_gt(pos_prob, 0.6)
+        row['neg_ddp_prob_gt_0_5'] = _rate_gt(neg_prob, 0.5)
+        row['neg_ddp_prob_gt_0_6'] = _rate_gt(neg_prob, 0.6)
+    return row
+
+
+def _oracle_threshold_diagnostics(scores: torch.Tensor, targets: torch.Tensor, thresholds):
+    if not thresholds:
+        return {}
+
+    best = {'threshold': None, 'precision': 0.0, 'recall': 0.0, 'f1': -1.0}
+    for threshold in thresholds:
+        counts = _binary_counts(scores.gt(float(threshold)), targets)
+        if counts['f1'] > best['f1']:
+            best = {
+                'threshold': float(threshold),
+                'precision': counts['precision'],
+                'recall': counts['recall'],
+                'f1': counts['f1'],
+            }
+
+    per_class_f1 = []
+    per_class_threshold = []
+    for class_id in range(scores.size(1)):
+        class_best = {'threshold': None, 'f1': -1.0}
+        for threshold in thresholds:
+            counts = _binary_counts(scores[:, class_id].gt(float(threshold)), targets[:, class_id])
+            if counts['f1'] > class_best['f1']:
+                class_best = {'threshold': float(threshold), 'f1': counts['f1']}
+        per_class_f1.append(class_best['f1'])
+        per_class_threshold.append(class_best['threshold'])
+
+    return {
+        'oracle_global_threshold': best['threshold'],
+        'oracle_global_precision': best['precision'],
+        'oracle_global_recall': best['recall'],
+        'oracle_global_f1': best['f1'],
+        'oracle_per_class_f1': float(np.mean(per_class_f1)) if per_class_f1 else 0.0,
+        'oracle_per_class_threshold_mean': float(np.mean(per_class_threshold)) if per_class_threshold else 0.0,
+    }
+
+
+def _multilabel_class_details(logits: torch.Tensor, targets: torch.Tensor, class_ids: List[int],
+                              scores: torch.Tensor = None, score_tensors=None, threshold=None):
+    logits = logits.detach().cpu()
+    scores = torch.sigmoid(logits).detach().cpu() if scores is None else scores.detach().cpu()
+    score_tensors = {
+        key: value.detach().cpu()
+        for key, value in (score_tensors or {}).items()
+    } if score_tensors is not None else None
+    threshold = DEFAULT_EVAL_THRESHOLD if threshold is None else float(threshold)
+    predictions = scores.gt(threshold)
     targets = targets.detach().cpu().bool()
     details = {}
 
     for class_id in class_ids:
         pred = predictions[:, class_id]
         target = targets[:, class_id]
-
-        tp = int((pred & target).sum().item())
-        fp = int((pred & ~target).sum().item())
-        fn = int((~pred & target).sum().item())
-        tn = int((~pred & ~target).sum().item())
-        support = int(target.sum().item())
-        predicted_positive = int(pred.sum().item())
-        precision = _safe_divide(tp, predicted_positive)
-        recall = _safe_divide(tp, support)
-        f1 = _safe_divide(2 * precision * recall, precision + recall)
+        class_logits = logits[:, class_id]
+        class_scores = scores[:, class_id]
 
         details[class_id] = {
             'ap': _average_precision(scores[:, class_id], target.float()),
-            'f1': f1,
-            'precision': precision,
-            'recall': recall,
-            'support': support,
-            'predicted_positive': predicted_positive,
-            'tp': tp,
-            'fp': fp,
-            'fn': fn,
-            'tn': tn,
+            **_binary_counts(pred, target),
+            **_distribution('logit', class_logits),
+            **_distribution('prob', class_scores),
+            'pos_prob_mean': _distribution('pos_prob', class_scores[target])['pos_prob_mean'],
+            'pos_prob_p50': _distribution('pos_prob', class_scores[target])['pos_prob_p50'],
+            'neg_prob_mean': _distribution('neg_prob', class_scores[~target])['neg_prob_mean'],
+            'neg_prob_p50': _distribution('neg_prob', class_scores[~target])['neg_prob_p50'],
         }
+        _add_score_tensor_distributions(details[class_id], score_tensors, class_id, target=target)
 
     return details
+
+
+def _multilabel_overall_diagnostics(logits: torch.Tensor, targets: torch.Tensor, class_ids: List[int],
+                                    thresholds=None, scores: torch.Tensor = None, score_tensors=None,
+                                    threshold=None, score_mode='logits'):
+    logits = logits.detach().cpu()
+    targets = targets.detach().cpu().bool()
+    if len(class_ids) == 0:
+        return {}
+
+    clean_logits = logits[:, class_ids]
+    clean_targets = targets[:, class_ids]
+    if scores is None:
+        scores = torch.sigmoid(logits)
+    scores = scores.detach().cpu()
+    clean_scores = scores[:, class_ids]
+    threshold = DEFAULT_EVAL_THRESHOLD if threshold is None else float(threshold)
+    predictions = clean_scores.gt(threshold)
+    counts = _binary_counts(predictions, clean_targets)
+    diagnostics = {
+        'score_mode': score_mode,
+        'threshold': threshold,
+        'diag_support': counts['support'],
+        'diag_predicted_positive': counts['predicted_positive'],
+        'diag_tp': counts['tp'],
+        'diag_fp': counts['fp'],
+        'diag_fn': counts['fn'],
+        'diag_precision': counts['precision'],
+        'diag_recall': counts['recall'],
+        'diag_f1': counts['f1'],
+        'diag_positive_rate': _safe_divide(counts['predicted_positive'], counts['support']),
+    }
+    diagnostics.update(_distribution('diag_logit', clean_logits))
+    diagnostics.update(_distribution('diag_prob', clean_scores))
+    diagnostics.update(_distribution('diag_pos_logit', clean_logits[clean_targets]))
+    diagnostics.update(_distribution('diag_neg_logit', clean_logits[~clean_targets]))
+    diagnostics.update(_distribution('diag_pos_prob', clean_scores[clean_targets]))
+    diagnostics.update(_distribution('diag_neg_prob', clean_scores[~clean_targets]))
+
+    if score_tensors is not None:
+        for key in ('s_pos', 's_neg', 'margin', 'ddp_prob', 'scaled_logit'):
+            if key not in score_tensors:
+                continue
+            clean_values = score_tensors[key].detach().cpu()[:, class_ids]
+            diagnostics.update(_distribution(f'diag_{key}', clean_values))
+            diagnostics.update(_distribution(f'diag_pos_{key}', clean_values[clean_targets]))
+            diagnostics.update(_distribution(f'diag_neg_{key}', clean_values[~clean_targets]))
+
+        if 'margin' in score_tensors:
+            clean_margin = score_tensors['margin'].detach().cpu()[:, class_ids]
+            pos_margin = clean_margin[clean_targets]
+            neg_margin = clean_margin[~clean_targets]
+            pos_mean = diagnostics.get('diag_pos_margin_mean')
+            neg_mean = diagnostics.get('diag_neg_margin_mean')
+            diagnostics['diag_margin_gap_mean'] = (
+                None if pos_mean is None or neg_mean is None else pos_mean - neg_mean)
+            diagnostics['diag_pos_margin_gt_0_rate'] = _rate_gt(pos_margin, 0.0)
+            diagnostics['diag_neg_margin_gt_0_rate'] = _rate_gt(neg_margin, 0.0)
+
+        if 'ddp_prob' in score_tensors:
+            clean_ddp_prob = score_tensors['ddp_prob'].detach().cpu()[:, class_ids]
+            pos_ddp_prob = clean_ddp_prob[clean_targets]
+            neg_ddp_prob = clean_ddp_prob[~clean_targets]
+            diagnostics['diag_pos_ddp_prob_gt_0_5'] = _rate_gt(pos_ddp_prob, 0.5)
+            diagnostics['diag_pos_ddp_prob_gt_0_6'] = _rate_gt(pos_ddp_prob, 0.6)
+            diagnostics['diag_neg_ddp_prob_gt_0_5'] = _rate_gt(neg_ddp_prob, 0.5)
+            diagnostics['diag_neg_ddp_prob_gt_0_6'] = _rate_gt(neg_ddp_prob, 0.6)
+
+    for threshold in thresholds or [DEFAULT_EVAL_THRESHOLD]:
+        threshold_predictions = clean_scores.gt(float(threshold))
+        threshold_counts = _binary_counts(threshold_predictions, clean_targets)
+        label = _threshold_label(threshold)
+        diagnostics[f'th{label}_precision'] = threshold_counts['precision']
+        diagnostics[f'th{label}_recall'] = threshold_counts['recall']
+        diagnostics[f'th{label}_f1'] = threshold_counts['f1']
+        diagnostics[f'th{label}_predicted_positive'] = threshold_counts['predicted_positive']
+
+    diagnostics.update(_oracle_threshold_diagnostics(clean_scores, clean_targets, thresholds or []))
+    return diagnostics
+
+
+def _format_ddp_diagnostics(task_id, diagnostics, thresholds):
+    if not diagnostics:
+        return
+
+    print(
+        f"[DDP diagnostics task {task_id + 1}] "
+        f"mode={diagnostics.get('score_mode', 'logits')} "
+        f"threshold={diagnostics['threshold']:.3f} "
+        f"pred/support={diagnostics['diag_predicted_positive']}/{diagnostics['diag_support']} "
+        f"microP={diagnostics['diag_precision']:.4f} "
+        f"microR={diagnostics['diag_recall']:.4f} "
+        f"microF1={diagnostics['diag_f1']:.4f} "
+        f"prob_p50={diagnostics['diag_prob_p50']:.4f} "
+        f"pos_prob_mean={diagnostics['diag_pos_prob_mean']:.4f} "
+        f"neg_prob_mean={diagnostics['diag_neg_prob_mean']:.4f}"
+    )
+    if diagnostics.get('diag_margin_gap_mean') is not None:
+        print(
+            f"[DDP margin task {task_id + 1}] "
+            f"pos_margin_mean={diagnostics['diag_pos_margin_mean']:.4f} "
+            f"neg_margin_mean={diagnostics['diag_neg_margin_mean']:.4f} "
+            f"gap={diagnostics['diag_margin_gap_mean']:.4f} "
+            f"pos_margin>0={diagnostics['diag_pos_margin_gt_0_rate']:.3f} "
+            f"neg_margin>0={diagnostics['diag_neg_margin_gt_0_rate']:.3f} "
+            f"pos_ddp_prob>0.6={diagnostics['diag_pos_ddp_prob_gt_0_6']:.3f} "
+            f"neg_ddp_prob>0.6={diagnostics['diag_neg_ddp_prob_gt_0_6']:.3f}"
+        )
+    threshold_parts = []
+    for threshold in thresholds:
+        label = _threshold_label(threshold)
+        threshold_parts.append(
+            f"{threshold:.2f}:P={diagnostics[f'th{label}_precision']:.3f},"
+            f"R={diagnostics[f'th{label}_recall']:.3f},"
+            f"F1={diagnostics[f'th{label}_f1']:.3f},"
+            f"pred={diagnostics[f'th{label}_predicted_positive']}"
+        )
+    print(f"[DDP threshold sweep task {task_id + 1}] " + " | ".join(threshold_parts))
+    if diagnostics.get('oracle_global_threshold') is not None:
+        print(
+            f"[DDP oracle task {task_id + 1}] "
+            f"global@{diagnostics['oracle_global_threshold']:.2f}:"
+            f"P={diagnostics['oracle_global_precision']:.3f},"
+            f"R={diagnostics['oracle_global_recall']:.3f},"
+            f"F1={diagnostics['oracle_global_f1']:.3f} | "
+            f"perClassF1={diagnostics['oracle_per_class_f1']:.3f},"
+            f"perClassThresholdMean={diagnostics['oracle_per_class_threshold_mean']:.3f}"
+        )
 
 
 def _support_counts(targets, num_classes):
@@ -127,6 +473,7 @@ def _write_detail_report(path, title, table_columns, table_rows, overall_columns
     json_table_rows = json.dumps(table_rows, ensure_ascii=False, allow_nan=False)
     json_overall_columns = json.dumps(overall_columns, ensure_ascii=False)
     json_overall_rows = json.dumps(overall_rows, ensure_ascii=False, allow_nan=False)
+    json_metric_preference = json.dumps(DETAIL_METRICS, ensure_ascii=False)
     escaped_title = escape(title)
 
     html = f'''<!doctype html>
@@ -275,7 +622,7 @@ def _write_detail_report(path, title, table_columns, table_rows, overall_columns
     const tableRows = {json_table_rows};
     const overallColumns = {json_overall_columns};
     const overallRows = {json_overall_rows};
-    const metricPreference = ["ap", "f1", "precision", "recall", "support", "predicted_positive", "tp", "fp", "fn", "tn"];
+    const metricPreference = {json_metric_preference};
     const frozenColumnCount = 4;
     const indexColumns = tableColumns.slice(0, frozenColumnCount);
     const metricColumns = tableColumns.slice(frozenColumnCount);
@@ -407,7 +754,8 @@ def _write_detail_report(path, title, table_columns, table_rows, overall_columns
 
 
 def _update_multilabel_detail_report(args, class_mask, val_dataset, task_id, predictions,
-                                     targets, loss, mAP, of1, cf1):
+                                     targets, loss, mAP, of1, cf1, diagnostics=None,
+                                     scores=None, score_tensors=None):
     if not utils.is_main_process():
         return
 
@@ -429,15 +777,22 @@ def _update_multilabel_detail_report(args, class_mask, val_dataset, task_id, pre
         }
 
     seen_classes = sorted([c for m in class_mask[:task_id + 1] for c in m])
-    details = _multilabel_class_details(predictions, targets, seen_classes)
+    details = _multilabel_class_details(
+        predictions,
+        targets,
+        seen_classes,
+        scores=scores,
+        score_tensors=score_tensors,
+        threshold=_selected_eval_threshold(args),
+    )
     for row in args.detail_report_state['rows']:
         class_id = row['class_id']
         class_task = row['class_task']
         for metric in DETAIL_METRICS:
             column = f'task{task_id}_{metric}'
-            row[column] = details[class_id][metric] if class_task <= task_id and class_id in details else None
+            row[column] = details[class_id].get(metric) if class_task <= task_id and class_id in details else None
 
-    args.detail_report_state['overall_rows'].append({
+    overall_row = {
         'task': task_id,
         'seen_classes': len(seen_classes),
         'samples': int(targets.shape[0]),
@@ -446,7 +801,10 @@ def _update_multilabel_detail_report(args, class_mask, val_dataset, task_id, pre
         'oF1': float(of1.item()),
         'cF1': float(cf1.item()),
         'loss': float(loss),
-    })
+    }
+    if diagnostics is not None:
+        overall_row.update(diagnostics)
+    args.detail_report_state['overall_rows'].append(overall_row)
 
     table_columns = ['class_id', 'class_name', 'class_task', 'count']
     for current_task in range(args.num_tasks):
@@ -459,6 +817,14 @@ def _update_multilabel_detail_report(args, class_mask, val_dataset, task_id, pre
                 row[column] = None
 
     overall_columns = ['task', 'seen_classes', 'samples', 'mAP', 'amAP', 'oF1', 'cF1', 'loss']
+    for row in args.detail_report_state['overall_rows']:
+        for column in row:
+            if column not in overall_columns:
+                overall_columns.append(column)
+    for row in args.detail_report_state['overall_rows']:
+        for column in overall_columns:
+            if column not in row:
+                row[column] = None
     title = f'{args.name or args.dataset.replace("Split-", "").lower()}_per_class_metrics'
     path = _detail_report_path(args)
     _write_detail_report(
@@ -470,6 +836,39 @@ def _update_multilabel_detail_report(args, class_mask, val_dataset, task_id, pre
         overall_rows=args.detail_report_state['overall_rows'],
     )
     print(f"Saved detail report to {path}")
+
+
+def _score_dump_path(args, task_id):
+    run_name = args.name or args.dataset.replace('Split-', '').lower()
+    file_name = f'{run_name}_task{task_id}_ddp_scores.npz'
+    return os.path.join(args.output_dir, 'detail', file_name)
+
+
+def _dump_ddp_scores(args, task_id, class_mask, targets, score_tensors, eval_scores):
+    if not getattr(args, 'ddp_score_dump', False) or score_tensors is None:
+        return
+    if not utils.is_main_process():
+        return
+
+    seen_classes = sorted([c for m in class_mask[:task_id + 1] for c in m])
+    class_index = torch.as_tensor(seen_classes, dtype=torch.long, device=targets.device)
+    clean_targets = targets[:, class_index].detach().cpu().numpy().astype(np.int8)
+    clean_eval_scores = eval_scores[:, class_index].detach().cpu().numpy().astype(np.float32)
+    payload = {
+        'class_ids': np.asarray(seen_classes, dtype=np.int64),
+        'y_true': clean_targets,
+        'eval_score': clean_eval_scores,
+        'eval_score_mode': np.asarray([getattr(args, 'ddp_eval_score_mode', 'logits')]),
+        'eval_threshold': np.asarray([_selected_eval_threshold(args)], dtype=np.float32),
+    }
+    for key in ('s_pos', 's_neg', 'margin', 'ddp_prob', 'scaled_logit'):
+        if key in score_tensors:
+            payload[key] = score_tensors[key][:, class_index].detach().cpu().numpy().astype(np.float32)
+
+    path = _score_dump_path(args, task_id)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    np.savez_compressed(path, **payload)
+    print(f"Saved DDP score dump to {path}")
 
 
 def train_one_epoch(model: nn.Module, criterion, data_loader: Iterable, optimizer: torch.optim.Optimizer,
@@ -685,6 +1084,7 @@ def evaluate_till_now_multi(model: nn.Module, criterion, data_loader, device: to
     #! ------- Extract predictions ------
     predictions = []
     targets = []
+    ddp_score_batches = []
 
     header = f'Till task {task_id+1}'
     for input, target in metric_logger.log_every(data_loader, args.print_freq, header):
@@ -692,6 +1092,11 @@ def evaluate_till_now_multi(model: nn.Module, criterion, data_loader, device: to
         target = target.to(device, non_blocking=True)
 
         logits, feats, frozen_feats, sim, tasks = model(input, eval=True)
+        ddp_head = args.head_mode in ('clip_ddp', 'ddp')
+        if ddp_head:
+            batch_scores = _last_ddp_score_tensors(model)
+            if batch_scores is not None:
+                ddp_score_batches.append(batch_scores)
 
         # here is the trick to mask out classes of non-current tasks
         logits = utils.mask_logits(logits, class_mask, args.num_classes, task_id=list(range(task_id+1)), 
@@ -699,7 +1104,7 @@ def evaluate_till_now_multi(model: nn.Module, criterion, data_loader, device: to
         target = utils.mask_logits(target, class_mask, args.num_classes, task_id=list(range(task_id+1)),
                                 fill_value=0)
         
-        if args.head_mode in ('clip_ddp', 'ddp'):
+        if ddp_head:
             clean_logits = utils.remove_logits(logits, class_mask, list(range(task_id+1)))
             clean_target = utils.remove_logits(target, class_mask, list(range(task_id+1)))
             loss = criterion(clean_logits, clean_target.float())
@@ -712,24 +1117,49 @@ def evaluate_till_now_multi(model: nn.Module, criterion, data_loader, device: to
 
     predictions = torch.cat(predictions, dim=0)
     targets = torch.cat(targets, dim=0)
+    ddp_score_tensors = _cat_ddp_score_batches(ddp_score_batches)
     #! ----------------------------------
     
     #$ ------- Calculate metrics ----------
     clean_predictions = utils.remove_logits(predictions, class_mask, list(range(task_id+1)))
     clean_targets = utils.remove_logits(targets, class_mask, list(range(task_id+1)))
     if args.head_mode in ('clip_ddp', 'ddp'):
-        mAP = utils.mean_average_precision(clean_predictions, clean_targets)
+        eval_scores = _ddp_eval_scores(predictions, args, ddp_score_tensors)
+        clean_scores = utils.remove_logits(eval_scores, class_mask, list(range(task_id+1)))
+        eval_threshold = _selected_eval_threshold(args)
+        mAP = _mean_average_precision_from_scores(clean_scores, clean_targets)
+        of1 = _f1_score_overall_from_scores(clean_scores, clean_targets, eval_threshold)
+        cf1, class_wise_cf1 = _f1_score_per_class_from_scores(clean_scores, clean_targets, eval_threshold)
     else:
+        eval_scores = torch.sigmoid(predictions)
         mAP = utils.mean_average_precision(predictions, targets)
+        of1 = utils.f1_score_overall(clean_predictions, clean_targets)
+        cf1, class_wise_cf1 = utils.f1_score_per_class(clean_predictions, clean_targets)
     mAP_vector[task_id] = mAP.item()
-    of1 = utils.f1_score_overall(clean_predictions, clean_targets)
-    cf1, class_wise_cf1 = utils.f1_score_per_class(clean_predictions, clean_targets)
     #$ ------------------------------------
 
     result_str = f"[Average performances till task {task_id+1}]"
     result_str += f"\tmAP: {mAP.item():.4f}\tamAP: {mAP_vector[:task_id+1].mean():.4f}\toF1: {of1.item():.4f}\tcF1: {cf1.item():.4f}"
     result_str += f"\tLoss: {metric_logger.meters['Loss'].global_avg:.4f}"
     print(result_str)
+
+    diagnostics = None
+    if args.head_mode in ('clip_ddp', 'ddp'):
+        seen_classes = sorted([c for m in class_mask[:task_id + 1] for c in m])
+        thresholds = _diagnostic_thresholds(args)
+        diagnostics = _multilabel_overall_diagnostics(
+            predictions,
+            targets,
+            seen_classes,
+            thresholds=thresholds,
+            scores=eval_scores,
+            score_tensors=ddp_score_tensors,
+            threshold=_selected_eval_threshold(args),
+            score_mode=getattr(args, 'ddp_eval_score_mode', 'logits'),
+        )
+        if getattr(args, 'ddp_diagnostics', True):
+            _format_ddp_diagnostics(task_id, diagnostics, thresholds)
+        _dump_ddp_scores(args, task_id, class_mask, targets, ddp_score_tensors, eval_scores)
 
     if val_dataset is not None:
         _update_multilabel_detail_report(
@@ -743,6 +1173,9 @@ def evaluate_till_now_multi(model: nn.Module, criterion, data_loader, device: to
             mAP=mAP,
             of1=of1,
             cf1=cf1,
+            diagnostics=diagnostics,
+            scores=eval_scores,
+            score_tensors=ddp_score_tensors,
         )
 
     wandb_dict = {}
@@ -753,6 +1186,58 @@ def evaluate_till_now_multi(model: nn.Module, criterion, data_loader, device: to
         wandb_dict['test/loss'] = metric_logger.meters['Loss'].global_avg
 
     return wandb_dict
+
+
+def _model_module(model):
+    return model.module if hasattr(model, 'module') else model
+
+
+def _set_model_task(model, task_id):
+    module = _model_module(model)
+    if hasattr(module, 't'):
+        module.t = task_id
+    if hasattr(module, '_refresh_ddp_trainable_mask'):
+        module._refresh_ddp_trainable_mask()
+
+
+def _build_seen_val_dataloader(task_id, class_mask, args):
+    _, val_dataset = datasets.get_dataset(args.dataset.replace('Split-', ''),
+                                          datasets.build_transform(is_train=True, args=args),
+                                          datasets.build_transform(is_train=False, args=args),
+                                          args=args)
+    seen_classes = [c for m in class_mask[:task_id + 1] for c in m]
+    val_seen_indices = []
+    for k in range(len(val_dataset.targets)):
+        if set(val_dataset.targets[k]).intersection(set(seen_classes)) != set():
+            val_seen_indices.append(k)
+
+    val_seen_dataset = torch.utils.data.Subset(val_dataset, val_seen_indices)
+    val_seen_dataloader = torch.utils.data.DataLoader(val_seen_dataset, batch_size=24,
+                                                      shuffle=False, num_workers=args.num_workers,
+                                                      pin_memory=args.pin_mem)
+    return val_seen_dataloader, val_dataset
+
+
+@torch.no_grad()
+def evaluate_checkpoint(model: nn.Module, criterion, data_loader: Iterable, device: torch.device,
+                        class_mask=None, args=None):
+    print("Start checkpoint evaluation")
+    if type(criterion) == torch.nn.CrossEntropyLoss:
+        acc_matrix = np.zeros((args.num_tasks, args.num_tasks))
+        for task_id in range(args.num_tasks):
+            _set_model_task(model, task_id)
+            evaluate_till_now(model=model, criterion=criterion, data_loader=data_loader,
+                              device=device, task_id=task_id, acc_matrix=acc_matrix,
+                              class_mask=class_mask, run=None, args=args)
+        return
+
+    mAP_vector = np.zeros((args.num_tasks, 1))
+    for task_id in range(args.num_tasks):
+        _set_model_task(model, task_id)
+        val_seen_dataloader, val_dataset = _build_seen_val_dataloader(task_id, class_mask, args)
+        evaluate_till_now_multi(model=model, criterion=criterion, data_loader=val_seen_dataloader,
+                                device=device, task_id=task_id, mAP_vector=mAP_vector,
+                                class_mask=class_mask, run=None, args=args, val_dataset=val_dataset)
 
 
 def train_and_evaluate(model: nn.Module, model_without_ddp: nn.Module, 
@@ -808,20 +1293,7 @@ def train_and_evaluate(model: nn.Module, model_without_ddp: nn.Module,
                                     class_mask=class_mask, run=run, args=args)
 
         else:
-            _, val_dataset = datasets.get_dataset(args.dataset.replace('Split-', ''), 
-                                                  datasets.build_transform(is_train=True, args=args),
-                                                  datasets.build_transform(is_train=False, args=args),
-                                                  args=args)
-            seen_classes = [c for m in class_mask[:task_id+1] for c in m]
-            val_seen_indices = []
-            for k in range(len(val_dataset.targets)):
-                if set(val_dataset.targets[k]).intersection(set(seen_classes)) != set():
-                    val_seen_indices.append(k)
-                    
-            val_seen_dataset = torch.utils.data.Subset(val_dataset, val_seen_indices)
-            val_seen_dataloader = torch.utils.data.DataLoader(val_seen_dataset, batch_size=24, 
-                                                              shuffle=False, num_workers=args.num_workers, 
-                                                              pin_memory=True)
+            val_seen_dataloader, val_dataset = _build_seen_val_dataloader(task_id, class_mask, args)
             stats = evaluate_till_now_multi(model=model, criterion=criterion, data_loader=val_seen_dataloader,
                                             device=device, task_id=task_id, mAP_vector=mAP_vector, 
                                             class_mask=class_mask, run=run, args=args, val_dataset=val_dataset)

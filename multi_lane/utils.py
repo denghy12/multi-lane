@@ -350,7 +350,11 @@ def _load_checkpoint_for_ema(model_ema, checkpoint):
 def is_trainable(args, name: str) -> bool:
     head_mode = getattr(args, 'head_mode', '')
     if head_mode in ('clip_ddp', 'ddp'):
-        return name in ('ddp_text_prompts', 'ddp_visual_prompts')
+        if name == 'ddp_text_prompts':
+            return bool(getattr(args, 'ddp_train_text_prompts', True))
+        if name == 'ddp_visual_prompts':
+            return bool(getattr(args, 'ddp_train_visual_prompts', True))
+        return False
 
     clip_text_head = head_mode in ('clip_taskCLS_text', 'clip_task_cls_text')
     if clip_text_head and 'head' in name:

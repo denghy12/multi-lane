@@ -19,6 +19,11 @@ from multi_lane.continual_datasets.continual_datasets import *
 
 import multi_lane.utils as utils
 
+CLIP_INPUT_MEAN = (0.48145466, 0.4578275, 0.40821073)
+CLIP_INPUT_STD = (0.26862954, 0.26130258, 0.27577711)
+IMAGENET_INPUT_MEAN = (0.485, 0.456, 0.406)
+IMAGENET_INPUT_STD = (0.229, 0.224, 0.225)
+
 class Lambda(transforms.Lambda):
     def __init__(self, lambd, nb_classes):
         super().__init__(lambd)
@@ -262,9 +267,11 @@ def build_transform(is_train, args):
 
         transform.append(transforms.ToTensor())
         
-        if args.normalize_input:
-            transform.append(transforms.Normalize(mean=[0.485, 0.456, 0.406], 
-                                                  std=[0.229, 0.224, 0.225]))
+        if getattr(args, 'clip_normalize_input', False):
+            transform.append(transforms.Normalize(mean=CLIP_INPUT_MEAN, std=CLIP_INPUT_STD))
+        elif args.normalize_input:
+            transform.append(transforms.Normalize(mean=IMAGENET_INPUT_MEAN,
+                                                  std=IMAGENET_INPUT_STD))
 
         return transforms.Compose(transform)
 
@@ -276,8 +283,10 @@ def build_transform(is_train, args):
         )
         t.append(transforms.CenterCrop(args.input_size))
     t.append(transforms.ToTensor())
-    if args.normalize_input:
-        t.append(transforms.Normalize(mean=[0.485, 0.456, 0.406], 
-                                       std=[0.229, 0.224, 0.225]))
+    if getattr(args, 'clip_normalize_input', False):
+        t.append(transforms.Normalize(mean=CLIP_INPUT_MEAN, std=CLIP_INPUT_STD))
+    elif args.normalize_input:
+        t.append(transforms.Normalize(mean=IMAGENET_INPUT_MEAN,
+                                      std=IMAGENET_INPUT_STD))
     
     return transforms.Compose(t)
