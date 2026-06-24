@@ -45,8 +45,63 @@
      predicted positives、precision、recall 和 `bicycle/chair/bottle/car`。
    - 对照论文官方实现核对 optimizer、实际 prompt LR、scheduler/warmup、visual prompt
      初始化、text prompt 是否更新，以及论文约 `0.49M` 参数统计口径。
+   - 已确认当前实现没有实际使用 `warmup_epochs/warmup_lr/min_lr`，只使用裸
+     `CosineAnnealingLR(T_max=epochs)`；下一轮修改前应先查明论文官方调度，并补成
+     可切换配置，保留当前行为用于 control。
+   - mAP 优化以 class-wise ranking 为目标，优先观察
+     `chair/bottle/tvmonitor/pottedplant/diningtable/sofa/car` 的 AP；
+     threshold/PCD sweep 主要改善 F1/calibration，不能作为提升 mAP 的主手段。
    - 如果严格论文配置核对后 raw margin 仍不足，再考虑 margin regularizer；
      该项必须标记为 DDP extension。
+
+   官方 supplementary 核对后的修正：
+
+   - 官方实现没有 warmup，也不是 raw margin train；它使用
+     `paper_attention + fixed scale 100 + summed binary-softmax BCE * 0.03`。
+   - 官方 optimizer/scheduler 路径已实现为可选配置：
+     `continual Adam(lr=5.9e-3) + MultiStepLR([0,20], gamma=0.1)`。
+   - 官方数据增强路径已实现；服务器正式运行前需安装
+     `randaugment==1.0.2`。
+   - `randaugment==1.0.2` 已安装；NumPy 1.26 的 `np.int` 兼容问题已修复并验证。
+
+   下一轮三组短实验应按单变量逻辑组织：
+
+   - A：当前 full semantic control，只把 aggregation 改成 `paper_attention`，
+     判断官方 token attention 是否直接提高困难类别 AP。
+   - B：完整官方 recipe，使用 random class-specific text prompts、
+     paper loss/optimizer/scheduler/transform 和官方 PCD。
+   - C：完整官方 recipe + semantic text init，判断 semantic 初始化是否仍能在
+     官方 aggregation 下提供额外收益。
+
+   三组首先跑 3 epoch 做结构筛选，重点比较 last/average mAP 以及
+   `chair/bottle/tvmonitor/pottedplant/diningtable/sofa/car` 的 AP；选出候选后再跑
+   20 epoch。raw train 只作为后续诊断，不进入论文复现主表。
+
+   三组已完成，当前结论：
+
+   - `official semantic 3ep` 是明确主候选：last/average mAP `88.03/93.32`。
+   - 按用户当前要求，优先直接跑优化版 official semantic：
+     `run_voc_ddp_official_semantic_tau2_3ep.sh`，随后立刻运行
+     `run_voc_ddp_official_semantic_tau2_20ep.sh`。
+   - 该优化版保留 official semantic recipe，只把 PCD 改为
+     `tau_max=2.0,gamma=0.7`，保持主指标 threshold 0.8。
+   - 根据 score dump，tau2 最接近当前 threshold0.6 的 oracle 决策边界；预计主要恢复
+     recall，同时尽量保持 official semantic 的高 mAP。
+   - 如果 3ep 出现明显过预测，再补 `tau2.5/gamma0.7` 或 `tau3/gamma0.7`。
+   - tau2 3ep 已完成，final `mAP/amAP/OF1/CF1=88.03/93.32/79.44/78.69`；
+     主阈值 0.8 已是 global oracle threshold，说明当前无需先补 tau2.5/tau3。
+   - tau2 20ep 已完成，final `mAP/amAP/OF1/CF1=88.52/93.41/72.78/76.36`。
+     ranking 较 3ep 小幅提高，但 tau2 在 20ep 出现过预测；global oracle threshold
+     移到 `0.9`。
+   - 下一步第一优先级不是重训，而是基于 20ep checkpoint 做 eval-only
+     `tau_max=2.5/3/4, gamma=0.7` 对照，固定 threshold 0.8，选择 precision/recall
+     更平衡的 PCD。该实验只改变校准，不会改变 mAP。
+   - mAP 优化随后聚焦跨任务退化最严重的 `bottle/chair/bicycle/cow`。先从 score dump
+     分解这些类在后续任务中的正负样本 margin 漂移，再决定是否需要类别级 PCD、
+     current-task hard-negative 采样或 replay；后两项属于 DDP extension，不能混入
+     严格论文复现主结果。
+   - 为严格论文对照，仍需单独完成 official random-init 20ep B0-C4；semantic init
+     是当前增强版本，不能代替官方默认初始化的复现结果。
 
 1. 增加严格 DDP probability / score calibration 诊断，先回答当前 gap 是结构问题还是评估/校准问题。
 

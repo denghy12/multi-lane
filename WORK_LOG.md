@@ -1,6 +1,6 @@
-nvi# 工作日志
+# 工作日志
 
-最后一次更新：2026-06-23。
+最后一次更新：2026-06-24。
 
 ## 当前 Git 状态
 
@@ -964,3 +964,298 @@ full semantic 20ep seed0: mAP/amAP/OF1/CF1 = 84.2737/90.3961/70.5397/72.5721
 - 推送后本地与远端完整哈希一致：
   `19417f1500dd3e1046e79afe18711628f835eb84`。
 - 无关的 `train_c100.sh` 文件末尾换行改动未纳入功能提交，仍保留在服务器工作区。
+
+### 2026-06-24 margin 与 mAP 阶段结论
+
+- full semantic 20ep final margin：
+  `pos_mean=0.0731`、`neg_mean=-0.0521`、gap `0.1252`。
+- `93.4%` 正样本的 margin 大于 0，说明多数正样本方向正确；
+  `15.0%` 负样本的 margin 仍大于 0，说明 false-positive 排序仍明显存在。
+- task5 PCD `tau=3` 后 strict DDP probability 仍为
+  positive `0.5061`、negative `0.4957`，绝对尺度没有充分拉开。
+- random 3ep gap `0.1688` 大于 semantic 20ep 的 `0.1252`，但 mAP 只有 `82.34`
+  而非 `84.27`。因此 mAP 需要改善每类正负样本排序，不能只优化 overall mean gap。
+- full semantic 20ep 最低 AP 类别为：
+  `chair 38.51`、`bottle 51.73`、`tvmonitor 68.62`、`pottedplant 73.80`、
+  `diningtable 75.33`、`sofa 76.15`、`car 78.05`。
+- 代码核对发现配置中的 warmup/min-lr 参数未被实际 scheduler 使用；
+  当前每 task 使用裸 `CosineAnnealingLR(T_max=epochs)`，并无条件重建 optimizer。
+  这是下一阶段论文协议核对和 mAP 优化的高优先级风险点。
+
+### 2026-06-24 官方 supplementary 对齐改造
+
+从 OpenReview supplementary material 取得官方代码包 `CODE_DDP`，核对后确认：
+
+```text
+visual token similarity scale: 20
+token attention: softmax(positive token similarities)
+same token attention weights applied to positive and negative branches
+weighted pair-logit scale: 5
+effective final margin scale: 20 * 5 = 100
+loss: binary pair softmax BCE, reduction=sum, loss weight=0.03
+optimizer: Adam, lr=5.9e-3, betas=(0.9,0.999), eps=1e-8, weight_decay=0
+scheduler: MultiStepLR, milestones=[0,20], gamma=0.1
+optimizer lifetime: one optimizer across all tasks
+epochs: 20
+batch size: 8
+train transform: Resize(224), CutoutPIL(0.2), RandAugment, CLIP normalize
+val transform: Resize(224), CLIP normalize
+visual prompt layers: [7,8,9,10,11]
+text/visual prompt length: 16
+```
+
+因此此前计划中的“raw DDP train 是论文主路径”不成立。论文公式省略了实现级 scale，
+但 supplementary code 明确使用固定 100 的强尺度。raw margin train 只保留为诊断
+ablation，不再标记为严格论文配置。
+
+本轮修改：
+
+- `multi_lane/configs/custom_types.py`
+  - 新增 `paper_attention` aggregation。
+  - 新增 train/eval logit scale 分离和固定 paper scale。
+  - 新增 `paper_sum` loss、持续 optimizer、paper scheduler 和 paper transform 参数。
+- `multi_lane/clip_vit.py`
+  - 实现官方 positive-token attention：positive similarities 经 `softmax(20*s)`，
+    同一权重用于正负分支 token 汇总。
+  - train/eval 可分别选择 `clip/none/paper` scale。
+- `multi_lane/engine.py`
+  - 实现官方 sum binary-softmax 等价 loss：margin BCE sum × `0.03`。
+  - 支持 optimizer 跨 task 持续存在和全局 MultiStepLR。
+- `multi_lane/utils.py`
+  - 清理非当前类别 Adam state，确保旧类 prompt 在持续 optimizer 下不受历史动量漂移。
+- `multi_lane/datasets.py`
+  - 新增官方 Resize + CutoutPIL + RandAugment + CLIP normalize 路径。
+- `main.py`
+  - 支持 DDP unscaled optimizer LR override，并打印实际 LR。
+- `requirements.txt`
+  - 新增 `randaugment==1.0.2`。
+
+服务器验证：
+
+```text
+py_compile: passed
+paper attention formula equality: passed
+pair-softmax BCE == margin BCE(sum): passed
+full CPU forward/backward: passed
+current task prompts have gradients, future prompts zero: passed
+continual Adam frozen-state test: passed
+paper scheduler: 5.9e-4 at init, 5.9e-5 after global epoch 20
+paper transform with isolated randaugment 1.0.2: passed
+```
+
+注意：
+
+- supplementary 的公开 `DDP.py` 硬编码示例是 VOC B4-C2，论文主表还包含 B0-C4；
+  方法级参数可以对齐，但 B0-C4 的 PCD 超参仍需用新 attention 路径重新验证。
+- 官方代码没有显式清理旧类 Adam 动量；本实现的 state 清理是为了严格满足论文
+  “past prompts are frozen as knowledge anchors”的方法描述。
+
+### 2026-06-24 official random 首次启动失败修复
+
+- `voc_ddp_paperattn_semantic_3ep` 已在 GPU0 正常运行。
+- `voc_ddp_official_random_3ep` 首次启动后 tmux 立即消失。
+- 日志确认不是 OOM；GPU1 为空闲。失败发生在 DataLoader worker：
+  `randaugment==1.0.2` 使用了 NumPy 1.24 后删除的 `np.int`。
+- 已在 `_paper_randaugment()` 中对该官方旧依赖增加 `np.int = int` 兼容映射，
+  不改变 RandAugment 策略。
+- 服务器 NumPy 1.26.4 下已验证：
+  `Resize -> CutoutPIL -> RandAugment -> ToTensor -> CLIP Normalize`
+  可正常输出 `[3,224,224]` tensor。
+- 当前 GPU1 空闲，可重启 official random；GPU2-7 均被其他任务占用，不启动 semantic
+  official 对照，也不触碰其他用户进程。
+
+### 2026-06-24 official-path 三组 3ep 结果
+
+三组实验均完整结束并同步日志、detail JSON 和 score dumps：
+
+```text
+A semantic + paper attention:
+  mAP/amAP/OF1/CF1 = 84.4317/90.5850/74.5444/70.9225
+  P/R/F1 = 0.849/0.665/0.745
+  margin gap = 0.1039
+
+B official random:
+  mAP/amAP/OF1/CF1 = 86.0550/91.9571/59.0481/51.9978
+  P/R/F1 = 0.954/0.428/0.590
+  margin gap = 0.1482
+  oracle global threshold 0.7, F1 = 0.745
+
+C official semantic:
+  mAP/amAP/OF1/CF1 = 88.0259/93.3177/37.9391/28.7707
+  P/R/F1 = 0.985/0.235/0.379
+  margin gap = 0.1250
+  oracle global threshold 0.6, F1 = 0.796
+```
+
+对照结论：
+
+- A 对旧 semantic 3ep：`+0.56 mAP/+0.41 amAP/+4.28 OF1/+0.28 CF1`。
+  token attention 显著提高 precision，并确认官方聚合不是无效细节。
+- B 对 A：`+1.62 mAP/+1.37 amAP`，说明官方 loss、augmentation、optimizer/scheduler
+  组合继续改善排序和 margin。
+- C 对 B：`+1.97 mAP/+1.36 amAP`。semantic 初始化在官方路径上仍然有效，
+  尽管 overall mean margin gap 更小，再次证明 AP 不能只由 mean gap 判断。
+- C 对旧 semantic 3ep：`+4.16 mAP/+3.14 amAP`；对旧 semantic 20ep：
+  `+3.75 mAP/+2.92 amAP`。仅 3 epoch 已明显超过此前所有 mAP。
+- C 距 DDP 论文 VOC B0-C4：last mAP `-2.17`，average mAP `-1.48`。
+
+official semantic 对旧 semantic 3ep 的关键 per-class AP 变化：
+
+```text
+chair       34.95 -> 61.61 (+26.66)
+car         80.11 -> 92.69 (+12.57)
+tvmonitor   75.01 -> 86.01 (+11.00)
+pottedplant 68.26 -> 78.13 (+9.87)
+diningtable 77.75 -> 84.77 (+7.02)
+sofa        71.77 -> 77.44 (+5.67)
+person      89.94 -> 95.74 (+5.79)
+```
+
+固定阈值解释：
+
+- B/C 使用 official VOC `tau_max=7,gamma=0.2`。在 B0-C4 final task，tau=7 将
+  confidence 大幅压向中间，threshold 0.8 导致 recall collapse。
+- C 在 threshold 0.6 时已有 `P=0.763,R=0.832,F1=0.796`，说明排序和可校准上限明显
+  高于当前主表 F1。
+- 对固定 0.8 阈值，`tau≈2.0` 与 tau7/threshold0.6 的 margin 边界近似等价；
+  因此下一步优先 eval-only `tau2/gamma0.7` 和 `tau3/gamma0.7`。
+
+### 2026-06-24 official semantic tau2 优化运行脚本
+
+按用户要求，已基于当前最高 mAP 的 `official semantic` 配置新增两个可直接运行的
+VOC B0-C4 脚本：
+
+```text
+run_voc_ddp_official_semantic_tau2_3ep.sh
+run_voc_ddp_official_semantic_tau2_20ep.sh
+```
+
+配置策略：
+
+- 保持 official semantic recipe 不变：`paper_attention`、`paper` logit scale、
+  `paper_sum` loss、continual optimizer、paper MultiStepLR、paper transform、
+  semantic text initialization。
+- 只把 PCD 从官方 VOC 风格的 `tau_max=7.0,gamma=0.2` 改为
+  `tau_max=2.0,gamma=0.7`。
+- 目的不是改排序，而是先修复 fixed-threshold 0.8 下的 confidence 过度压缩问题。
+
+脚本行为：
+
+- 日志写入：
+  - `./logs/voc_ddp_official_semantic_tau2_g07_3ep.log`
+  - `./logs/voc_ddp_official_semantic_tau2_g07_20ep.log`
+- 输出写入：
+  - `./output/voc_ddp_official_semantic_tau2_g07_3ep`
+  - `./output/voc_ddp_official_semantic_tau2_g07_20ep`
+- 均开启 `--store_model` 和 `--ddp_score_dump true`。
+- 可通过 `GPU=<id> ./script.sh` 指定显卡。
+
+已完成本地检查：
+
+```text
+bash -n run_voc_ddp_official_semantic_tau2_3ep.sh run_voc_ddp_official_semantic_tau2_20ep.sh
+python3 -m py_compile main.py multi_lane/*.py multi_lane/configs/*.py multi_lane/continual_datasets/*.py
+```
+
+结果：通过。
+
+2026-06-24 追加修复：
+
+- 远程服务器用 `bash run_voc_ddp_official_semantic_tau2_3ep.sh` 启动时，
+  `/root/.bashrc` 在 `set -u` 下引用未定义 `PS1`，导致脚本提前退出。
+- 已在两个 tau2 脚本中对 `source ~/.bashrc` 前后临时切换 `set +u` / `set -u`，
+  仅规避 shell 初始化兼容问题，不改变任何实验配置。
+- 已重新运行 `bash -n`，结果通过。
+
+注意：当前本地目录不是 Git 仓库，无法在本地创建实验分支或提交；Git 状态仍以服务器
+`/mnt/haoyuan/workspace/multi-lane-main` 为准。
+
+### 2026-06-24 official semantic tau2 3ep 结果分析
+
+已同步并分析：
+
+```text
+log:    ./logs/voc_ddp_official_semantic_tau2_g07_3ep.log
+output: ./output/voc_ddp_official_semantic_tau2_g07_3ep
+ckpt:   ./output/voc_ddp_official_semantic_tau2_g07_3ep/checkpoints.pth
+```
+
+最终结果：
+
+```text
+task5 mAP/amAP/OF1/CF1 = 88.0259/93.3177/79.4418/78.6858
+pred/support = 8420/7632
+micro precision/recall/F1 = 0.7572/0.8354/0.7944
+oracle global threshold = 0.80, F1 = 0.794
+per-class oracle F1 = 0.824, threshold mean = 0.790
+```
+
+对比：
+
+```text
+official semantic tau7 3ep: 88.0259/93.3177/37.9391/28.7707
+official semantic tau2 3ep: 88.0259/93.3177/79.4418/78.6858
+delta:                         +0.00/+0.00/+41.50/+49.92
+
+official random tau7 3ep:      86.0550/91.9571/59.0481/51.9978
+delta tau2 semantic:            +1.97/+1.36/+20.39/+26.69
+
+paper-attention semantic 3ep:   84.4317/90.5850/74.5444/70.9225
+delta tau2 semantic:            +3.59/+2.73/+4.90/+7.76
+```
+
+结论：
+
+- `tau2/gamma0.7` 没改变排序，mAP 与 tau7 official semantic 完全一致；
+  它只改变 fixed-threshold calibration。
+- tau2 主阈值 0.8 的结果几乎复现了 tau7 score dump 中 threshold 0.6 的 oracle 行，
+  验证此前“tau≈2 对齐主阈值 0.8”的判断成立。
+- 当前已接近 DDP 论文 VOC B0-C4 OF1 `80.8`，但 CF1 仍低约 `5` 点，剩余问题主要在
+  类别级 calibration，特别是 `bottle/chair/bicycle/diningtable/sheep/sofa`。
+
+### 2026-06-24 official semantic tau2 20ep 结果分析
+
+已同步并分析：
+
+```text
+log:    ./logs/voc_ddp_official_semantic_tau2_g07_20ep.log
+output: ./output/voc_ddp_official_semantic_tau2_g07_20ep
+```
+
+最终结果：
+
+```text
+task5 mAP/amAP/OF1/CF1 = 88.5226/93.4123/72.7760/76.3618
+pred/support = 10286/7632
+micro precision/recall/F1 = 0.6339/0.8543/0.7278
+margin: pos=0.0813, neg=-0.0598, gap=0.1411
+global oracle threshold = 0.90, F1 = 0.7584
+per-class oracle F1 = 0.805, threshold mean = 0.795
+```
+
+关键对比：
+
+```text
+official semantic tau2 3ep:  88.0259/93.3177/79.4418/78.6858
+official semantic tau2 20ep: 88.5226/93.4123/72.7760/76.3618
+delta:                        +0.4967/+0.0946/-6.6658/-2.3240
+
+paper B0-C4:                  90.2/94.8/80.8/76.9
+20ep gap:                     -1.68/-1.39/-8.02/-0.54
+```
+
+结论：
+
+- 20ep 让 ranking 和 margin 继续改善，但收益不大：mAP 只增加 `0.50`，
+  margin gap 从 `0.1250` 增加到 `0.1411`。
+- tau2 在 3ep 时校准正好，在 20ep 时偏激进。预测正类从 `8420` 增到 `10286`，
+  precision 从 `0.757` 降到 `0.634`，而 recall 仅从 `0.835` 升到 `0.854`。
+- 20ep 最佳扫描阈值已经移到 `0.9`，因此下一步先使用现有 checkpoint 做
+  eval-only tau `2.5/3/4` 对照，不能把 OF1 下降误判成结构退化。
+- mAP 剩余问题集中在困难类和跨任务退化。最终弱类：
+  `bottle 61.96`、`chair 61.45`、`sofa 77.13`、`pottedplant 79.00`、
+  `diningtable 82.03`。
+- 从类别刚学完到 task5，主要 AP 下降：
+  `bottle -29.97`、`chair -14.96`、`bicycle -10.53`、`cow -9.03`、
+  `diningtable -5.92`。这不是旧 prompt 参数漂移的直接证据，因为 prompts 已冻结；
+  更可能是后续 seen-class 评估中类别间分数竞争、任务数据分布和负样本覆盖不足。

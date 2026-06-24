@@ -1,5 +1,6 @@
 timm==0.6.7
 open_clip_torch==2.17.1
+randaugment==1.0.2
 matplotlib==3.9.0
 numpy==1.26.4
 pillow==9.2.0

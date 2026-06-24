@@ -9,9 +9,11 @@
 
 import random
 
+import numpy as np
 import torch
 from torch.utils.data.dataset import Subset, ConcatDataset
 from torchvision import datasets, transforms
+from PIL import ImageDraw
 
 from timm.data import create_transform
 
@@ -23,6 +25,40 @@ CLIP_INPUT_MEAN = (0.48145466, 0.4578275, 0.40821073)
 CLIP_INPUT_STD = (0.26862954, 0.26130258, 0.27577711)
 IMAGENET_INPUT_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_INPUT_STD = (0.229, 0.224, 0.225)
+
+
+class CutoutPIL:
+    def __init__(self, cutout_factor=0.2):
+        self.cutout_factor = float(cutout_factor)
+
+    def __call__(self, image):
+        width, height = image.size
+        cutout_height = int(self.cutout_factor * height + 0.5)
+        cutout_width = int(self.cutout_factor * width + 0.5)
+        center_y = np.random.randint(height)
+        center_x = np.random.randint(width)
+        y1 = np.clip(center_y - cutout_height // 2, 0, height)
+        y2 = np.clip(center_y + cutout_height // 2, 0, height)
+        x1 = np.clip(center_x - cutout_width // 2, 0, width)
+        x2 = np.clip(center_x + cutout_width // 2, 0, width)
+        fill = tuple(random.randint(0, 255) for _ in range(3))
+        ImageDraw.Draw(image).rectangle([x1, y1, x2, y2], fill=fill)
+        return image
+
+
+def _paper_randaugment():
+    # randaugment 1.0.2 uses the NumPy alias removed in NumPy 1.24.
+    if not hasattr(np, 'int'):
+        np.int = int
+    try:
+        from randaugment import RandAugment
+    except ImportError as exc:
+        raise RuntimeError(
+            'ddp_train_transform=paper requires randaugment==1.0.2; '
+            'install the project requirements before training.'
+        ) from exc
+    return RandAugment()
+
 
 class Lambda(transforms.Lambda):
     def __init__(self, lambd, nb_classes):
@@ -257,6 +293,19 @@ def split_single_dataset(dataset_train, dataset_val, args):
 
 def build_transform(is_train, args):
     resize_im = args.input_size > 32
+    ddp_paper_transform = (
+        getattr(args, 'head_mode', '') in ('clip_ddp', 'ddp')
+        and getattr(args, 'ddp_train_transform', 'legacy') == 'paper'
+    )
+
+    if ddp_paper_transform:
+        transform = [transforms.Resize((args.input_size, args.input_size))]
+        if is_train:
+            transform.extend([CutoutPIL(cutout_factor=0.2), _paper_randaugment()])
+        transform.append(transforms.ToTensor())
+        transform.append(transforms.Normalize(mean=CLIP_INPUT_MEAN, std=CLIP_INPUT_STD))
+        return transforms.Compose(transform)
+
     if is_train:
         scale = (args.min_scale, 1.0)
         ratio = (3. / 4., 4. / 3.)

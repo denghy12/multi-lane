@@ -12,6 +12,7 @@ import argparse
 import datetime
 import random
 import os
+import json
 import numpy as np
 import time
 import torch
@@ -76,6 +77,33 @@ def _class_names_from_loaders(data_loader):
                 return class_names
     return None
 
+def _log_class_order(args, class_mask, class_names):
+    if class_mask is None or class_names is None:
+        return
+
+    order = []
+    for task_id, class_ids in enumerate(class_mask):
+        task_classes = [
+            {
+                'class_id': int(class_id),
+                'class_name': str(class_names[int(class_id)]),
+            }
+            for class_id in class_ids
+        ]
+        order.append({'task': int(task_id), 'classes': task_classes})
+        joined = ', '.join(f"{item['class_id']}:{item['class_name']}" for item in task_classes)
+        print(f"[Class order] task {task_id}: {joined}")
+
+    if not utils.is_main_process() or not getattr(args, 'output_dir', None):
+        return
+    run_name = args.name or args.dataset.replace('Split-', '').lower()
+    detail_dir = os.path.join(args.output_dir, 'detail')
+    os.makedirs(detail_dir, exist_ok=True)
+    path = os.path.join(detail_dir, f'{run_name}_class_order.json')
+    with open(path, 'w', encoding='utf-8') as fp:
+        json.dump(order, fp, ensure_ascii=False, indent=2)
+    print(f"Saved class order to {path}")
+
 def _resolve_eval_checkpoint(args):
     candidates = []
     for path in (getattr(args, 'eval_checkpoint', None), getattr(args, 'eval_dir', None)):
@@ -127,6 +155,7 @@ def main(args):
     class_names = _class_names_from_loaders(data_loader)
     if class_names is not None and hasattr(model, 'set_class_names'):
         model.set_class_names(class_names)
+    _log_class_order(args, class_mask, class_names)
         
     # freeze everything except head and layernorm
     learnable_params = []
@@ -154,6 +183,10 @@ def main(args):
     else:
         global_batch_size = args.batch_size * args.world_size
     args.lr = args.lr * global_batch_size / 256.0 * args.accumulate_grad_batches
+    if args.head_mode in ('clip_ddp', 'ddp') \
+    and getattr(args, 'ddp_optimizer_lr', None) is not None:
+        args.lr = float(args.ddp_optimizer_lr)
+    print(f'Effective optimizer lr: {args.lr}')
 
     if args.opt == 'sgd':
         args.opt_betas = None

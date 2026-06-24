@@ -903,7 +903,12 @@ def train_one_epoch(model: nn.Module, criterion, data_loader: Iterable, optimize
         elif ddp_head:
             loss_logits = utils.remove_logits(logits, class_mask, [task_id])
             loss_target = utils.remove_logits(target, class_mask, [task_id])
-            loss = criterion(loss_logits, loss_target.float())
+            if getattr(args, 'ddp_loss_mode', 'bce_mean') == 'paper_sum':
+                loss = F.binary_cross_entropy_with_logits(
+                    loss_logits, loss_target.float(), reduction='sum')
+                loss = float(getattr(args, 'ddp_loss_weight', 0.03)) * loss
+            else:
+                loss = criterion(loss_logits, loss_target.float())
         else:
             loss = criterion(logits / args.temperature, target.float())
         
@@ -1262,6 +1267,36 @@ def train_and_evaluate(model: nn.Module, model_without_ddp: nn.Module,
     else:
         mAP_vector = np.zeros((args.num_tasks, 1))
 
+    ddp_head = args.head_mode in ('clip_ddp', 'ddp')
+    optimizer_scope = getattr(args, 'ddp_optimizer_scope', 'per_task') \
+        if ddp_head else 'per_task'
+    optimizer = None
+    lr_scheduler = None
+
+    def build_scheduler(current_optimizer):
+        if not ddp_head:
+            if args.sched == 'cosine':
+                return torch.optim.lr_scheduler.CosineAnnealingLR(
+                    current_optimizer, T_max=args.epochs)
+            return None
+
+        scheduler_mode = getattr(args, 'ddp_scheduler_mode', 'legacy_cosine')
+        if scheduler_mode == 'none':
+            return None
+        if scheduler_mode == 'paper_multistep':
+            return torch.optim.lr_scheduler.MultiStepLR(
+                current_optimizer,
+                milestones=list(getattr(args, 'ddp_scheduler_milestones', [0, 20])),
+                gamma=float(getattr(args, 'ddp_scheduler_gamma', 0.1)),
+            )
+        if scheduler_mode == 'legacy_cosine':
+            total_epochs = args.epochs
+            if optimizer_scope == 'continual':
+                total_epochs *= args.num_tasks
+            return torch.optim.lr_scheduler.CosineAnnealingLR(
+                current_optimizer, T_max=total_epochs)
+        raise ValueError(f'Unknown ddp_scheduler_mode: {scheduler_mode}')
+
     for task_id in range(args.num_tasks):
         # transfer parameters to new task
         if task_id > 0:
@@ -1269,12 +1304,18 @@ def train_and_evaluate(model: nn.Module, model_without_ddp: nn.Module,
                 model.module.next_task()
             else:
                 model.next_task()
+            if optimizer is not None and optimizer_scope == 'continual':
+                utils.clear_frozen_ddp_optimizer_state(args, model_without_ddp, optimizer)
 
-        # Create new optimizer for each task to clear optimizer status
-        optimizer = utils.get_optimizer(args, model_without_ddp)
-        lr_scheduler = None
-        if args.sched == 'cosine':
-            lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
+        recreate_optimizer = optimizer is None or optimizer_scope == 'per_task'
+        if recreate_optimizer:
+            optimizer = utils.get_optimizer(args, model_without_ddp)
+            lr_scheduler = build_scheduler(optimizer)
+            print(
+                f'[Optimizer task {task_id + 1}] scope={optimizer_scope} '
+                f'lr={optimizer.param_groups[0]["lr"]:.8f} '
+                f'scheduler={type(lr_scheduler).__name__ if lr_scheduler else "none"}'
+            )
         train_dataloader = data_loader[task_id]['train']
         
         wandb_dict = {}

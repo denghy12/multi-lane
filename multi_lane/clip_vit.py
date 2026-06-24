@@ -123,8 +123,14 @@ class ClipViTB16Patch(nn.Module):
         self.ddp_pcd = bool(getattr(args, 'ddp_pcd', True))
         self.ddp_similarity_aggregation = getattr(args, 'ddp_similarity_aggregation', 'mean')
         self.ddp_similarity_topk = max(1, int(getattr(args, 'ddp_similarity_topk', 5)))
+        self.ddp_paper_attention_scale = float(getattr(args, 'ddp_paper_attention_scale', 20.0))
         self.ddp_prompt_norm_mode = getattr(args, 'ddp_prompt_norm_mode', 'legacy')
         self.ddp_logit_scale_mode = getattr(args, 'ddp_logit_scale_mode', 'clip')
+        self.ddp_train_logit_scale_mode = getattr(
+            args, 'ddp_train_logit_scale_mode', 'inherit')
+        self.ddp_eval_logit_scale_mode = getattr(
+            args, 'ddp_eval_logit_scale_mode', 'inherit')
+        self.ddp_paper_logit_scale = float(getattr(args, 'ddp_paper_logit_scale', 100.0))
         self.ddp_text_init = getattr(args, 'ddp_text_init', 'random')
         self.ddp_positive_text_template = getattr(
             args, 'ddp_positive_text_template', 'a photo containing a {}.')
@@ -506,16 +512,27 @@ class ClipViTB16Patch(nn.Module):
             else:
                 topk = min(self.ddp_similarity_topk, patch_similarities.size(-1))
                 similarities = patch_similarities.topk(topk, dim=-1).values.mean(dim=-1)
+        elif self.ddp_similarity_aggregation == 'paper_attention':
+            positive_token_scores = similarities[:, 0]
+            token_weights = F.softmax(
+                self.ddp_paper_attention_scale * positive_token_scores, dim=-1)
+            similarities = (similarities * token_weights[:, None]).sum(dim=-1)
         else:
             similarities = similarities.mean(dim=-1)
         return similarities.permute(2, 0, 1)
 
-    def _ddp_logit_scale(self, device, dtype):
-        if self.ddp_logit_scale_mode == 'none':
+    def _ddp_logit_scale(self, device, dtype, eval):
+        mode = self.ddp_eval_logit_scale_mode if eval else self.ddp_train_logit_scale_mode
+        if mode == 'inherit':
+            mode = self.ddp_logit_scale_mode
+        if mode == 'none':
             return torch.ones((), device=device, dtype=dtype)
-        if self.ddp_logit_scale_mode == 'clip':
+        if mode == 'paper':
+            return torch.as_tensor(
+                self.ddp_paper_logit_scale, device=device, dtype=dtype)
+        if mode == 'clip':
             return self.clip_model.logit_scale.exp().clamp(max=100).to(device=device, dtype=dtype)
-        raise ValueError(f'Unknown ddp_logit_scale_mode: {self.ddp_logit_scale_mode}')
+        raise ValueError(f'Unknown DDP logit scale mode: {mode}')
 
     def _forward_ddp_head(self, x, eval=False):
         self.clip_model.eval()
@@ -536,7 +553,11 @@ class ClipViTB16Patch(nn.Module):
             task_ids = list(range(self.t + 1))
         class_ids = self._seen_class_ids(task_ids, device=device)
         tau = self._ddp_temperature(task_ids, device=device, dtype=dtype, eval=eval)
-        logit_scale = self._ddp_logit_scale(device=device, dtype=dtype)
+        logit_scale = self._ddp_logit_scale(device=device, dtype=dtype, eval=eval)
+        logit_scale_mode = (
+            self.ddp_eval_logit_scale_mode if eval else self.ddp_train_logit_scale_mode)
+        if logit_scale_mode == 'inherit':
+            logit_scale_mode = self.ddp_logit_scale_mode
         final_logits = base_tokens.new_zeros((batch_size, self.num_classes))
         s_pos_full = base_tokens.new_zeros((batch_size, self.num_classes))
         s_neg_full = base_tokens.new_zeros((batch_size, self.num_classes))
@@ -577,7 +598,9 @@ class ClipViTB16Patch(nn.Module):
             'first_score_pair': tuple(first_scores.shape) if first_scores is not None else None,
             'tau': float(tau.detach().cpu().item()),
             'logit_scale': float(logit_scale.detach().cpu().item()),
-            'logit_scale_mode': self.ddp_logit_scale_mode,
+            'logit_scale_mode': logit_scale_mode,
+            'train_logit_scale_mode': self.ddp_train_logit_scale_mode,
+            'eval_logit_scale_mode': self.ddp_eval_logit_scale_mode,
             'prompt_norm_mode': self.ddp_prompt_norm_mode,
             'text_init': self.ddp_text_init,
             'similarity_aggregation': self.ddp_similarity_aggregation,

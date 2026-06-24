@@ -384,6 +384,35 @@ def get_optimizer(args, model):
         {'params': head_params, 'weight_decay': 0},
     ]
     return create_optimizer(args, params)
+
+
+def clear_frozen_ddp_optimizer_state(args, model, optimizer):
+    if getattr(args, 'head_mode', '') not in ('clip_ddp', 'ddp'):
+        return
+    if not getattr(args, 'ddp_clear_frozen_optimizer_state', True):
+        return
+
+    module = model.module if hasattr(model, 'module') else model
+    class_mask = getattr(module, 'ddp_trainable_class_mask', None)
+    if class_mask is None:
+        return
+
+    polarity_mask = torch.ones(2, device=class_mask.device, dtype=class_mask.dtype)
+    polarity = getattr(args, 'ddp_prompt_polarity', 'both')
+    if polarity == 'positive':
+        polarity_mask[1] = 0
+    elif polarity == 'negative':
+        polarity_mask[0] = 0
+
+    state_mask = class_mask[:, None, None, None] * polarity_mask[None, :, None, None]
+    for name in ('ddp_text_prompts', 'ddp_visual_prompts'):
+        parameter = getattr(module, name, None)
+        if parameter is None:
+            continue
+        state = optimizer.state.get(parameter, {})
+        for value in state.values():
+            if torch.is_tensor(value) and value.shape == parameter.shape:
+                value.mul_(state_mask.to(device=value.device, dtype=value.dtype))
     
 
 def mask_logits(logits: torch.Tensor, mask: torch.Tensor, nb_classes: int, task_id: List[int],

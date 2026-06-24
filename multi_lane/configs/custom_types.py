@@ -45,17 +45,33 @@ def add_clip_ddp_args(subparsers: argparse.ArgumentParser):
                             choices=[
                                 'mean', 'max', 'cls', 'pooled_cls',
                                 'patch_mean', 'patch_max', 'cls_plus_patch_max', 'topk_mean',
+                                'paper_attention',
                             ],
                             default='mean',
                             help='How to turn DDP visual evidence into one class score')
     subparsers.add_argument('--ddp_similarity_topk', type=int, default=5,
                             help='Number of patch tokens averaged when ddp_similarity_aggregation=topk_mean')
+    subparsers.add_argument('--ddp_paper_attention_scale', type=float, default=20.0,
+                            help='Official DDP positive-token attention scale before token softmax')
     subparsers.add_argument('--ddp_prompt_norm_mode', type=str,
                             choices=['legacy', 'prompted'], default='legacy',
                             help='legacy normalizes only image tokens before prompt attention; prompted normalizes [prompt; image] jointly')
     subparsers.add_argument('--ddp_logit_scale_mode', type=str,
-                            choices=['clip', 'none'], default='clip',
-                            help='Use CLIP logit scale for DDP margin logits, or keep strict raw cosine margins')
+                            choices=['clip', 'none', 'paper'], default='clip',
+                            help='Legacy shared train/eval scale; paper uses the official fixed DDP scale')
+    subparsers.add_argument('--ddp_train_logit_scale_mode', type=str,
+                            choices=['inherit', 'clip', 'none', 'paper'], default='inherit',
+                            help='Training-only DDP margin scale; inherit uses ddp_logit_scale_mode')
+    subparsers.add_argument('--ddp_eval_logit_scale_mode', type=str,
+                            choices=['inherit', 'clip', 'none', 'paper'], default='inherit',
+                            help='Evaluation-only DDP margin scale; inherit uses ddp_logit_scale_mode')
+    subparsers.add_argument('--ddp_paper_logit_scale', type=float, default=100.0,
+                            help='Official DDP final pair-logit scale (20 token scale times 5)')
+    subparsers.add_argument('--ddp_loss_mode', type=str,
+                            choices=['bce_mean', 'paper_sum'], default='bce_mean',
+                            help='Current mean BCE or official DDP summed binary-softmax BCE')
+    subparsers.add_argument('--ddp_loss_weight', type=float, default=0.03,
+                            help='Weight applied to paper_sum DDP loss')
     subparsers.add_argument('--ddp_text_init', type=str,
                             choices=['random', 'same', 'semantic'], default='random',
                             help='DDP text prompt initialization: random keeps the old behavior; same ties pos/neg starts; semantic seeds pos/neg prompts from template words')
@@ -74,6 +90,25 @@ def add_clip_ddp_args(subparsers: argparse.ArgumentParser):
                             help='Which positive/negative prompt branch is trainable; both branches are still used in forward')
     subparsers.add_argument('--ddp_class_chunk_size', type=int, default=4,
                             help='Number of classes processed per DDP visual prompt chunk')
+    subparsers.add_argument('--ddp_optimizer_scope', type=str,
+                            choices=['per_task', 'continual'], default='per_task',
+                            help='Recreate prompt optimizer each task or keep one optimizer across tasks')
+    subparsers.add_argument('--ddp_clear_frozen_optimizer_state', type=str2bool, default=True,
+                            help='Clear Adam state for non-current prompts so frozen knowledge anchors cannot drift')
+    subparsers.add_argument('--ddp_optimizer_lr', type=float, default=None,
+                            help='Unscaled DDP optimizer LR override; official supplemental code uses 5.9e-3')
+    subparsers.add_argument('--ddp_scheduler_mode', type=str,
+                            choices=['legacy_cosine', 'paper_multistep', 'none'],
+                            default='legacy_cosine',
+                            help='DDP scheduler implementation; paper_multistep follows the supplemental code')
+    subparsers.add_argument('--ddp_scheduler_milestones', type=int, nargs='+',
+                            default=[0, 20],
+                            help='Global epoch milestones for DDP paper_multistep scheduler')
+    subparsers.add_argument('--ddp_scheduler_gamma', type=float, default=0.1,
+                            help='Decay factor for DDP paper_multistep scheduler')
+    subparsers.add_argument('--ddp_train_transform', type=str,
+                            choices=['legacy', 'paper'], default='legacy',
+                            help='Legacy MULTI-LANE crop/flip or official DDP resize/cutout/RandAugment')
     subparsers.add_argument('--ddp_diagnostics', type=str2bool, default=True,
                             help='Print and save DDP evaluation score diagnostics')
     subparsers.add_argument('--ddp_diagnostic_thresholds', type=float, nargs='+',
