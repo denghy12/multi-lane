@@ -102,6 +102,8 @@
      严格论文复现主结果。
    - 为严格论文对照，仍需单独完成 official random-init 20ep B0-C4；semantic init
      是当前增强版本，不能代替官方默认初始化的复现结果。
+   - 当前最佳 tau2 20ep 实现及脚本已通过提交 `5ac25a8` 推送到远端功能分支；
+     后续实验应以该提交为基线，避免混入服务器工作区的无关修改。
 
 1. 增加严格 DDP probability / score calibration 诊断，先回答当前 gap 是结构问题还是评估/校准问题。
 

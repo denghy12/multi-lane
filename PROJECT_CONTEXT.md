@@ -169,4 +169,9 @@
   `sofa 77.13`、`pottedplant 79.00`、`diningtable 82.03`。跨任务下降尤其集中在
   `bottle -29.97 AP`、`chair -14.96`、`bicycle -10.53`、`cow -9.03`，
   表明剩余 mAP 差距还包含旧类在新任务数据分布上的泛化/校准退化。
+- 2026-06-24 已将产生当前最佳 B0-C4 20ep tau2 结果的 paper-aligned DDP 实现、
+  可复现实验脚本和结果记录提交并推送到
+  `origin/feature/clip-taskCLS-posneg-text-head`，主提交为
+  `5ac25a8 Align CLIP DDP with official training recipe`。日志、output 和 checkpoint
+  未纳入 Git；无关的 `train_c100.sh` 末尾换行变化仍保留在服务器工作区。
 - 运行任何训练前必须先向用户说明完整实验配置并等待确认。

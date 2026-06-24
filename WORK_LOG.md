@@ -1259,3 +1259,12 @@ paper B0-C4:                  90.2/94.8/80.8/76.9
   `bottle -29.97`、`chair -14.96`、`bicycle -10.53`、`cow -9.03`、
   `diningtable -5.92`。这不是旧 prompt 参数漂移的直接证据，因为 prompts 已冻结；
   更可能是后续 seen-class 评估中类别间分数竞争、任务数据分布和负样本覆盖不足。
+
+### 2026-06-24 最佳 20ep tau2 版本提交与推送
+
+- 分支：`feature/clip-taskCLS-posneg-text-head`
+- 提交：`5ac25a8 Align CLIP DDP with official training recipe`
+- 已推送：`origin/feature/clip-taskCLS-posneg-text-head`
+- 提交包含 paper-aligned DDP 实现、official semantic tau2 3ep/20ep 运行脚本及实验记录。
+- `logs/`、`output/`、`checkpoints.pth` 均未进入 Git。
+- 服务器工作区仍有无关的 `train_c100.sh` 末尾换行变化，未纳入提交。
