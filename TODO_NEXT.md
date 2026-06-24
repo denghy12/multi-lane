@@ -4,7 +4,17 @@
 
 ## 最高优先级
 
-0. 当前已完成 margin-first 代码改动，下一步应先验证这些改动是否真的扩大正负 margin。
+0. 在 `feature/emotic-ddp-semantic-tau2` 验证并运行 EMOTIC B5-C3 迁移实验。
+
+   - parser、数据集类别数/任务划分、情感 prompt、静态编译和模型/报告 smoke 已完成。
+   - 正式配置：Split-EMOTIC、full image、B5-C3、20ep、batch8、
+     official semantic paper recipe、PCD tau2/gamma0.7。
+   - 正式入口：`run_emotic_ddp_official_semantic_tau2_20ep.sh`。
+   - 预期产物：训练日志、checkpoint、8 个 task 的 score dump、class order JSON、
+     per-class/task HTML 和 JSON。
+   - 下一步在用户确认 GPU 和完整配置后启动正式 20ep 训练；当前未自动占用 GPU。
+
+1. 当前已完成 margin-first 代码改动，下一步应先验证这些改动是否真的扩大正负 margin。
 
    已实现：
 

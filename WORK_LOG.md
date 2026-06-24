@@ -1268,3 +1268,25 @@ paper B0-C4:                  90.2/94.8/80.8/76.9
 - 提交包含 paper-aligned DDP 实现、official semantic tau2 3ep/20ep 运行脚本及实验记录。
 - `logs/`、`output/`、`checkpoints.pth` 均未进入 Git。
 - 服务器工作区仍有无关的 `train_c100.sh` 末尾换行变化，未纳入提交。
+
+### 2026-06-24 创建 EMOTIC DDP tau2 分支
+
+- 从 `feature/clip-taskCLS-posneg-text-head` 的 `01c10fc` 创建
+  `feature/emotic-ddp-semantic-tau2`。
+- 数据集确认存在于服务器 `./datasets/EMOTIC`，加载参数使用 `--data_path ./datasets`。
+- 采用 Split-EMOTIC 默认 alphabetical B5-C3 协议：
+  `base_classes=5,num_tasks=8`，共 26 个类别。
+- `multi_lane/configs/emotic.py` 的 DDP semantic prompt 默认值改为情感专用前缀：
+  positive `a photo of a person clearly feeling`，negative
+  `a photo of a person not feeling`。
+- 新增 `run_emotic_ddp_official_semantic_tau2_20ep.sh`，完整迁移 VOC 当前最佳
+  paper-aligned DDP 20ep tau2 配置，输出独立 log/output/checkpoint/score dump，
+  detail HTML/JSON 继续复用同一评估引擎。
+- 服务器验证结果：
+  - Python 静态编译和脚本 `bash -n` 通过；
+  - parser 默认提示与脚本提示一致；
+  - train/eval 人物样本数为 `16001/7765`，26 类任务切分为
+    `[5,3,3,3,3,3,3,3]`；
+  - DDP text/visual prompt shapes 为 `(26,2,16,512)` / `(26,2,16,768)`；
+  - positive/negative semantic seeds 不相同；
+  - 报告 smoke 成功生成 `.html` 和 `.json` 双文件。

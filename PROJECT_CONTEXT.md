@@ -1,6 +1,6 @@
 # 项目上下文
 
-最后一次更新：2026-06-24；当前分支为 `feature/clip-taskCLS-posneg-text-head`。
+最后一次更新：2026-06-24；当前分支为 `feature/emotic-ddp-semantic-tau2`。
 
 ## 项目目标
 
@@ -174,4 +174,17 @@
   `origin/feature/clip-taskCLS-posneg-text-head`，主提交为
   `5ac25a8 Align CLIP DDP with official training recipe`。日志、output 和 checkpoint
   未纳入 Git；无关的 `train_c100.sh` 末尾换行变化仍保留在服务器工作区。
+- 2026-06-24 从父分支提交 `01c10fc` 创建
+  `feature/emotic-ddp-semantic-tau2`，开始将当前最佳 official semantic tau2 20ep
+  配置迁移到 Split-EMOTIC B5-C3。EMOTIC semantic prompt 前缀为：
+  positive `a photo of a person clearly feeling`，negative
+  `a photo of a person not feeling`；具体情感类别名由 DDP 文本编码路径追加。
+- EMOTIC 正式脚本为 `run_emotic_ddp_official_semantic_tau2_20ep.sh`，使用
+  `num_tasks=8,base_classes=5,epochs=20,batch_size=8`、full image 输入、
+  paper attention/loss/optimizer/scheduler/transform、PCD tau2/gamma0.7，并开启
+  checkpoint、score dump、class order、逐类 HTML 和 JSON detail report。
+- 服务器迁移验证已通过：EMOTIC train/eval 人物样本数为 `16001/7765`，类别数为 26，
+  task sizes 为 `[5,3,3,3,3,3,3,3]`；text/visual prompt shapes 分别为
+  `(26,2,16,512)` 和 `(26,2,16,768)`。情感正负 prompt seed 不相同，detail report
+  smoke 同时生成了同名 HTML/JSON。
 - 运行任何训练前必须先向用户说明完整实验配置并等待确认。

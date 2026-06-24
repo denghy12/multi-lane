@@ -30,6 +30,10 @@ def get_args_parser(subparsers: argparse.ArgumentParser):
                             help='Optional list of CLIP text prompt templates')
     subparsers.add_argument('--train_logit_scale', type=str2bool, default=False)
     add_clip_ddp_args(subparsers)
+    subparsers.set_defaults(
+        ddp_positive_text_template='a photo of a person clearly feeling {}.',
+        ddp_negative_text_template='a photo of a person not feeling {}.',
+    )
     subparsers.add_argument('--accumulate_grad_batches', type=int, default=1)
     subparsers.add_argument('--store_model', action='store_true', help='Store the model')
     subparsers.add_argument('--wandb', action='store_true', help='Enable Weights and Biases')
