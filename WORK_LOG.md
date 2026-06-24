@@ -950,3 +950,17 @@ full semantic 20ep seed0: mAP/amAP/OF1/CF1 = 84.2737/90.3961/70.5397/72.5721
 - 基于已有 20ep checkpoints 做 threshold/PCD eval-only，不重训地确认 calibration 上限。
 - 在继续增加非论文 loss 前，先核对论文官方实现的 optimizer、LR、scheduler、warmup、
   visual prompt 初始化和 `0.49M` 参数统计口径。
+
+### 2026-06-24 Git 提交与远端推送
+
+- 服务器分支：`feature/clip-taskCLS-posneg-text-head`。
+- 功能提交：`19417f1 Add DDP semantic prompt diagnostics`。
+- 提交包含 DDP semantic text initialization、prompt branch ablation 开关、
+  CLIP normalization、eval-only/checkpoint、score/margin diagnostics 及上下文文档。
+- `python -m py_compile main.py multi_lane/*.py multi_lane/configs/*.py
+  multi_lane/continual_datasets/*.py` 已在服务器 `multilane` 环境通过。
+- 已首次推送并设置上游：
+  `origin/feature/clip-taskCLS-posneg-text-head`。
+- 推送后本地与远端完整哈希一致：
+  `19417f1500dd3e1046e79afe18711628f835eb84`。
+- 无关的 `train_c100.sh` 文件末尾换行改动未纳入功能提交，仍保留在服务器工作区。

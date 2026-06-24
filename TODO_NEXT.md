@@ -241,3 +241,7 @@
 - forward smoke 和梯度冻结检查。
 - 更新 `PROJECT_CONTEXT.md`、`WORK_LOG.md`、`TODO_NEXT.md`。
 - 经用户确认后再考虑 push 到远端。
+
+当前状态：已于 2026-06-24 将 `19417f1 Add DDP semantic prompt diagnostics`
+推送至 `origin/feature/clip-taskCLS-posneg-text-head`。后续仍需完成论文实现细节核对和
+VOC 对照实验，不应在现阶段合并到 `main`。

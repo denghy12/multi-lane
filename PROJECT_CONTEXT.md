@@ -8,7 +8,7 @@
 
 > "Less is more: Summarizing Patch Tokens for efficient Multi-Label Class-Incremental Learning (MULTI-LANE)", CoLLAs 2024。
 
-当前项目方向是在 MULTI-LANE 基础上做 CLIP 相关多标签类增量学习实验，重点数据集为 EMOTIC。当前已从 `clip_taskCLS_text` 基线新增服务器本地提交版 DDP v1 / Progressive Confidence Decoupling (PCD) 风格结构，尚未 push 到远端。
+当前项目方向是在 MULTI-LANE 基础上做 CLIP 相关多标签类增量学习实验，重点数据集为 EMOTIC。当前已从 `clip_taskCLS_text` 基线新增 DDP v1 / Progressive Confidence Decoupling (PCD) 风格结构，并已推送到远端功能分支。
 
 ## 开发与运行环境
 
@@ -65,7 +65,9 @@
 - 当前实现已在服务器环境完成静态检查、配置解析、dummy forward/backward smoke 和梯度冻结检查；尚未运行 EMOTIC smoke 实验。
 - 2026-06-22 VOC smoke 暴露出纯 cosine DDP logit 在 `sigmoid > 0.8` 阈值下会导致 CF1/OF1 全 0，因此已恢复 CLIP `logit_scale` 到 DDP similarity logit；重新 smoke 后 final mAP/OF1/CF1 为 71.52/64.06/62.12。
 - VOC B0-C4 需要 `base_classes=0,num_tasks=5` 特殊切分，当前已修正为空 base 不再产生空 task；B0-C4 `cls + tau3/gamma0.7` 20 epoch 已完成，B10-C2 需在 B0-C4 checkpoint 复评估后按选定 PCD 配置继续跑。
-- 服务器本地提交 `Add CLIP DDP prompt head` 已创建，按用户要求尚未 push 到远端。
+- DDP 核心提交 `0f0db5f Add CLIP DDP prompt head` 和语义 prompt/诊断提交
+  `19417f1 Add DDP semantic prompt diagnostics` 已推送至
+  `origin/feature/clip-taskCLS-posneg-text-head`；尚未合并到 `main`。
 - VOC B0-C4 20 epoch `tau_max=7,gamma=0.2` 的 final mAP/OF1/CF1 为 76.98/21.60/22.82；问题主要是 PCD 抑制过强导致 recall 极低。
 - VOC B0-C4 3 epoch `tau_max=3,gamma=0.7` 诊断实验 final mAP/OF1/CF1 为 76.16/64.21/62.18；checkpoint 复评估结果与训练末尾完全一致，说明 eval-only 路径可用。
 - 同一 checkpoint 关闭 PCD 后 final mAP/OF1/CF1 为 76.16/56.00/59.06；PCD off 提高 recall 但 precision 掉太多，当前 `tau_max=3,gamma=0.7` 更优。
