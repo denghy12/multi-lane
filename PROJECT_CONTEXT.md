@@ -76,6 +76,47 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - 修正后的 Adapter GPU1 smoke 已通过：bottleneck64 单层当前任务可训练参数为
   `788314 = 689178 + 99136`，零初始化真实 CLIP AMP logits 最大差为 `3.0518e-5`。该验证
   只执行 batch2 forward/backward，没有加载 EMOTIC 或启动训练。
+- task0 validation screen 已于 2026-08-11 15:30 启动，batch ID 为
+  `task_lane_adapter_task0_seed0_20260811_153033`。四组 bottleneck `32/64` × Adapter LR
+  `1e-4/4e-4` 分别运行在 GPU 1/2/3/4；均使用 seed0、30 epochs、batch64、base LR
+  0.0125、val-only。四组均完成 30 epochs/2520 updates、skipped 0，val mAP 依次为
+  `56.792729/58.974777/57.720757/59.697275`；相对 seed0 基线 `57.339154` 的增益为
+  `-0.546425/+1.635623/+0.381603/+2.358121`，因此只晋级 b64/lr4e-4。
+- b64/lr4e-4 的 task0 三种子确认已启动：复用 screen 的 seed0 结果，seed1/2 分别在 GPU1/2
+  运行，run ID 前缀为 `task_lane_adapter_task0_confirm_b64_lr4e4_20260811_155343`。两组在停止
+  信号到达前已正常完成，seed1/2 val mAP 为 `59.329355/56.178599`，相对各自基线均提升。
+  按老师意见，后续不再把额外 task0 多 seed 确认作为正式实验前置条件。
+- 新增 b128/lr4e-4 seed0 task0 val screen，GPU3、30 epochs，其每任务 Adapter 参数为
+  `197504`、当前总可训练参数 `886682`。其 val mAP 为 `56.824802`，比 b64 的
+  `59.697275` 低 `2.872474`，因此淘汰 b128，正式配置确定为 b64/lr4e-4。
+- 正式三种子实验 `multi_lane_task_lane_adapter_b64_lr4e4_seed012_20260811_160927` 已在
+  GPU1/2/3 启动，对应 seed0/1/2。配置为完整 8 tasks、30 epochs/task、batch64、base
+  LR0.0125、Adapter LR4e-4、b64/layer11/ReLU/scale0.1、AMP/TF32、held-out test、阈值0.5；
+  运行提交固定为 clean `6e8b15d`。三组均完成 240 epochs/8 tasks、skipped0、exit code0。
+- Adapter 三种子均值为 final mAP `31.128461`、final cF1 `31.994054`、final oF1
+  `48.878881`、average mAP `38.599579`、forgetting `4.869595`。相对无 Adapter 严格复现
+  分别变化 `-0.171025/+0.182944/-0.230322/+0.601003/+0.081138`；forgetting 越低越好，
+  因而当前 Adapter 提高了阶段平均 mAP 和 cF1，但没有提高最终 mAP/oF1/forgetting。
+- 正式结果已生成无 checkpoint 的17文件白名单压缩包，SHA-256
+  `16e0a9fcf9dc7d66dbf8ac5ba0a681539a400fdcf0f53916bd122071818946e1`，并下载、校验、解压到
+  本地 `./output/emotic_track_a_adapter/multi_lane_task_lane_adapter_b64_lr4e4_seed012_20260811_160927/`。
+- 逐 task 诊断表明不是运行失败：test mAP 在 task0–5 均高于基线，但 task6/7 转为
+  `-0.233741/-0.171025`；task6 新引入三类的平均 AP 在引入时下降 `4.514579`，主要来自
+  Sadness `-6.289815` 和 Suffering `-7.842116`，而不是训练后覆盖旧 lane。
+- Adapter 每个新任务独立随机初始化且不继承上一任务；task6 训练 view 只有627样本、
+  10 updates/epoch、总计300 updates，其最终 up-weight norm `2.494252` 也是8个 task中最低。
+  所有 task 的训练 BCE 都更低，但 task3/5/6/7 val mAP 更低，说明当前 BCE/零起点 Adapter
+  在低数据后期任务上出现目标错配或欠适应，而非数值爆炸。
+- 当前实现还存在严格对照混杂：Adapter Bank 在 DataLoader 创建前消耗全局 PyTorch RNG，
+  导致同 seed 的 Adapter 与基线、不同 bottleneck 之间使用不同 shuffle/augmentation 随机
+  序列。三种子同向结果仍说明权衡具有一致性，但下一轮必须先隔离 Adapter 初始化 RNG，
+  再评估方法本身。
+- 本地下一版已增加 `independent/copy_previous` 两种 task 初始化策略；warm-start 模式在新
+  task 激活时复制上一 task Adapter 的完整参数，再仅解冻当前副本，旧 Adapter 继续冻结。
+  默认仍为 `independent`，保证上一轮实验配置可复现。
+- Adapter Bank 构造已放入独立 torch RNG context，构造后恢复全局 RNG state；新增单元测试
+  对比 disabled/adapter 模型构造后的 RNG state。新增 seed0 完整8-task val-only入口
+  `run_multilane_track_a_adapter_full_val.sh`，固定不读取test；当前修改尚未提交、推送或训练。
 
 ### 当前仓库内的 EMOTIC Track-A 严格复现
 

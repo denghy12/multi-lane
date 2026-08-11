@@ -8,11 +8,29 @@
    未触碰。
 2. 服务器 8/8 单元测试、原基线 GPU smoke 和 Adapter GPU smoke 均已通过；Adapter
    bottleneck64 单层每任务参数为 `99136`，当前总可训练参数为 `788314`。
-3. 下一步必须再次向用户完整报告实验配置、获得训练确认后，才运行 seed0 task0 val
-   screen：layer11、ReLU、scale0.1，组合 bottleneck `32/64` 与 Adapter LR
-   `1e-4/4e-4`。所有筛选只看 val，不读取 test。
-4. task0 候选选定后依次进行 task0 三种子确认、seed0 全 8-task 试验，最后才考虑正式
-   seed0/1/2；每一阶段均需单独确认，不直接启动正式训练。
+3. 用户确认完整配置后，seed0 task0 val screen 已在 GPU 1/2/3/4 启动：layer11、ReLU、
+   scale0.1，组合 bottleneck `32/64` 与 Adapter LR `1e-4/4e-4`。四组均已完成，b64/lr4e-4
+   以 `59.697275` 胜出，相对 seed0 基线提升 `+2.358121`；不读取 test。
+4. b64/lr4e-4 task0 seed1/2 在停止信号前已正常完成，val mAP 为
+   `59.329355/56.178599`，均高于各自基线；按老师意见不再增加 task0 多 seed 确认。
+5. b128/lr4e-4 seed0 val mAP `56.824802`，比 b64 低 `2.872474`，已淘汰；正式配置固定为
+   b64/lr4e-4。
+6. 完整 8-task seed0/1/2 正式实验已在 GPU1/2/3 启动，run ID
+   `multi_lane_task_lane_adapter_b64_lr4e4_seed012_20260811_160927`。三组均已完成并通过
+   240 epochs/8 tasks/skipped0/exit code0 检查；五项均值为
+   `31.128461/31.994054/48.878881/38.599579/4.869595`。
+7. 当前 Adapter 相对基线的五项变化为
+   `-0.171025/+0.182944/-0.230322/+0.601003/+0.081138`。下一步先分析逐 task/逐类曲线，
+   重点解释 average mAP 提升但 final mAP 和 forgetting 变差；在找到后期退化原因前不合并
+   main，也不盲目扩大 Adapter。
+8. 无 checkpoint 的17文件包已下载并解压到本地；上下文文档当前为本地未提交修改，需在
+   用户确认后提交推送并安全同步。
+9. 本地已实现独立 RNG context、RNG state 单测，以及 `copy_previous` Adapter warm-start；
+   默认 `independent` 保留上一轮可复现性。先审查并提交推送，再在服务器运行完整单测和
+   copy_previous GPU smoke，不直接启动训练。
+10. 验证通过并确认实验配置后，只跑 seed0 的完整8-task val-only warm-start：b64/lr4e-4、
+    layer11/ReLU/scale0.1。用逐task validation曲线重点比较task6 Sadness/Suffering；不读取
+    test，也不扩大bottleneck/layer。
 
 ## 已完成：当前仓库 Track-A 三种子复现
 

@@ -18,6 +18,11 @@ def main() -> None:
         "--adapter-mode", choices=("disabled", "task_lane"), default="disabled"
     )
     parser.add_argument("--adapter-bottleneck-dim", type=int, default=64)
+    parser.add_argument(
+        "--adapter-task-init",
+        choices=("independent", "copy_previous"),
+        default="independent",
+    )
     args = parser.parse_args()
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is required")
@@ -29,6 +34,7 @@ def main() -> None:
         adapter_bottleneck_dim=args.adapter_bottleneck_dim,
         adapter_layer_indices=(11,),
         adapter_residual_scale=0.1,
+        adapter_task_initialization=args.adapter_task_init,
     ).float().cuda()
     model.activate_task(0)
     images = torch.randn(2, 3, 224, 224, device="cuda")
@@ -90,7 +96,8 @@ def main() -> None:
         raise RuntimeError(f"Expected {expected} trainable parameters, got {trainable}")
     print(
         "MULTI_LANE_TRACK_A_SMOKE_OK "
-        f"adapter_mode={args.adapter_mode} trainable_parameters={trainable} "
+        f"adapter_mode={args.adapter_mode} task_init={args.adapter_task_init} "
+        f"trainable_parameters={trainable} "
         f"max_initial_difference={max_initial_difference if model.adapter_bank is not None else 0.0}"
     )
 

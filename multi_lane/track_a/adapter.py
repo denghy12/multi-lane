@@ -45,6 +45,7 @@ class TaskLaneTransformerAdapterBank(nn.Module):
         layer_indices: Sequence[int],
         residual_scale: float = 0.1,
         activation: str = "relu",
+        task_initialization: str = "independent",
     ) -> None:
         super().__init__()
         layers = tuple(int(index) for index in layer_indices)
@@ -56,12 +57,17 @@ class TaskLaneTransformerAdapterBank(nn.Module):
             raise ValueError("Adapter layer indices must be unique")
         if residual_scale < 0:
             raise ValueError("Adapter residual scale must be non-negative")
+        if task_initialization not in {"independent", "copy_previous"}:
+            raise ValueError(
+                "Adapter task initialization must be independent or copy_previous"
+            )
         self.num_tasks = int(num_tasks)
         self.hidden_dim = int(hidden_dim)
         self.bottleneck_dim = int(bottleneck_dim)
         self.layer_indices = tuple(sorted(layers))
         self.residual_scale = float(residual_scale)
         self.activation_name = activation
+        self.task_initialization = task_initialization
         self._current_task_id = -1
 
         self.task_adapters = nn.ModuleList(
@@ -89,6 +95,10 @@ class TaskLaneTransformerAdapterBank(nn.Module):
         if not 0 <= task_id < self.num_tasks:
             raise ValueError("Adapter task id is outside the protocol")
         self.requires_grad_(False)
+        if task_id > 0 and self.task_initialization == "copy_previous":
+            self.task_adapters[task_id].load_state_dict(
+                self.task_adapters[task_id - 1].state_dict()
+            )
         self.task_adapters[task_id].requires_grad_(True)
         self._current_task_id = int(task_id)
 

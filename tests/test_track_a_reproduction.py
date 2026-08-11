@@ -116,6 +116,22 @@ class TrackAModelTest(unittest.TestCase):
             torch.equal(baseline_logits, adapted.current_all_logits(images))
         )
 
+    def test_adapter_initialization_preserves_global_rng_state(self) -> None:
+        torch.manual_seed(19)
+        MultiLaneModel(
+            FakeVisual(), (2, 1), num_selectors=2, num_prompts=2,
+            num_prompt_layers=1,
+        )
+        baseline_rng_state = torch.get_rng_state().clone()
+
+        torch.manual_seed(19)
+        MultiLaneModel(
+            FakeVisual(), (2, 1), num_selectors=2, num_prompts=2,
+            num_prompt_layers=1, adapter_mode="task_lane",
+            adapter_bottleneck_dim=3, adapter_layer_indices=(0,),
+        )
+        self.assertTrue(torch.equal(torch.get_rng_state(), baseline_rng_state))
+
     def test_adapter_parameter_names_cover_active_optimizer_parameters(self) -> None:
         model = MultiLaneModel(
             FakeVisual(), (2, 1), num_selectors=2, num_prompts=2,
@@ -162,6 +178,41 @@ class TrackAAdapterBankTest(unittest.TestCase):
         )
         self.assertTrue(all(not parameter.requires_grad for parameter in bank.task_adapters[0].parameters()))
         self.assertTrue(all(parameter.requires_grad for parameter in bank.task_adapters[1].parameters()))
+
+    def test_copy_previous_warm_starts_only_the_new_task(self) -> None:
+        bank = TaskLaneTransformerAdapterBank(
+            num_tasks=2,
+            hidden_dim=8,
+            bottleneck_dim=3,
+            layer_indices=(0,),
+            task_initialization="copy_previous",
+        )
+        bank.activate_task(0)
+        with torch.no_grad():
+            for index, parameter in enumerate(
+                bank.task_adapters[0].parameters(), start=1
+            ):
+                parameter.fill_(float(index))
+        expected = {
+            name: value.detach().clone()
+            for name, value in bank.task_adapters[0].state_dict().items()
+        }
+
+        bank.activate_task(1)
+        for name, value in bank.task_adapters[1].state_dict().items():
+            self.assertTrue(torch.equal(value, expected[name]))
+        self.assertTrue(
+            all(
+                not parameter.requires_grad
+                for parameter in bank.task_adapters[0].parameters()
+            )
+        )
+        self.assertTrue(
+            all(
+                parameter.requires_grad
+                for parameter in bank.task_adapters[1].parameters()
+            )
+        )
 
 
 class TrackAMetricsTest(unittest.TestCase):

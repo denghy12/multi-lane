@@ -446,6 +446,11 @@ def parse_args() -> argparse.Namespace:
         "--adapter-activation", choices=("relu", "gelu"), default="relu"
     )
     parser.add_argument("--adapter-learning-rate", type=float, default=4e-4)
+    parser.add_argument(
+        "--adapter-task-init",
+        choices=("independent", "copy_previous"),
+        default="independent",
+    )
     parser.add_argument("--max-tasks", type=int, default=len(TASK_SIZES))
     parser.add_argument(
         "--reporting-split", choices=("val", "test"), default="test"
@@ -486,6 +491,7 @@ def main() -> None:
         adapter_layer_indices=args.adapter_layer_indices,
         adapter_residual_scale=args.adapter_residual_scale,
         adapter_activation=args.adapter_activation,
+        adapter_task_initialization=args.adapter_task_init,
     ).float().to(device)
     model.visual_encoder.requires_grad_(False)
     model.assert_visual_frozen()
@@ -567,6 +573,10 @@ def main() -> None:
         "adapter_layer_indices": list(args.adapter_layer_indices),
         "adapter_residual_scale": args.adapter_residual_scale,
         "adapter_activation": args.adapter_activation,
+        "adapter_task_initialization": args.adapter_task_init,
+        "adapter_initialization_rng": (
+            "forked_global_state" if args.adapter_mode == "task_lane" else None
+        ),
         "adapter_learning_rate": (
             args.adapter_learning_rate if args.adapter_mode == "task_lane" else None
         ),

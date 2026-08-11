@@ -33,6 +33,7 @@ class MultiLaneModel(nn.Module):
         adapter_layer_indices: Sequence[int] = (11,),
         adapter_residual_scale: float = 0.1,
         adapter_activation: str = "relu",
+        adapter_task_initialization: str = "independent",
     ) -> None:
         super().__init__()
         if not task_sizes or any(int(size) <= 0 for size in task_sizes):
@@ -132,14 +133,22 @@ class MultiLaneModel(nn.Module):
 
         self.adapter_bank = None
         if self.adapter_mode == "task_lane":
-            self.adapter_bank = TaskLaneTransformerAdapterBank(
-                num_tasks=len(self._task_sizes),
-                hidden_dim=self.width,
-                bottleneck_dim=adapter_bottleneck_dim,
-                layer_indices=adapter_layers,
-                residual_scale=adapter_residual_scale,
-                activation=adapter_activation,
-            )
+            # Adapter initialization must not perturb the global RNG stream
+            # that drives DataLoader shuffling and stochastic transforms.  The
+            # bank still receives deterministic seed-specific initialization,
+            # while code after model construction observes the same RNG state
+            # as the adapter-disabled baseline.
+            with torch.random.fork_rng(devices=[]):
+                adapter_bank = TaskLaneTransformerAdapterBank(
+                    num_tasks=len(self._task_sizes),
+                    hidden_dim=self.width,
+                    bottleneck_dim=adapter_bottleneck_dim,
+                    layer_indices=adapter_layers,
+                    residual_scale=adapter_residual_scale,
+                    activation=adapter_activation,
+                    task_initialization=adapter_task_initialization,
+                )
+            self.adapter_bank = adapter_bank
 
     @property
     def task_sizes(self) -> Tuple[int, ...]:

@@ -2,6 +2,86 @@
 
 最后一次更新：2026-08-11。
 
+## 2026-08-11：实现 Adapter RNG 隔离与跨任务 warm-start
+
+- 当前结构明确为“每任务独立 Adapter”，不是所有任务共享一个：8个 Adapter 预分配，训练
+  task t 时只解冻第t个，推理按lane id路由。上一版本每个task独立随机初始化且不复制。
+- 按用户确认的计划增加 `adapter_task_initialization=independent|copy_previous`；默认
+  `independent` 保留上一轮复现。`copy_previous` 在task>0激活时把上一task Adapter完整复制
+  到当前task，然后只训练当前副本，旧task仍冻结。
+- Adapter Bank 初始化被包在 `torch.random.fork_rng(devices=[])` 中；Adapter仍获得确定性的
+  seed相关初始化，但构造结束后全局torch RNG恢复到与disabled模型相同的状态，避免改变
+  DataLoader shuffle和随机增强序列。
+- runner/config/smoke新增 `--adapter-task-init`；task0脚本默认保持independent。新增
+  `scripts/emotic/run_multilane_track_a_adapter_full_val.sh`，用于seed0完整8-task、val-only、
+  b64/lr4e-4 warm-start验证，不构造test dataset。
+- 单元测试新增disabled/adapter构造后RNG state完全一致，以及warm-start参数逐tensor复制、
+  旧task冻结和当前task解冻检查。本地py_compile、bash -n和git diff --check均已通过；
+  当前业务代码和上下文修改均未提交、未推送、未启动训练。
+
+## 2026-08-11：启动 Task-lane Adapter task0 validation screen
+
+- 用户确认 Automatic Upload 已关闭，并确认可以启动 task0 validation screen。启动前服务器
+  主工作树干净，local/origin/server 均为
+  `exp/emotic-multilane-transformer-adapter@6e8b15d`；test-only worktree 未触碰。
+- 完整配置：EMOTIC full image、seed0、task0/5 classes、train→val、30 epochs、batch64、
+  eval batch64、Adam base LR0.0125、weight decay0、temperature1、每任务 cosine、AMP/TF32、
+  threshold0.5、layer11、ReLU、scale0.1；不构造 test dataset。
+- batch ID：`task_lane_adapter_task0_seed0_20260811_153033`。b32/lr1e-4、b32/lr4e-4、
+  b64/lr1e-4、b64/lr4e-4 分别运行在 GPU1/2/3/4，对应 tmux：
+  `mla_t0_b32_lr1e4_153033`、`mla_t0_b32_lr4e4_153033`、
+  `mla_t0_b64_lr1e4_153033`、`mla_t0_b64_lr4e4_153033`。
+- 初始检查四组均约进入 epoch3/30，每 epoch 84 optimizer updates、skipped 0，无 OOM、NaN
+  或 traceback。输出位于服务器
+  `/mnt/haoyuan/workspace/emotic_benchmark_runs/multi_lane_task_lane_adapter_screen_v0.1/`，日志位于
+  `./logs/emotic_track_a_adapter/`。本地上下文改动待实验完成、补齐结果后再确认提交。
+- 四组均以 exit code0 完成 30 epochs、2520 optimizer updates、skipped 0。b32/lr1e-4、
+  b32/lr4e-4、b64/lr1e-4、b64/lr4e-4 的 seed0 task0 val mAP 分别为
+  `56.792729/58.974777/57.720757/59.697275`；相对严格复现 seed0 `57.339154` 的增益分别为
+  `-0.546425/+1.635623/+0.381603/+2.358121`，只晋级 b64/lr4e-4。
+- b64/lr4e-4 的 task0 seed1/2 确认于 15:53 启动，run ID 为
+  `task_lane_adapter_task0_confirm_b64_lr4e4_20260811_155343_seed1/seed2`，tmux 为
+  `mla_t0_confirm_s1_155343` / `mla_t0_confirm_s2_155343`，分别使用 GPU1/2。复用已有 seed0，
+  晋级规则为三种子平均增益≥+0.5、至少2/3 seeds提升、任一seed降幅不超过1.0；仍不读取test。
+- 老师随后明确不需要额外多 seed 确认。停止信号到达前 seed1/2 已正常完成，val mAP 为
+  `59.329355/56.178599`，相对各自严格复现基线 `56.932921/54.973777` 仍分别提升
+  `+2.396434/+1.204822`；产物保留，但不再作为必须前置步骤。
+- 按用户要求新增 b128/lr4e-4 seed0 task0 val screen：run ID
+  `task_lane_adapter_task0_seed0_b128_lr4e4_20260811_155954`，tmux
+  `mla_t0_b128_lr4e4_155954`，GPU3。每任务 Adapter 参数 `197504`、当前总可训练参数
+  `886682`。最终 val mAP `56.824802`，比 b64/lr4e-4 的 `59.697275` 低 `2.872474`，因此
+  淘汰 b128，正式配置确定为 b64/lr4e-4。
+- 正式 run ID：`multi_lane_task_lane_adapter_b64_lr4e4_seed012_20260811_160927`。seed0/1/2
+  分别在 GPU1/2/3、tmux `mla_adapter_formal_s0_160927`、
+  `mla_adapter_formal_s1_160927`、`mla_adapter_formal_s2_160927` 启动。完整配置为 8 tasks、
+  30 epochs/task、batch64、Adam base LR0.0125、Adapter LR4e-4、b64/layer11/ReLU/scale0.1、
+  cosine per task、AMP/TF32、test reporting、threshold0.5；运行提交 clean `6e8b15d`。
+- 正式输出位于服务器
+  `/mnt/haoyuan/workspace/emotic_benchmark_runs/multi_lane_task_lane_adapter_formal_v0.1/multi_lane_task_lane_adapter_b64_lr4e4_seed012_20260811_160927/`，日志位于
+  `./logs/emotic_track_a_adapter_formal/multi_lane_task_lane_adapter_b64_lr4e4_seed012_20260811_160927/`。
+  启动检查三组均完成模型构建并进入 task0，GPU 显存约1.9GB，Git仍为clean。
+- 正式三组均以 completion marker 和 tmux exit code0 完成；每 seed 240 epochs、8 tasks、
+  skipped0，config 均为 test reporting、b64/lr4e-4、Git clean `6e8b15d`。
+- 聚合五项 mean±sample std：final mAP `31.128461±0.082307`、final cF1
+  `31.994054±0.322333`、final oF1 `48.878881±0.080051`、average mAP
+  `38.599579±0.360451`、forgetting `4.869595±0.112483`。相对无 Adapter 基线均值变化为
+  `-0.171025/+0.182944/-0.230322/+0.601003/+0.081138`。
+- 使用显式白名单打包 formal summary、每 seed 四个 JSON、三份日志和 SHA manifest，共17个
+  普通文件，确认无 checkpoint。服务器压缩包大小61813 bytes，SHA-256
+  `16e0a9fcf9dc7d66dbf8ac5ba0a681539a400fdcf0f53916bd122071818946e1`；已通过 SSH key 下载到
+  本地 `./output/emotic_track_a_adapter/<run_id>/`，校验一致并解压到 `synced_files/`。
+- 逐 task 对齐发现 Adapter 的 seen-class test mAP 在 task0–5 分别提升
+  `+1.665288/+1.280988/+0.912148/+0.433352/+0.510573/+0.410443`，但 task6/7 变为
+  `-0.233741/-0.171025`。task6 新类平均 AP 下降 `4.514579`，Sadness/Suffering 分别下降
+  `6.289815/7.842116`；到 final 仍保持类似差值，说明是 task6 获取不足而非后续遗忘。
+- task6 train view 仅627样本、10 updates/epoch、总计300 updates；其 Adapter up-weight norm
+  `2.494252` 为8个 task最低。全部 task 的最终 BCE 均低于基线，但 task3/5/6/7 val mAP
+  更差，支持低数据任务欠适应/目标错配诊断。参数全部 finite，无爆炸或未训练迹象。
+- 发现严格控制缺陷：Adapter Bank 的 down projection 随机初始化会在 DataLoader 前消耗
+  全局 torch RNG，使相同 seed 的数据 shuffle/augmentation 不再与 disabled 基线相同，
+  不同 bottleneck 也不完全配对。下一轮必须先隔离初始化 RNG，并优先测试上一 task Adapter
+  warm-start；不再根据已观察的正式 test 反复调参。
+
 ## 2026-08-11：开始 Task-lane Transformer Adapter 阶段 0
 
 - 用户确认按分析方案开始修改；从严格复现分支 `exp/emotic-multilane-track-a-repro` 的
