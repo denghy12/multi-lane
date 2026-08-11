@@ -73,6 +73,9 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   Adapter 诊断确认零初始化残差非零元素严格为 0；两次独立 GPU forward 的 AMP 最大数值差
   为 `6.1035e-5`、FP32 最大差为 `1.4901e-8`，因此 GPU smoke 使用 `1e-4` 容差，同时 CPU
   单测继续要求逐 bit 相等。
+- 修正后的 Adapter GPU1 smoke 已通过：bottleneck64 单层当前任务可训练参数为
+  `788314 = 689178 + 99136`，零初始化真实 CLIP AMP logits 最大差为 `3.0518e-5`。该验证
+  只执行 batch2 forward/backward，没有加载 EMOTIC 或启动训练。
 
 ### 当前仓库内的 EMOTIC Track-A 严格复现
 

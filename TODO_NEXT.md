@@ -6,9 +6,9 @@
 
 1. 阶段 0 主实现 `531f3f3` 已提交推送，本地和服务器主工作树已同步；test-only worktree
    未触碰。
-2. 服务器 8/8 单元测试和原基线 GPU smoke 已通过；Adapter 零残差诊断通过。完成 GPU
-   AMP 数值容差修正的提交同步后，重跑 Adapter forward/backward smoke。
-3. 上述验证通过并再次向用户完整报告实验配置、获得训练确认后，才运行 seed0 task0 val
+2. 服务器 8/8 单元测试、原基线 GPU smoke 和 Adapter GPU smoke 均已通过；Adapter
+   bottleneck64 单层每任务参数为 `99136`，当前总可训练参数为 `788314`。
+3. 下一步必须再次向用户完整报告实验配置、获得训练确认后，才运行 seed0 task0 val
    screen：layer11、ReLU、scale0.1，组合 bottleneck `32/64` 与 Adapter LR
    `1e-4/4e-4`。所有筛选只看 val，不读取 test。
 4. task0 候选选定后依次进行 task0 三种子确认、seed0 全 8-task 试验，最后才考虑正式

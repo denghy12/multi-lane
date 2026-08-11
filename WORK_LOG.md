@@ -32,6 +32,10 @@
   `1.4901e-8`，属于 GPU 重复计算数值差，而非 Adapter 非零输出。GPU smoke 因此改为直接
   检查 Adapter residual 严格为零，并对两次 AMP logits 使用 `atol/rtol=1e-4`；CPU 单测的
   逐 bit 等价检查保持不变。
+- AMP smoke 修正以 `fc32af7` 提交推送并同步。最终提交上服务器 8/8 单元测试再次通过；
+  GPU1 Adapter smoke 通过，可训练参数 `788314`，其中新增当前任务 Adapter `99136`，
+  零初始化 AMP logits 最大差 `3.0518e-5`。全程未读取 EMOTIC、未生成 checkpoint、未启动
+  task0 或正式训练。
 
 ## 2026-08-11：开始在当前仓库移植 MULTI-LANE Track-A 严格复现
 
