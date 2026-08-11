@@ -32,7 +32,8 @@
     GPU2 clean disabled配对对照 `multi_lane_disabled_full_val_seed0_paired_clean_20260811_174847`
     同样完成。task6/7 mAP下降 `0.334822/0.448594`，task6 Sadness/Suffering AP下降
     `8.788894/10.703310`，三项继续条件全部失败；停止继续堆叠task-lane Adapter容量，不跑
-    新的test调参。下一步应转向非task-lane容量扩张方向，先由用户确认新的方法假设。
+    新的test调参。分析脚本提交 `3d7c5aa` 已同步且服务器13/13测试通过。下一步应转向
+    非task-lane容量扩张方向，先由用户确认新的方法假设。
 
 ## 已完成：当前仓库 Track-A 三种子复现
 

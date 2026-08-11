@@ -130,6 +130,11 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - 按实验前固定判定规则，task6 mAP、task7/final mAP、task6新类平均AP三项继续条件均失败。
   当前task-lane Adapter不适合解决MULTI-LANE后期低数据任务问题，停止继续扩大bottleneck或
   增加层数；结果保留为方法消融，不再使用正式test调参。
+- 配对分析实现以 `3d7c5aa` 提交推送并在服务器同步，13/13单元测试通过。训练history表明
+  warm-start在所有task的最终BCE更低，但新类平均AP从task3开始多数下降，task6降幅最大。
+  task6仅300次更新，最终Adapter与task5余弦相似度 `0.9841`；连续复制使Adapter范数从task0
+  `12.3918`累积至task6 `17.8840`。结合selectors/prompts本已复制，问题是重复继承造成的
+  prior-task偏置和低数据可塑性不足，而非初始化RNG或单纯容量不足。
 
 ### 当前仓库内的 EMOTIC Track-A 严格复现
 

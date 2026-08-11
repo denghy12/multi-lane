@@ -29,6 +29,19 @@
   clean状态，自动生成8-task曲线、task6逐类AP及停止判定；结果写入本地
   `./output/emotic_track_a_adapter_warmstart_val/paired_validation_comparison.json`。按预先规则
   三项继续条件全部失败，结论为停止task-lane Adapter容量扩张，不再增加bottleneck或层数。
+- 配对分析脚本、3项新测试和上下文以 `3d7c5aa` 提交推送并在服务器fast-forward同步；原10项
+  Track-A回归测试加3项分析测试共13/13通过，未启动新实验。
+- 进一步诊断显示warm-start的当前任务训练BCE在8个task均低于disabled，但新类平均AP差值从
+  task3开始转负：task0–7依次为 `+2.041904/+2.073189/+0.601783/-0.703644` 和
+  `-0.832849/-1.669440/-6.165031/-1.103683`。总mAP前期的正增益主要由已学旧lane保留，
+  而非新task获取。
+- task6 train view仅627样本、10 updates/epoch、总计300 updates；Sadness/Sensitivity/
+  Suffering训练正例为260/316/188，seen-scope val正例仅113/110/102。最终checkpoint中Adapter
+  参数范数从task0 `12.3918`累积到task6 `17.8840`；task6与task5余弦相似度 `0.9841`、参数
+  距离 `3.1801`，是最强的相邻继承之一，说明低更新预算无法消除task5的非零残差偏置。
+- 原MULTI-LANE已复制selectors/prompts，Adapter再次完整warm-start造成重复继承；同时较低BCE
+  未转化为AP排序提升，说明优化更贴合训练概率而非稀疏新类排序。现状属于结构偏置与可塑性
+  不足，不是随机轨迹、容量太小或训练崩溃，因此继续堆容量缺乏依据。
 
 ## 2026-08-11：实现 Adapter RNG 隔离与跨任务 warm-start
 
