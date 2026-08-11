@@ -33,14 +33,28 @@ def main() -> None:
     model.activate_task(0)
     images = torch.randn(2, 3, 224, 224, device="cuda")
     if model.adapter_bank is not None:
+        probe = torch.ones(
+            1, 1, 1, model.width, device="cuda", dtype=torch.float32
+        )
+        adapter_delta = model.adapter_bank.delta_for_layer(11, probe, (0,))
+        if torch.count_nonzero(adapter_delta).item() != 0:
+            raise RuntimeError("Zero-initialized adapter produced a nonzero residual")
         model.eval()
         with torch.no_grad(), torch.cuda.amp.autocast():
             adapter_logits = model.current_all_logits(images)
             model.set_adapter_runtime_enabled(False)
             baseline_logits = model.current_all_logits(images)
             model.set_adapter_runtime_enabled(True)
-        if not torch.equal(adapter_logits, baseline_logits):
-            raise RuntimeError("Zero-initialized adapter changed initial logits")
+        max_initial_difference = float(
+            (adapter_logits - baseline_logits).abs().max().cpu()
+        )
+        if not torch.allclose(
+            adapter_logits, baseline_logits, atol=1e-4, rtol=1e-4
+        ):
+            raise RuntimeError(
+                "Zero-initialized adapter changed initial logits beyond AMP "
+                f"tolerance: max_difference={max_initial_difference}"
+            )
     model.train()
     with torch.cuda.amp.autocast():
         logits = model.current_all_logits(images)
@@ -76,7 +90,8 @@ def main() -> None:
         raise RuntimeError(f"Expected {expected} trainable parameters, got {trainable}")
     print(
         "MULTI_LANE_TRACK_A_SMOKE_OK "
-        f"adapter_mode={args.adapter_mode} trainable_parameters={trainable}"
+        f"adapter_mode={args.adapter_mode} trainable_parameters={trainable} "
+        f"max_initial_difference={max_initial_difference if model.adapter_bank is not None else 0.0}"
     )
 
 

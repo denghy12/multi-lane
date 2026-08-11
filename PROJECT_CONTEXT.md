@@ -1,8 +1,8 @@
 # 项目上下文
 
-最后一次更新：2026-08-11；本地已从严格复现提交 `ce7d9a0` 创建
-`exp/emotic-multilane-transformer-adapter`，阶段 0 改动尚未提交或推送。服务器主工作树
-仍保持 `exp/emotic-multilane-track-a-repro@ce7d9a0`；正式复现实验使用的业务代码提交为
+最后一次更新：2026-08-11；本地与服务器主工作树均已切换并跟踪
+`exp/emotic-multilane-transformer-adapter`，阶段 0 主实现提交为 `531f3f3`。服务器额外
+test-only worktree 保持原分支和原有未提交状态；正式复现实验使用的业务代码提交仍为
 `8cff911`。
 
 ## 项目目标
@@ -69,6 +69,10 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   split，避免用测试集选超参数。
 - 首轮候选固定为 layer 11、ReLU、scale 0.1，对 bottleneck `32/64` 与 Adapter LR
   `1e-4/4e-4` 做 seed0 task0 validation screen；尚未启动任何训练。
+- 服务器 8/8 单元测试通过；原基线 GPU smoke 仍为 `689178` 个可训练参数。真实 CLIP
+  Adapter 诊断确认零初始化残差非零元素严格为 0；两次独立 GPU forward 的 AMP 最大数值差
+  为 `6.1035e-5`、FP32 最大差为 `1.4901e-8`，因此 GPU smoke 使用 `1e-4` 容差，同时 CPU
+  单测继续要求逐 bit 相等。
 
 ### 当前仓库内的 EMOTIC Track-A 严格复现
 

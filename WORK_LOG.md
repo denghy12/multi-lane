@@ -24,6 +24,14 @@
   等价、Adapter 梯度、冻结视觉塔和当前任务参数量；默认 disabled 路径仍执行原基线检查。
 - 本机系统 Python 3.9 已通过 `py_compile`，新 shell 入口通过 `bash -n`，`git diff --check`
   通过；本机缺少 PyTorch，张量级单元测试与 GPU smoke 等待提交推送后在服务器执行。
+- 阶段 0 主实现以 `531f3f3` 提交并推送；服务器主工作树检查为空后通过 `fetch` 和新建跟踪
+  分支同步到同一提交。test-only worktree 的历史修改和未跟踪文件保持原样。
+- 服务器 CPU 单元测试 8/8 通过；原基线 GPU1 smoke 通过，可训练参数仍严格为 `689178`。
+- 首次 Adapter GPU smoke 的逐 bit logits 检查失败。诊断确认 Adapter delta、up weight 和
+  up bias 的非零元素均为 0；重复 forward 的 AMP 最大差为 `6.1035e-5`，FP32 最大差为
+  `1.4901e-8`，属于 GPU 重复计算数值差，而非 Adapter 非零输出。GPU smoke 因此改为直接
+  检查 Adapter residual 严格为零，并对两次 AMP logits 使用 `atol/rtol=1e-4`；CPU 单测的
+  逐 bit 等价检查保持不变。
 
 ## 2026-08-11：开始在当前仓库移植 MULTI-LANE Track-A 严格复现
 

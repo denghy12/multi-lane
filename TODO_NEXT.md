@@ -4,17 +4,14 @@
 
 ## 当前最高优先级：验证 Task-lane Transformer Adapter 阶段 0
 
-1. 本地 `exp/emotic-multilane-transformer-adapter` 已完成阶段 0 代码与测试入口，当前尚未
-   commit/push；先审查 diff，并保持 `--adapter-mode disabled` 的原基线兼容性。
-2. 经用户确认后提交并推送；服务器先检查两个 worktree 状态，只同步主工作树到同一提交，
-   不触碰 `/mnt/haoyuan/workspace/multi-lane-main-test-only`。
-3. 服务器同步后先运行单元测试，再运行 Adapter GPU forward/backward smoke；这两步不启动
-   EMOTIC 训练。重点核对零初始化 logits 完全相同、lane 路由、旧/未来 Adapter 冻结、
-   bottleneck64 单层每任务参数 `99136`。
-4. 上述验证通过并再次向用户完整报告实验配置、获得训练确认后，才运行 seed0 task0 val
+1. 阶段 0 主实现 `531f3f3` 已提交推送，本地和服务器主工作树已同步；test-only worktree
+   未触碰。
+2. 服务器 8/8 单元测试和原基线 GPU smoke 已通过；Adapter 零残差诊断通过。完成 GPU
+   AMP 数值容差修正的提交同步后，重跑 Adapter forward/backward smoke。
+3. 上述验证通过并再次向用户完整报告实验配置、获得训练确认后，才运行 seed0 task0 val
    screen：layer11、ReLU、scale0.1，组合 bottleneck `32/64` 与 Adapter LR
    `1e-4/4e-4`。所有筛选只看 val，不读取 test。
-5. task0 候选选定后依次进行 task0 三种子确认、seed0 全 8-task 试验，最后才考虑正式
+4. task0 候选选定后依次进行 task0 三种子确认、seed0 全 8-task 试验，最后才考虑正式
    seed0/1/2；每一阶段均需单独确认，不直接启动正式训练。
 
 ## 已完成：当前仓库 Track-A 三种子复现
