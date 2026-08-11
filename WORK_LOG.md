@@ -27,6 +27,14 @@
   `emotic_multilane_track_a_seed012`，seed 0/1/2 对应 GPU 0/1/2。
 - task 0 三个 seed 的 mAP/cF1/oF1 与注册实验逐项完全相同；停止持续轮询，让 tmux 后台
   独立完成。最后一次快照位于 task 1 epoch 14–17/30，错误、NaN、OOM、skip 计数均为 0。
+- 三种子正式实验已完成并输出 completion marker。最终 final mAP/cF1/oF1/average
+  mAP/forgetting 为 `31.2994855/31.8111103/49.1092038/37.9985757/4.7884572`，所有
+  mean/std 与原注册实验完全一致。
+- 在服务器生成 `multi_lane_main_track_a_seed012_20260811_132448_download.tar.gz`，包含
+  13 个 JSON 和 4 个日志、共 17 个文件，明确无 `checkpoints/`；大小约 80K，SHA-256
+  `d3a2f23080da5ff6bd5d0fde99c6ebb9eae1916db31b1e09e9ebb6ed5fb15dcc`。
+- 压缩包已通过 SSH 下载到本地项目 `./output/emotic_track_a/<run_id>/`，本地校验一致并
+  解压到 `synced_files/`，可直接进行后续分析。
 
 ## 当前 Git 状态
 

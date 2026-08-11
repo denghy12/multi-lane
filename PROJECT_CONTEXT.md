@@ -72,8 +72,13 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   同输入输出最大误差均为 `0.0`；GPU forward/backward smoke 通过，可训练参数严格为
   `689178`，冻结视觉塔没有梯度。
 - 正式实验 `multi_lane_main_track_a_seed012_20260811_132448` 已在 tmux
-  `emotic_multilane_track_a_seed012` 启动，seed 0/1/2 分别使用 GPU 0/1/2。task 0 三种子
-  mAP/cF1/oF1 与注册实验逐项完全相同，当前继续后台训练且错误计数为 0。
+  `emotic_multilane_track_a_seed012` 完成，seed 0/1/2 分别使用 GPU 0/1/2。最终五项
+  三种子均值/标准差与注册实验完全一致：final mAP `31.2994855 ± 0.1410457`、final cF1
+  `31.8111103 ± 0.2026319`、final oF1 `49.1092038 ± 0.1330790`、average mAP
+  `37.9985757 ± 0.4824589`、forgetting `4.7884572 ± 0.0199469`。
+- 已生成不含 checkpoint 的 17 文件下载包，SHA-256 为
+  `d3a2f23080da5ff6bd5d0fde99c6ebb9eae1916db31b1e09e9ebb6ed5fb15dcc`，并下载、解压到
+  本地 `./output/emotic_track_a/multi_lane_main_track_a_seed012_20260811_132448/`。
 
 已提交基线：
 
