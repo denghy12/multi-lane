@@ -4,6 +4,30 @@
 
 Official Implementation of "Less is more: Summarizing Patch Tokens for efficient Multi-Label Class-Incremental Learning (MULTI-LANE)", published at 3rd Conference on Lifelong Learning Agents (CoLLAs 2024)
 
+## EMOTIC Track-A frozen reproduction
+
+The repository contains a protocol-locked reproduction path for the registered
+MULTI-LANE EMOTIC B5-C3 result. It is isolated from the historical `main.py`
+entry point so earlier experiments keep their original behavior.
+
+On the configured Linux server, launch the three formal seeds with:
+
+```bash
+cd /mnt/haoyuan/workspace/multi-lane-main
+bash scripts/emotic/launch_multilane_track_a_seed012_tmux.sh
+```
+
+The launcher validates the OpenAI CLIP ViT-B/16 checkpoint, runs a GPU smoke,
+then trains seeds 0, 1, and 2 on physical GPUs 0, 1, and 2. Logs are written
+below `./logs/emotic_track_a/`, a checkpoint-free summary below
+`./output/emotic_track_a/`, and full formal artifacts remain under
+`/mnt/haoyuan/workspace/emotic_benchmark_runs/`.
+
+The frozen configuration is implemented in `multi_lane/track_a/runner.py`:
+EMOTIC B5-C3, 30 epochs per task, batch size 64, Adam at learning rate 0.0125,
+per-task cosine scheduling, AMP/TF32, fixed threshold 0.5, and held-out test
+reporting over seen classes.
+
 ## 🛠️ Installation
 Create and activate a conda environment with Python 3.11.17:
 ```

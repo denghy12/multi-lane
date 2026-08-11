@@ -1,7 +1,8 @@
 # 项目上下文
 
-最后一次更新：2026-08-11；本地和服务器主工作树当前分支均为
-`fix/independent-git-worktrees`，基线为 `feature/clip-vit-b16@0b59138`。
+最后一次更新：2026-08-11；本地主工作树已从共同基线创建
+`exp/emotic-multilane-track-a-repro`，服务器仍暂时位于
+`fix/independent-git-worktrees`，等待本地实现提交推送后同步。
 
 ## 项目目标
 
@@ -49,6 +50,24 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   仅允许 fast-forward 更新。标准回滚流程为从旧 commit 创建恢复分支，而不是硬重置。
 
 ## 当前技术路线
+
+### 当前仓库内的 EMOTIC Track-A 严格复现
+
+- 新增 `multi_lane/track_a/`，在当前仓库内实现目标 benchmark 使用的冻结 OpenAI
+  CLIP ViT-B/16 MULTI-LANE 路径；历史 `clip_vit_b16_patch` 和 `main.py` 默认行为不变。
+- OpenAI CLIP checkpoint 固定为 SHA-256
+  `5806e77cd80f8b59890b7e101eabd078d9fb84e6937f9e85e4ecb61988df416f`；加载器不依赖
+  DDP worktree 或运行时网络下载。
+- Track-A 模型保留 10 selectors、10 组逐层 K/V prompts、前 5 层 prompt、
+  drop-and-replace、上一任务 slice 初始化、共享 512 维 projection 后分类器和 concat
+  inference；可训练参数应严格为 `689178`。
+- 冻结协议为 EMOTIC B5-C3、8 tasks、30 epochs/task、seed 0/1/2、batch 64、
+  Adam LR 0.0125、每任务重置 cosine scheduler、AMP/TF32、held-out test、固定阈值 0.5。
+- 三种子 launcher 先运行 GPU smoke，再在 GPU 0/1/2 并行运行；日志进入
+  `./logs/emotic_track_a/`，项目汇总进入 `./output/emotic_track_a/`，完整产物进入服务器
+  `emotic_benchmark_runs`。
+- 目标注册结果 final mAP/cF1/oF1/average mAP/forgetting 为
+  `31.2995/31.8111/49.1092/37.9986/4.7885`；当前实现尚待服务器验证。
 
 已提交基线：
 

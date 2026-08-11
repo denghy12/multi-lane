@@ -1,0 +1,596 @@
+"""Strict three-seed-capable EMOTIC Track-A runner for MULTI-LANE.
+
+This entry point intentionally lives in the original multi-lane repository.  It
+keeps the historical ``main.py`` path unchanged while reproducing the frozen
+benchmark protocol used for the registered MULTI-LANE Track-A result.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import os
+import random
+import subprocess
+import time
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Dict, Iterable, List, Sequence, Tuple
+
+import numpy as np
+import torch
+import torch.nn.functional as F
+from torch.utils.data import DataLoader, Dataset, Subset
+from torchvision import transforms
+
+from multi_lane.continual_datasets.continual_datasets import EMOTIC
+
+from .model import MultiLaneModel
+from .openai_clip_loader import OPENAI_VIT_B16_SHA256, load_openai_clip_visual
+
+
+CLASS_ORDER: Tuple[str, ...] = (
+    "Affection", "Anger", "Annoyance", "Anticipation", "Aversion",
+    "Confidence", "Disapproval", "Disconnection", "Disquietment",
+    "Doubt/Confusion", "Embarrassment", "Engagement", "Esteem",
+    "Excitement", "Fatigue", "Fear", "Happiness", "Pain", "Peace",
+    "Pleasure", "Sadness", "Sensitivity", "Suffering", "Surprise",
+    "Sympathy", "Yearning",
+)
+TASK_SIZES: Tuple[int, ...] = (5, 3, 3, 3, 3, 3, 3, 3)
+PROTOCOL_ID = "emotic_b5c3_v0.1"
+METHOD_NAME = "MULTI-LANE"
+TRACK = "A"
+
+
+def task_indices(task_id: int) -> Tuple[int, ...]:
+    start = sum(TASK_SIZES[:task_id])
+    return tuple(range(start, start + TASK_SIZES[task_id]))
+
+
+def seen_indices(task_id: int) -> Tuple[int, ...]:
+    return tuple(range(sum(TASK_SIZES[: task_id + 1])))
+
+
+class LabelView(Dataset):
+    def __init__(
+        self,
+        source: EMOTIC,
+        indices: Sequence[int],
+        class_indices: Sequence[int],
+    ) -> None:
+        self.source = source
+        self.indices = tuple(int(value) for value in indices)
+        self.class_indices = tuple(int(value) for value in class_indices)
+
+    def __len__(self) -> int:
+        return len(self.indices)
+
+    def __getitem__(self, index: int):
+        image, target = self.source[self.indices[index]]
+        return image, target[list(self.class_indices)].float()
+
+
+def _intersects(target: Sequence[int], class_indices: Sequence[int]) -> bool:
+    return bool(set(int(value) for value in target).intersection(class_indices))
+
+
+def dataset_view(
+    source: EMOTIC, class_indices: Sequence[int]
+) -> LabelView:
+    indices = [
+        index
+        for index, target in enumerate(source.targets)
+        if _intersects(target, class_indices)
+    ]
+    if not indices:
+        raise RuntimeError("EMOTIC protocol view contains no samples")
+    return LabelView(source, indices, class_indices)
+
+
+def build_transforms():
+    train = transforms.Compose(
+        [
+            transforms.RandomResizedCrop(
+                224, scale=(0.05, 1.0), ratio=(3.0 / 4.0, 4.0 / 3.0)
+            ),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+        ]
+    )
+    evaluate = transforms.Compose(
+        [
+            transforms.Resize(
+                256, interpolation=transforms.InterpolationMode.BICUBIC
+            ),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+        ]
+    )
+    return train, evaluate
+
+
+def resolve_dataset_parent(path: Path) -> Path:
+    path = path.expanduser().resolve()
+    if path.name == "EMOTIC" and (path / "CVPR17_Annotations.mat").is_file():
+        return path.parent
+    if (path / "EMOTIC" / "CVPR17_Annotations.mat").is_file():
+        return path
+    raise FileNotFoundError(
+        "Expected CVPR17_Annotations.mat under DATA_ROOT/EMOTIC or DATA_ROOT"
+    )
+
+
+def validate_classes(*datasets: EMOTIC) -> None:
+    for source in datasets:
+        if tuple(source.classes) != CLASS_ORDER:
+            raise RuntimeError(
+                "EMOTIC class order differs from the frozen protocol: "
+                f"{tuple(source.classes)}"
+            )
+
+
+def set_seed(seed: int, tf32: bool) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cuda.matmul.allow_tf32 = tf32
+    torch.backends.cudnn.allow_tf32 = tf32
+
+
+def average_precision(scores: np.ndarray, targets: np.ndarray) -> float:
+    order = scores.argsort()[::-1]
+    sorted_targets = targets[order]
+    positives = sorted_targets == 1
+    positive_count = np.cumsum(positives)
+    total = int(positive_count[-1]) if len(positive_count) else 0
+    if total == 0:
+        return 0.0
+    positive_count[~positives] = 0
+    rank = np.arange(1, len(scores) + 1)
+    return float(np.sum(positive_count / rank) / (total + 1e-8))
+
+
+def binary_counts(predictions: np.ndarray, targets: np.ndarray) -> Dict[str, float]:
+    predictions = predictions.astype(bool)
+    targets = targets.astype(bool)
+    tp = int(np.logical_and(predictions, targets).sum())
+    fp = int(np.logical_and(predictions, ~targets).sum())
+    fn = int(np.logical_and(~predictions, targets).sum())
+    tn = int(np.logical_and(~predictions, ~targets).sum())
+    precision = tp / (tp + fp) if tp + fp else 0.0
+    recall = tp / (tp + fn) if tp + fn else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+    return {
+        "tp": tp, "fp": fp, "fn": fn, "tn": tn,
+        "support": tp + fn, "predicted_positive": tp + fp,
+        "precision": precision, "recall": recall, "f1": f1,
+    }
+
+
+@dataclass
+class TaskMetrics:
+    task_id: int
+    seen_classes: int
+    samples: int
+    threshold: float
+    mAP: float
+    cPrecision: float
+    cRecall: float
+    cF1: float
+    oPrecision: float
+    oRecall: float
+    oF1: float
+    per_class_ap: List[float]
+
+
+def compute_metrics(
+    task_id: int, scores: torch.Tensor, targets: torch.Tensor, threshold: float
+) -> TaskMetrics:
+    scores_np = scores.float().cpu().numpy()
+    targets_np = targets.float().cpu().numpy()
+    per_class_ap = [
+        100.0 * average_precision(scores_np[:, index], targets_np[:, index])
+        for index in range(scores_np.shape[1])
+    ]
+    predictions = scores_np > threshold
+    class_rows = [
+        binary_counts(predictions[:, index], targets_np[:, index])
+        for index in range(scores_np.shape[1])
+    ]
+    overall = binary_counts(predictions, targets_np)
+    class_mean = lambda key: 100.0 * float(np.mean([row[key] for row in class_rows]))
+    return TaskMetrics(
+        task_id=task_id,
+        seen_classes=scores_np.shape[1],
+        samples=scores_np.shape[0],
+        threshold=threshold,
+        mAP=float(np.mean(per_class_ap)),
+        cPrecision=class_mean("precision"),
+        cRecall=class_mean("recall"),
+        cF1=class_mean("f1"),
+        oPrecision=100.0 * overall["precision"],
+        oRecall=100.0 * overall["recall"],
+        oF1=100.0 * overall["f1"],
+        per_class_ap=per_class_ap,
+    )
+
+
+def evaluate(
+    model: MultiLaneModel,
+    loader: Iterable,
+    device: torch.device,
+    task_id: int,
+    threshold: float,
+    amp: bool,
+) -> TaskMetrics:
+    model.eval()
+    scores: List[torch.Tensor] = []
+    targets: List[torch.Tensor] = []
+    with torch.no_grad():
+        for images, target in loader:
+            images = images.to(device, non_blocking=True).float()
+            with torch.cuda.amp.autocast(enabled=amp):
+                logits = model.seen_logits(images)
+            scores.append(torch.sigmoid(logits.float()).cpu())
+            targets.append(target.float().cpu())
+    if not scores:
+        raise RuntimeError("Evaluation loader produced no samples")
+    return compute_metrics(
+        task_id, torch.cat(scores), torch.cat(targets), threshold
+    )
+
+
+def current_validation_map(
+    model: MultiLaneModel, loader: Iterable, device: torch.device, amp: bool
+) -> float:
+    model.eval()
+    scores: List[torch.Tensor] = []
+    targets: List[torch.Tensor] = []
+    with torch.no_grad():
+        for images, target in loader:
+            images = images.to(device, non_blocking=True).float()
+            with torch.cuda.amp.autocast(enabled=amp):
+                logits = model.current_logits(images)
+            scores.append(torch.sigmoid(logits.float()).cpu())
+            targets.append(target.float().cpu())
+    all_scores = torch.cat(scores).numpy()
+    all_targets = torch.cat(targets).numpy()
+    return 100.0 * float(np.mean([
+        average_precision(all_scores[:, index], all_targets[:, index])
+        for index in range(all_targets.shape[1])
+    ]))
+
+
+def train_task(
+    model: MultiLaneModel,
+    loader: DataLoader,
+    validation_loader: DataLoader,
+    device: torch.device,
+    task_id: int,
+    epochs: int,
+    learning_rate: float,
+    weight_decay: float,
+    temperature: float,
+    amp: bool,
+) -> List[Dict[str, float]]:
+    optimizer = torch.optim.Adam(
+        [
+            {
+                "params": [model.selectors, *list(model.prompts)],
+                "weight_decay": weight_decay,
+            },
+            {"params": list(model.head.parameters()), "weight_decay": 0.0},
+        ],
+        lr=learning_rate,
+    )
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+    scaler = torch.cuda.amp.GradScaler(enabled=amp)
+    current = list(task_indices(task_id))
+    hidden = [index for index in range(len(CLASS_ORDER)) if index not in current]
+    hidden_tensor = torch.tensor(hidden, device=device, dtype=torch.long)
+    history: List[Dict[str, float]] = []
+    for epoch in range(epochs):
+        model.train()
+        loss_total = 0.0
+        batches = 0
+        optimizer_steps = 0
+        skipped_steps = 0
+        epoch_lr = float(optimizer.param_groups[0]["lr"])
+        epoch_start = time.time()
+        for images, current_targets in loader:
+            images = images.to(device, non_blocking=True).float()
+            current_targets = current_targets.to(device, non_blocking=True).float()
+            optimizer.zero_grad(set_to_none=True)
+            with torch.cuda.amp.autocast(enabled=amp):
+                logits = model.current_all_logits(images)
+                full_targets = torch.zeros_like(logits, dtype=torch.float32)
+                full_targets[:, current] = current_targets
+                masked_logits = logits.index_fill(1, hidden_tensor, 0.0)
+                loss = F.binary_cross_entropy_with_logits(
+                    masked_logits.float() / temperature, full_targets
+                )
+            scale_before = float(scaler.get_scale())
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+            if float(scaler.get_scale()) >= scale_before:
+                optimizer_steps += 1
+            else:
+                skipped_steps += 1
+            loss_total += float(loss.detach().cpu())
+            batches += 1
+        if not batches:
+            raise RuntimeError("Training loader produced no batches")
+        if optimizer_steps:
+            scheduler.step()
+        row = {
+            "epoch": float(epoch),
+            "current_loss": loss_total / batches,
+            "optimizer_steps": float(optimizer_steps),
+            "skipped_optimizer_steps": float(skipped_steps),
+            "learning_rate": epoch_lr,
+            "next_learning_rate": float(optimizer.param_groups[0]["lr"]),
+            "elapsed_seconds": time.time() - epoch_start,
+        }
+        history.append(row)
+        print(
+            f"task={task_id} epoch={epoch + 1}/{epochs} "
+            f"loss={row['current_loss']:.8f} lr={epoch_lr:.8f} "
+            f"steps={optimizer_steps} skipped={skipped_steps} "
+            f"seconds={row['elapsed_seconds']:.1f}",
+            flush=True,
+        )
+    history[-1]["validation_current_mAP"] = current_validation_map(
+        model, validation_loader, device, amp
+    )
+    return history
+
+
+def git_metadata(root: Path) -> Dict[str, object]:
+    def run(*args: str) -> str:
+        return subprocess.check_output(
+            ["git", "-C", str(root), *args], text=True
+        ).strip()
+    status = run("status", "--porcelain")
+    return {
+        "commit": run("rev-parse", "HEAD"),
+        "branch": run("branch", "--show-current"),
+        "tree": run("rev-parse", "HEAD^{tree}"),
+        "dirty": bool(status),
+    }
+
+
+def summarize_tasks(rows: Sequence[TaskMetrics]) -> Dict[str, object]:
+    final = rows[-1]
+    forgetting_by_class: Dict[str, float] = {}
+    final_task = len(rows) - 1
+    for class_id, class_name in enumerate(CLASS_ORDER):
+        introduction = next(
+            task_id for task_id in range(len(TASK_SIZES))
+            if class_id in task_indices(task_id)
+        )
+        if introduction >= final_task:
+            continue
+        history = [
+            row.per_class_ap[class_id]
+            for row in rows
+            if row.task_id >= introduction and class_id < row.seen_classes
+        ]
+        forgetting_by_class[class_name] = max(history) - history[-1]
+    return {
+        "final_mAP": final.mAP,
+        "average_mAP": float(np.mean([row.mAP for row in rows])),
+        "final_cF1": final.cF1,
+        "final_oF1": final.oF1,
+        "forgetting": float(np.mean(list(forgetting_by_class.values()))),
+        "per_class_forgetting": forgetting_by_class,
+    }
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser("MULTI-LANE EMOTIC Track-A reproduction")
+    parser.add_argument("--seed", type=int, required=True, choices=(0, 1, 2))
+    parser.add_argument("--data-root", type=Path, required=True)
+    parser.add_argument("--clip-checkpoint", type=Path, required=True)
+    parser.add_argument("--output-root", type=Path, required=True)
+    parser.add_argument("--device", default="cuda")
+    parser.add_argument("--epochs", type=int, default=30)
+    parser.add_argument("--train-batch-size", type=int, default=64)
+    parser.add_argument("--eval-batch-size", type=int, default=64)
+    parser.add_argument("--workers", type=int, default=2)
+    parser.add_argument("--threshold", type=float, default=0.5)
+    parser.add_argument("--source-learning-rate", type=float, default=0.05)
+    parser.add_argument("--source-reference-batch-size", type=int, default=256)
+    parser.add_argument("--weight-decay", type=float, default=0.0)
+    parser.add_argument("--temperature", type=float, default=1.0)
+    parser.add_argument("--no-amp", action="store_true")
+    parser.add_argument("--no-tf32", action="store_true")
+    parser.add_argument("--input-mode", choices=("full", "person_crop"), default="full")
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    if args.train_batch_size != 64:
+        raise ValueError("Frozen Track-A protocol requires train batch size 64")
+    if args.threshold != 0.5:
+        raise ValueError("Frozen Track-A protocol requires threshold 0.5")
+    if not torch.cuda.is_available() or args.device != "cuda":
+        raise RuntimeError("Formal Track-A reproduction requires CUDA")
+    amp = not args.no_amp
+    tf32 = not args.no_tf32
+    set_seed(args.seed, tf32)
+    device = torch.device("cuda")
+    root = Path(__file__).resolve().parents[2]
+    output = args.output_root.expanduser().resolve()
+    output.mkdir(parents=True, exist_ok=False)
+    (output / "checkpoints").mkdir()
+
+    metadata = git_metadata(root)
+    visual = load_openai_clip_visual(args.clip_checkpoint)
+    model = MultiLaneModel(
+        visual_encoder=visual,
+        task_sizes=TASK_SIZES,
+        num_selectors=10,
+        num_prompts=10,
+        num_prompt_layers=5,
+        normalize="pre-head",
+    ).float().to(device)
+    model.visual_encoder.requires_grad_(False)
+    model.assert_visual_frozen()
+    lane_parameters = model.selectors.numel() + sum(p.numel() for p in model.prompts)
+    classifier_parameters = sum(p.numel() for p in model.head.parameters())
+    print(
+        f"trainable_parameters={lane_parameters + classifier_parameters} "
+        f"task_lane={lane_parameters} classifier={classifier_parameters}",
+        flush=True,
+    )
+
+    train_transform, eval_transform = build_transforms()
+    dataset_parent = resolve_dataset_parent(args.data_root)
+    train_source = EMOTIC(
+        str(dataset_parent), train=True, transform=train_transform,
+        input_mode=args.input_mode,
+    )
+    val_source = EMOTIC(
+        str(dataset_parent), train=False, transform=eval_transform,
+        eval_splits=("val",), input_mode=args.input_mode,
+    )
+    test_source = EMOTIC(
+        str(dataset_parent), train=False, transform=eval_transform,
+        eval_splits=("test",), input_mode=args.input_mode,
+    )
+    validate_classes(train_source, val_source, test_source)
+
+    learning_rate = args.source_learning_rate * (
+        args.train_batch_size / args.source_reference_batch_size
+    )
+    config = {
+        "protocol_id": PROTOCOL_ID,
+        "track": TRACK,
+        "method": METHOD_NAME,
+        "seed": args.seed,
+        "class_order": list(CLASS_ORDER),
+        "task_sizes": list(TASK_SIZES),
+        "train_split": "train",
+        "validation_split": "val",
+        "reporting_split": "test",
+        "training_label_scope": "current_classes_only",
+        "evaluation_scope": "samples_intersect_seen_classes",
+        "threshold": args.threshold,
+        "epochs_per_task": args.epochs,
+        "train_batch_size": args.train_batch_size,
+        "eval_batch_size": args.eval_batch_size,
+        "workers": args.workers,
+        "optimizer": "Adam_reset_per_task",
+        "learning_rate": learning_rate,
+        "scheduler": "CosineAnnealingLR_reset_per_task",
+        "weight_decay": args.weight_decay,
+        "temperature": args.temperature,
+        "amp": amp,
+        "tf32": tf32,
+        "cudnn_benchmark": False,
+        "cudnn_deterministic": True,
+        "num_selectors": 10,
+        "num_prompts": 10,
+        "num_prompt_layers": 5,
+        "normalize": "pre-head",
+        "head_mode": "concat",
+        "clip_checkpoint": str(args.clip_checkpoint.resolve()),
+        "clip_checkpoint_sha256": OPENAI_VIT_B16_SHA256,
+        "data_root": str(dataset_parent / "EMOTIC"),
+        "git": metadata,
+        "torch_version": torch.__version__,
+        "cuda_version": torch.version.cuda,
+        "trainable_parameters": lane_parameters + classifier_parameters,
+        "task_lane_parameters": lane_parameters,
+        "classifier_parameters": classifier_parameters,
+    }
+    (output / "config.json").write_text(
+        json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+
+    task_rows: List[TaskMetrics] = []
+    training_history: Dict[str, object] = {}
+    start = time.time()
+    for task_id in range(len(TASK_SIZES)):
+        print(f"begin_task={task_id}", flush=True)
+        model.activate_task(task_id)
+        train_view = dataset_view(train_source, task_indices(task_id))
+        val_view = dataset_view(val_source, task_indices(task_id))
+        test_view = dataset_view(test_source, seen_indices(task_id))
+        train_loader = DataLoader(
+            train_view, batch_size=args.train_batch_size, shuffle=True,
+            num_workers=args.workers, pin_memory=True, drop_last=False,
+        )
+        val_loader = DataLoader(
+            val_view, batch_size=args.eval_batch_size, shuffle=False,
+            num_workers=args.workers, pin_memory=False, drop_last=False,
+        )
+        test_loader = DataLoader(
+            test_view, batch_size=args.eval_batch_size, shuffle=False,
+            num_workers=args.workers, pin_memory=False, drop_last=False,
+        )
+        history = train_task(
+            model, train_loader, val_loader, device, task_id,
+            args.epochs, learning_rate, args.weight_decay,
+            args.temperature, amp,
+        )
+        row = evaluate(
+            model, test_loader, device, task_id, args.threshold, amp
+        )
+        task_rows.append(row)
+        training_history[str(task_id)] = history
+        torch.save(
+            {
+                "model": model.state_dict(), "task_id": task_id,
+                "config": config,
+            },
+            output / "checkpoints" / f"task{task_id}.pth",
+        )
+        (output / "task_metrics.json").write_text(
+            json.dumps([asdict(item) for item in task_rows], indent=2) + "\n",
+            encoding="utf-8",
+        )
+        (output / "training_history.json").write_text(
+            json.dumps(training_history, indent=2) + "\n", encoding="utf-8"
+        )
+        print(
+            f"task={task_id} test_mAP={row.mAP:.6f} "
+            f"test_cF1={row.cF1:.6f} test_oF1={row.oF1:.6f}",
+            flush=True,
+        )
+
+    summary = {
+        "schema_version": 1,
+        "status": "complete",
+        "method": METHOD_NAME,
+        "protocol_id": PROTOCOL_ID,
+        "track": TRACK,
+        "seed": args.seed,
+        "elapsed_seconds": time.time() - start,
+        "completed_epochs": args.epochs * len(TASK_SIZES),
+        "completed_optimizer_updates": int(sum(
+            row["optimizer_steps"]
+            for history in training_history.values()
+            for row in history
+        )),
+        "metrics": summarize_tasks(task_rows),
+        "task_metrics": [asdict(item) for item in task_rows],
+        "config": config,
+    }
+    (output / "seed_summary.json").write_text(
+        json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    print(json.dumps(summary["metrics"], indent=2), flush=True)
+    print("MULTI_LANE_TRACK_A_COMPLETE", flush=True)
+
+
+if __name__ == "__main__":
+    main()

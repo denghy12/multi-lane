@@ -1,6 +1,22 @@
 # 工作日志
 
-最后一次更新：2026-06-24。
+最后一次更新：2026-08-11。
+
+## 2026-08-11：开始在当前仓库移植 MULTI-LANE Track-A 严格复现
+
+- 用户确认在当前 `multi-lane-main` 中复现注册的 EMOTIC B5-C3 三种子结果，随后从该
+  结果继续修改，而不是切换到 DDP 仓库开发。
+- 从 `fix/independent-git-worktrees@1b1dcd2` 创建本地分支
+  `exp/emotic-multilane-track-a-repro`；服务器分支尚未切换。
+- 对照确认旧 `clip_vit_b16_patch` 与目标协议存在权重来源、768/512 维分类头、
+  val+test/test、0.8/0.5 阈值、batch 256/64、AMP 和三种子口径等差异。
+- 新增 `multi_lane/track_a/`：固定 OpenAI CLIP checkpoint 加载、目标 MULTI-LANE
+  模型、严格训练/评估 runner、GPU smoke 和三种子汇总器。
+- 新增 `scripts/emotic/` worker、直接 launcher 和 tmux launcher；旧入口保持不变。
+- 新增单元测试，覆盖 task-slice 复制、concat inference、冻结视觉塔、固定阈值指标和
+  逐类 forgetting。本地系统 Python 缺少 PyTorch/NumPy，已完成 AST/compile 与 shell
+  语法检查，完整测试待服务器执行。
+- 待完成：提交推送、服务器同步、单元测试、权重/前向核验、GPU smoke、三种子正式训练。
 
 ## 当前 Git 状态
 

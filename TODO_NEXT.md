@@ -2,6 +2,18 @@
 
 最后一次更新：2026-08-11。
 
+## 当前最高优先级：完成当前仓库 Track-A 三种子复现
+
+1. 检查 `exp/emotic-multilane-track-a-repro` diff，提交并推送到 origin。
+2. 服务器主工作树检查 worktree/status 后 fetch 并切换同一分支；保持
+   `/mnt/haoyuan/workspace/multi-lane-main-test-only` 原状。
+3. 在目标 PyTorch 环境运行单元测试，核对 checkpoint、689178 个可训练参数和冻结视觉塔。
+4. 运行 GPU smoke；通过后用 GPU 0/1/2 启动 seed 0/1/2 正式实验。
+5. 检查每个 seed 完成 240 epochs、13950 optimizer updates，且无 NaN/OOM/skip。
+6. 汇总 final mAP、cF1、oF1、average mAP 和 forgetting，与注册结果
+   `31.2995/31.8111/49.1092/37.9986/4.7885` 对照。
+7. 复现通过后创建 `exp/emotic-multilane-track-a-next`，后续方法改动只进入 next 分支。
+
 ## Git 迁移后续
 
 - 本地和服务器主工作树已共同跟踪 `origin/fix/independent-git-worktrees`，当前基线为
