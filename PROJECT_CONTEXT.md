@@ -118,7 +118,18 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   对比 disabled/adapter 模型构造后的 RNG state。新增 seed0 完整8-task val-only入口
   `run_multilane_track_a_adapter_full_val.sh`，固定不读取test。实现提交 `313618c` 已推送并在
   服务器 fast-forward 同步；服务器10/10单元测试及GPU1 `copy_previous` Adapter smoke均
-  通过，尚未启动新的validation或正式训练。
+  通过。seed0完整8-task val-only warm-start已在GPU1完成，run ID为
+  `task_lane_adapter_full_val_seed0_b64_lr0.0004_copy_previous_20260811_174404`；不读取test，
+  GPU2的同seed/同配置clean disabled val-only配对对照
+  `multi_lane_disabled_full_val_seed0_paired_clean_20260811_174847`也已完成。尚未启动新的正式
+  test实验。
+- 配对validation表明warm-start在task0–5 mAP均提升，但task6/7分别下降
+  `0.334822/0.448594`；task6新类平均AP下降 `6.165031`，Sadness/Suffering分别下降
+  `8.788894/10.703310`。average mAP虽提升 `1.021565`，final cF1提升 `0.482067`且forgetting
+  改善 `0.079821`，但final mAP和oF1分别下降 `0.448594/0.770218`。
+- 按实验前固定判定规则，task6 mAP、task7/final mAP、task6新类平均AP三项继续条件均失败。
+  当前task-lane Adapter不适合解决MULTI-LANE后期低数据任务问题，停止继续扩大bottleneck或
+  增加层数；结果保留为方法消融，不再使用正式test调参。
 
 ### 当前仓库内的 EMOTIC Track-A 严格复现
 

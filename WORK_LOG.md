@@ -2,6 +2,34 @@
 
 最后一次更新：2026-08-11。
 
+## 2026-08-11：启动 seed0 完整8-task warm-start validation
+
+- 在服务器主工作树clean `58886f1` 上启动唯一候选：seed0、EMOTIC train→val、完整8 tasks、
+  30 epochs/task、batch64、base LR0.0125、Adapter LR4e-4、b64、layer11、ReLU、scale0.1、
+  `copy_previous`、隔离初始化RNG、AMP/TF32；不构造或读取test split。
+- run ID为
+  `task_lane_adapter_full_val_seed0_b64_lr0.0004_copy_previous_20260811_174404`，tmux为
+  `mla_warm_val_s0_174404`，使用GPU1。输出位于服务器
+  `/mnt/haoyuan/workspace/emotic_benchmark_runs/multi_lane_task_lane_adapter_warmstart_val_v0.2/`，
+  日志位于 `./logs/emotic_track_a_adapter_warmstart_val/`。
+- 启动核验已进入task0并完成至少3个epoch；每epoch 84 updates、skipped0，暂未发现OOM、NaN、
+  inf或traceback。等待8 tasks完成后只分析validation曲线，重点比较task6的Sadness、
+  Sensitivity、Suffering；不根据正式test调参。
+- 为形成同代码、同seed、同随机轨迹的配对对照，在GPU2启动 Adapter disabled 的完整8-task
+  val-only运行 `multi_lane_disabled_full_val_seed0_paired_clean_20260811_174847`，tmux为
+  `mla_disabled_val_s0_174847`。首次对照因Automatic Upload使config记录dirty而在task0早期
+  主动终止并保留原目录；clean重启版本config记录 `dirty=false`，已完成至少3个epoch且无错误。
+- warm-start与clean disabled均完成240 epochs/8 tasks并输出completion marker。逐task val mAP
+  差值为 `+2.041904/+2.367560/+1.808337/+1.307971/+0.890832/+0.539336/-0.334822/-0.448594`，
+  明确在task6/7转负；final cF1虽提高 `+0.482067`，但final oF1下降 `-0.770218`。
+- warm-start相对disabled的average mAP提高 `+1.021565`、forgetting改善 `0.079821`，但final
+  mAP下降 `0.448594`。task6新三类引入时平均AP下降 `6.165031`：Sadness `-8.788894`、
+  Sensitivity `+0.997110`、Suffering `-10.703310`；final三类平均差进一步为 `-6.248597`。
+- 新增 `multi_lane/track_a/compare_validation.py`，严格检查同commit/seed/protocol/val-only与
+  clean状态，自动生成8-task曲线、task6逐类AP及停止判定；结果写入本地
+  `./output/emotic_track_a_adapter_warmstart_val/paired_validation_comparison.json`。按预先规则
+  三项继续条件全部失败，结论为停止task-lane Adapter容量扩张，不再增加bottleneck或层数。
+
 ## 2026-08-11：实现 Adapter RNG 隔离与跨任务 warm-start
 
 - 当前结构明确为“每任务独立 Adapter”，不是所有任务共享一个：8个 Adapter 预分配，训练

@@ -27,9 +27,12 @@
 9. RNG隔离与 `copy_previous` Adapter warm-start 已由提交 `313618c` 推送并同步；默认
    `independent` 保留上一轮可复现性。服务器10/10单元测试与GPU1 Adapter smoke通过，
    smoke可训练参数 `788314`、初始logits最大差 `9.1552734375e-05`；未启动训练。
-10. 下一步经用户确认完整实验配置后，只跑 seed0 的完整8-task val-only warm-start：b64/lr4e-4、
-    layer11/ReLU/scale0.1。用逐task validation曲线重点比较task6 Sadness/Suffering；不读取
-    test，也不扩大bottleneck/layer。
+10. seed0完整8-task val-only warm-start已在GPU1完成：b64/lr4e-4、layer11/ReLU/scale0.1，
+    run ID为 `task_lane_adapter_full_val_seed0_b64_lr0.0004_copy_previous_20260811_174404`。
+    GPU2 clean disabled配对对照 `multi_lane_disabled_full_val_seed0_paired_clean_20260811_174847`
+    同样完成。task6/7 mAP下降 `0.334822/0.448594`，task6 Sadness/Suffering AP下降
+    `8.788894/10.703310`，三项继续条件全部失败；停止继续堆叠task-lane Adapter容量，不跑
+    新的test调参。下一步应转向非task-lane容量扩张方向，先由用户确认新的方法假设。
 
 ## 已完成：当前仓库 Track-A 三种子复现
 
