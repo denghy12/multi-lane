@@ -14,14 +14,34 @@ from .openai_clip_loader import load_openai_clip_visual
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--clip-checkpoint", required=True)
+    parser.add_argument(
+        "--adapter-mode", choices=("disabled", "task_lane"), default="disabled"
+    )
+    parser.add_argument("--adapter-bottleneck-dim", type=int, default=64)
     args = parser.parse_args()
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is required")
     visual = load_openai_clip_visual(args.clip_checkpoint)
-    model = MultiLaneModel(visual, (5, 3, 3, 3, 3, 3, 3, 3)).float().cuda()
+    model = MultiLaneModel(
+        visual,
+        (5, 3, 3, 3, 3, 3, 3, 3),
+        adapter_mode=args.adapter_mode,
+        adapter_bottleneck_dim=args.adapter_bottleneck_dim,
+        adapter_layer_indices=(11,),
+        adapter_residual_scale=0.1,
+    ).float().cuda()
     model.activate_task(0)
-    model.train()
     images = torch.randn(2, 3, 224, 224, device="cuda")
+    if model.adapter_bank is not None:
+        model.eval()
+        with torch.no_grad(), torch.cuda.amp.autocast():
+            adapter_logits = model.current_all_logits(images)
+            model.set_adapter_runtime_enabled(False)
+            baseline_logits = model.current_all_logits(images)
+            model.set_adapter_runtime_enabled(True)
+        if not torch.equal(adapter_logits, baseline_logits):
+            raise RuntimeError("Zero-initialized adapter changed initial logits")
+    model.train()
     with torch.cuda.amp.autocast():
         logits = model.current_all_logits(images)
         loss = F.binary_cross_entropy_with_logits(
@@ -31,6 +51,15 @@ def main() -> None:
     model.assert_visual_frozen()
     if model.selectors.grad is None or not torch.isfinite(model.selectors.grad).all():
         raise RuntimeError("Selector gradient smoke failed")
+    adapter_parameters = list(model.adapter_optimizer_parameters())
+    if adapter_parameters and (
+        any(parameter.grad is None for parameter in adapter_parameters)
+        or any(
+            not torch.isfinite(parameter.grad).all()
+            for parameter in adapter_parameters
+        )
+    ):
+        raise RuntimeError("Adapter gradient smoke failed")
     if any(parameter.grad is not None for parameter in model.visual_encoder.parameters()):
         raise RuntimeError("Frozen visual tower received gradients")
     model.eval()
@@ -38,11 +67,17 @@ def main() -> None:
         seen = model.seen_logits(images)
     if tuple(seen.shape) != (2, 5) or not torch.isfinite(seen).all():
         raise RuntimeError("Concat inference smoke failed")
-    expected = 689178
+    expected = 689178 + (
+        model.adapter_bank.per_task_parameter_count()
+        if model.adapter_bank is not None else 0
+    )
     trainable = sum(p.numel() for p in model.optimizer_parameters())
     if trainable != expected:
         raise RuntimeError(f"Expected {expected} trainable parameters, got {trainable}")
-    print(f"MULTI_LANE_TRACK_A_SMOKE_OK trainable_parameters={trainable}")
+    print(
+        "MULTI_LANE_TRACK_A_SMOKE_OK "
+        f"adapter_mode={args.adapter_mode} trainable_parameters={trainable}"
+    )
 
 
 if __name__ == "__main__":

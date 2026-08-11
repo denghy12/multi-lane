@@ -16,7 +16,7 @@ import subprocess
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -278,17 +278,27 @@ def train_task(
     weight_decay: float,
     temperature: float,
     amp: bool,
+    adapter_learning_rate: Optional[float] = None,
 ) -> List[Dict[str, float]]:
-    optimizer = torch.optim.Adam(
-        [
+    optimizer_groups = [
+        {
+            "params": [model.selectors, *list(model.prompts)],
+            "weight_decay": weight_decay,
+        },
+        {"params": list(model.head.parameters()), "weight_decay": 0.0},
+    ]
+    adapter_parameters = list(model.adapter_optimizer_parameters())
+    if adapter_parameters:
+        if adapter_learning_rate is None or adapter_learning_rate <= 0:
+            raise ValueError("Enabled adapters require a positive learning rate")
+        optimizer_groups.append(
             {
-                "params": [model.selectors, *list(model.prompts)],
+                "params": adapter_parameters,
                 "weight_decay": weight_decay,
-            },
-            {"params": list(model.head.parameters()), "weight_decay": 0.0},
-        ],
-        lr=learning_rate,
-    )
+                "lr": adapter_learning_rate,
+            }
+        )
+    optimizer = torch.optim.Adam(optimizer_groups, lr=learning_rate)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
     scaler = torch.cuda.amp.GradScaler(enabled=amp)
     current = list(task_indices(task_id))
@@ -302,6 +312,10 @@ def train_task(
         optimizer_steps = 0
         skipped_steps = 0
         epoch_lr = float(optimizer.param_groups[0]["lr"])
+        epoch_adapter_lr = (
+            float(optimizer.param_groups[-1]["lr"])
+            if adapter_parameters else None
+        )
         epoch_start = time.time()
         for images, current_targets in loader:
             images = images.to(device, non_blocking=True).float()
@@ -338,6 +352,11 @@ def train_task(
             "next_learning_rate": float(optimizer.param_groups[0]["lr"]),
             "elapsed_seconds": time.time() - epoch_start,
         }
+        if adapter_parameters:
+            row["adapter_learning_rate"] = epoch_adapter_lr
+            row["next_adapter_learning_rate"] = float(
+                optimizer.param_groups[-1]["lr"]
+            )
         history.append(row)
         print(
             f"task={task_id} epoch={epoch + 1}/{epochs} "
@@ -388,7 +407,10 @@ def summarize_tasks(rows: Sequence[TaskMetrics]) -> Dict[str, object]:
         "average_mAP": float(np.mean([row.mAP for row in rows])),
         "final_cF1": final.cF1,
         "final_oF1": final.oF1,
-        "forgetting": float(np.mean(list(forgetting_by_class.values()))),
+        "forgetting": (
+            float(np.mean(list(forgetting_by_class.values())))
+            if forgetting_by_class else 0.0
+        ),
         "per_class_forgetting": forgetting_by_class,
     }
 
@@ -412,6 +434,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-amp", action="store_true")
     parser.add_argument("--no-tf32", action="store_true")
     parser.add_argument("--input-mode", choices=("full", "person_crop"), default="full")
+    parser.add_argument(
+        "--adapter-mode", choices=("disabled", "task_lane"), default="disabled"
+    )
+    parser.add_argument("--adapter-bottleneck-dim", type=int, default=64)
+    parser.add_argument(
+        "--adapter-layer-indices", type=int, nargs="+", default=[11]
+    )
+    parser.add_argument("--adapter-residual-scale", type=float, default=0.1)
+    parser.add_argument(
+        "--adapter-activation", choices=("relu", "gelu"), default="relu"
+    )
+    parser.add_argument("--adapter-learning-rate", type=float, default=4e-4)
+    parser.add_argument("--max-tasks", type=int, default=len(TASK_SIZES))
+    parser.add_argument(
+        "--reporting-split", choices=("val", "test"), default="test"
+    )
     return parser.parse_args()
 
 
@@ -421,6 +459,8 @@ def main() -> None:
         raise ValueError("Frozen Track-A protocol requires train batch size 64")
     if args.threshold != 0.5:
         raise ValueError("Frozen Track-A protocol requires threshold 0.5")
+    if not 1 <= args.max_tasks <= len(TASK_SIZES):
+        raise ValueError(f"max-tasks must be between 1 and {len(TASK_SIZES)}")
     if not torch.cuda.is_available() or args.device != "cuda":
         raise RuntimeError("Formal Track-A reproduction requires CUDA")
     amp = not args.no_amp
@@ -441,14 +481,29 @@ def main() -> None:
         num_prompts=10,
         num_prompt_layers=5,
         normalize="pre-head",
+        adapter_mode=args.adapter_mode,
+        adapter_bottleneck_dim=args.adapter_bottleneck_dim,
+        adapter_layer_indices=args.adapter_layer_indices,
+        adapter_residual_scale=args.adapter_residual_scale,
+        adapter_activation=args.adapter_activation,
     ).float().to(device)
     model.visual_encoder.requires_grad_(False)
     model.assert_visual_frozen()
     lane_parameters = model.selectors.numel() + sum(p.numel() for p in model.prompts)
     classifier_parameters = sum(p.numel() for p in model.head.parameters())
+    adapter_parameters = (
+        model.adapter_bank.total_parameter_count()
+        if model.adapter_bank is not None else 0
+    )
+    adapter_parameters_per_task = (
+        model.adapter_bank.per_task_parameter_count()
+        if model.adapter_bank is not None else 0
+    )
     print(
-        f"trainable_parameters={lane_parameters + classifier_parameters} "
-        f"task_lane={lane_parameters} classifier={classifier_parameters}",
+        f"trainable_parameters={lane_parameters + classifier_parameters + adapter_parameters_per_task} "
+        f"task_lane={lane_parameters} classifier={classifier_parameters} "
+        f"adapter_total={adapter_parameters} "
+        f"adapter_per_task={adapter_parameters_per_task}",
         flush=True,
     )
 
@@ -462,11 +517,15 @@ def main() -> None:
         str(dataset_parent), train=False, transform=eval_transform,
         eval_splits=("val",), input_mode=args.input_mode,
     )
-    test_source = EMOTIC(
-        str(dataset_parent), train=False, transform=eval_transform,
-        eval_splits=("test",), input_mode=args.input_mode,
-    )
-    validate_classes(train_source, val_source, test_source)
+    if args.reporting_split == "test":
+        reporting_source = EMOTIC(
+            str(dataset_parent), train=False, transform=eval_transform,
+            eval_splits=("test",), input_mode=args.input_mode,
+        )
+        validate_classes(train_source, val_source, reporting_source)
+    else:
+        reporting_source = val_source
+        validate_classes(train_source, val_source)
 
     learning_rate = args.source_learning_rate * (
         args.train_batch_size / args.source_reference_batch_size
@@ -480,7 +539,7 @@ def main() -> None:
         "task_sizes": list(TASK_SIZES),
         "train_split": "train",
         "validation_split": "val",
-        "reporting_split": "test",
+        "reporting_split": args.reporting_split,
         "training_label_scope": "current_classes_only",
         "evaluation_scope": "samples_intersect_seen_classes",
         "threshold": args.threshold,
@@ -502,15 +561,31 @@ def main() -> None:
         "num_prompt_layers": 5,
         "normalize": "pre-head",
         "head_mode": "concat",
+        "max_tasks": args.max_tasks,
+        "adapter_mode": args.adapter_mode,
+        "adapter_bottleneck_dim": args.adapter_bottleneck_dim,
+        "adapter_layer_indices": list(args.adapter_layer_indices),
+        "adapter_residual_scale": args.adapter_residual_scale,
+        "adapter_activation": args.adapter_activation,
+        "adapter_learning_rate": (
+            args.adapter_learning_rate if args.adapter_mode == "task_lane" else None
+        ),
         "clip_checkpoint": str(args.clip_checkpoint.resolve()),
         "clip_checkpoint_sha256": OPENAI_VIT_B16_SHA256,
         "data_root": str(dataset_parent / "EMOTIC"),
         "git": metadata,
         "torch_version": torch.__version__,
         "cuda_version": torch.version.cuda,
-        "trainable_parameters": lane_parameters + classifier_parameters,
+        "trainable_parameters": (
+            lane_parameters + classifier_parameters + adapter_parameters_per_task
+        ),
+        "total_method_parameters": (
+            lane_parameters + classifier_parameters + adapter_parameters
+        ),
         "task_lane_parameters": lane_parameters,
         "classifier_parameters": classifier_parameters,
+        "adapter_parameters": adapter_parameters,
+        "adapter_parameters_per_task": adapter_parameters_per_task,
     }
     (output / "config.json").write_text(
         json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
@@ -519,12 +594,12 @@ def main() -> None:
     task_rows: List[TaskMetrics] = []
     training_history: Dict[str, object] = {}
     start = time.time()
-    for task_id in range(len(TASK_SIZES)):
+    for task_id in range(args.max_tasks):
         print(f"begin_task={task_id}", flush=True)
         model.activate_task(task_id)
         train_view = dataset_view(train_source, task_indices(task_id))
         val_view = dataset_view(val_source, task_indices(task_id))
-        test_view = dataset_view(test_source, seen_indices(task_id))
+        reporting_view = dataset_view(reporting_source, seen_indices(task_id))
         train_loader = DataLoader(
             train_view, batch_size=args.train_batch_size, shuffle=True,
             num_workers=args.workers, pin_memory=True, drop_last=False,
@@ -533,17 +608,17 @@ def main() -> None:
             val_view, batch_size=args.eval_batch_size, shuffle=False,
             num_workers=args.workers, pin_memory=False, drop_last=False,
         )
-        test_loader = DataLoader(
-            test_view, batch_size=args.eval_batch_size, shuffle=False,
+        reporting_loader = DataLoader(
+            reporting_view, batch_size=args.eval_batch_size, shuffle=False,
             num_workers=args.workers, pin_memory=False, drop_last=False,
         )
         history = train_task(
             model, train_loader, val_loader, device, task_id,
             args.epochs, learning_rate, args.weight_decay,
-            args.temperature, amp,
+            args.temperature, amp, args.adapter_learning_rate,
         )
         row = evaluate(
-            model, test_loader, device, task_id, args.threshold, amp
+            model, reporting_loader, device, task_id, args.threshold, amp
         )
         task_rows.append(row)
         training_history[str(task_id)] = history
@@ -562,8 +637,9 @@ def main() -> None:
             json.dumps(training_history, indent=2) + "\n", encoding="utf-8"
         )
         print(
-            f"task={task_id} test_mAP={row.mAP:.6f} "
-            f"test_cF1={row.cF1:.6f} test_oF1={row.oF1:.6f}",
+            f"task={task_id} {args.reporting_split}_mAP={row.mAP:.6f} "
+            f"{args.reporting_split}_cF1={row.cF1:.6f} "
+            f"{args.reporting_split}_oF1={row.oF1:.6f}",
             flush=True,
         )
 
@@ -575,7 +651,7 @@ def main() -> None:
         "track": TRACK,
         "seed": args.seed,
         "elapsed_seconds": time.time() - start,
-        "completed_epochs": args.epochs * len(TASK_SIZES),
+        "completed_epochs": args.epochs * args.max_tasks,
         "completed_optimizer_updates": int(sum(
             row["optimizer_steps"]
             for history in training_history.values()

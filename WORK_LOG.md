@@ -2,6 +2,29 @@
 
 最后一次更新：2026-08-11。
 
+## 2026-08-11：开始 Task-lane Transformer Adapter 阶段 0
+
+- 用户确认按分析方案开始修改；从严格复现分支 `exp/emotic-multilane-track-a-repro` 的
+  `ce7d9a0` 创建本地分支 `exp/emotic-multilane-transformer-adapter`。服务器尚未切换，
+  当前改动尚未 commit/push。
+- 新增 `multi_lane/track_a/adapter.py`：实现 task-specific、layer-specific bottleneck
+  Adapter bank；down 使用 Xavier 初始化，up 权重/偏置全零，按 lane id 路由，激活新任务
+  时只解冻当前 task Adapter，不复制或覆盖旧任务参数。
+- `multi_lane/track_a/model.py` 在 lane block 冻结 MLP 旁路接入 Adapter；默认
+  `adapter_mode=disabled`，因此原模型不会创建 Adapter 或额外消耗初始化随机数。新增运行时
+  开关及基础/Adapter 参数分组接口。
+- `multi_lane/track_a/runner.py` 增加独立 Adapter LR、bottleneck/layer/scale/activation、
+  `max_tasks` 和 `reporting_split`；默认仍是 disabled、8 tasks、test。val screen 模式不创建
+  test dataset；单 task summary 的 forgetting 明确定义为 0。
+- 新增 `scripts/emotic/run_multilane_track_a_adapter_task0.sh`，固定 task0、val-only、
+  layer11、ReLU、scale0.1，并允许通过环境变量筛选 bottleneck 与 Adapter LR；脚本尚未运行。
+- 单元测试扩展为覆盖零初始化基线等价、运行时旁路、lane 路由、任务冻结、无 Adapter 复制、
+  参数计数和单任务 forgetting。
+- GPU smoke 新增显式 `--adapter-mode task_lane` 路径，检查真实 CLIP 上零初始化 logits
+  等价、Adapter 梯度、冻结视觉塔和当前任务参数量；默认 disabled 路径仍执行原基线检查。
+- 本机系统 Python 3.9 已通过 `py_compile`，新 shell 入口通过 `bash -n`，`git diff --check`
+  通过；本机缺少 PyTorch，张量级单元测试与 GPU smoke 等待提交推送后在服务器执行。
+
 ## 2026-08-11：开始在当前仓库移植 MULTI-LANE Track-A 严格复现
 
 - 用户确认在当前 `multi-lane-main` 中复现注册的 EMOTIC B5-C3 三种子结果，随后从该

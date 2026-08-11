@@ -14,6 +14,8 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
+from .adapter import TaskLaneTransformerAdapterBank
+
 
 class MultiLaneModel(nn.Module):
     """Frozen CLIP visual tower with preallocated MULTI-LANE task pathways."""
@@ -26,6 +28,11 @@ class MultiLaneModel(nn.Module):
         num_prompts: int = 10,
         num_prompt_layers: int = 5,
         normalize: str = "pre-head",
+        adapter_mode: str = "disabled",
+        adapter_bottleneck_dim: int = 64,
+        adapter_layer_indices: Sequence[int] = (11,),
+        adapter_residual_scale: float = 0.1,
+        adapter_activation: str = "relu",
     ) -> None:
         super().__init__()
         if not task_sizes or any(int(size) <= 0 for size in task_sizes):
@@ -34,6 +41,8 @@ class MultiLaneModel(nn.Module):
             raise ValueError("MULTI-LANE selector/prompt counts must be positive")
         if normalize not in {"none", "pre-head"}:
             raise ValueError("MULTI-LANE normalize must be none or pre-head")
+        if adapter_mode not in {"disabled", "task_lane"}:
+            raise ValueError("Adapter mode must be disabled or task_lane")
         required = (
             "conv1",
             "class_embedding",
@@ -56,6 +65,12 @@ class MultiLaneModel(nn.Module):
             raise ValueError("CLIP visual transformer has no residual blocks")
         if not 0 <= num_prompt_layers <= len(blocks):
             raise ValueError("MULTI-LANE prompt-layer count is invalid")
+        adapter_layers = tuple(int(index) for index in adapter_layer_indices)
+        if adapter_mode == "task_lane" and (
+            not adapter_layers
+            or any(index < 0 or index >= len(blocks) for index in adapter_layers)
+        ):
+            raise ValueError("Adapter layer index is outside the visual transformer")
 
         width = int(visual_encoder.conv1.out_channels)
         output_dim = int(getattr(visual_encoder, "output_dim", -1))
@@ -80,6 +95,8 @@ class MultiLaneModel(nn.Module):
         self.num_prompts = int(num_prompts)
         self.num_prompt_layers = int(num_prompt_layers)
         self.normalize = normalize
+        self.adapter_mode = adapter_mode
+        self.adapter_runtime_enabled = adapter_mode == "task_lane"
         self._task_sizes = tuple(int(size) for size in task_sizes)
         self._current_task_id = -1
 
@@ -112,6 +129,17 @@ class MultiLaneModel(nn.Module):
             mask[task_id, offset : offset + size] = 1.0
             offset += size
         self.register_buffer("task_class_mask", mask, persistent=True)
+
+        self.adapter_bank = None
+        if self.adapter_mode == "task_lane":
+            self.adapter_bank = TaskLaneTransformerAdapterBank(
+                num_tasks=len(self._task_sizes),
+                hidden_dim=self.width,
+                bottleneck_dim=adapter_bottleneck_dim,
+                layer_indices=adapter_layers,
+                residual_scale=adapter_residual_scale,
+                activation=adapter_activation,
+            )
 
     @property
     def task_sizes(self) -> Tuple[int, ...]:
@@ -149,12 +177,21 @@ class MultiLaneModel(nn.Module):
                 self.selectors[task_id].copy_(self.selectors[task_id - 1])
                 for prompt in self.prompts:
                     prompt[:, task_id].copy_(prompt[:, task_id - 1])
+        if self.adapter_bank is not None:
+            self.adapter_bank.activate_task(task_id)
         self._current_task_id = int(task_id)
 
     def restore_task(self, task_id: int) -> None:
         if not -1 <= task_id < self.num_tasks:
             raise ValueError("MULTI-LANE restored task id is invalid")
+        if self.adapter_bank is not None:
+            self.adapter_bank.restore_task(task_id)
         self._current_task_id = int(task_id)
+
+    def set_adapter_runtime_enabled(self, enabled: bool) -> None:
+        if enabled and self.adapter_bank is None:
+            raise RuntimeError("Cannot enable a task-lane adapter that was not configured")
+        self.adapter_runtime_enabled = bool(enabled)
 
     def _visual_tokens(self, images: torch.Tensor) -> torch.Tensor:
         visual = self.visual_encoder
@@ -265,7 +302,12 @@ class MultiLaneModel(nn.Module):
         # selector tokens back before the residual addition.
         update = torch.cat([attention_output[:, :, :1], selectors], dim=2)
         lane_tokens = lane_tokens + update
-        lane_tokens = lane_tokens + block.mlp(block.ln_2(lane_tokens))
+        normalized_residual = block.ln_2(lane_tokens)
+        lane_tokens = lane_tokens + block.mlp(normalized_residual)
+        if self.adapter_bank is not None and self.adapter_runtime_enabled:
+            lane_tokens = lane_tokens + self.adapter_bank.delta_for_layer(
+                layer_id, normalized_residual, lane_ids
+            )
         return lane_tokens
 
     def encode_lanes(
@@ -316,14 +358,28 @@ class MultiLaneModel(nn.Module):
         return combined[:, : self.seen_classes]
 
     def optimizer_parameters(self) -> Iterable[nn.Parameter]:
+        yield from self.base_optimizer_parameters()
+        yield from self.adapter_optimizer_parameters()
+
+    def base_optimizer_parameters(self) -> Iterable[nn.Parameter]:
         yield self.selectors
         yield from self.prompts
         yield from self.head.parameters()
+
+    def adapter_optimizer_parameters(self) -> Iterable[nn.Parameter]:
+        if self.adapter_bank is not None:
+            yield from self.adapter_bank.active_parameters()
 
     def optimizer_parameter_names(self) -> Tuple[str, ...]:
         names = ["selectors"]
         names.extend(f"prompts.{index}" for index in range(len(self.prompts)))
         names.extend(("head.weight", "head.bias"))
+        if self.adapter_bank is not None:
+            names.extend(
+                f"adapter_bank.{name}"
+                for name in self.adapter_bank.parameter_names()
+                if dict(self.adapter_bank.named_parameters())[name].requires_grad
+            )
         return tuple(names)
 
     def assert_visual_frozen(self) -> None:

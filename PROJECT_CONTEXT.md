@@ -1,8 +1,9 @@
 # 项目上下文
 
-最后一次更新：2026-08-11；本地和服务器主工作树均已切换到
-`exp/emotic-multilane-track-a-repro`。正式实验固定使用代码提交 `8cff911`；实验运行期间
-服务器保持该提交，不再切换或更新工作树。
+最后一次更新：2026-08-11；本地已从严格复现提交 `ce7d9a0` 创建
+`exp/emotic-multilane-transformer-adapter`，阶段 0 改动尚未提交或推送。服务器主工作树
+仍保持 `exp/emotic-multilane-track-a-repro@ce7d9a0`；正式复现实验使用的业务代码提交为
+`8cff911`。
 
 ## 项目目标
 
@@ -50,6 +51,24 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   仅允许 fast-forward 更新。标准回滚流程为从旧 commit 创建恢复分支，而不是硬重置。
 
 ## 当前技术路线
+
+### Task-lane Transformer Adapter 实验
+
+- 当前实验分支为 `exp/emotic-multilane-transformer-adapter`，起点是已严格复现注册结果的
+  `ce7d9a0`；严格复现分支保持冻结。
+- Adapter 只作用于 MULTI-LANE 的 task lane tokens，不修改共享 CLIP image tokens；默认
+  放在第 12 个视觉 block（Python 索引 11），与冻结 MLP 并联：
+  `MLP(LN2(x)) + 0.1 * Up(ReLU(Down(LN2(x))))`。
+- 每个 task/layer 使用独立、预分配的 Adapter；进入新任务时只解冻当前任务 Adapter，
+  旧任务与未来任务 Adapter 均冻结，concat inference 按 lane id 路由，因此不需要 task
+  oracle，也不会覆盖旧任务 Adapter。
+- 上投影权重和偏置全零初始化，启用 Adapter 的初始 forward 应与原 MULTI-LANE 完全一致；
+  `--adapter-mode disabled` 是默认值，原正式 launcher 不传任何新参数，保持旧训练计算路径。
+- 阶段 0 新增 bottleneck、layer、residual scale、activation 和独立 Adapter LR 配置，并增加
+  `--max-tasks 1 --reporting-split val` 的 task0 验证集筛选能力；该模式不会构造或读取 test
+  split，避免用测试集选超参数。
+- 首轮候选固定为 layer 11、ReLU、scale 0.1，对 bottleneck `32/64` 与 Adapter LR
+  `1e-4/4e-4` 做 seed0 task0 validation screen；尚未启动任何训练。
 
 ### 当前仓库内的 EMOTIC Track-A 严格复现
 
