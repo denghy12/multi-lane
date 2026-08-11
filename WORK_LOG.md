@@ -16,6 +16,8 @@
 - 新增单元测试，覆盖 task-slice 复制、concat inference、冻结视觉塔、固定阈值指标和
   逐类 forgetting。本地系统 Python 缺少 PyTorch/NumPy，已完成 AST/compile 与 shell
   语法检查，完整测试待服务器执行。
+- 首次服务器单元测试中 3 个模型/forgetting 测试通过；AP 测试因旧公式的 `1e-8`
+  epsilon 返回 `99.99999925` 而非数学上的 100，已将断言调整为 5 位小数容差。
 - 待完成：提交推送、服务器同步、单元测试、权重/前向核验、GPU smoke、三种子正式训练。
 
 ## 当前 Git 状态

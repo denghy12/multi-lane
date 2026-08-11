@@ -89,7 +89,7 @@ class TrackAMetricsTest(unittest.TestCase):
         scores = torch.tensor([[0.9, 0.1], [0.7, 0.8], [0.2, 0.6]])
         targets = torch.tensor([[1.0, 0.0], [0.0, 1.0], [0.0, 1.0]])
         row = compute_metrics(0, scores, targets, threshold=0.5)
-        self.assertAlmostEqual(row.mAP, 100.0)
+        self.assertAlmostEqual(row.mAP, 100.0, places=5)
         self.assertAlmostEqual(row.cF1, (2.0 / 3.0 + 1.0) * 50.0)
         self.assertAlmostEqual(row.oF1, 6.0 / 7.0 * 100.0)
 
