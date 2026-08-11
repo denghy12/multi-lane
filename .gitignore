@@ -1,6 +1,10 @@
 # python
 __pycache__/
 
+# local IDE and OS metadata
+.idea/
+.DS_Store
+
 
 # directories
 datasets/
