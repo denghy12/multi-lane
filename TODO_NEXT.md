@@ -23,12 +23,11 @@
    `-0.171025/+0.182944/-0.230322/+0.601003/+0.081138`。下一步先分析逐 task/逐类曲线，
    重点解释 average mAP 提升但 final mAP 和 forgetting 变差；在找到后期退化原因前不合并
    main，也不盲目扩大 Adapter。
-8. 无 checkpoint 的17文件包已下载并解压到本地；上下文文档当前为本地未提交修改，需在
-   用户确认后提交推送并安全同步。
-9. 本地已实现独立 RNG context、RNG state 单测，以及 `copy_previous` Adapter warm-start；
-   默认 `independent` 保留上一轮可复现性。先审查并提交推送，再在服务器运行完整单测和
-   copy_previous GPU smoke，不直接启动训练。
-10. 验证通过并确认实验配置后，只跑 seed0 的完整8-task val-only warm-start：b64/lr4e-4、
+8. 无 checkpoint 的17文件包已下载并解压到本地；正式三种子结果与诊断已写入上下文。
+9. RNG隔离与 `copy_previous` Adapter warm-start 已由提交 `313618c` 推送并同步；默认
+   `independent` 保留上一轮可复现性。服务器10/10单元测试与GPU1 Adapter smoke通过，
+   smoke可训练参数 `788314`、初始logits最大差 `9.1552734375e-05`；未启动训练。
+10. 下一步经用户确认完整实验配置后，只跑 seed0 的完整8-task val-only warm-start：b64/lr4e-4、
     layer11/ReLU/scale0.1。用逐task validation曲线重点比较task6 Sadness/Suffering；不读取
     test，也不扩大bottleneck/layer。
 

@@ -111,12 +111,14 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   导致同 seed 的 Adapter 与基线、不同 bottleneck 之间使用不同 shuffle/augmentation 随机
   序列。三种子同向结果仍说明权衡具有一致性，但下一轮必须先隔离 Adapter 初始化 RNG，
   再评估方法本身。
-- 本地下一版已增加 `independent/copy_previous` 两种 task 初始化策略；warm-start 模式在新
+- 当前版本已增加 `independent/copy_previous` 两种 task 初始化策略；warm-start 模式在新
   task 激活时复制上一 task Adapter 的完整参数，再仅解冻当前副本，旧 Adapter 继续冻结。
   默认仍为 `independent`，保证上一轮实验配置可复现。
 - Adapter Bank 构造已放入独立 torch RNG context，构造后恢复全局 RNG state；新增单元测试
   对比 disabled/adapter 模型构造后的 RNG state。新增 seed0 完整8-task val-only入口
-  `run_multilane_track_a_adapter_full_val.sh`，固定不读取test；当前修改尚未提交、推送或训练。
+  `run_multilane_track_a_adapter_full_val.sh`，固定不读取test。实现提交 `313618c` 已推送并在
+  服务器 fast-forward 同步；服务器10/10单元测试及GPU1 `copy_previous` Adapter smoke均
+  通过，尚未启动新的validation或正式训练。
 
 ### 当前仓库内的 EMOTIC Track-A 严格复现
 

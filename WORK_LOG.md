@@ -17,7 +17,11 @@
   b64/lr4e-4 warm-start验证，不构造test dataset。
 - 单元测试新增disabled/adapter构造后RNG state完全一致，以及warm-start参数逐tensor复制、
   旧task冻结和当前task解冻检查。本地py_compile、bash -n和git diff --check均已通过；
-  当前业务代码和上下文修改均未提交、未推送、未启动训练。
+  实现以 `313618c` 提交并推送，服务器主工作树fast-forward到同一提交，test-only未触碰。
+- 服务器完整单元测试10/10通过；GPU1真实CLIP `copy_previous` Adapter smoke通过，可训练参数
+  `788314`，零初始化Adapter与disabled logits最大差 `9.1552734375e-05`，在既定AMP容差
+  `1e-4` 内。smoke仅执行batch2 forward/backward，未加载EMOTIC、未生成checkpoint、未启动
+  validation或正式训练。
 
 ## 2026-08-11：启动 Task-lane Adapter task0 validation screen
 
