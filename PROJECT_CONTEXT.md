@@ -67,7 +67,10 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   `./logs/emotic_track_a/`，项目汇总进入 `./output/emotic_track_a/`，完整产物进入服务器
   `emotic_benchmark_runs`。
 - 目标注册结果 final mAP/cF1/oF1/average mAP/forgetting 为
-  `31.2995/31.8111/49.1092/37.9986/4.7885`；当前实现尚待服务器验证。
+  `31.2995/31.8111/49.1092/37.9986/4.7885`。
+- 服务器预检已通过：4/4 单元测试通过；当前 loader 与目标 loader 的 152 个视觉权重及
+  同输入输出最大误差均为 `0.0`；GPU forward/backward smoke 通过，可训练参数严格为
+  `689178`，冻结视觉塔没有梯度。正式三种子实验待启动。
 
 已提交基线：
 

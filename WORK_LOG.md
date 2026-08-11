@@ -18,7 +18,11 @@
   语法检查，完整测试待服务器执行。
 - 首次服务器单元测试中 3 个模型/forgetting 测试通过；AP 测试因旧公式的 `1e-8`
   epsilon 返回 `99.99999925` 而非数学上的 100，已将断言调整为 5 位小数容差。
-- 待完成：提交推送、服务器同步、单元测试、权重/前向核验、GPU smoke、三种子正式训练。
+- 容差修正后服务器 4/4 单元测试通过。
+- 当前仓库 checkpoint loader 与目标 benchmark loader 的 152 个 CLIP visual state
+  tensor 完全相同，最大权重误差和同输入输出误差均为 `0.0`，输出为 512 维。
+- GPU0 forward/backward smoke 通过，可训练参数为 `689178`，冻结视觉塔没有梯度。
+- 本地、远端和服务器同步于 `exp/emotic-multilane-track-a-repro@8ee8bbd`；待启动三种子训练。
 
 ## 当前 Git 状态
 
