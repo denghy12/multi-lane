@@ -1,8 +1,8 @@
 # 项目上下文
 
-最后一次更新：2026-08-11；本地主工作树已从共同基线创建
-`exp/emotic-multilane-track-a-repro`，服务器仍暂时位于
-`fix/independent-git-worktrees`，等待本地实现提交推送后同步。
+最后一次更新：2026-08-11；本地和服务器主工作树均已切换到
+`exp/emotic-multilane-track-a-repro`。正式实验固定使用代码提交 `8cff911`；实验运行期间
+服务器保持该提交，不再切换或更新工作树。
 
 ## 项目目标
 
@@ -70,7 +70,10 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   `31.2995/31.8111/49.1092/37.9986/4.7885`。
 - 服务器预检已通过：4/4 单元测试通过；当前 loader 与目标 loader 的 152 个视觉权重及
   同输入输出最大误差均为 `0.0`；GPU forward/backward smoke 通过，可训练参数严格为
-  `689178`，冻结视觉塔没有梯度。正式三种子实验待启动。
+  `689178`，冻结视觉塔没有梯度。
+- 正式实验 `multi_lane_main_track_a_seed012_20260811_132448` 已在 tmux
+  `emotic_multilane_track_a_seed012` 启动，seed 0/1/2 分别使用 GPU 0/1/2。task 0 三种子
+  mAP/cF1/oF1 与注册实验逐项完全相同，当前继续后台训练且错误计数为 0。
 
 已提交基线：
 

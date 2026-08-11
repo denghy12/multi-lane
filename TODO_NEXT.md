@@ -6,11 +6,15 @@
 
 1. 已完成复现实现提交推送、服务器同步、4/4 单元测试、checkpoint/输出零误差核验和
    GPU smoke；test-only worktree 保持原状。
-2. 用 GPU 0/1/2 启动 seed 0/1/2 正式实验。
-3. 检查每个 seed 完成 240 epochs、13950 optimizer updates，且无 NaN/OOM/skip。
-4. 汇总 final mAP、cF1、oF1、average mAP 和 forgetting，与注册结果
+2. 正式实验已在 GPU 0/1/2 后台运行；等待 tmux 完成，不切换服务器 Git 状态。
+3. 训练结束后同步项目内 `logs/emotic_track_a/<run_id>/` 和
+   `output/emotic_track_a/<run_id>/`；完整分析还需从 `emotic_benchmark_runs` 同步三个
+   seed 的 `config.json`、`task_metrics.json`、`training_history.json`、`seed_summary.json`
+   以及根目录 `formal_seed_summary.json`。checkpoint 默认留在服务器。
+4. 检查每个 seed 完成 240 epochs、13950 optimizer updates，且无 NaN/OOM/skip。
+5. 汇总 final mAP、cF1、oF1、average mAP 和 forgetting，与注册结果
    `31.2995/31.8111/49.1092/37.9986/4.7885` 对照。
-5. 复现通过后创建 `exp/emotic-multilane-track-a-next`，后续方法改动只进入 next 分支。
+6. 复现通过后创建 `exp/emotic-multilane-track-a-next`，后续方法改动只进入 next 分支。
 
 ## Git 迁移后续
 

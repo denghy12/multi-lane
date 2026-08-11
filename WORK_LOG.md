@@ -22,7 +22,11 @@
 - 当前仓库 checkpoint loader 与目标 benchmark loader 的 152 个 CLIP visual state
   tensor 完全相同，最大权重误差和同输入输出误差均为 `0.0`，输出为 512 维。
 - GPU0 forward/backward smoke 通过，可训练参数为 `689178`，冻结视觉塔没有梯度。
-- 本地、远端和服务器同步于 `exp/emotic-multilane-track-a-repro@8ee8bbd`；待启动三种子训练。
+- 本地、远端和服务器同步后，以 `8cff911` 启动正式三种子训练：run ID
+  `multi_lane_main_track_a_seed012_20260811_132448`，tmux
+  `emotic_multilane_track_a_seed012`，seed 0/1/2 对应 GPU 0/1/2。
+- task 0 三个 seed 的 mAP/cF1/oF1 与注册实验逐项完全相同；停止持续轮询，让 tmux 后台
+  独立完成。最后一次快照位于 task 1 epoch 14–17/30，错误、NaN、OOM、skip 计数均为 0。
 
 ## 当前 Git 状态
 
