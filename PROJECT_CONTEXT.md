@@ -146,6 +146,11 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   Adapter组只包含当前task的Image-token Adapter，从而保证model-ASL与adapter-ASL不是同一
   梯度的不同命名。三组均为seed0、完整8-task、30 epochs/task、held-out test，不做validation
   筛选；单seed/test直跑只作探索性结果。
+- ASL实现提交`6d5430a`已推送；为避免切换GPU2正在运行的原Image-token BCE主工作树，服务器
+  新建独立worktree `/mnt/haoyuan/workspace/multi-lane-main-asl-routing`并检出同一clean提交，
+  test-only worktree保持原状。服务器25/25完整单元测试通过；GPU3/4/7上的
+  `model_asl/adapter_asl/both_asl`真实CLIP smoke全部通过，初始等价最大差分别为
+  `3.0518e-05/4.1962e-05/3.0518e-05`，可训练参数均为`739130`，无OOM或梯度/冻结异常。
 
 - 当前实验分支为 `exp/emotic-multilane-transformer-adapter`，起点是已严格复现注册结果的
   `ce7d9a0`；严格复现分支保持冻结。

@@ -12,7 +12,14 @@
   selectors/prompts/head，把Adapter目标只送入当前task Adapter，消除联合图上的梯度串流。
 - 新增ASL数值/梯度路由测试、GPU smoke路由参数、三组seed0正式worker和3-GPU启动器。三组
   固定full image、CLIP normalization、crop0.05、legacy监督、Image-token layer8/b32、
-  30 epochs/task、batch64、held-out test；尚未提交、同步或启动。
+  30 epochs/task、batch64、held-out test。
+- 实现提交`6d5430a`已推送。服务器为ASL分支创建独立worktree
+  `/mnt/haoyuan/workspace/multi-lane-main-asl-routing`，不切换GPU2仍在运行原Image-token BCE的
+  主worktree；Automatic Upload文件已备份到
+  `/mnt/haoyuan/workspace/git-sync-backup-image-token-asl-upload-20260813`并恢复主worktree clean。
+- 服务器25/25完整单测通过；GPU3/4/7依次完成`model_asl/adapter_asl/both_asl`真实CLIP
+  smoke，三组可训练参数均为739130，初始等价最大差均在`4.2e-05`内，参数组梯度、冻结visual
+  和concat inference正常。三组正式训练尚未启动。
 
 ## 2026-08-13：实现 Image-token Adapter 并准备 seed0 正式实验
 
