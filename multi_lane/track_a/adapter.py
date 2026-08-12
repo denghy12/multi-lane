@@ -1,4 +1,4 @@
-"""Task-routed transformer adapters for MULTI-LANE lane tokens."""
+"""Task-routed transformer adapters for MULTI-LANE token streams."""
 
 from __future__ import annotations
 
@@ -145,3 +145,41 @@ class TaskLaneTransformerAdapterBank(nn.Module):
 
     def per_task_parameter_count(self) -> int:
         return sum(parameter.numel() for parameter in self.task_adapters[0].parameters())
+
+
+class TaskImageTokenAdapterBank(TaskLaneTransformerAdapterBank):
+    """Task-specific residual adapters over frozen CLIP CLS + patch tokens.
+
+    Each lane receives the frozen image-token stream plus the residual produced
+    by its own task adapter.  The caller decides where those adapted tokens are
+    consumed; Track A uses them only for selector matching and aggregation, so
+    they never replace the frozen CLIP residual stream.
+    """
+
+    def adapted_tokens_for_layer(
+        self,
+        layer_id: int,
+        frozen_image_tokens: torch.Tensor,
+        lane_ids: Sequence[int],
+    ) -> torch.Tensor:
+        if frozen_image_tokens.ndim != 3:
+            raise ValueError("Image tokens must have shape [batch, tokens, width]")
+        if frozen_image_tokens.shape[-1] != self.hidden_dim:
+            raise ValueError("Image-token width differs from adapter width")
+        if not lane_ids:
+            raise ValueError("At least one lane id is required")
+        expanded = frozen_image_tokens.unsqueeze(0).expand(
+            len(lane_ids), -1, -1, -1
+        )
+        if layer_id not in self.layer_indices:
+            return expanded
+        adapted = []
+        for task_id in lane_ids:
+            if not 0 <= int(task_id) < self.num_tasks:
+                raise ValueError("Lane id is outside the adapter bank")
+            adapter = self.task_adapters[int(task_id)][str(layer_id)]
+            adapted.append(
+                frozen_image_tokens
+                + self.residual_scale * adapter(frozen_image_tokens)
+            )
+        return torch.stack(adapted, dim=0)

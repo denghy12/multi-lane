@@ -14,7 +14,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from .adapter import TaskLaneTransformerAdapterBank
+from .adapter import TaskImageTokenAdapterBank, TaskLaneTransformerAdapterBank
 
 
 class MultiLaneModel(nn.Module):
@@ -42,8 +42,10 @@ class MultiLaneModel(nn.Module):
             raise ValueError("MULTI-LANE selector/prompt counts must be positive")
         if normalize not in {"none", "pre-head"}:
             raise ValueError("MULTI-LANE normalize must be none or pre-head")
-        if adapter_mode not in {"disabled", "task_lane"}:
-            raise ValueError("Adapter mode must be disabled or task_lane")
+        if adapter_mode not in {"disabled", "task_lane", "image_token"}:
+            raise ValueError(
+                "Adapter mode must be disabled, task_lane, or image_token"
+            )
         required = (
             "conv1",
             "class_embedding",
@@ -67,7 +69,7 @@ class MultiLaneModel(nn.Module):
         if not 0 <= num_prompt_layers <= len(blocks):
             raise ValueError("MULTI-LANE prompt-layer count is invalid")
         adapter_layers = tuple(int(index) for index in adapter_layer_indices)
-        if adapter_mode == "task_lane" and (
+        if adapter_mode != "disabled" and (
             not adapter_layers
             or any(index < 0 or index >= len(blocks) for index in adapter_layers)
         ):
@@ -97,7 +99,7 @@ class MultiLaneModel(nn.Module):
         self.num_prompt_layers = int(num_prompt_layers)
         self.normalize = normalize
         self.adapter_mode = adapter_mode
-        self.adapter_runtime_enabled = adapter_mode == "task_lane"
+        self.adapter_runtime_enabled = adapter_mode != "disabled"
         self._task_sizes = tuple(int(size) for size in task_sizes)
         self._current_task_id = -1
 
@@ -132,14 +134,19 @@ class MultiLaneModel(nn.Module):
         self.register_buffer("task_class_mask", mask, persistent=True)
 
         self.adapter_bank = None
-        if self.adapter_mode == "task_lane":
+        if self.adapter_mode != "disabled":
             # Adapter initialization must not perturb the global RNG stream
             # that drives DataLoader shuffling and stochastic transforms.  The
             # bank still receives deterministic seed-specific initialization,
             # while code after model construction observes the same RNG state
             # as the adapter-disabled baseline.
             with torch.random.fork_rng(devices=[]):
-                adapter_bank = TaskLaneTransformerAdapterBank(
+                bank_class = (
+                    TaskImageTokenAdapterBank
+                    if self.adapter_mode == "image_token"
+                    else TaskLaneTransformerAdapterBank
+                )
+                adapter_bank = bank_class(
                     num_tasks=len(self._task_sizes),
                     hidden_dim=self.width,
                     bottleneck_dim=adapter_bottleneck_dim,
@@ -199,7 +206,7 @@ class MultiLaneModel(nn.Module):
 
     def set_adapter_runtime_enabled(self, enabled: bool) -> None:
         if enabled and self.adapter_bank is None:
-            raise RuntimeError("Cannot enable a task-lane adapter that was not configured")
+            raise RuntimeError("Cannot enable an adapter that was not configured")
         self.adapter_runtime_enabled = bool(enabled)
 
     def _visual_tokens(self, images: torch.Tensor) -> torch.Tensor:
@@ -288,18 +295,33 @@ class MultiLaneModel(nn.Module):
         # The released block applies its first LayerNorm before both selector
         # aggregation and prompt attention.  Keep the residual stream itself
         # unnormalized, as in the original pre-norm transformer.
-        normalized_image = block.ln_1(image_tokens)
+        frozen_normalized_image = block.ln_1(image_tokens).detach()
         normalized_lane = block.ln_1(lane_tokens)
         task_cls = normalized_lane[:, :, :1]
         selectors = normalized_lane[:, :, 1:]
-        similarity = torch.einsum(
-            "tbsc,bnc->tbsn", selectors, normalized_image.detach()
-        ) * (self.width**-0.5)
-        selected = torch.einsum(
-            "bnc,tbsn->tbsc",
-            normalized_image.detach(),
-            torch.softmax(similarity, dim=-1),
-        )
+        if self.adapter_mode == "image_token" and self.adapter_runtime_enabled:
+            selector_image_tokens = self.adapter_bank.adapted_tokens_for_layer(
+                layer_id, frozen_normalized_image, lane_ids
+            )
+            similarity = torch.einsum(
+                "tbsc,tbnc->tbsn", selectors, selector_image_tokens
+            ) * (self.width**-0.5)
+            selected = torch.einsum(
+                "tbnc,tbsn->tbsc",
+                selector_image_tokens,
+                torch.softmax(similarity, dim=-1),
+            )
+        else:
+            # Preserve the historical contraction path exactly for disabled
+            # and task-lane modes.
+            similarity = torch.einsum(
+                "tbsc,bnc->tbsn", selectors, frozen_normalized_image
+            ) * (self.width**-0.5)
+            selected = torch.einsum(
+                "bnc,tbsn->tbsc",
+                frozen_normalized_image,
+                torch.softmax(similarity, dim=-1),
+            )
         summarized = torch.cat([task_cls, selected], dim=2)
         attention_output = self._prompt_attention(
             block,
@@ -313,7 +335,7 @@ class MultiLaneModel(nn.Module):
         lane_tokens = lane_tokens + update
         normalized_residual = block.ln_2(lane_tokens)
         lane_tokens = lane_tokens + block.mlp(normalized_residual)
-        if self.adapter_bank is not None and self.adapter_runtime_enabled:
+        if self.adapter_mode == "task_lane" and self.adapter_runtime_enabled:
             lane_tokens = lane_tokens + self.adapter_bank.delta_for_layer(
                 layer_id, normalized_residual, lane_ids
             )

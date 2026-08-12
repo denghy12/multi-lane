@@ -507,7 +507,9 @@ def parse_args() -> argparse.Namespace:
         metavar=("MIN", "MAX"),
     )
     parser.add_argument(
-        "--adapter-mode", choices=("disabled", "task_lane"), default="disabled"
+        "--adapter-mode",
+        choices=("disabled", "task_lane", "image_token"),
+        default="disabled",
     )
     parser.add_argument("--adapter-bottleneck-dim", type=int, default=64)
     parser.add_argument(
@@ -670,11 +672,21 @@ def main() -> None:
         "adapter_residual_scale": args.adapter_residual_scale,
         "adapter_activation": args.adapter_activation,
         "adapter_task_initialization": args.adapter_task_init,
+        "adapter_target": (
+            "frozen_image_tokens_for_selector"
+            if args.adapter_mode == "image_token"
+            else "task_lane_tokens" if args.adapter_mode == "task_lane" else None
+        ),
+        "adapter_image_token_scope": (
+            "block_ln1_cls_plus_patch_tokens"
+            if args.adapter_mode == "image_token" else None
+        ),
+        "adapter_writes_back_to_frozen_visual_stream": False,
         "adapter_initialization_rng": (
-            "forked_global_state" if args.adapter_mode == "task_lane" else None
+            "forked_global_state" if args.adapter_mode != "disabled" else None
         ),
         "adapter_learning_rate": (
-            args.adapter_learning_rate if args.adapter_mode == "task_lane" else None
+            args.adapter_learning_rate if args.adapter_mode != "disabled" else None
         ),
         "clip_checkpoint": str(args.clip_checkpoint.resolve()),
         "clip_checkpoint_sha256": OPENAI_VIT_B16_SHA256,

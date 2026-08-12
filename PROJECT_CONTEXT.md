@@ -1,6 +1,6 @@
 # 项目上下文
 
-最后一次更新：2026-08-12；本地已从服务器当前分支创建新的诊断分支；此前本地与服务器均跟踪
+最后一次更新：2026-08-13；本地已从服务器当前分支创建新的诊断分支；此前本地与服务器均跟踪
 `exp/emotic-multilane-transformer-adapter`，阶段 0 主实现提交为 `531f3f3`。服务器额外
 test-only worktree 保持原分支和原有未提交状态；正式复现实验使用的业务代码提交仍为
 `8cff911`。
@@ -119,6 +119,15 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   `legacy_full_zero + CLIP normalization + crop(0.05,1.0)`；三个已完成诊断tmux已关闭，活动
   诊断runner为0，日志与结果目录完整保留。后续若提出针对新类可塑性/类别不平衡的新假设，
   应另建实验分支，而不是继续扩展当前task-lane Adapter。
+- 2026-08-13按用户确认开始新的Image-token Adapter方向，实验分支为
+  `exp/emotic-image-token-adapter`。该模式在zero-based CLIP block 8读取冻结并经`ln_1`
+  归一化的全部`CLS + patch tokens`，为每个task训练独立bottleneck32 Adapter；适配后的图像
+  tokens只供对应lane的selector相似度计算与patch汇聚，不回写冻结CLIP残差流。现有
+  `disabled`与`task_lane`路径保持不变。
+- 用户确认时间紧，跳过validation筛选，直接运行一个seed（seed0）的完整8-task held-out test
+  正式实验。固定配置为`legacy_full_zero + CLIP normalization + crop(0.05,1.0)`、30 epochs/task、
+  batch64、Adam、base LR0.0125、Adapter LR4e-4、scale0.1、ReLU、independent初始化。该单seed
+  结果只能作为探索性对照，不能报告三seed均值或统计显著性。
 
 - 当前实验分支为 `exp/emotic-multilane-transformer-adapter`，起点是已严格复现注册结果的
   `ce7d9a0`；严格复现分支保持冻结。

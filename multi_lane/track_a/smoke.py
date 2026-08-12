@@ -15,7 +15,9 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--clip-checkpoint", required=True)
     parser.add_argument(
-        "--adapter-mode", choices=("disabled", "task_lane"), default="disabled"
+        "--adapter-mode",
+        choices=("disabled", "task_lane", "image_token"),
+        default="disabled",
     )
     parser.add_argument("--adapter-bottleneck-dim", type=int, default=64)
     parser.add_argument(
@@ -23,7 +25,7 @@ def main() -> None:
         type=int,
         nargs="+",
         default=(11,),
-        help="Zero-based CLIP transformer block indices used by task-lane adapters.",
+        help="Zero-based CLIP transformer block indices used by adapters.",
     )
     parser.add_argument(
         "--adapter-task-init",
@@ -46,13 +48,22 @@ def main() -> None:
     model.activate_task(0)
     images = torch.randn(2, 3, 224, 224, device="cuda")
     if model.adapter_bank is not None:
-        probe = torch.ones(
-            1, 1, 1, model.width, device="cuda", dtype=torch.float32
-        )
         for layer_index in args.adapter_layer_indices:
-            adapter_delta = model.adapter_bank.delta_for_layer(
-                layer_index, probe, (0,)
-            )
+            if args.adapter_mode == "image_token":
+                probe = torch.ones(
+                    1, 5, model.width, device="cuda", dtype=torch.float32
+                )
+                adapted_probe = model.adapter_bank.adapted_tokens_for_layer(
+                    layer_index, probe, (0,)
+                )
+                adapter_delta = adapted_probe - probe.unsqueeze(0)
+            else:
+                probe = torch.ones(
+                    1, 1, 1, model.width, device="cuda", dtype=torch.float32
+                )
+                adapter_delta = model.adapter_bank.delta_for_layer(
+                    layer_index, probe, (0,)
+                )
             if torch.count_nonzero(adapter_delta).item() != 0:
                 raise RuntimeError(
                     "Zero-initialized adapter produced a nonzero residual at "

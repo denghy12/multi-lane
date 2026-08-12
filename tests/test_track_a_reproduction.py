@@ -6,7 +6,10 @@ import numpy as np
 import torch
 from torch import nn
 
-from multi_lane.track_a.adapter import TaskLaneTransformerAdapterBank
+from multi_lane.track_a.adapter import (
+    TaskImageTokenAdapterBank,
+    TaskLaneTransformerAdapterBank,
+)
 from multi_lane.track_a.model import MultiLaneModel
 from multi_lane.track_a.runner import (
     CLASS_ORDER,
@@ -126,13 +129,17 @@ class TrackAModelTest(unittest.TestCase):
         )
         baseline_rng_state = torch.get_rng_state().clone()
 
-        torch.manual_seed(19)
-        MultiLaneModel(
-            FakeVisual(), (2, 1), num_selectors=2, num_prompts=2,
-            num_prompt_layers=1, adapter_mode="task_lane",
-            adapter_bottleneck_dim=3, adapter_layer_indices=(0,),
-        )
-        self.assertTrue(torch.equal(torch.get_rng_state(), baseline_rng_state))
+        for adapter_mode in ("task_lane", "image_token"):
+            with self.subTest(adapter_mode=adapter_mode):
+                torch.manual_seed(19)
+                MultiLaneModel(
+                    FakeVisual(), (2, 1), num_selectors=2, num_prompts=2,
+                    num_prompt_layers=1, adapter_mode=adapter_mode,
+                    adapter_bottleneck_dim=3, adapter_layer_indices=(0,),
+                )
+                self.assertTrue(
+                    torch.equal(torch.get_rng_state(), baseline_rng_state)
+                )
 
     def test_adapter_parameter_names_cover_active_optimizer_parameters(self) -> None:
         model = MultiLaneModel(
@@ -146,8 +153,78 @@ class TrackAModelTest(unittest.TestCase):
         actual = sum(parameter.numel() for parameter in model.optimizer_parameters())
         self.assertEqual(actual, expected)
 
+    def test_image_token_adapter_preserves_then_changes_selector_input(self) -> None:
+        torch.manual_seed(29)
+        baseline = MultiLaneModel(
+            FakeVisual(), (2, 1), num_selectors=2, num_prompts=2,
+            num_prompt_layers=1,
+        )
+        torch.manual_seed(29)
+        adapted = MultiLaneModel(
+            FakeVisual(), (2, 1), num_selectors=2, num_prompts=2,
+            num_prompt_layers=1, adapter_mode="image_token",
+            adapter_bottleneck_dim=3, adapter_layer_indices=(0,),
+            adapter_residual_scale=0.1,
+        )
+        baseline.activate_task(0)
+        adapted.activate_task(0)
+        images = torch.randn(3, 3, 4, 4)
+        baseline_logits = baseline.current_all_logits(images)
+        initial_logits = adapted.current_all_logits(images)
+        self.assertTrue(torch.allclose(baseline_logits, initial_logits, atol=1e-7))
+
+        with torch.no_grad():
+            adapted.adapter_bank.task_adapters[0]["0"].up.bias[0] = 1.0
+        changed_logits = adapted.current_all_logits(images)
+        self.assertFalse(torch.equal(baseline_logits, changed_logits))
+        adapted.set_adapter_runtime_enabled(False)
+        self.assertTrue(
+            torch.equal(baseline_logits, adapted.current_all_logits(images))
+        )
+
+        adapted.set_adapter_runtime_enabled(True)
+        adapted.zero_grad(set_to_none=True)
+        adapted.current_all_logits(images).sum().backward()
+        self.assertTrue(
+            all(
+                parameter.grad is not None
+                for parameter in adapted.adapter_optimizer_parameters()
+            )
+        )
+        self.assertTrue(
+            all(
+                parameter.grad is None
+                for parameter in adapted.visual_encoder.parameters()
+            )
+        )
+
 
 class TrackAAdapterBankTest(unittest.TestCase):
+    def test_image_token_bank_routes_each_lane_without_visual_writeback(self) -> None:
+        bank = TaskImageTokenAdapterBank(
+            num_tasks=2,
+            hidden_dim=8,
+            bottleneck_dim=3,
+            layer_indices=(0,),
+            residual_scale=0.5,
+        )
+        frozen = torch.randn(2, 5, 8)
+        original = frozen.clone()
+        initial = bank.adapted_tokens_for_layer(0, frozen, (0, 1))
+        self.assertTrue(torch.equal(initial[0], frozen))
+        self.assertTrue(torch.equal(initial[1], frozen))
+
+        with torch.no_grad():
+            bank.task_adapters[0]["0"].up.bias[0] = 2.0
+            bank.task_adapters[1]["0"].up.bias[1] = 4.0
+        adapted = bank.adapted_tokens_for_layer(0, frozen, (0, 1))
+        self.assertTrue(torch.all(adapted[0, :, :, 0] == frozen[:, :, 0] + 1.0))
+        self.assertTrue(torch.all(adapted[1, :, :, 1] == frozen[:, :, 1] + 2.0))
+        self.assertTrue(torch.equal(frozen, original))
+        bypassed = bank.adapted_tokens_for_layer(1, frozen, (0, 1))
+        self.assertTrue(torch.equal(bypassed[0], frozen))
+        self.assertTrue(torch.equal(bypassed[1], frozen))
+
     def test_identity_routing_freezing_and_parameter_count(self) -> None:
         bank = TaskLaneTransformerAdapterBank(
             num_tasks=2,

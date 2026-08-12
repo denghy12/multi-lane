@@ -1,6 +1,22 @@
 # 工作日志
 
-最后一次更新：2026-08-12。
+最后一次更新：2026-08-13。
+
+## 2026-08-13：实现 Image-token Adapter 并准备 seed0 正式实验
+
+- 将上一阶段task-lane Adapter位置诊断与路线收口文档以提交`ea5f204`推送到
+  `origin/exp/emotic-adapter-position-diagnostics`，随后新建
+  `exp/emotic-image-token-adapter`，避免两种架构混入同一提交。
+- 新增`image_token` Adapter模式：每个task独立路由Adapter，输入为目标CLIP block经`ln_1`
+  归一化后的冻结`CLS + patch tokens`；输出仅修改selector读取的图像token视图，不修改冻结
+  CLIP主干的后续残差流。zero-up初始化保证初始输出与disabled路径一致，初始化RNG继续隔离。
+- runner、GPU smoke、配置元数据和单元测试已扩展到新模式；新增seed0专用正式启动器
+  `scripts/emotic/run_multilane_track_a_image_token_adapter_seed0.sh`。
+- 用户明确只跑seed0并允许跳过validation。正式配置：Split-EMOTIC B5-C3、full image、held-out
+  test、8 tasks、30 epochs/task、batch64、seed0、legacy loss、CLIP normalization、crop0.05、
+  image-token Adapter layer8/bottleneck32/LR4e-4/scale0.1/ReLU/independent。
+- 本地Python编译与Shell语法通过；本地系统Python缺少torch/numpy，完整单测和GPU smoke改在
+  服务器`ddp`环境执行。训练尚未启动。
 
 ## 2026-08-12：实现 loss、预处理与 Adapter 层位置分阶段诊断
 
