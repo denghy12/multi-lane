@@ -20,6 +20,12 @@
 - 服务器25/25完整单测通过；GPU3/4/7依次完成`model_asl/adapter_asl/both_asl`真实CLIP
   smoke，三组可训练参数均为739130，初始等价最大差均在`4.2e-05`内，参数组梯度、冻结visual
   和concat inference正常。三组正式训练尚未启动。
+- 验证记录提交`8840e96`已推送并由服务器ASL worktree fast-forward。三组seed0 held-out test
+  正式实验在tmux `mla_image_token_asl_seed0_011602`启动，GPU3/4/7分别对应
+  `model_asl/adapter_asl/both_asl`，run ID共同后缀为`20260813_011602`。
+- 三组task0 epoch1均为84 optimizer steps、skipped0、约16.5秒；GPU占用2.0--2.4GB且均有
+  21GB以上余量。model-ASL的model/Adapter loss为`0.01572653/0.76665431`，adapter-ASL为
+  `0.61468159/0.02817775`，both-ASL为`0.01577781/0.01577781`；路由行为可观测且无异常。
 
 ## 2026-08-13：实现 Image-token Adapter 并准备 seed0 正式实验
 

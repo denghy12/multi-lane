@@ -8,9 +8,10 @@
    loss-routing真实CLIP GPU smoke全部通过。
 2. 已提交推送`6d5430a`；服务器独立ASL worktree检出同一clean提交，正在运行原Image-token
    seed0的主worktree和test-only worktree均未切换。
-3. 现在重新检查GPU空闲显存，并用三张不同空闲卡分别启动`model_asl/adapter_asl/both_asl`。
+3. 已在GPU3/4/7分别启动`model_asl/adapter_asl/both_asl`，tmux为
+   `mla_image_token_asl_seed0_011602`；三组首轮均稳定且loss路由符合定义。
    三组均为seed0、完整8-task、30 epochs/task、held-out test；不做validation或更多seed。
-4. 仅观察首轮无OOM/NaN/Traceback、optimizer skipped0与显存稳定，随后不持续盯跑。完成后
+4. 首轮已确认无OOM/NaN/Traceback、optimizer skipped0与显存稳定，随后不持续盯跑。完成后
    同步各组`config.json/task_metrics.json/training_history.json/seed_summary.json`与日志。
 
 ## 正在运行：Image-token Adapter seed0 正式实验

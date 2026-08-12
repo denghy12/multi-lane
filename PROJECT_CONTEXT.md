@@ -151,6 +151,12 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   test-only worktree保持原状。服务器25/25完整单元测试通过；GPU3/4/7上的
   `model_asl/adapter_asl/both_asl`真实CLIP smoke全部通过，初始等价最大差分别为
   `3.0518e-05/4.1962e-05/3.0518e-05`，可训练参数均为`739130`，无OOM或梯度/冻结异常。
+- 验证记录提交`8840e96`同步后，三组正式实验于2026-08-13 01:16在tmux
+  `mla_image_token_asl_seed0_011602`启动：GPU3=`model_asl`、GPU4=`adapter_asl`、
+  GPU7=`both_asl`，共同时间戳`20260813_011602`。task0 epoch1均完成84步/skipped0，耗时
+  16.4--16.8秒；model/Adapter objective loss分别为`0.01573/0.76665`、
+  `0.61468/0.02818`、`0.01578/0.01578`，与三种路由定义一致。单卡占用约2.0--2.4GB，
+  无OOM、NaN、Traceback或RuntimeError。
 
 - 当前实验分支为 `exp/emotic-multilane-transformer-adapter`，起点是已严格复现注册结果的
   `ce7d9a0`；严格复现分支保持冻结。
