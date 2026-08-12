@@ -4,6 +4,83 @@
 
 ## 2026-08-12：实现 loss、预处理与 Adapter 层位置分阶段诊断
 
+- 按预定停止规则正式结束当前task-lane Adapter路线：不再扩展layer5/8/11、不做多层、不扩大
+  bottleneck、不增加Adapter深度、不使用正式test调参。当前保留的validation基线为Adapter
+  disabled、legacy loss、CLIP normalization、crop `(0.05,1.0)`；其seed0五项为
+  `42.175807/48.421923/37.198819/58.301308/0.994957`。
+- 已确认服务器不存在loss/preprocessing/layer诊断runner，GPU2/3/4已释放；已关闭三个完成后
+  停留在shell的tmux `mla_loss_diag_s0_173322`、`mla_prep_diag_s0_182014`、
+  `mla_layer_diag_s0_192723`。所有服务器日志、JSON与本地同步副本均保留，未删除实验数据，
+  未启动新实验。
+- 第三阶段单层位置诊断已在tmux `mla_layer_diag_s0_192723`启动，batch ID为
+  `adapter_layer_position_seed0_20260812_192723`。固定legacy loss、CLIP normalization、
+  crop `(0.05,1.0)`、seed0、完整8-task val-only、30 epochs/task、batch64、LR0.0125；
+  independent Adapter为b64、LR4e-4、ReLU、scale0.1，GPU2/3/4分别运行zero-based layer
+  `5/8/11`。基线为已完成的clip+crop0.05 disabled运行。
+- 三组config均记录clean `001d8a0`，仅layer index不同；首两轮均84 steps、skipped0，每卡约
+  1.94GB且仍空闲约22.1GB，无OOM、CUDA error、Traceback或NaN/Inf。不读取test、不保存
+  checkpoint。输出位于服务器
+  `/mnt/haoyuan/workspace/emotic_benchmark_runs/multi_lane_adapter_layer_position_v0.3/adapter_layer_position_seed0_20260812_192723/`。
+- 最终判定在原三项task6 mAP、final mAP、task6新类均值改善之外，增加Suffering AP不得低于
+  disabled基线的硬性条件；若无单层同时满足，则结束task-lane Adapter路线，不做多层扩容。
+- layer5/8/11均以240 epochs、13950 updates、launcher exit code0完成，日志无OOM、NaN或异常。
+  相对clip+crop0.05 disabled基线，五项变化分别为：layer5
+  `final mAP -0.093808 / average mAP +0.391947 / final cF1 +0.701436 / final oF1 +0.061258 /
+  forgetting improvement +0.006156`；layer8为
+  `+0.380562/+1.013492/+0.975789/+0.132606/+0.178909`；layer11为
+  `-0.439175/+1.389888/+0.425703/-0.124769/+0.195441`。
+- 四项硬条件没有任何层通过。layer5的task6新类均值/Suffering为`-0.525884/-0.528539`；
+  layer8为`-1.296133/-2.105999`；layer11为`-8.770622/-14.799475`。layer8虽然aggregate
+  最优，但task6总mAP`+0.540776`来自旧类均值`+0.816313`掩盖新类下降；layer11同样表现为
+  旧类`+0.924071`掩盖新类`-8.770622`，证明层位置不能修复后期可塑性问题。
+- 三组12个运行JSON、3个paired report及3份日志已同步到本地
+  `./output/emotic_track_a_adapter_layer_diagnostics/adapter_layer_position_seed0_20260812_192723/`；
+  服务器与本地18个文件SHA-256逐项一致，没有checkpoint。按预定规则停止task-lane Adapter
+  多层与容量扩张，当前未启动新实验。
+- 第二阶段2×2预处理诊断已在tmux `mla_prep_diag_s0_182014`启动，batch ID为
+  `preprocessing_seed0_20260812_182014`。固定`legacy_full_zero`、seed0、EMOTIC train→val、
+  完整8 tasks、30 epochs/task、batch64、LR0.0125、Adapter disabled、full image、AMP/TF32；
+  GPU2/3/4/7分别对应`none+crop0.05`、`clip+crop0.05`、`none+crop0.50`、
+  `clip+crop0.50`。不读取test、不保存checkpoint、不启动Adapter层实验。
+- 四组启动config均记录clean `001d8a0`。首个epoch均84 steps、skipped0；每张卡新增约1.94GB，
+  仍空闲约22.1GB，未发现OOM、CUDA error、Traceback或NaN/Inf。输出位于服务器
+  `/mnt/haoyuan/workspace/emotic_benchmark_runs/multi_lane_preprocessing_diagnostics_v0.3/preprocessing_seed0_20260812_182014/`，
+  日志位于`./logs/emotic_track_a_adapter_diagnostics/`。
+- 四组均以240 epochs、13950 updates、launcher exit code0完成。五项
+  `final_mAP/average_mAP/final_cF1/final_oF1/forgetting`分别为：none+0.05
+  `41.964051/48.323627/37.289303/58.586581/0.890804`；clip+0.05
+  `42.175807/48.421923/37.198819/58.301308/0.994957`；none+0.50
+  `40.645741/46.624393/37.102879/57.290124/0.971548`；clip+0.50
+  `41.172109/47.777290/37.403789/57.218872/0.800238`。
+- crop0.50在两种normalization下均使8个task mAP全部下降；末轮训练loss反而更低，说明训练
+  视图更简单但泛化更差，因此淘汰。clip+crop0.05相对旧默认使task6/final mAP提升
+  `0.134184/0.211756`、task6新类均值提升`0.484693`，按预先规则选为层位置基线；但其
+  Sadness/Sensitivity/Suffering变化为`+7.019647/+0.362923/-5.928491`，后续必须单列
+  Suffering，不能只凭aggregate mAP选层。
+- 结果与四份日志已同步到本地
+  `./output/emotic_track_a_preprocessing_diagnostics/preprocessing_seed0_20260812_182014/`；服务器与
+  本地21个文件SHA-256逐项一致，没有checkpoint。当前未启动Adapter层位置实验。
+- 第一阶段loss二选一已在tmux `mla_loss_diag_s0_173322`启动，batch ID为
+  `training_loss_seed0_20260812_173322`。GPU2为`legacy_full_zero`，GPU3为`current_only`；
+  两组均为clean `001d8a0`、seed0、EMOTIC train→val、完整8 tasks、30 epochs/task、batch64、
+  LR0.0125、Adapter disabled、full image、none normalization、crop `(0.05,1.0)`、AMP/TF32。
+- 启动前GPU2/3已有进程约占7.8/8.3GB，空闲15.8/16.1GB；本轮进程各占约1.9GB，进入稳定
+  训练后仍空闲约14.1GB。两组task0前5个epoch均84 steps、skipped0，无OOM、CUDA error、
+  Traceback或NaN/Inf。输出位于服务器
+  `/mnt/haoyuan/workspace/emotic_benchmark_runs/multi_lane_loss_diagnostics_v0.3/training_loss_seed0_20260812_173322/`，
+  日志位于`./logs/emotic_track_a_adapter_diagnostics/`。
+- 两组均完成240 epochs与13950 updates，launcher exit code 0，并自动生成
+  `loss_diagnostics_summary.json`。legacy五项为
+  `41.964051/48.323627/37.289303/58.586581/0.890804`；current-only为
+  `41.318942/48.227313/36.413423/58.508179/0.795174`。current-only虽在task0–3 mAP分别
+  微升`0.237138/0.392014/0.198054/0.079564`，但task4开始转负，task6/7下降
+  `0.757291/0.645109`。
+- task6新三类引入AP：legacy为Sadness `41.064792`、Sensitivity `5.960459`、Suffering
+  `51.880423`；current-only为`40.507695/6.710906/38.328382`。均值从`32.968558`降至
+  `28.515661`，主要失败点是Suffering `-13.552041`，因此下一阶段固定legacy loss。
+- 新legacy运行与上一轮clean disabled运行的8-task mAP及五项summary差值全部为0；结果已连同
+  两份日志同步到本地`./output/emotic_track_a_loss_diagnostics/training_loss_seed0_20260812_173322/`，
+  11个文件经服务器/本地SHA-256逐项校验完全一致，没有checkpoint。
 - 从clean `5b2f791` 创建本地分支 `exp/emotic-adapter-position-diagnostics`；服务器仍停留在
   `exp/emotic-multilane-transformer-adapter`，本轮代码尚未提交推送或运行实验。
 - runner新增 `--training-loss-mode legacy_full_zero|current_only`。默认legacy保持历史复现；

@@ -76,6 +76,49 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - 服务器完整Track-A单元测试20/20通过。GPU2/3/4上的layer `5/8/11` smoke均通过：每组
   可训练参数 `788314`，零初始化Adapter与disabled路径的AMP logits最大差均为
   `6.103515625e-05`；本轮未启动loss、预处理或层位置实验。
+- 第一阶段loss诊断已于2026-08-12启动：同一clean `001d8a0`、seed0、完整8-task val-only、
+  Adapter disabled配置下，GPU2运行`legacy_full_zero`，GPU3运行`current_only`；batch64、
+  30 epochs/task、LR0.0125、none normalization、crop `(0.05,1.0)`。启动后两组各新增约
+  1.9GB显存，仍各有约14.1GB空闲；task0前5个epoch均steps84/skipped0且无OOM/NaN/异常。
+- 两组均以240 epochs、13950 optimizer updates、exit code 0完成。current-only相对legacy的
+  final/average mAP为`-0.645109/-0.096314`，final cF1/oF1为`-0.875881/-0.078401`；
+  forgetting数值改善`0.095630`，但task6/7 mAP下降`0.757291/0.645109`。task6新类引入时
+  Sadness/Sensitivity/Suffering AP变化为`-0.557096/+0.750446/-13.552041`，均值下降
+  `4.452897`，因此loss选择为保留`legacy_full_zero`。
+- legacy结果与上一轮clean disabled对照的8-task mAP及五项summary逐项完全一致，确认随机轨迹
+  与历史行为未漂移。current-only与legacy在数学上仅相差常数项和每task整体梯度缩放；Adam
+  基本抵消该缩放，所以它没有修复监督逻辑，剩余数值轨迹扰动反而损害后期Suffering。
+- 第二阶段预处理诊断已启动：固定`legacy_full_zero`、Adapter disabled和其余协议，GPU2/3/4/7
+  分别运行`none+crop0.05`、`clip+crop0.05`、`none+crop0.50`、`clip+crop0.50`。四组均为
+  clean `001d8a0`、seed0、完整8-task val-only；首个epoch均84 steps、skipped0，每组约占
+  1.94GB显存且仍有约22.1GB空闲，无OOM/NaN/异常。
+- 四组均完成240 epochs/13950 updates并自动汇总。相对旧默认`none+crop0.05`，
+  `clip+crop0.05`的task6/final mAP为`+0.134184/+0.211756`，average mAP`+0.098297`，
+  task6新三类均值`+0.484693`；但final cF1/oF1为`-0.090485/-0.285273`，且Sadness
+  `+7.019647`的同时Suffering`-5.928491`。按预先三项排序指标规则，下一阶段预处理固定为
+  CLIP normalization与crop `(0.05,1.0)`，同时将Suffering列为层位置诊断硬性观察项。
+- crop minimum提高至`0.50`在none/clip下分别使final mAP下降`1.318310/1.003698`，并且
+  8个task mAP全部下降；虽然末轮训练loss更低，validation更差说明较弱裁剪增强导致泛化下降，
+  因此淘汰crop0.50。四组21个JSON/日志文件已同步本地并逐项通过SHA-256校验。
+- 第三阶段单层位置诊断已启动：固定`legacy_full_zero + clip normalization + crop(0.05,1.0)`，
+  independent Adapter b64/LR4e-4/ReLU/scale0.1，GPU2/3/4分别运行zero-based layer `5/8/11`。
+  三组均为clean `001d8a0`、seed0、完整8-task val-only；首两轮84 steps、skipped0，每组约
+  1.94GB显存且仍有约22.1GB空闲。最终除task6/final mAP和task6三类均值外，增加Suffering
+  AP不得低于同预处理disabled基线的硬性条件。
+- 三层均完成240 epochs/13950 updates且无运行异常。相对同预处理disabled基线，layer5/8/11
+  的task6 mAP为`+0.031871/+0.540776/-0.340454`，final mAP为
+  `-0.093808/+0.380562/-0.439175`，task6新类均值为
+  `-0.525884/-1.296133/-8.770622`，Suffering AP为
+  `-0.528539/-2.105999/-14.799475`；没有一层通过四项硬条件，停止多层与容量扩张。
+- layer8虽是aggregate最优位置，average/final mAP提升`1.013492/0.380562`，但task6旧类平均
+  AP提升`0.816313`的同时新类均值下降`1.296133`；layer11更是旧类`+0.924071`、新类
+  `-8.770622`。位置变化主要强化已学lane而损害后期新类可塑性，不能解决当前task-lane
+  Adapter的结构问题。18个JSON/日志文件已同步本地并逐项通过SHA-256校验。
+- 2026-08-12已正式收口该路线：停止layer位置扩展、多层Adapter、bottleneck扩容和Adapter深度
+  增加，不再使用正式test调参。当前保留的validation基线为Adapter disabled、
+  `legacy_full_zero + CLIP normalization + crop(0.05,1.0)`；三个已完成诊断tmux已关闭，活动
+  诊断runner为0，日志与结果目录完整保留。后续若提出针对新类可塑性/类别不平衡的新假设，
+  应另建实验分支，而不是继续扩展当前task-lane Adapter。
 
 - 当前实验分支为 `exp/emotic-multilane-transformer-adapter`，起点是已严格复现注册结果的
   `ce7d9a0`；严格复现分支保持冻结。

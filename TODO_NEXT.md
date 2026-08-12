@@ -5,10 +5,21 @@
 ## 当前最高优先级：验证 Task-lane Transformer Adapter 阶段 0
 
 0. `exp/emotic-adapter-position-diagnostics` 的实现提交 `5766860` 已推送并同步；服务器20/20
-   单测及GPU2/3/4 zero-based layer5/8/11 Adapter smoke均通过，尚未启动实验。下一步必须先
-   经用户确认完整配置，才按顺序执行：loss二选一 → normalization/crop 2×2 → independent
-   layer5/8/11；
+   单测及GPU2/3/4 zero-based layer5/8/11 Adapter smoke均通过。loss二选一已完成：current-only
+   的task6/7 mAP下降`0.757291/0.645109`，task6新类均值下降`4.452897`，Suffering下降
+   `13.552041`；第二阶段已固定legacy并在GPU2/3/4/7启动normalization `none/clip` × crop
+   minimum `0.05/0.50`的2×2 seed0完整8-task val-only对照已完成。crop0.50在8个task均退化；
+   clip+crop0.05使task6/final mAP提升`0.134184/0.211756`、task6三类均值提升`0.484693`，
+   因此第三阶段已固定`legacy_full_zero + clip normalization + crop(0.05,1.0)`并在GPU2/3/4
+   启动的independent layer5/8/11均已完成。三层task6新类均值分别下降
+   `0.525884/1.296133/8.770622`，Suffering分别下降`0.528539/2.105999/14.799475`；没有一层
+   通过四项条件。按预定规则停止task-lane Adapter路线，不进行多层或容量扩张；下一方法方向
+   需在用户确认新假设后另开分支，不再用当前正式test反复调参。
    每一步均只用seed0完整8-task validation，不能并行跳过前置选择。
+
+   当前保留基线：Adapter disabled、`legacy_full_zero`、CLIP normalization、crop
+   `(0.05,1.0)`。当前没有活动诊断实验；下一步不是继续调Adapter层数/容量，而是先提出能直接
+   改善后期新类获取、稀有类排序或类别不平衡的新机制，再经用户确认后另建分支。
 
 1. 阶段 0 主实现 `531f3f3` 已提交推送，本地和服务器主工作树已同步；test-only worktree
    未触碰。
