@@ -1,6 +1,6 @@
 # 项目上下文
 
-最后一次更新：2026-08-11；本地与服务器主工作树均已切换并跟踪
+最后一次更新：2026-08-12；本地已从服务器当前分支创建新的诊断分支；此前本地与服务器均跟踪
 `exp/emotic-multilane-transformer-adapter`，阶段 0 主实现提交为 `531f3f3`。服务器额外
 test-only worktree 保持原分支和原有未提交状态；正式复现实验使用的业务代码提交仍为
 `8cff911`。
@@ -53,6 +53,26 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 ## 当前技术路线
 
 ### Task-lane Transformer Adapter 实验
+
+- 新的诊断分支为 `exp/emotic-adapter-position-diagnostics`，从已完成warm-start结论的
+  `5b2f791` 创建；本地实现尚未提交推送，服务器仍保持原Adapter分支。
+- runner新增可选 `legacy_full_zero/current_only` loss；默认继续使用legacy，保证历史严格复现
+  不变。current-only直接对当前任务5/3类logits计算BCE，去除26维零填充常数，并把原始有效
+  梯度分别放大约 `26/5` 与 `26/3`；但Adam矩归一化会抵消大部分纯常数缩放，必须用完整
+  seed0 validation实证选择，不能预设current-only一定提升。
+- 输入预处理新增独立 `none/clip` normalization和可配置RandomResizedCrop scale；旧默认仍为
+  无normalization、scale `(0.05,1.0)`。CLIP normalization使用OpenAI mean/std，crop诊断候选
+  为最小面积 `0.05/0.50`，两项以2×2 disabled对照分开评估。
+- 诊断流程固定为三阶段：先disabled比较legacy/current-only loss；再用选中loss做normalization
+  × crop 2×2；最后以选中的disabled配置为基线，运行independent Adapter的单层零基索引
+  `5/8/11`（即第6/9/12 block）。每阶段均限seed0、完整8-task、val-only、clean Git；只有中层
+  改善task6 mAP、task7 final mAP和task6新类平均AP，才考虑小范围多层。
+- 新增通用validation diagnostics汇总器，用于loss和预处理阶段的disabled多运行对照；它严格
+  校验seed0/8-task/val-only/clean Git并输出完整曲线、汇总指标和task6三类AP，但不使用单一
+  scalar自动选优，避免average mAP掩盖后期退化。
+- GPU smoke入口支持显式指定零基Adapter layer indices；本轮验证计划仅在GPU2/3/4分别对
+  layer `5/8/11`执行真实CLIP batch2 forward/backward、零初始化等价、梯度/冻结与路由检查，
+  不读取EMOTIC、不写checkpoint，也不启动任何诊断训练。
 
 - 当前实验分支为 `exp/emotic-multilane-transformer-adapter`，起点是已严格复现注册结果的
   `ce7d9a0`；严格复现分支保持冻结。

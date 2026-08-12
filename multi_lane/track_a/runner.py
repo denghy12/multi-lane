@@ -42,6 +42,16 @@ TASK_SIZES: Tuple[int, ...] = (5, 3, 3, 3, 3, 3, 3, 3)
 PROTOCOL_ID = "emotic_b5c3_v0.1"
 METHOD_NAME = "MULTI-LANE"
 TRACK = "A"
+CLIP_IMAGE_MEAN: Tuple[float, ...] = (
+    0.48145466,
+    0.4578275,
+    0.40821073,
+)
+CLIP_IMAGE_STD: Tuple[float, ...] = (
+    0.26862954,
+    0.26130258,
+    0.27577711,
+)
 
 
 def task_indices(task_id: int) -> Tuple[int, ...]:
@@ -89,14 +99,29 @@ def dataset_view(
     return LabelView(source, indices, class_indices)
 
 
-def build_transforms():
+def build_transforms(
+    input_normalization: str = "none",
+    train_crop_scale: Sequence[float] = (0.05, 1.0),
+):
+    if input_normalization not in {"none", "clip"}:
+        raise ValueError("Input normalization must be none or clip")
+    if len(train_crop_scale) != 2:
+        raise ValueError("Train crop scale must contain minimum and maximum")
+    crop_scale = tuple(float(value) for value in train_crop_scale)
+    if not 0 < crop_scale[0] <= crop_scale[1] <= 1:
+        raise ValueError("Train crop scale must satisfy 0 < min <= max <= 1")
+    normalize = (
+        [transforms.Normalize(CLIP_IMAGE_MEAN, CLIP_IMAGE_STD)]
+        if input_normalization == "clip" else []
+    )
     train = transforms.Compose(
         [
             transforms.RandomResizedCrop(
-                224, scale=(0.05, 1.0), ratio=(3.0 / 4.0, 4.0 / 3.0)
+                224, scale=crop_scale, ratio=(3.0 / 4.0, 4.0 / 3.0)
             ),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
+            *normalize,
         ]
     )
     evaluate = transforms.Compose(
@@ -106,9 +131,44 @@ def build_transforms():
             ),
             transforms.CenterCrop(224),
             transforms.ToTensor(),
+            *normalize,
         ]
     )
     return train, evaluate
+
+
+def compute_training_loss(
+    logits: torch.Tensor,
+    current_targets: torch.Tensor,
+    current_class_indices: Sequence[int],
+    temperature: float,
+    loss_mode: str,
+) -> torch.Tensor:
+    if loss_mode not in {"legacy_full_zero", "current_only"}:
+        raise ValueError("Training loss mode must be legacy_full_zero or current_only")
+    if temperature <= 0:
+        raise ValueError("Training temperature must be positive")
+    current = tuple(int(index) for index in current_class_indices)
+    if not current or len(set(current)) != len(current):
+        raise ValueError("Current class indices must be non-empty and unique")
+    if current_targets.ndim != 2 or current_targets.shape[1] != len(current):
+        raise ValueError("Current targets do not match current class indices")
+    if logits.ndim != 2 or logits.shape[0] != current_targets.shape[0]:
+        raise ValueError("Training logits and targets have incompatible shapes")
+    if min(current) < 0 or max(current) >= logits.shape[1]:
+        raise ValueError("Current class index is outside the logits")
+    if loss_mode == "current_only":
+        loss_logits = logits[:, list(current)]
+        loss_targets = current_targets
+    else:
+        hidden = [index for index in range(logits.shape[1]) if index not in current]
+        hidden_tensor = torch.tensor(hidden, device=logits.device, dtype=torch.long)
+        loss_targets = torch.zeros_like(logits, dtype=torch.float32)
+        loss_targets[:, list(current)] = current_targets
+        loss_logits = logits.index_fill(1, hidden_tensor, 0.0)
+    return F.binary_cross_entropy_with_logits(
+        loss_logits.float() / temperature, loss_targets
+    )
 
 
 def resolve_dataset_parent(path: Path) -> Path:
@@ -279,6 +339,7 @@ def train_task(
     temperature: float,
     amp: bool,
     adapter_learning_rate: Optional[float] = None,
+    loss_mode: str = "legacy_full_zero",
 ) -> List[Dict[str, float]]:
     optimizer_groups = [
         {
@@ -302,8 +363,6 @@ def train_task(
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
     scaler = torch.cuda.amp.GradScaler(enabled=amp)
     current = list(task_indices(task_id))
-    hidden = [index for index in range(len(CLASS_ORDER)) if index not in current]
-    hidden_tensor = torch.tensor(hidden, device=device, dtype=torch.long)
     history: List[Dict[str, float]] = []
     for epoch in range(epochs):
         model.train()
@@ -323,11 +382,12 @@ def train_task(
             optimizer.zero_grad(set_to_none=True)
             with torch.cuda.amp.autocast(enabled=amp):
                 logits = model.current_all_logits(images)
-                full_targets = torch.zeros_like(logits, dtype=torch.float32)
-                full_targets[:, current] = current_targets
-                masked_logits = logits.index_fill(1, hidden_tensor, 0.0)
-                loss = F.binary_cross_entropy_with_logits(
-                    masked_logits.float() / temperature, full_targets
+                loss = compute_training_loss(
+                    logits,
+                    current_targets,
+                    current,
+                    temperature,
+                    loss_mode,
                 )
             scale_before = float(scaler.get_scale())
             scaler.scale(loss).backward()
@@ -431,9 +491,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--source-reference-batch-size", type=int, default=256)
     parser.add_argument("--weight-decay", type=float, default=0.0)
     parser.add_argument("--temperature", type=float, default=1.0)
+    parser.add_argument(
+        "--training-loss-mode",
+        choices=("legacy_full_zero", "current_only"),
+        default="legacy_full_zero",
+    )
     parser.add_argument("--no-amp", action="store_true")
     parser.add_argument("--no-tf32", action="store_true")
     parser.add_argument("--input-mode", choices=("full", "person_crop"), default="full")
+    parser.add_argument(
+        "--input-normalization", choices=("none", "clip"), default="none"
+    )
+    parser.add_argument(
+        "--train-crop-scale", type=float, nargs=2, default=(0.05, 1.0),
+        metavar=("MIN", "MAX"),
+    )
     parser.add_argument(
         "--adapter-mode", choices=("disabled", "task_lane"), default="disabled"
     )
@@ -513,7 +585,9 @@ def main() -> None:
         flush=True,
     )
 
-    train_transform, eval_transform = build_transforms()
+    train_transform, eval_transform = build_transforms(
+        args.input_normalization, args.train_crop_scale
+    )
     dataset_parent = resolve_dataset_parent(args.data_root)
     train_source = EMOTIC(
         str(dataset_parent), train=True, transform=train_transform,
@@ -547,6 +621,19 @@ def main() -> None:
         "validation_split": "val",
         "reporting_split": args.reporting_split,
         "training_label_scope": "current_classes_only",
+        "training_loss_mode": args.training_loss_mode,
+        "training_loss_reduction_classes": (
+            "current_task_only"
+            if args.training_loss_mode == "current_only"
+            else "all_26_with_zeroed_hidden_logits"
+        ),
+        "training_loss_current_only_gradient_multiplier_vs_legacy": (
+            [len(CLASS_ORDER) / size for size in TASK_SIZES]
+            if args.training_loss_mode == "current_only" else None
+        ),
+        "training_loss_optimizer_scale_note": (
+            "Adam moment normalization can largely cancel constant gradient scaling"
+        ),
         "evaluation_scope": "samples_intersect_seen_classes",
         "threshold": args.threshold,
         "epochs_per_task": args.epochs,
@@ -558,6 +645,15 @@ def main() -> None:
         "scheduler": "CosineAnnealingLR_reset_per_task",
         "weight_decay": args.weight_decay,
         "temperature": args.temperature,
+        "input_mode": args.input_mode,
+        "input_normalization": args.input_normalization,
+        "input_normalization_mean": (
+            list(CLIP_IMAGE_MEAN) if args.input_normalization == "clip" else None
+        ),
+        "input_normalization_std": (
+            list(CLIP_IMAGE_STD) if args.input_normalization == "clip" else None
+        ),
+        "train_crop_scale": [float(value) for value in args.train_crop_scale],
         "amp": amp,
         "tf32": tf32,
         "cudnn_benchmark": False,
@@ -626,6 +722,7 @@ def main() -> None:
             model, train_loader, val_loader, device, task_id,
             args.epochs, learning_rate, args.weight_decay,
             args.temperature, amp, args.adapter_learning_rate,
+            args.training_loss_mode,
         )
         row = evaluate(
             model, reporting_loader, device, task_id, args.threshold, amp

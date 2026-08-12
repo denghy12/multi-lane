@@ -19,6 +19,13 @@ def main() -> None:
     )
     parser.add_argument("--adapter-bottleneck-dim", type=int, default=64)
     parser.add_argument(
+        "--adapter-layer-indices",
+        type=int,
+        nargs="+",
+        default=(11,),
+        help="Zero-based CLIP transformer block indices used by task-lane adapters.",
+    )
+    parser.add_argument(
         "--adapter-task-init",
         choices=("independent", "copy_previous"),
         default="independent",
@@ -32,7 +39,7 @@ def main() -> None:
         (5, 3, 3, 3, 3, 3, 3, 3),
         adapter_mode=args.adapter_mode,
         adapter_bottleneck_dim=args.adapter_bottleneck_dim,
-        adapter_layer_indices=(11,),
+        adapter_layer_indices=tuple(args.adapter_layer_indices),
         adapter_residual_scale=0.1,
         adapter_task_initialization=args.adapter_task_init,
     ).float().cuda()
@@ -42,9 +49,15 @@ def main() -> None:
         probe = torch.ones(
             1, 1, 1, model.width, device="cuda", dtype=torch.float32
         )
-        adapter_delta = model.adapter_bank.delta_for_layer(11, probe, (0,))
-        if torch.count_nonzero(adapter_delta).item() != 0:
-            raise RuntimeError("Zero-initialized adapter produced a nonzero residual")
+        for layer_index in args.adapter_layer_indices:
+            adapter_delta = model.adapter_bank.delta_for_layer(
+                layer_index, probe, (0,)
+            )
+            if torch.count_nonzero(adapter_delta).item() != 0:
+                raise RuntimeError(
+                    "Zero-initialized adapter produced a nonzero residual at "
+                    f"layer {layer_index}"
+                )
         model.eval()
         with torch.no_grad(), torch.cuda.amp.autocast():
             adapter_logits = model.current_all_logits(images)
@@ -97,6 +110,7 @@ def main() -> None:
     print(
         "MULTI_LANE_TRACK_A_SMOKE_OK "
         f"adapter_mode={args.adapter_mode} task_init={args.adapter_task_init} "
+        f"adapter_layers={','.join(map(str, args.adapter_layer_indices))} "
         f"trainable_parameters={trainable} "
         f"max_initial_difference={max_initial_difference if model.adapter_bank is not None else 0.0}"
     )

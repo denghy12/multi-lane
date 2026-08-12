@@ -12,6 +12,8 @@ from multi_lane.track_a.runner import (
     CLASS_ORDER,
     TASK_SIZES,
     TaskMetrics,
+    build_transforms,
+    compute_training_loss,
     compute_metrics,
     summarize_tasks,
 )
@@ -216,6 +218,44 @@ class TrackAAdapterBankTest(unittest.TestCase):
 
 
 class TrackAMetricsTest(unittest.TestCase):
+    def test_current_only_loss_removes_legacy_class_count_gradient_scaling(self) -> None:
+        legacy_logits = torch.tensor(
+            [[0.2, -0.4, 0.8, -0.1, 0.3, -0.7]], requires_grad=True
+        )
+        current_logits = legacy_logits.detach().clone().requires_grad_(True)
+        targets = torch.tensor([[1.0, 0.0]])
+        current = (1, 4)
+        legacy_loss = compute_training_loss(
+            legacy_logits, targets, current, 1.0, "legacy_full_zero"
+        )
+        current_loss = compute_training_loss(
+            current_logits, targets, current, 1.0, "current_only"
+        )
+        legacy_loss.backward()
+        current_loss.backward()
+        self.assertTrue(torch.equal(
+            legacy_logits.grad[:, [0, 2, 3, 5]], torch.zeros(1, 4)
+        ))
+        self.assertTrue(torch.equal(
+            current_logits.grad[:, [0, 2, 3, 5]], torch.zeros(1, 4)
+        ))
+        self.assertTrue(
+            torch.allclose(
+                current_logits.grad[:, list(current)],
+                legacy_logits.grad[:, list(current)] * 3.0,
+            )
+        )
+
+    def test_transform_options_are_independent(self) -> None:
+        legacy_train, legacy_eval = build_transforms()
+        clip_train, clip_eval = build_transforms("clip", (0.5, 1.0))
+        self.assertEqual(tuple(legacy_train.transforms[0].scale), (0.05, 1.0))
+        self.assertEqual(tuple(clip_train.transforms[0].scale), (0.5, 1.0))
+        self.assertEqual(legacy_train.transforms[-1].__class__.__name__, "ToTensor")
+        self.assertEqual(legacy_eval.transforms[-1].__class__.__name__, "ToTensor")
+        self.assertEqual(clip_train.transforms[-1].__class__.__name__, "Normalize")
+        self.assertEqual(clip_eval.transforms[-1].__class__.__name__, "Normalize")
+
     def test_fixed_threshold_metrics(self) -> None:
         scores = torch.tensor([[0.9, 0.1], [0.7, 0.8], [0.2, 0.6]])
         targets = torch.tensor([[1.0, 0.0], [0.0, 1.0], [0.0, 1.0]])

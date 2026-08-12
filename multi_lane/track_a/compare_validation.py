@@ -20,6 +20,8 @@ PAIR_FIELDS = (
     "validation_split",
     "reporting_split",
     "training_label_scope",
+    "training_loss_mode",
+    "training_loss_reduction_classes",
     "evaluation_scope",
     "threshold",
     "epochs_per_task",
@@ -31,6 +33,11 @@ PAIR_FIELDS = (
     "scheduler",
     "weight_decay",
     "temperature",
+    "input_mode",
+    "input_normalization",
+    "input_normalization_mean",
+    "input_normalization_std",
+    "train_crop_scale",
     "amp",
     "tf32",
     "cudnn_benchmark",
@@ -79,7 +86,11 @@ def _load_run(run_root: Path) -> Dict[str, Any]:
             "task_metrics": task_metrics}
 
 
-def _validate_pair(baseline: Mapping[str, Any], candidate: Mapping[str, Any]) -> None:
+def _validate_pair(
+    baseline: Mapping[str, Any],
+    candidate: Mapping[str, Any],
+    candidate_task_initialization: str,
+) -> None:
     baseline_config = baseline["config"]
     candidate_config = candidate["config"]
     mismatches = [
@@ -97,16 +108,23 @@ def _validate_pair(baseline: Mapping[str, Any], candidate: Mapping[str, Any]) ->
         raise ValueError("Baseline run must have adapter_mode=disabled")
     if candidate_config.get("adapter_mode") != "task_lane":
         raise ValueError("Candidate run must have adapter_mode=task_lane")
-    if candidate_config.get("adapter_task_initialization") != "copy_previous":
-        raise ValueError("Candidate run must use copy_previous warm-start")
+    if (
+        candidate_config.get("adapter_task_initialization")
+        != candidate_task_initialization
+    ):
+        raise ValueError(
+            "Candidate Adapter initialization does not match the requested mode"
+        )
     if candidate_config.get("adapter_initialization_rng") != "forked_global_state":
         raise ValueError("Candidate run must isolate Adapter initialization RNG")
 
 
-def _metric_triplet(baseline: float, candidate: float) -> Dict[str, float]:
+def _metric_triplet(
+    baseline: float, candidate: float, candidate_label: str
+) -> Dict[str, float]:
     return {
         "disabled": float(baseline),
-        "warm_start": float(candidate),
+        candidate_label: float(candidate),
         "delta": float(candidate) - float(baseline),
     }
 
@@ -115,10 +133,14 @@ def compare_runs(
     baseline_root: Path,
     candidate_root: Path,
     focus_task_id: int = 6,
+    candidate_task_initialization: str = "copy_previous",
 ) -> Dict[str, Any]:
+    if candidate_task_initialization not in {"independent", "copy_previous"}:
+        raise ValueError("Candidate Adapter initialization mode is invalid")
     baseline = _load_run(baseline_root)
     candidate = _load_run(candidate_root)
-    _validate_pair(baseline, candidate)
+    _validate_pair(baseline, candidate, candidate_task_initialization)
+    candidate_label = candidate_task_initialization
 
     baseline_config = baseline["config"]
     class_order = list(baseline_config["class_order"])
@@ -144,7 +166,9 @@ def compare_runs(
             "seen_classes": int(baseline_row["seen_classes"]),
             "samples": int(baseline_row["samples"]),
             "metrics": {
-                metric: _metric_triplet(baseline_row[metric], candidate_row[metric])
+                metric: _metric_triplet(
+                    baseline_row[metric], candidate_row[metric], candidate_label
+                )
                 for metric in CURVE_METRICS
             },
         })
@@ -155,7 +179,7 @@ def compare_runs(
         candidate_ap = candidate["task_metrics"][task_id]["per_class_ap"]
         classes = {
             class_name: _metric_triplet(
-                baseline_ap[class_index], candidate_ap[class_index]
+                baseline_ap[class_index], candidate_ap[class_index], candidate_label
             )
             for class_index, class_name in zip(
                 range(focus_start, focus_end), focus_classes
@@ -170,17 +194,23 @@ def compare_runs(
         focus_rows[stage_name] = {
             "task_id": task_id,
             "classes": classes,
-            "mean_ap": _metric_triplet(baseline_mean, candidate_mean),
+            "mean_ap": _metric_triplet(
+                baseline_mean, candidate_mean, candidate_label
+            ),
         }
 
     baseline_summary = baseline["summary"]["metrics"]
     candidate_summary = candidate["summary"]["metrics"]
     summary_metrics = {
-        metric: _metric_triplet(baseline_summary[metric], candidate_summary[metric])
+        metric: _metric_triplet(
+            baseline_summary[metric], candidate_summary[metric], candidate_label
+        )
         for metric in SUMMARY_METRICS
     }
     forgetting = _metric_triplet(
-        baseline_summary["forgetting"], candidate_summary["forgetting"]
+        baseline_summary["forgetting"],
+        candidate_summary["forgetting"],
+        candidate_label,
     )
     forgetting["improvement"] = -forgetting["delta"]
     summary_metrics["forgetting"] = forgetting
@@ -203,13 +233,13 @@ def compare_runs(
             else "stop_task_lane_adapter_capacity_scaling"
         ),
         "rule": (
-            "Continue only when warm-start improves task6 mAP, task7/final mAP, "
+            "Continue only when the candidate improves task6 mAP, task7/final mAP, "
             "and the task6 new-class mean AP versus the paired disabled run."
         ),
     }
 
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "status": "complete",
         "comparison": "seed0_full_8task_validation",
         "protocol_id": baseline_config["protocol_id"],
@@ -217,6 +247,7 @@ def compare_runs(
         "git_commit": baseline_config["git"]["commit"],
         "baseline_run": baseline["root"],
         "candidate_run": candidate["root"],
+        "candidate_task_initialization": candidate_task_initialization,
         "task_curve": curve,
         "summary_metrics": summary_metrics,
         "focus_task": {
@@ -233,6 +264,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--baseline-run", type=Path, required=True)
     parser.add_argument("--candidate-run", type=Path, required=True)
     parser.add_argument("--focus-task-id", type=int, default=6)
+    parser.add_argument(
+        "--candidate-task-init",
+        choices=("independent", "copy_previous"),
+        default="copy_previous",
+    )
     parser.add_argument("--output", type=Path)
     return parser.parse_args()
 
@@ -243,6 +279,7 @@ def main() -> None:
         args.baseline_run.expanduser().resolve(),
         args.candidate_run.expanduser().resolve(),
         args.focus_task_id,
+        args.candidate_task_init,
     )
     text = json.dumps(result, indent=2, ensure_ascii=False) + "\n"
     if args.output is not None:

@@ -1,6 +1,28 @@
 # 工作日志
 
-最后一次更新：2026-08-11。
+最后一次更新：2026-08-12。
+
+## 2026-08-12：实现 loss、预处理与 Adapter 层位置分阶段诊断
+
+- 从clean `5b2f791` 创建本地分支 `exp/emotic-adapter-position-diagnostics`；服务器仍停留在
+  `exp/emotic-multilane-transformer-adapter`，本轮代码尚未提交推送或运行实验。
+- runner新增 `--training-loss-mode legacy_full_zero|current_only`。默认legacy保持历史复现；
+  current-only直接在当前task logits/targets上计算BCE。测试将验证有效logit梯度相对legacy
+  放大 `26/current_classes`，同时config记录Adam会弱化常数梯度缩放，避免预设结果。
+- runner新增 `--input-normalization none|clip` 和 `--train-crop-scale MIN MAX`；默认仍为none和
+  `(0.05,1.0)`。CLIP选项使用OpenAI mean/std，normalization与crop可独立组合并写入config。
+- 新增统一seed0/8-task/val-only诊断worker，支持disabled或task-lane；所有入口要求clean Git，
+  不构造test。新增loss两组launcher、预处理2×2 launcher、以及independent Adapter零基索引
+  layer `5/8/11` launcher；后两阶段强制显式传入上一阶段选中的配置，防止混杂。
+- paired validation分析器扩展为严格核对loss、input mode、normalization与crop scale，支持
+  显式 `independent/copy_previous` candidate，并把输出候选字段改为对应初始化模式。
+- 新增通用多运行validation diagnostics汇总器及测试，用于disabled loss/预处理阶段；输出每组
+  8-task mAP/cF1/oF1、五项summary和task6三类引入/final AP，不擅自按单一指标自动选优。
+- GPU smoke新增 `--adapter-layer-indices`，使同一个真实CLIP forward/backward入口可验证零基
+  layer `5/8/11` 的Adapter零初始化、梯度、冻结参数、参数量与路由，不必启动训练。
+- 计划顺序固定：disabled legacy/current-only完整validation选loss；选中loss下跑none/clip ×
+  crop0.05/0.50；选中预处理下再跑layer5/8/11 independent Adapter。只有中层通过task6、
+  task7 final与task6新类平均AP三项条件，才考虑小范围多层；当前未启动任何组。
 
 ## 2026-08-11：启动 seed0 完整8-task warm-start validation
 

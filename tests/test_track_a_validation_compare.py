@@ -31,6 +31,8 @@ def write_run(
         "validation_split": "val",
         "reporting_split": "val",
         "training_label_scope": "current_classes_only",
+        "training_loss_mode": "current_only",
+        "training_loss_reduction_classes": "current_task_only",
         "evaluation_scope": "samples_intersect_seen_classes",
         "threshold": 0.5,
         "epochs_per_task": 30,
@@ -42,6 +44,11 @@ def write_run(
         "scheduler": "CosineAnnealingLR_reset_per_task",
         "weight_decay": 0.0,
         "temperature": 1.0,
+        "input_mode": "full",
+        "input_normalization": "clip",
+        "input_normalization_mean": [0.1, 0.2, 0.3],
+        "input_normalization_std": [0.4, 0.5, 0.6],
+        "train_crop_scale": [0.5, 1.0],
         "amp": True,
         "tf32": True,
         "cudnn_benchmark": False,
@@ -150,6 +157,34 @@ class TrackAValidationComparisonTest(unittest.TestCase):
             write_run(root / "baseline", adapter_mode="disabled", seed=1)
             write_run(root / "candidate", adapter_mode="task_lane", seed=1)
             with self.assertRaisesRegex(ValueError, "only accepts seed0"):
+                compare_runs(root / "baseline", root / "candidate")
+
+    def test_accepts_requested_independent_candidate(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_run(root / "baseline", adapter_mode="disabled")
+            write_run(root / "candidate", adapter_mode="task_lane")
+            config_path = root / "candidate" / "config.json"
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+            config["adapter_task_initialization"] = "independent"
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+            result = compare_runs(
+                root / "baseline",
+                root / "candidate",
+                candidate_task_initialization="independent",
+            )
+        self.assertEqual(result["candidate_task_initialization"], "independent")
+
+    def test_rejects_preprocessing_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_run(root / "baseline", adapter_mode="disabled")
+            write_run(root / "candidate", adapter_mode="task_lane")
+            config_path = root / "candidate" / "config.json"
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+            config["train_crop_scale"] = [0.05, 1.0]
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "train_crop_scale"):
                 compare_runs(root / "baseline", root / "candidate")
 
 
