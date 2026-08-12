@@ -128,6 +128,10 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   正式实验。固定配置为`legacy_full_zero + CLIP normalization + crop(0.05,1.0)`、30 epochs/task、
   batch64、Adam、base LR0.0125、Adapter LR4e-4、scale0.1、ReLU、independent初始化。该单seed
   结果只能作为探索性对照，不能报告三seed均值或统计显著性。
+- 新实现已以`e10324f`提交并推送，服务器主工作树与本地同HEAD且clean；服务器`ddp`环境
+  22/22完整单元测试通过。GPU2真实CLIP smoke通过：可训练参数`739130`，zero-up Adapter与
+  runtime-disabled输出最大差`3.4332e-05`（AMP容差内），forward/backward、Adapter梯度、
+  frozen visual无梯度和concat inference均正常。
 
 - 当前实验分支为 `exp/emotic-multilane-transformer-adapter`，起点是已严格复现注册结果的
   `ce7d9a0`；严格复现分支保持冻结。

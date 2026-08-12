@@ -16,7 +16,12 @@
   test、8 tasks、30 epochs/task、batch64、seed0、legacy loss、CLIP normalization、crop0.05、
   image-token Adapter layer8/bottleneck32/LR4e-4/scale0.1/ReLU/independent。
 - 本地Python编译与Shell语法通过；本地系统Python缺少torch/numpy，完整单测和GPU smoke改在
-  服务器`ddp`环境执行。训练尚未启动。
+  服务器`ddp`环境执行。
+- 实现提交`e10324f`已推送到远端并由服务器通过Git安全切换；额外test-only worktree未修改。
+  服务器完整22项单元测试全部通过。
+- GPU2真实ViT-B/16 Image-token Adapter smoke通过：trainable parameters为`739130`，初始
+  等价最大差`3.4332275e-05`，Adapter梯度有限、visual encoder无梯度、无OOM。正式训练尚未
+  启动，下一步按确认配置只启动seed0。
 
 ## 2026-08-12：实现 loss、预处理与 Adapter 层位置分阶段诊断
 

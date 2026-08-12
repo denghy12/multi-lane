@@ -4,11 +4,11 @@
 
 ## 当前最高优先级：Image-token Adapter seed0 正式实验
 
-1. 完成本地实现检查，提交并推送`exp/emotic-image-token-adapter`；服务器先备份并恢复
-   Automatic Upload写入的同名文件，再通过Git安全切换该分支，保留test-only worktree。
-2. 在服务器`ddp`环境运行完整单元测试和image-token Adapter GPU smoke。必须验证：zero-up初始
-   等价、Adapter有有限梯度、冻结visual无梯度、task路由与参数计数正确；失败时不启动训练。
-3. 测试通过后只启动seed0：完整8-task、30 epochs/task、held-out test。配置固定为
+1. 已完成：实现提交`e10324f`已推送，服务器通过Git安全切换同一clean HEAD；test-only
+   worktree保留原状。
+2. 已完成：服务器22/22单元测试及GPU2真实CLIP image-token Adapter smoke通过；zero-up初始
+   等价、Adapter有限梯度、冻结visual无梯度、task路由与参数计数均已验证。
+3. 现在只启动seed0：完整8-task、30 epochs/task、held-out test。配置固定为
    `legacy_full_zero + clip normalization + crop(0.05,1.0)`、image-token Adapter zero-based
    layer8、bottleneck32、LR4e-4、scale0.1、ReLU、independent；不启动seed1/2或val筛选。
 4. 启动后只确认首批次/首轮无OOM、NaN、Traceback且显存稳定，不持续盯跑。完成后同步
