@@ -137,6 +137,15 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   `image_token_adapter_b32_layer8_seed0_20260813_004500`，运行代码提交为`a322419`。
   task0 epoch1耗时17.7秒、loss `0.61481267`、84步且skipped0；GPU2占用约2.0GB，未出现
   OOM、NaN、Traceback或RuntimeError。实验仍在运行，不启动seed1/2。
+- 用户随后要求参照本地`CODE_DDP`的ASL，在Image-token Adapter基础上直接做三组seed0正式
+  test：仅selectors/prompts/head使用ASL、仅Adapter使用ASL、两者都使用ASL。新分支为
+  `exp/emotic-image-token-asl-routing`，其余Image-token架构与训练协议保持不变。
+- ASL公式锁定为`CODE_DDP`的`gamma_neg=9.8, gamma_pos=0, clip=0.05, eps=1e-8`、detach
+  focal weight，并保持MULTI-LANE `legacy_full_zero`的26维mean reduction。混合loss采用一次
+  forward后对两个不相交参数组分别求`autograd.grad`：model组为selectors/prompts/head，
+  Adapter组只包含当前task的Image-token Adapter，从而保证model-ASL与adapter-ASL不是同一
+  梯度的不同命名。三组均为seed0、完整8-task、30 epochs/task、held-out test，不做validation
+  筛选；单seed/test直跑只作探索性结果。
 
 - 当前实验分支为 `exp/emotic-multilane-transformer-adapter`，起点是已严格复现注册结果的
   `ce7d9a0`；严格复现分支保持冻结。

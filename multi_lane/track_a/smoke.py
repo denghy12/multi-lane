@@ -5,10 +5,14 @@ from __future__ import annotations
 import argparse
 
 import torch
-import torch.nn.functional as F
 
 from .model import MultiLaneModel
 from .openai_clip_loader import load_openai_clip_visual
+from .runner import (
+    backward_routed_training_losses,
+    compute_asymmetric_training_loss,
+    compute_training_loss,
+)
 
 
 def main() -> None:
@@ -31,6 +35,11 @@ def main() -> None:
         "--adapter-task-init",
         choices=("independent", "copy_previous"),
         default="independent",
+    )
+    parser.add_argument(
+        "--loss-routing",
+        choices=("joint_bce", "model_asl", "adapter_asl", "both_asl"),
+        default="joint_bce",
     )
     args = parser.parse_args()
     if not torch.cuda.is_available():
@@ -86,16 +95,39 @@ def main() -> None:
                 f"tolerance: max_difference={max_initial_difference}"
             )
     model.train()
+    model_parameters = list(model.base_optimizer_parameters())
+    adapter_parameters = list(model.adapter_optimizer_parameters())
+    if args.loss_routing in {"adapter_asl", "both_asl"} and not adapter_parameters:
+        raise RuntimeError("Adapter ASL smoke requires an enabled Adapter")
+    scaler = torch.cuda.amp.GradScaler(enabled=True)
     with torch.cuda.amp.autocast():
         logits = model.current_all_logits(images)
-        loss = F.binary_cross_entropy_with_logits(
-            logits.float(), torch.zeros_like(logits)
+        current_targets = torch.zeros(2, 5, device="cuda")
+        bce_loss = compute_training_loss(
+            logits, current_targets, range(5), 1.0, "legacy_full_zero"
         )
-    loss.backward()
+        asl_loss = compute_asymmetric_training_loss(
+            logits, current_targets, range(5), 1.0, "legacy_full_zero"
+        )
+        model_loss = (
+            asl_loss
+            if args.loss_routing in {"model_asl", "both_asl"} else bce_loss
+        )
+        adapter_loss = (
+            asl_loss
+            if args.loss_routing in {"adapter_asl", "both_asl"} else bce_loss
+        )
+    backward_routed_training_losses(
+        model_loss=model_loss,
+        adapter_loss=adapter_loss,
+        model_parameters=model_parameters,
+        adapter_parameters=adapter_parameters,
+        scaler=scaler,
+        same_objective=args.loss_routing in {"joint_bce", "both_asl"},
+    )
     model.assert_visual_frozen()
     if model.selectors.grad is None or not torch.isfinite(model.selectors.grad).all():
         raise RuntimeError("Selector gradient smoke failed")
-    adapter_parameters = list(model.adapter_optimizer_parameters())
     if adapter_parameters and (
         any(parameter.grad is None for parameter in adapter_parameters)
         or any(
@@ -121,6 +153,7 @@ def main() -> None:
     print(
         "MULTI_LANE_TRACK_A_SMOKE_OK "
         f"adapter_mode={args.adapter_mode} task_init={args.adapter_task_init} "
+        f"loss_routing={args.loss_routing} "
         f"adapter_layers={','.join(map(str, args.adapter_layer_indices))} "
         f"trainable_parameters={trainable} "
         f"max_initial_difference={max_initial_difference if model.adapter_bank is not None else 0.0}"

@@ -144,10 +144,26 @@ def compute_training_loss(
     temperature: float,
     loss_mode: str,
 ) -> torch.Tensor:
-    if loss_mode not in {"legacy_full_zero", "current_only"}:
-        raise ValueError("Training loss mode must be legacy_full_zero or current_only")
     if temperature <= 0:
         raise ValueError("Training temperature must be positive")
+    loss_logits, loss_targets = training_loss_view(
+        logits, current_targets, current_class_indices, loss_mode
+    )
+    return F.binary_cross_entropy_with_logits(
+        loss_logits.float() / temperature, loss_targets
+    )
+
+
+def training_loss_view(
+    logits: torch.Tensor,
+    current_targets: torch.Tensor,
+    current_class_indices: Sequence[int],
+    loss_mode: str,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Build the historically supervised logit/target view once per objective."""
+
+    if loss_mode not in {"legacy_full_zero", "current_only"}:
+        raise ValueError("Training loss mode must be legacy_full_zero or current_only")
     current = tuple(int(index) for index in current_class_indices)
     if not current or len(set(current)) != len(current):
         raise ValueError("Current class indices must be non-empty and unique")
@@ -166,9 +182,89 @@ def compute_training_loss(
         loss_targets = torch.zeros_like(logits, dtype=torch.float32)
         loss_targets[:, list(current)] = current_targets
         loss_logits = logits.index_fill(1, hidden_tensor, 0.0)
-    return F.binary_cross_entropy_with_logits(
-        loss_logits.float() / temperature, loss_targets
+    return loss_logits, loss_targets
+
+
+def compute_asymmetric_training_loss(
+    logits: torch.Tensor,
+    current_targets: torch.Tensor,
+    current_class_indices: Sequence[int],
+    temperature: float,
+    loss_mode: str,
+    gamma_neg: float = 9.8,
+    gamma_pos: float = 0.0,
+    clip: float = 0.05,
+    eps: float = 1e-8,
+) -> torch.Tensor:
+    """CODE_DDP-compatible ASL over MULTI-LANE's supervised logit view."""
+
+    if temperature <= 0:
+        raise ValueError("Training temperature must be positive")
+    if gamma_neg < 0 or gamma_pos < 0:
+        raise ValueError("ASL gamma values must be non-negative")
+    if not 0 <= clip < 1:
+        raise ValueError("ASL clip must be in [0, 1)")
+    if eps <= 0:
+        raise ValueError("ASL epsilon must be positive")
+    loss_logits, loss_targets = training_loss_view(
+        logits, current_targets, current_class_indices, loss_mode
     )
+    probabilities = torch.sigmoid(loss_logits.float() / temperature)
+    negative_probabilities = 1.0 - probabilities
+    if clip > 0:
+        negative_probabilities = (negative_probabilities + clip).clamp(max=1.0)
+    targets = loss_targets.float()
+    anti_targets = 1.0 - targets
+    positive_loss = targets * torch.log(probabilities.clamp_min(eps))
+    negative_loss = anti_targets * torch.log(
+        negative_probabilities.clamp_min(eps)
+    )
+    positive_weight = (1.0 - probabilities).pow(gamma_pos)
+    negative_weight = (1.0 - negative_probabilities).pow(gamma_neg)
+    focal_weight = (
+        targets * positive_weight + anti_targets * negative_weight
+    ).detach()
+    loss = (-(positive_loss + negative_loss) * focal_weight).mean()
+    if not torch.isfinite(loss):
+        raise FloatingPointError("ASL produced a non-finite loss")
+    return loss
+
+
+def backward_routed_training_losses(
+    model_loss: torch.Tensor,
+    adapter_loss: torch.Tensor,
+    model_parameters: Sequence[torch.nn.Parameter],
+    adapter_parameters: Sequence[torch.nn.Parameter],
+    scaler: torch.cuda.amp.GradScaler,
+    same_objective: bool,
+) -> None:
+    """Route distinct objectives to model and Adapter parameter groups.
+
+    A normal backward is retained when both groups use one objective.  With
+    mixed objectives, autograd computes gradients for each disjoint parameter
+    group explicitly, preventing either loss from leaking into the other group.
+    """
+
+    model_parameters = tuple(model_parameters)
+    adapter_parameters = tuple(adapter_parameters)
+    if not adapter_parameters or same_objective:
+        scaler.scale(model_loss).backward()
+        return
+    overlap = {id(parameter) for parameter in model_parameters}.intersection(
+        id(parameter) for parameter in adapter_parameters
+    )
+    if overlap:
+        raise ValueError("Model and Adapter parameter groups must be disjoint")
+    model_gradients = torch.autograd.grad(
+        scaler.scale(model_loss), model_parameters, retain_graph=True
+    )
+    adapter_gradients = torch.autograd.grad(
+        scaler.scale(adapter_loss), adapter_parameters
+    )
+    for parameter, gradient in zip(model_parameters, model_gradients):
+        parameter.grad = gradient
+    for parameter, gradient in zip(adapter_parameters, adapter_gradients):
+        parameter.grad = gradient
 
 
 def resolve_dataset_parent(path: Path) -> Path:
@@ -340,7 +436,17 @@ def train_task(
     amp: bool,
     adapter_learning_rate: Optional[float] = None,
     loss_mode: str = "legacy_full_zero",
+    loss_routing: str = "joint_bce",
+    asl_gamma_neg: float = 9.8,
+    asl_gamma_pos: float = 0.0,
+    asl_clip: float = 0.05,
+    asl_eps: float = 1e-8,
 ) -> List[Dict[str, float]]:
+    if loss_routing not in {
+        "joint_bce", "model_asl", "adapter_asl", "both_asl"
+    }:
+        raise ValueError("Unknown model/Adapter loss routing")
+    model_parameters = list(model.base_optimizer_parameters())
     optimizer_groups = [
         {
             "params": [model.selectors, *list(model.prompts)],
@@ -349,6 +455,8 @@ def train_task(
         {"params": list(model.head.parameters()), "weight_decay": 0.0},
     ]
     adapter_parameters = list(model.adapter_optimizer_parameters())
+    if loss_routing in {"adapter_asl", "both_asl"} and not adapter_parameters:
+        raise ValueError("Adapter ASL routing requires an enabled Adapter")
     if adapter_parameters:
         if adapter_learning_rate is None or adapter_learning_rate <= 0:
             raise ValueError("Enabled adapters require a positive learning rate")
@@ -367,6 +475,7 @@ def train_task(
     for epoch in range(epochs):
         model.train()
         loss_total = 0.0
+        adapter_loss_total = 0.0
         batches = 0
         optimizer_steps = 0
         skipped_steps = 0
@@ -382,22 +491,53 @@ def train_task(
             optimizer.zero_grad(set_to_none=True)
             with torch.cuda.amp.autocast(enabled=amp):
                 logits = model.current_all_logits(images)
-                loss = compute_training_loss(
+                bce_loss = compute_training_loss(
                     logits,
                     current_targets,
                     current,
                     temperature,
                     loss_mode,
                 )
+                asl_loss = None
+                if loss_routing != "joint_bce":
+                    asl_loss = compute_asymmetric_training_loss(
+                        logits,
+                        current_targets,
+                        current,
+                        temperature,
+                        loss_mode,
+                        gamma_neg=asl_gamma_neg,
+                        gamma_pos=asl_gamma_pos,
+                        clip=asl_clip,
+                        eps=asl_eps,
+                    )
+                model_loss = (
+                    asl_loss
+                    if loss_routing in {"model_asl", "both_asl"}
+                    else bce_loss
+                )
+                adapter_loss = (
+                    asl_loss
+                    if loss_routing in {"adapter_asl", "both_asl"}
+                    else bce_loss
+                )
             scale_before = float(scaler.get_scale())
-            scaler.scale(loss).backward()
+            backward_routed_training_losses(
+                model_loss=model_loss,
+                adapter_loss=adapter_loss,
+                model_parameters=model_parameters,
+                adapter_parameters=adapter_parameters,
+                scaler=scaler,
+                same_objective=loss_routing in {"joint_bce", "both_asl"},
+            )
             scaler.step(optimizer)
             scaler.update()
             if float(scaler.get_scale()) >= scale_before:
                 optimizer_steps += 1
             else:
                 skipped_steps += 1
-            loss_total += float(loss.detach().cpu())
+            loss_total += float(model_loss.detach().cpu())
+            adapter_loss_total += float(adapter_loss.detach().cpu())
             batches += 1
         if not batches:
             raise RuntimeError("Training loader produced no batches")
@@ -406,6 +546,8 @@ def train_task(
         row = {
             "epoch": float(epoch),
             "current_loss": loss_total / batches,
+            "model_objective_loss": loss_total / batches,
+            "adapter_objective_loss": adapter_loss_total / batches,
             "optimizer_steps": float(optimizer_steps),
             "skipped_optimizer_steps": float(skipped_steps),
             "learning_rate": epoch_lr,
@@ -421,6 +563,7 @@ def train_task(
         print(
             f"task={task_id} epoch={epoch + 1}/{epochs} "
             f"loss={row['current_loss']:.8f} lr={epoch_lr:.8f} "
+            f"adapter_loss={row['adapter_objective_loss']:.8f} "
             f"steps={optimizer_steps} skipped={skipped_steps} "
             f"seconds={row['elapsed_seconds']:.1f}",
             flush=True,
@@ -496,6 +639,15 @@ def parse_args() -> argparse.Namespace:
         choices=("legacy_full_zero", "current_only"),
         default="legacy_full_zero",
     )
+    parser.add_argument(
+        "--loss-routing",
+        choices=("joint_bce", "model_asl", "adapter_asl", "both_asl"),
+        default="joint_bce",
+    )
+    parser.add_argument("--asl-gamma-neg", type=float, default=9.8)
+    parser.add_argument("--asl-gamma-pos", type=float, default=0.0)
+    parser.add_argument("--asl-clip", type=float, default=0.05)
+    parser.add_argument("--asl-eps", type=float, default=1e-8)
     parser.add_argument("--no-amp", action="store_true")
     parser.add_argument("--no-tf32", action="store_true")
     parser.add_argument("--input-mode", choices=("full", "person_crop"), default="full")
@@ -540,6 +692,8 @@ def main() -> None:
         raise ValueError("Frozen Track-A protocol requires threshold 0.5")
     if not 1 <= args.max_tasks <= len(TASK_SIZES):
         raise ValueError(f"max-tasks must be between 1 and {len(TASK_SIZES)}")
+    if args.loss_routing in {"adapter_asl", "both_asl"} and args.adapter_mode == "disabled":
+        raise ValueError("Adapter ASL routing requires an enabled Adapter")
     if not torch.cuda.is_available() or args.device != "cuda":
         raise RuntimeError("Formal Track-A reproduction requires CUDA")
     amp = not args.no_amp
@@ -624,6 +778,27 @@ def main() -> None:
         "reporting_split": args.reporting_split,
         "training_label_scope": "current_classes_only",
         "training_loss_mode": args.training_loss_mode,
+        "parameter_group_loss_routing": args.loss_routing,
+        "model_parameter_objective": (
+            "asl"
+            if args.loss_routing in {"model_asl", "both_asl"} else "bce"
+        ),
+        "adapter_parameter_objective": (
+            "asl"
+            if args.loss_routing in {"adapter_asl", "both_asl"} else "bce"
+        ),
+        "asl": (
+            {
+                "source": "CODE_DDP MaskedAsymmetricLoss",
+                "gamma_neg": args.asl_gamma_neg,
+                "gamma_pos": args.asl_gamma_pos,
+                "clip": args.asl_clip,
+                "eps": args.asl_eps,
+                "detach_focal_weight": True,
+                "reduction": "mean_over_training_loss_view",
+            }
+            if args.loss_routing != "joint_bce" else None
+        ),
         "training_loss_reduction_classes": (
             "current_task_only"
             if args.training_loss_mode == "current_only"
@@ -734,7 +909,9 @@ def main() -> None:
             model, train_loader, val_loader, device, task_id,
             args.epochs, learning_rate, args.weight_decay,
             args.temperature, amp, args.adapter_learning_rate,
-            args.training_loss_mode,
+            args.training_loss_mode, args.loss_routing,
+            args.asl_gamma_neg, args.asl_gamma_pos,
+            args.asl_clip, args.asl_eps,
         )
         row = evaluate(
             model, reporting_loader, device, task_id, args.threshold, amp

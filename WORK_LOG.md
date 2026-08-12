@@ -2,6 +2,18 @@
 
 最后一次更新：2026-08-13。
 
+## 2026-08-13：Image-token Adapter 的参数组级 ASL 三组实验
+
+- 审计本地`CODE_DDP`实现与已有结果，沿用其Adapter ASL默认：gamma-neg9.8、gamma-pos0、
+  probability clip0.05、eps1e-8、detach focal weight。MULTI-LANE保留legacy 26维监督视图和
+  mean reduction，避免同时改变loss形状与历史梯度尺度。
+- 从Image-token分支创建`exp/emotic-image-token-asl-routing`，新增参数组loss路由：
+  `model_asl`、`adapter_asl`、`both_asl`。混合模式通过`autograd.grad`把model目标只送入
+  selectors/prompts/head，把Adapter目标只送入当前task Adapter，消除联合图上的梯度串流。
+- 新增ASL数值/梯度路由测试、GPU smoke路由参数、三组seed0正式worker和3-GPU启动器。三组
+  固定full image、CLIP normalization、crop0.05、legacy监督、Image-token layer8/b32、
+  30 epochs/task、batch64、held-out test；尚未提交、同步或启动。
+
 ## 2026-08-13：实现 Image-token Adapter 并准备 seed0 正式实验
 
 - 将上一阶段task-lane Adapter位置诊断与路线收口文档以提交`ea5f204`推送到

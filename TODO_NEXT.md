@@ -2,7 +2,18 @@
 
 最后一次更新：2026-08-13。
 
-## 当前最高优先级：Image-token Adapter seed0 正式实验
+## 当前最高优先级：Image-token Adapter × ASL 三组 seed0 正式实验
+
+1. 完成ASL公式与model/Adapter参数组梯度隔离实现，运行静态检查、完整单元测试以及三种
+   loss-routing的真实CLIP GPU smoke；任何一项失败均不启动训练。
+2. 提交推送`exp/emotic-image-token-asl-routing`。为不切换正在运行原Image-token seed0的
+   服务器主工作树，在服务器创建独立ASL worktree，并保留已有test-only worktree原状。
+3. 重新检查GPU空闲显存后，用三张不同空闲卡分别启动`model_asl/adapter_asl/both_asl`。
+   三组均为seed0、完整8-task、30 epochs/task、held-out test；不做validation或更多seed。
+4. 仅观察首轮无OOM/NaN/Traceback、optimizer skipped0与显存稳定，随后不持续盯跑。完成后
+   同步各组`config.json/task_metrics.json/training_history.json/seed_summary.json`与日志。
+
+## 正在运行：Image-token Adapter seed0 正式实验
 
 1. 已完成：实现提交`e10324f`已推送，服务器通过Git安全切换同一clean HEAD；test-only
    worktree保留原状。

@@ -15,7 +15,9 @@ from multi_lane.track_a.runner import (
     CLASS_ORDER,
     TASK_SIZES,
     TaskMetrics,
+    backward_routed_training_losses,
     build_transforms,
+    compute_asymmetric_training_loss,
     compute_training_loss,
     compute_metrics,
     summarize_tasks,
@@ -295,6 +297,63 @@ class TrackAAdapterBankTest(unittest.TestCase):
 
 
 class TrackAMetricsTest(unittest.TestCase):
+    def test_asl_zero_gamma_zero_clip_matches_bce(self) -> None:
+        logits = torch.tensor([[0.2, -0.4, 0.8, -0.1]], requires_grad=True)
+        targets = torch.tensor([[1.0, 0.0]])
+        indices = (1, 3)
+        bce = compute_training_loss(
+            logits, targets, indices, 1.0, "current_only"
+        )
+        asl = compute_asymmetric_training_loss(
+            logits,
+            targets,
+            indices,
+            1.0,
+            "current_only",
+            gamma_neg=0.0,
+            gamma_pos=0.0,
+            clip=0.0,
+        )
+        self.assertTrue(torch.allclose(asl, bce, atol=1e-7))
+
+    def test_asl_suppresses_easy_negative_gradient(self) -> None:
+        bce_logits = torch.tensor([[-5.0]], requires_grad=True)
+        targets = torch.zeros(1, 1)
+        bce = compute_training_loss(
+            bce_logits, targets, (0,), 1.0, "current_only"
+        )
+        bce.backward()
+        asl_logits = torch.tensor([[-5.0]], requires_grad=True)
+        asl = compute_asymmetric_training_loss(
+            asl_logits,
+            targets,
+            (0,),
+            1.0,
+            "current_only",
+            gamma_neg=9.8,
+            gamma_pos=0.0,
+            clip=0.05,
+        )
+        asl.backward()
+        self.assertLess(asl_logits.grad.abs().item(), bce_logits.grad.abs().item())
+
+    def test_mixed_loss_routing_isolates_parameter_group_gradients(self) -> None:
+        model_parameter = nn.Parameter(torch.tensor(2.0))
+        adapter_parameter = nn.Parameter(torch.tensor(3.0))
+        model_loss = (model_parameter + 2.0 * adapter_parameter).pow(2)
+        adapter_loss = (3.0 * model_parameter + adapter_parameter).pow(2)
+        scaler = torch.cuda.amp.GradScaler(enabled=False)
+        backward_routed_training_losses(
+            model_loss,
+            adapter_loss,
+            (model_parameter,),
+            (adapter_parameter,),
+            scaler,
+            same_objective=False,
+        )
+        self.assertEqual(float(model_parameter.grad), 16.0)
+        self.assertEqual(float(adapter_parameter.grad), 18.0)
+
     def test_current_only_loss_removes_legacy_class_count_gradient_scaling(self) -> None:
         legacy_logits = torch.tensor(
             [[0.2, -0.4, 0.8, -0.1, 0.3, -0.7]], requires_grad=True
