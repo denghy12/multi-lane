@@ -8,10 +8,11 @@
    worktree保留原状。
 2. 已完成：服务器22/22单元测试及GPU2真实CLIP image-token Adapter smoke通过；zero-up初始
    等价、Adapter有限梯度、冻结visual无梯度、task路由与参数计数均已验证。
-3. 现在只启动seed0：完整8-task、30 epochs/task、held-out test。配置固定为
+3. 已启动seed0：完整8-task、30 epochs/task、held-out test。配置固定为
    `legacy_full_zero + clip normalization + crop(0.05,1.0)`、image-token Adapter zero-based
-   layer8、bottleneck32、LR4e-4、scale0.1、ReLU、independent；不启动seed1/2或val筛选。
-4. 启动后只确认首批次/首轮无OOM、NaN、Traceback且显存稳定，不持续盯跑。完成后同步
+   layer8、bottleneck32、LR4e-4、scale0.1、ReLU、independent；tmux为
+   `mla_image_token_seed0_004500`，不启动seed1/2或val筛选。
+4. 首轮已确认无OOM、NaN、Traceback，显存稳定。不持续盯跑；完成后同步
    `config.json`、`task_metrics.json`、`training_history.json`、`seed_summary.json`和正式日志；
    checkpoint可保留服务器。单seed仅作探索性对照，不宣称均值或显著性。
 

@@ -132,6 +132,11 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   22/22完整单元测试通过。GPU2真实CLIP smoke通过：可训练参数`739130`，zero-up Adapter与
   runtime-disabled输出最大差`3.4332e-05`（AMP容差内），forward/backward、Adapter梯度、
   frozen visual无梯度和concat inference均正常。
+- seed0 held-out test正式实验已于2026-08-13 00:45在GPU2启动，tmux为
+  `mla_image_token_seed0_004500`，run ID为
+  `image_token_adapter_b32_layer8_seed0_20260813_004500`，运行代码提交为`a322419`。
+  task0 epoch1耗时17.7秒、loss `0.61481267`、84步且skipped0；GPU2占用约2.0GB，未出现
+  OOM、NaN、Traceback或RuntimeError。实验仍在运行，不启动seed1/2。
 
 - 当前实验分支为 `exp/emotic-multilane-transformer-adapter`，起点是已严格复现注册结果的
   `ce7d9a0`；严格复现分支保持冻结。

@@ -22,6 +22,10 @@
 - GPU2真实ViT-B/16 Image-token Adapter smoke通过：trainable parameters为`739130`，初始
   等价最大差`3.4332275e-05`，Adapter梯度有限、visual encoder无梯度、无OOM。正式训练尚未
   启动，下一步按确认配置只启动seed0。
+- 记录验证结果的`a322419`已推送并由服务器fast-forward到clean同HEAD。seed0正式实验已在
+  GPU2/tmux `mla_image_token_seed0_004500`启动，run ID为
+  `image_token_adapter_b32_layer8_seed0_20260813_004500`。task0 epoch1正常完成：loss
+  `0.61481267`、84 optimizer steps、skipped0、17.7秒；GPU显存约2.0GB，无错误信号。
 
 ## 2026-08-12：实现 loss、预处理与 Adapter 层位置分阶段诊断
 
