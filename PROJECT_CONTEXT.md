@@ -55,7 +55,7 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 ### Task-lane Transformer Adapter 实验
 
 - 新的诊断分支为 `exp/emotic-adapter-position-diagnostics`，从已完成warm-start结论的
-  `5b2f791` 创建；本地实现尚未提交推送，服务器仍保持原Adapter分支。
+  `5b2f791` 创建；诊断实现提交 `5766860` 已推送，本地与服务器主工作树均切到该分支。
 - runner新增可选 `legacy_full_zero/current_only` loss；默认继续使用legacy，保证历史严格复现
   不变。current-only直接对当前任务5/3类logits计算BCE，去除26维零填充常数，并把原始有效
   梯度分别放大约 `26/5` 与 `26/3`；但Adam矩归一化会抵消大部分纯常数缩放，必须用完整
@@ -73,6 +73,9 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - GPU smoke入口支持显式指定零基Adapter layer indices；本轮验证计划仅在GPU2/3/4分别对
   layer `5/8/11`执行真实CLIP batch2 forward/backward、零初始化等价、梯度/冻结与路由检查，
   不读取EMOTIC、不写checkpoint，也不启动任何诊断训练。
+- 服务器完整Track-A单元测试20/20通过。GPU2/3/4上的layer `5/8/11` smoke均通过：每组
+  可训练参数 `788314`，零初始化Adapter与disabled路径的AMP logits最大差均为
+  `6.103515625e-05`；本轮未启动loss、预处理或层位置实验。
 
 - 当前实验分支为 `exp/emotic-multilane-transformer-adapter`，起点是已严格复现注册结果的
   `ce7d9a0`；严格复现分支保持冻结。

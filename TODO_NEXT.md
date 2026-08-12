@@ -4,10 +4,10 @@
 
 ## 当前最高优先级：验证 Task-lane Transformer Adapter 阶段 0
 
-0. 本地已创建 `exp/emotic-adapter-position-diagnostics` 并实现分阶段诊断，当前未提交、未推送、
-   未启动实验。用户已确认提交推送；先完成静态检查，再在服务器运行完整单测，并于GPU2/3/4
-   分别执行zero-based layer5/8/11 Adapter smoke。
-   验证通过后按顺序执行：loss二选一 → normalization/crop 2×2 → independent layer5/8/11；
+0. `exp/emotic-adapter-position-diagnostics` 的实现提交 `5766860` 已推送并同步；服务器20/20
+   单测及GPU2/3/4 zero-based layer5/8/11 Adapter smoke均通过，尚未启动实验。下一步必须先
+   经用户确认完整配置，才按顺序执行：loss二选一 → normalization/crop 2×2 → independent
+   layer5/8/11；
    每一步均只用seed0完整8-task validation，不能并行跳过前置选择。
 
 1. 阶段 0 主实现 `531f3f3` 已提交推送，本地和服务器主工作树已同步；test-only worktree

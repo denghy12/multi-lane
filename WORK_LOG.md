@@ -23,6 +23,14 @@
 - 计划顺序固定：disabled legacy/current-only完整validation选loss；选中loss下跑none/clip ×
   crop0.05/0.50；选中预处理下再跑layer5/8/11 independent Adapter。只有中层通过task6、
   task7 final与task6新类平均AP三项条件，才考虑小范围多层；当前未启动任何组。
+- 诊断实现已以 `5766860` 提交并推送；服务器主工作树安全切到同一分支和提交。Automatic
+  Upload遗留的4个同内容文件已先备份到
+  `/mnt/haoyuan/workspace/git-sync-backup-adapter-position-diagnostics-final-20260812`，再恢复旧分支
+  clean后通过Git切换；test-only worktree原有改动保持不动。
+- 服务器完整Track-A测试20/20通过。GPU2/3/4并行真实CLIP batch2 smoke分别验证zero-based
+  layer `5/8/11`，三组均为 `788314` 个可训练参数，初始logits最大差均为
+  `6.103515625e-05`，forward/backward、Adapter梯度、视觉塔冻结和concat推理均通过。本轮没有
+  读取EMOTIC、没有写checkpoint，也没有启动loss、预处理或层位置实验。
 
 ## 2026-08-11：启动 seed0 完整8-task warm-start validation
 
