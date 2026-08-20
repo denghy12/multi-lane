@@ -27,6 +27,10 @@
 - 首个实现提交`397d74d`已推送并由服务器ASL独立worktree通过Git切换到同一clean HEAD；
   服务器完整Track-A单元测试28/28通过。GPU smoke没有挤入繁忙卡，改由资源门控在队列真正
   启动前自动执行。
+- 资源门控补充提交`a0e0aee`已推送并由服务器fast-forward。第一阶段已在tmux
+  `mla_image_token_asl_hparam_s0_20260820_191924`排队，batch ID为
+  `image_token_asl_loss_seed0_20260820_191924`；首个GPU5快照为free3520MiB/util99%，门控
+  正确等待。当前只是CPU侧每60秒轮询，没有GPU smoke或训练进程，也未增加显存占用。
 
 ## 2026-08-13：Image-token Adapter 的参数组级 ASL 三组实验
 

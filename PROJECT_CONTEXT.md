@@ -197,6 +197,10 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   进程。Automatic Upload产生的服务器主worktree漂移已备份到
   `/mnt/haoyuan/workspace/git-sync-backup-image-token-hparam-upload-20260820`并恢复clean；
   ASL独立worktree同样保持clean。
+- 第一阶段队列已进入tmux等待态，session为
+  `mla_image_token_asl_hparam_s0_20260820_191924`，batch ID为
+  `image_token_asl_loss_seed0_20260820_191924`。首次门控快照GPU5仅余3520MiB且利用率99%，
+  因而正确保持等待；此时尚未运行GPU smoke、尚未创建任何训练run，也没有占用新增显存。
 
 - 当前实验分支为 `exp/emotic-multilane-transformer-adapter`，起点是已严格复现注册结果的
   `ce7d9a0`；严格复现分支保持冻结。

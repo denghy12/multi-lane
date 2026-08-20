@@ -17,6 +17,8 @@
    启动训练，也不终止现有进程。启动器已增加连续两次`free>=5000MiB`且`utilization<=10%`
    的自动资源门控；排队后会先执行真实CLIP GPU smoke，再用8卡队列启动。首轮仍需核验配置、
    84 steps、skipped0、显存与错误信号，然后让队列自动完成并汇总。
+   队列已在tmux `mla_image_token_asl_hparam_s0_20260820_191924`进入等待，batch ID为
+   `image_token_asl_loss_seed0_20260820_191924`；当前未启动smoke或训练。
 5. 第一阶段结束后才根据硬门槛进入gamma-pos搜索；不得提前并行启动依赖尚未产生的后续
    LR/scale/layer/bottleneck阶段，也不得读取held-out test。
 
