@@ -648,6 +648,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--asl-gamma-pos", type=float, default=0.0)
     parser.add_argument("--asl-clip", type=float, default=0.05)
     parser.add_argument("--asl-eps", type=float, default=1e-8)
+    parser.add_argument(
+        "--no-save-checkpoints",
+        action="store_true",
+        help="Do not write per-task checkpoints (intended for validation sweeps).",
+    )
     parser.add_argument("--no-amp", action="store_true")
     parser.add_argument("--no-tf32", action="store_true")
     parser.add_argument("--input-mode", choices=("full", "person_crop"), default="full")
@@ -703,7 +708,9 @@ def main() -> None:
     root = Path(__file__).resolve().parents[2]
     output = args.output_root.expanduser().resolve()
     output.mkdir(parents=True, exist_ok=False)
-    (output / "checkpoints").mkdir()
+    save_checkpoints = not args.no_save_checkpoints
+    if save_checkpoints:
+        (output / "checkpoints").mkdir()
 
     metadata = git_metadata(root)
     visual = load_openai_clip_visual(args.clip_checkpoint)
@@ -812,6 +819,7 @@ def main() -> None:
             "Adam moment normalization can largely cancel constant gradient scaling"
         ),
         "evaluation_scope": "samples_intersect_seen_classes",
+        "save_checkpoints": save_checkpoints,
         "threshold": args.threshold,
         "epochs_per_task": args.epochs,
         "train_batch_size": args.train_batch_size,
@@ -918,13 +926,14 @@ def main() -> None:
         )
         task_rows.append(row)
         training_history[str(task_id)] = history
-        torch.save(
-            {
-                "model": model.state_dict(), "task_id": task_id,
-                "config": config,
-            },
-            output / "checkpoints" / f"task{task_id}.pth",
-        )
+        if save_checkpoints:
+            torch.save(
+                {
+                    "model": model.state_dict(), "task_id": task_id,
+                    "config": config,
+                },
+                output / "checkpoints" / f"task{task_id}.pth",
+            )
         (output / "task_metrics.json").write_text(
             json.dumps([asdict(item) for item in task_rows], indent=2) + "\n",
             encoding="utf-8",

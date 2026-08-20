@@ -1,6 +1,26 @@
 # 工作日志
 
-最后一次更新：2026-08-13。
+最后一次更新：2026-08-20。
+
+## 2026-08-20：Image-token Adapter-only ASL 参数搜索框架
+
+- 从`exp/emotic-image-token-asl-routing@129c73d`创建
+  `exp/emotic-image-token-asl-hparam-search`，并保留此前尚未提交的四组结果分析与三份上下文
+  文档改动。
+- 第一阶段固定seed0、完整8-task validation、30 epochs/task、batch64、legacy监督、CLIP
+  normalization、crop0.05、Image-token layer8/b32/LR4e-4/scale0.1/ReLU/independent；主模型
+  继续BCE，只联合搜索Adapter ASL的5个gamma-neg与4个clip，并加入joint-BCE对照，共21组。
+- 新增通用validation worker与8-GPU队列启动器；每张GPU同一时刻只运行一组，21组按轮转
+  队列分配，全部完成后自动生成严格汇总。新增`--no-save-checkpoints`，只影响显式开启该参数
+  的调参运行，历史/正式入口继续默认保存checkpoint。
+- 新增专用汇总器和3项单测：强制完整21组网格、相同clean commit/tree、240 epochs、13950
+  updates、skipped0、无checkpoint，并按预注册task6/final/Sadness/Suffering/F1硬门槛排名。
+  本地Python编译、Shell语法、3项独立汇总器单测与`git diff --check`通过；完整torch单测待
+  服务器`ddp`环境执行。
+- 服务器预检发现GPU0--7均被现有任务占用约20.4--22.2GB，当前不具备安全启动余量，因此未
+  启动调参、未终止现有进程。Automatic Upload漂移已备份至
+  `/mnt/haoyuan/workspace/git-sync-backup-image-token-hparam-upload-20260820`并恢复主worktree
+  clean；ASL独立worktree保持clean，test-only worktree未触碰。
 
 ## 2026-08-13：Image-token Adapter 的参数组级 ASL 三组实验
 
@@ -26,6 +46,20 @@
 - 三组task0 epoch1均为84 optimizer steps、skipped0、约16.5秒；GPU占用2.0--2.4GB且均有
   21GB以上余量。model-ASL的model/Adapter loss为`0.01572653/0.76665431`，adapter-ASL为
   `0.61468159/0.02817775`，both-ASL为`0.01577781/0.01577781`；路由行为可观测且无异常。
+- 原Image-token BCE与三组ASL均完成240 epochs/13950 updates、skipped0、exit code0，运行
+  config为clean Git。按白名单打包四组JSON与正式/launcher日志，共24个小文件，不含checkpoint；
+  各源文件已通过服务器/本地SHA-256一致性校验，本地统一104KB压缩包SHA-256为
+  `60cb61ebe7f64d639f351821834c95539bad149ad0abe6e1d3f4796a2d8df884`。
+- 四组final/average mAP依次为：BCE `31.676786/38.564709`、model-ASL
+  `30.462064/38.238173`、Adapter-ASL `32.419329/38.878898`、both-ASL
+  `32.199410/39.148237`。Adapter-ASL相对BCE的task6/final mAP提高
+  `0.735797/0.742543`，task6 Sadness/Sensitivity/Suffering分别提高
+  `7.524682/0.652493/8.239046`，三类均值提高`5.472074`。
+- model-ASL/both-ASL的final oRecall接近100%、oPrecision约17%，oF1相对BCE下降
+  `20.004362/19.356518`。确认是gamma-neg9.8强烈削弱负监督引起的固定阈值校准坍塌，不是
+  训练未完成、OOM或梯度路由错误；Adapter-only ASL保留主模型BCE，因此F1基本稳定。
+- 完整对照报告写入本地结果目录`comparison_analysis.md`。本轮结果只有seed0且直接使用
+  held-out test，记录为探索性证据，不据此继续调gamma、阈值或启动新实验。
 
 ## 2026-08-13：实现 Image-token Adapter 并准备 seed0 正式实验
 

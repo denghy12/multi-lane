@@ -1,9 +1,9 @@
 # 项目上下文
 
-最后一次更新：2026-08-13；本地已从服务器当前分支创建新的诊断分支；此前本地与服务器均跟踪
-`exp/emotic-multilane-transformer-adapter`，阶段 0 主实现提交为 `531f3f3`。服务器额外
-test-only worktree 保持原分支和原有未提交状态；正式复现实验使用的业务代码提交仍为
-`8cff911`。
+最后一次更新：2026-08-20；当前本地分支为
+`exp/emotic-image-token-asl-hparam-search`。服务器为原Image-token BCE与ASL三组实验分别
+保留独立clean worktree；额外test-only worktree保持原分支和原有未提交状态，未被本轮同步、
+分析或实验修改。
 
 ## 项目目标
 
@@ -157,6 +157,42 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   16.4--16.8秒；model/Adapter objective loss分别为`0.01573/0.76665`、
   `0.61468/0.02818`、`0.01578/0.01578`，与三种路由定义一致。单卡占用约2.0--2.4GB，
   无OOM、NaN、Traceback或RuntimeError。
+- 原Image-token BCE及三组ASL均已正常完成：每组8 tasks × 30 epochs，共240 epochs、13950
+  optimizer updates、skipped0、launcher exit code0，config均记录clean Git。四组除loss路由
+  外的数据、seed、预处理与Adapter配置逐项一致。
+- Image-token BCE的final/average mAP、cF1、oF1、forgetting为
+  `31.676786/38.564709/31.911654/49.231766/4.801635`。相对它，`adapter_asl`为
+  `+0.742543/+0.314189/+0.247229/-0.130171/+0.022592`，是四组中final mAP最佳配置；
+  task6/7 mAP分别提高`0.735797/0.742543`。
+- `adapter_asl`在task6的Sadness/Sensitivity/Suffering AP分别提高
+  `7.524682/0.652493/8.239046`，三类均值提高`5.472074`，且提升在task7仍保留；它通过
+  Sadness与Suffering必须同时改善的方向性检查。但只有seed0且直接观察held-out test，不能
+  宣称统计显著或继续据此在test上调参。
+- `model_asl`使final mAP下降`1.214722`；`both_asl`虽使final mAP提高`0.522624`，两者的
+  final oRecall均接近100%、oPrecision约17%，oF1分别下降`20.004362/19.356518`。根因是
+  gamma-neg9.8与negative clip过度压低主模型易负样本梯度，导致logit校准在固定0.5阈值下
+  偏向全正预测；mAP排序能力不能掩盖该F1失效。仅Adapter使用ASL时主模型BCE仍维持校准，
+  因而没有该坍塌。
+- 四组结果与日志已按24文件白名单打包，不含checkpoint。本地目录为
+  `output/emotic_track_a_image_token_loss_routing_formal/image_token_bce_asl_seed0_results_20260813/`，
+  本地压缩包SHA-256为`60cb61ebe7f64d639f351821834c95539bad149ad0abe6e1d3f4796a2d8df884`；
+  详细对照见该目录`comparison_analysis.md`。本轮未启动任何后续实验。
+- 2026-08-20开始Image-token Adapter-only ASL调参阶段，新分支为
+  `exp/emotic-image-token-asl-hparam-search`。第一阶段预注册为seed0、完整8-task、30
+  epochs/task、validation-only；固定主模型BCE、legacy监督、CLIP normalization、crop0.05、
+  image-token layer8/b32/LR4e-4/scale0.1/ReLU/independent，仅联合搜索
+  `gamma_neg={1,2,4,6,9.8}` × `clip={0,0.025,0.05,0.1}`、`gamma_pos=0`，并加入一组
+  joint-BCE对照，共21组。
+- 新增通用Image-token validation worker、8-GPU队列启动器和专用汇总器。汇总器严格校验
+  clean Git、8 tasks、240 epochs、13950 updates、skipped0、完整预注册网格与配置一致性；
+  只有task6/final mAP、Sadness、Suffering不下降且final cF1/oF1下降不超过0.5的候选才进入
+  排名。新增`--no-save-checkpoints`，调参输出只保留小型JSON和日志，旧正式流程默认保存
+  checkpoint的行为不变。
+- 2026-08-20服务器GPU0--7预检时全部已有高负载进程：每卡使用约20.4--22.2GB、仅余
+  1.9--3.7GB，利用率57%--91%。为避免OOM和干扰现有任务，第一阶段尚未启动，也未终止任何
+  进程。Automatic Upload产生的服务器主worktree漂移已备份到
+  `/mnt/haoyuan/workspace/git-sync-backup-image-token-hparam-upload-20260820`并恢复clean；
+  ASL独立worktree同样保持clean。
 
 - 当前实验分支为 `exp/emotic-multilane-transformer-adapter`，起点是已严格复现注册结果的
   `ce7d9a0`；严格复现分支保持冻结。

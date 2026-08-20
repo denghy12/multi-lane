@@ -1,32 +1,38 @@
 # 下一步任务
 
-最后一次更新：2026-08-13。
+最后一次更新：2026-08-20。
 
-## 当前最高优先级：Image-token Adapter × ASL 三组 seed0 正式实验
+## 当前最高优先级：Image-token Adapter-only ASL 第一阶段参数搜索
 
-1. 已完成ASL公式与model/Adapter参数组梯度隔离实现；服务器25/25完整单测和三种
-   loss-routing真实CLIP GPU smoke全部通过。
-2. 已提交推送`6d5430a`；服务器独立ASL worktree检出同一clean提交，正在运行原Image-token
-   seed0的主worktree和test-only worktree均未切换。
-3. 已在GPU3/4/7分别启动`model_asl/adapter_asl/both_asl`，tmux为
-   `mla_image_token_asl_seed0_011602`；三组首轮均稳定且loss路由符合定义。
-   三组均为seed0、完整8-task、30 epochs/task、held-out test；不做validation或更多seed。
-4. 首轮已确认无OOM/NaN/Traceback、optimizer skipped0与显存稳定，随后不持续盯跑。完成后
-   同步各组`config.json/task_metrics.json/training_history.json/seed_summary.json`与日志。
+1. 已创建`exp/emotic-image-token-asl-hparam-search`并实现通用validation worker、8-GPU
+   队列、21组loss网格启动器、无checkpoint模式和严格结果汇总器。
+2. 第一阶段配置已预注册：seed0、完整8 tasks、30 epochs/task、val-only；固定主模型BCE、
+   legacy、CLIP normalization、crop0.05、image-token layer8/b32/LR4e-4/scale0.1/ReLU/
+   independent；搜索`gamma_neg={1,2,4,6,9.8}` ×
+   `clip={0,0.025,0.05,0.1}`、`gamma_pos=0`，另有joint-BCE，共21组。
+3. 本地静态检查和3项新增汇总器单测已通过。下一步先提交推送，再让服务器ASL独立worktree
+   安全切换同一clean HEAD，运行完整单测及真实CLIP GPU smoke。
+4. 当前GPU0--7全部被高负载任务占用，每卡仅余1.9--3.7GB；在任一卡没有足够安全余量前不
+   启动第一阶段，也不终止现有进程。释放后用8卡队列启动，首轮核验配置、84 steps、skipped0、
+   显存与错误信号，然后让队列自动完成并汇总。
+5. 第一阶段结束后才根据硬门槛进入gamma-pos搜索；不得提前并行启动依赖尚未产生的后续
+   LR/scale/layer/bottleneck阶段，也不得读取held-out test。
 
-## 正在运行：Image-token Adapter seed0 正式实验
+## 已完成：Image-token Adapter × ASL seed0 正式对照
 
-1. 已完成：实现提交`e10324f`已推送，服务器通过Git安全切换同一clean HEAD；test-only
-   worktree保留原状。
-2. 已完成：服务器22/22单元测试及GPU2真实CLIP image-token Adapter smoke通过；zero-up初始
-   等价、Adapter有限梯度、冻结visual无梯度、task路由与参数计数均已验证。
-3. 已启动seed0：完整8-task、30 epochs/task、held-out test。配置固定为
-   `legacy_full_zero + clip normalization + crop(0.05,1.0)`、image-token Adapter zero-based
-   layer8、bottleneck32、LR4e-4、scale0.1、ReLU、independent；tmux为
-   `mla_image_token_seed0_004500`，不启动seed1/2或val筛选。
-4. 首轮已确认无OOM、NaN、Traceback，显存稳定。不持续盯跑；完成后同步
-   `config.json`、`task_metrics.json`、`training_history.json`、`seed_summary.json`和正式日志；
-   checkpoint可保留服务器。单seed仅作探索性对照，不宣称均值或显著性。
+1. 原Image-token BCE与`model_asl/adapter_asl/both_asl`四组均已完成；每组240 epochs、
+   13950 updates、skipped0、exit code0，运行配置clean且除loss路由外完全对齐。
+2. 四组final mAP为`31.676786/30.462064/32.419329/32.199410`。当前探索性最优是
+   `model BCE + Adapter ASL`，相对Image-token BCE提高`0.742543`；task6/7分别提高
+   `0.735797/0.742543`，task6 Sadness与Suffering同时提高`7.524682/8.239046`。
+3. 不采用主模型ASL：`model_asl/both_asl`的final oRecall接近100%，oF1相对BCE下降
+   `20.004362/19.356518`，表明gamma-neg9.8导致固定阈值校准坍塌。
+4. 四组24个JSON/日志小文件已无checkpoint打包并同步到本地；压缩包SHA-256为
+   `60cb61ebe7f64d639f351821834c95539bad149ad0abe6e1d3f4796a2d8df884`，详细分析见本地
+   `output/emotic_track_a_image_token_loss_routing_formal/image_token_bce_asl_seed0_results_20260813/comparison_analysis.md`。
+5. 当前没有活动的本轮实验，不启动新训练。由于本轮只有seed0且已直接观察held-out test，
+   不继续基于该test调gamma、阈值、层数或容量。若要确认Adapter-ASL，应另行预注册未用于本轮
+   选择的validation/独立复现实验，再决定是否补seed，而不是把本次`+0.7425`当作显著结论。
 
 ## 已收口：Task-lane Transformer Adapter 阶段 0
 
