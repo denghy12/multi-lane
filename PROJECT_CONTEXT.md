@@ -188,6 +188,10 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   只有task6/final mAP、Sadness、Suffering不下降且final cF1/oF1下降不超过0.5的候选才进入
   排名。新增`--no-save-checkpoints`，调参输出只保留小型JSON和日志，旧正式流程默认保存
   checkpoint的行为不变。
+- 8-GPU启动器加入资源门控：每张卡必须连续两次满足空闲显存至少5000MiB且利用率不高于
+  10%，检查间隔60秒，才允许执行；指定smoke卡先运行真实CLIP Adapter-ASL smoke，通过后
+  各GPU独立等待并顺序执行自己的2--3组队列。这样可以在当前任务结束后自动启动，同时避免
+  把调参任务叠加到繁忙GPU。
 - 2026-08-20服务器GPU0--7预检时全部已有高负载进程：每卡使用约20.4--22.2GB、仅余
   1.9--3.7GB，利用率57%--91%。为避免OOM和干扰现有任务，第一阶段尚未启动，也未终止任何
   进程。Automatic Upload产生的服务器主worktree漂移已备份到

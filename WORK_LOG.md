@@ -13,6 +13,9 @@
 - 新增通用validation worker与8-GPU队列启动器；每张GPU同一时刻只运行一组，21组按轮转
   队列分配，全部完成后自动生成严格汇总。新增`--no-save-checkpoints`，只影响显式开启该参数
   的调参运行，历史/正式入口继续默认保存checkpoint。
+- 队列新增可复现资源门控，默认要求每卡连续两次达到`free>=5000MiB`且`utilization<=10%`，
+  间隔60秒；队列启动前在指定卡运行真实CLIP Image-token Adapter-ASL smoke。每条GPU lane
+  在开始下一组前都会重新过门槛，防止其他任务临时占卡时继续叠加。
 - 新增专用汇总器和3项单测：强制完整21组网格、相同clean commit/tree、240 epochs、13950
   updates、skipped0、无checkpoint，并按预注册task6/final/Sadness/Suffering/F1硬门槛排名。
   本地Python编译、Shell语法、3项独立汇总器单测与`git diff --check`通过；完整torch单测待
@@ -21,6 +24,9 @@
   启动调参、未终止现有进程。Automatic Upload漂移已备份至
   `/mnt/haoyuan/workspace/git-sync-backup-image-token-hparam-upload-20260820`并恢复主worktree
   clean；ASL独立worktree保持clean，test-only worktree未触碰。
+- 首个实现提交`397d74d`已推送并由服务器ASL独立worktree通过Git切换到同一clean HEAD；
+  服务器完整Track-A单元测试28/28通过。GPU smoke没有挤入繁忙卡，改由资源门控在队列真正
+  启动前自动执行。
 
 ## 2026-08-13：Image-token Adapter 的参数组级 ASL 三组实验
 

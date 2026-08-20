@@ -10,11 +10,13 @@
    legacy、CLIP normalization、crop0.05、image-token layer8/b32/LR4e-4/scale0.1/ReLU/
    independent；搜索`gamma_neg={1,2,4,6,9.8}` ×
    `clip={0,0.025,0.05,0.1}`、`gamma_pos=0`，另有joint-BCE，共21组。
-3. 本地静态检查和3项新增汇总器单测已通过。下一步先提交推送，再让服务器ASL独立worktree
-   安全切换同一clean HEAD，运行完整单测及真实CLIP GPU smoke。
+3. 首个实现提交`397d74d`已推送并安全同步到服务器ASL独立worktree；服务器完整Track-A
+   单元测试`28/28`通过。真实CLIP GPU smoke由资源门控在GPU空闲后先行执行，未在繁忙卡上
+   强行叠加。
 4. 当前GPU0--7全部被高负载任务占用，每卡仅余1.9--3.7GB；在任一卡没有足够安全余量前不
-   启动第一阶段，也不终止现有进程。释放后用8卡队列启动，首轮核验配置、84 steps、skipped0、
-   显存与错误信号，然后让队列自动完成并汇总。
+   启动训练，也不终止现有进程。启动器已增加连续两次`free>=5000MiB`且`utilization<=10%`
+   的自动资源门控；排队后会先执行真实CLIP GPU smoke，再用8卡队列启动。首轮仍需核验配置、
+   84 steps、skipped0、显存与错误信号，然后让队列自动完成并汇总。
 5. 第一阶段结束后才根据硬门槛进入gamma-pos搜索；不得提前并行启动依赖尚未产生的后续
    LR/scale/layer/bottleneck阶段，也不得读取held-out test。
 
