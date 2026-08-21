@@ -17,6 +17,11 @@
    直接判为无效，不通过改变seed或重跑掩盖。
 4. 启动前必须先完成服务器完整单测与FP32 Adapter-ASL smoke；启动后核对13组config均为
    `amp=false`、task0首轮steps84/skipped0且无OOM/NaN。若局部搜索得到内部最优，再进入gamma-pos；若最优仍在gamma-neg上边界，再决定是否扩展。
+5. 上述验证已完成，13组已在batch
+   `image_token_asl_stable_refine_seed0_20260821_231444`运行。等待两轮全部结束后，用
+   `stable_refine_fp32`profile严格核验13组同commit、240 epochs、13950 updates、skipped0，
+   再比较8-task mAP/cF1/oF1、forgetting及task6 Sadness/Sensitivity/Suffering。实验结束前
+   不更新服务器ASL worktree HEAD，也不启动gamma-pos或test。
    在validation参数选择完成并补独立seed前，不启动新的held-out test，也不同时调整LR、scale、
    layer或bottleneck。
 

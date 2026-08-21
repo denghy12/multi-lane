@@ -229,6 +229,16 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   `clip={0.0375,0.05,0.075}`、gamma-pos0；由于精度协议变化，旧9.8/0.05不再复用，需重跑
   12个ASL加1个joint-BCE。runner额外在ASL入口显式检查logits/targets有限性，便于区分上游
   NaN与loss公式异常；历史AMP入口默认行为保持不变。
+- 稳定版实现提交`3564e12`已推送并安全同步到服务器ASL独立worktree；完整Track-A单元测试
+  30/30通过。GPU0真实CLIP FP32 Adapter-ASL smoke通过，可训练参数739130，零初始化Adapter
+  与disabled logits最大差`1.70e-08`，梯度路由与冻结visual正常。
+- 13组正式validation队列已于2026-08-21 23:14启动，batch ID为
+  `image_token_asl_stable_refine_seed0_20260821_231444`，tmux为
+  `mla_asl_stable_refine_s0_20260821_231444`。第一轮GPU0--7分别运行joint-BCE、gn8的三个
+  clip、gn9.8的三个clip和gn12/clip0.0375；第二轮GPU0--4自动运行gn12剩余两组与gn16三组。
+- 第一轮8组config均记录clean`3564e12`与`amp=false`；task0 epoch1均为84 steps、skipped0，
+  单卡显存约2.8--3.0GB且仍余约21GB，无OOM、NaN、Traceback或RuntimeError。服务器ASL
+  worktree在13组全部结束前不得fast-forward到后续文档提交，否则第二轮Git commit会不一致。
 
 - 当前实验分支为 `exp/emotic-multilane-transformer-adapter`，起点是已严格复现注册结果的
   `ce7d9a0`；严格复现分支保持冻结。

@@ -34,7 +34,13 @@
 - 从当前分支创建`exp/emotic-image-token-asl-stable-refine`。为避免把不同数值协议混排，
   稳定版统一关闭AMP，以FP32重跑12个局部ASL组合及1个joint-BCE；因此不复用旧9.8/0.05。
   新增8-GPU两轮队列、FP32 GPU smoke入口、稳定版严格汇总profile和有限logit/target诊断。
-  当前仅完成本地实现与静态检查，尚未启动服务器训练。
+  实现提交`3564e12`已推送并由服务器ASL独立worktree安全切换；服务器30/30完整单测通过。
+- GPU0真实CLIP FP32 Adapter-ASL smoke通过：trainable parameters为739130，zero-up与disabled
+  logits最大差`1.70e-08`，无梯度、冻结或数值异常。8张GPU启动前均有23.6GB以上空闲。
+- 13组队列在tmux`mla_asl_stable_refine_s0_20260821_231444`启动，batch ID为
+  `image_token_asl_stable_refine_seed0_20260821_231444`。第一轮8组全部进入task0 epoch2；
+  epoch1均84 steps/skipped0、约16--17秒，单卡占用约2.8--3.0GB，无错误信号。第二轮5组由
+  每卡lane在第一组完成后自动接续；不保存checkpoint，不读取held-out test。
 
 ## 2026-08-20：Image-token Adapter-only ASL 参数搜索框架
 
