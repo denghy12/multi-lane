@@ -144,6 +144,30 @@ def write_grid(root: Path) -> list[tuple[str, Path]]:
     return labeled_roots
 
 
+def convert_to_failed_run(
+    labeled_roots: list[tuple[str, Path]], label: str
+) -> tuple[str, Path, Path]:
+    matching = [item for item in labeled_roots if item[0] == label]
+    if len(matching) != 1:
+        raise AssertionError(f"Expected one matching run for {label}")
+    _, run_root = matching[0]
+    labeled_roots.remove(matching[0])
+    (run_root / "seed_summary.json").unlink()
+    rows_path = run_root / "task_metrics.json"
+    rows = json.loads(rows_path.read_text(encoding="utf-8"))[:3]
+    rows_path.write_text(json.dumps(rows), encoding="utf-8")
+    history_path = run_root / "training_history.json"
+    history = json.loads(history_path.read_text(encoding="utf-8"))
+    history = {key: history[key] for key in ("0", "1", "2")}
+    history_path.write_text(json.dumps(history), encoding="utf-8")
+    log_path = run_root.parent / f"{label}.log"
+    log_path.write_text(
+        "Traceback\nFloatingPointError: ASL produced a non-finite loss\n",
+        encoding="utf-8",
+    )
+    return label, run_root, log_path
+
+
 class TrackAImageTokenASLSearchTest(unittest.TestCase):
     def test_validates_grid_and_selects_eligible_winner(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -173,6 +197,20 @@ class TrackAImageTokenASLSearchTest(unittest.TestCase):
             path.write_text(json.dumps(history), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "optimizer-step"):
                 summarize_loss_search(labeled_roots)
+
+    def test_records_verified_non_finite_candidate_as_ineligible(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            labeled_roots = write_grid(root)
+            failed = convert_to_failed_run(labeled_roots, "g6.0_c0.025")
+            result = summarize_loss_search(labeled_roots, [failed])
+        self.assertEqual(result["failed_candidates"], ["g6.0_c0.025"])
+        failed_result = next(
+            item for item in result["candidates"]
+            if item["label"] == "g6.0_c0.025"
+        )
+        self.assertFalse(failed_result["eligible"])
+        self.assertEqual(failed_result["failure"]["completed_tasks"], 3)
 
 
 if __name__ == "__main__":

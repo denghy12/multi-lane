@@ -65,11 +65,7 @@ def _close(left: Any, right: Any) -> bool:
     return left == right
 
 
-def _load_run(label: str, root: Path) -> Dict[str, Any]:
-    config = _load_json(root / "config.json")
-    rows = _load_json(root / "task_metrics.json")
-    history = _load_json(root / "training_history.json")
-    summary = _load_json(root / "seed_summary.json")
+def _validate_config(label: str, config: Dict[str, Any]) -> None:
     mismatches = [
         key for key, expected in EXPECTED_CONFIG.items()
         if not _close(config.get(key), expected)
@@ -78,6 +74,14 @@ def _load_run(label: str, root: Path) -> Dict[str, Any]:
         raise ValueError(f"Search run {label} has protocol mismatches: {mismatches}")
     if config.get("git", {}).get("dirty") is not False:
         raise ValueError(f"Search run {label} did not record clean Git")
+
+
+def _load_run(label: str, root: Path) -> Dict[str, Any]:
+    config = _load_json(root / "config.json")
+    rows = _load_json(root / "task_metrics.json")
+    history = _load_json(root / "training_history.json")
+    summary = _load_json(root / "seed_summary.json")
+    _validate_config(label, config)
     if summary.get("status") != "complete" or summary.get("seed") != 0:
         raise ValueError(f"Search run {label} is not a complete seed0 run")
     if len(rows) != 8 or [row.get("task_id") for row in rows] != list(range(8)):
@@ -107,9 +111,50 @@ def _load_run(label: str, root: Path) -> Dict[str, Any]:
     return {
         "label": label,
         "root": str(root.resolve()),
+        "status": "complete",
         "config": config,
         "rows": rows,
         "summary": summary,
+    }
+
+
+def _load_failed_run(label: str, root: Path, log_path: Path) -> Dict[str, Any]:
+    config = _load_json(root / "config.json")
+    rows = _load_json(root / "task_metrics.json")
+    history = _load_json(root / "training_history.json")
+    _validate_config(label, config)
+    if (root / "seed_summary.json").exists():
+        raise ValueError(f"Failed search run {label} unexpectedly has a summary")
+    if (root / "checkpoints").exists():
+        raise ValueError(f"Failed search run {label} unexpectedly has checkpoints")
+    if [row.get("task_id") for row in rows] != list(range(len(rows))):
+        raise ValueError(f"Failed search run {label} has invalid completed tasks")
+    if list(history) != [str(index) for index in range(len(rows))]:
+        raise ValueError(f"Failed search run {label} has invalid partial history")
+    if not rows or len(rows) >= 8:
+        raise ValueError(f"Failed search run {label} must be a nonempty partial run")
+    if any(len(history[str(index)]) != 30 for index in range(len(rows))):
+        raise ValueError(f"Failed search run {label} has incomplete saved task history")
+    if not log_path.is_file():
+        raise FileNotFoundError(f"Missing failure log for {label}: {log_path}")
+    log_text = log_path.read_text(encoding="utf-8")
+    failure_text = "FloatingPointError: ASL produced a non-finite loss"
+    if failure_text not in log_text:
+        raise ValueError(f"Failed search run {label} lacks the expected ASL failure")
+    return {
+        "label": label,
+        "root": str(root.resolve()),
+        "status": "failed_non_finite_asl_loss",
+        "failure": {
+            "error_type": "FloatingPointError",
+            "reason": "ASL produced a non-finite loss",
+            "completed_tasks": len(rows),
+            "completed_epochs": sum(len(value) for value in history.values()),
+            "log": str(log_path.resolve()),
+        },
+        "config": config,
+        "rows": rows,
+        "history": history,
     }
 
 
@@ -128,13 +173,19 @@ def _focus_metrics(run: Dict[str, Any], task_id: int = 6) -> Dict[str, Any]:
 
 def summarize_loss_search(
     labeled_roots: Sequence[Tuple[str, Path]],
+    failed_labeled_roots: Sequence[Tuple[str, Path, Path]] = (),
 ) -> Dict[str, Any]:
-    if len(labeled_roots) != 1 + len(EXPECTED_CANDIDATES):
-        raise ValueError("Loss search requires one BCE control and 20 ASL candidates")
-    labels = [label for label, _ in labeled_roots]
+    if len(labeled_roots) + len(failed_labeled_roots) != 1 + len(EXPECTED_CANDIDATES):
+        raise ValueError("Loss search requires one BCE control and 20 ASL outcomes")
+    labels = [label for label, _ in labeled_roots] + [
+        label for label, _, _ in failed_labeled_roots
+    ]
     if len(labels) != len(set(labels)):
         raise ValueError("Search labels must be unique")
-    runs = [_load_run(label, root) for label, root in labeled_roots]
+    runs = [_load_run(label, root) for label, root in labeled_roots] + [
+        _load_failed_run(label, root, log_path)
+        for label, root, log_path in failed_labeled_roots
+    ]
     commits = {
         (run["config"]["git"].get("commit"), run["config"]["git"].get("tree"))
         for run in runs
@@ -149,6 +200,8 @@ def summarize_loss_search(
     if len(controls) != 1:
         raise ValueError("Loss search requires exactly one joint-BCE control")
     control = controls[0]
+    if control["status"] != "complete":
+        raise ValueError("Joint-BCE control must complete successfully")
     if (
         control["config"].get("model_parameter_objective") != "bce"
         or control["config"].get("adapter_parameter_objective") != "bce"
@@ -176,6 +229,19 @@ def summarize_loss_search(
     baseline_focus = _focus_metrics(control)
     results = []
     for run in candidates:
+        if run["status"] != "complete":
+            results.append({
+                "label": run["label"],
+                "root": run["root"],
+                "status": run["status"],
+                "asl": run["config"]["asl"],
+                "failure": run["failure"],
+                "eligibility_gates": {
+                    "training_completed": False,
+                },
+                "eligible": False,
+            })
+            continue
         summary = run["summary"]["metrics"]
         focus = _focus_metrics(run)
         deltas = {
@@ -203,6 +269,7 @@ def summarize_loss_search(
         results.append({
             "label": run["label"],
             "root": run["root"],
+            "status": "complete",
             "asl": run["config"]["asl"],
             "task_curve": [
                 {
@@ -273,6 +340,10 @@ def summarize_loss_search(
             "task6_new_classes": baseline_focus,
         },
         "candidates": results,
+        "failed_candidates": [
+            result["label"] for result in results
+            if result["status"] != "complete"
+        ],
         "eligible_ranking": [result["label"] for result in eligible],
         "winner": winner["label"] if winner is not None else None,
         "retained_within_0.30_final_mAP": top_labels,
@@ -286,16 +357,28 @@ def _labeled_root(value: str) -> Tuple[str, Path]:
     return label, Path(path).expanduser()
 
 
+def _failed_labeled_root(value: str) -> Tuple[str, Path, Path]:
+    parts = value.split("=", 2)
+    if len(parts) != 3 or not all(parts):
+        raise argparse.ArgumentTypeError(
+            "Failed run must have LABEL=RUN_ROOT=LOG_PATH form"
+        )
+    return parts[0], Path(parts[1]).expanduser(), Path(parts[2]).expanduser()
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run", type=_labeled_root, action="append", required=True)
+    parser.add_argument(
+        "--failed-run", type=_failed_labeled_root, action="append", default=[]
+    )
     parser.add_argument("--output", type=Path, required=True)
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    result = summarize_loss_search(args.run)
+    result = summarize_loss_search(args.run, args.failed_run)
     text = json.dumps(result, indent=2, ensure_ascii=False) + "\n"
     output = args.output.expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
