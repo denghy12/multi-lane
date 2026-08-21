@@ -12,10 +12,26 @@ from typing import Any, Dict, Sequence, Tuple
 
 GAMMA_NEG_VALUES = (1.0, 2.0, 4.0, 6.0, 9.8)
 CLIP_VALUES = (0.0, 0.025, 0.05, 0.1)
-EXPECTED_CANDIDATES = {
-    (gamma_neg, clip)
-    for gamma_neg in GAMMA_NEG_VALUES
-    for clip in CLIP_VALUES
+STABLE_REFINE_GAMMA_NEG_VALUES = (8.0, 9.8, 12.0, 16.0)
+STABLE_REFINE_CLIP_VALUES = (0.0375, 0.05, 0.075)
+SEARCH_PROFILES = {
+    "stage1_amp": {
+        "gamma_neg_values": GAMMA_NEG_VALUES,
+        "clip_values": CLIP_VALUES,
+        "amp": True,
+        "comparison": (
+            "image_token_adapter_asl_seed0_full_8task_validation_loss_grid"
+        ),
+    },
+    "stable_refine_fp32": {
+        "gamma_neg_values": STABLE_REFINE_GAMMA_NEG_VALUES,
+        "clip_values": STABLE_REFINE_CLIP_VALUES,
+        "amp": False,
+        "comparison": (
+            "image_token_adapter_asl_seed0_full_8task_validation_"
+            "stable_refine_fp32"
+        ),
+    },
 }
 EXPECTED_CONFIG = {
     "seed": 0,
@@ -51,6 +67,13 @@ EXPECTED_CONFIG = {
 }
 
 
+def _profile(name: str) -> Dict[str, Any]:
+    try:
+        return SEARCH_PROFILES[name]
+    except KeyError as error:
+        raise ValueError(f"Unknown ASL search profile: {name}") from error
+
+
 def _load_json(path: Path) -> Any:
     if not path.is_file():
         raise FileNotFoundError(f"Missing search artifact: {path}")
@@ -65,9 +88,11 @@ def _close(left: Any, right: Any) -> bool:
     return left == right
 
 
-def _validate_config(label: str, config: Dict[str, Any]) -> None:
+def _validate_config(
+    label: str, config: Dict[str, Any], expected_config: Dict[str, Any]
+) -> None:
     mismatches = [
-        key for key, expected in EXPECTED_CONFIG.items()
+        key for key, expected in expected_config.items()
         if not _close(config.get(key), expected)
     ]
     if mismatches:
@@ -76,12 +101,14 @@ def _validate_config(label: str, config: Dict[str, Any]) -> None:
         raise ValueError(f"Search run {label} did not record clean Git")
 
 
-def _load_run(label: str, root: Path) -> Dict[str, Any]:
+def _load_run(
+    label: str, root: Path, expected_config: Dict[str, Any]
+) -> Dict[str, Any]:
     config = _load_json(root / "config.json")
     rows = _load_json(root / "task_metrics.json")
     history = _load_json(root / "training_history.json")
     summary = _load_json(root / "seed_summary.json")
-    _validate_config(label, config)
+    _validate_config(label, config, expected_config)
     if summary.get("status") != "complete" or summary.get("seed") != 0:
         raise ValueError(f"Search run {label} is not a complete seed0 run")
     if len(rows) != 8 or [row.get("task_id") for row in rows] != list(range(8)):
@@ -118,11 +145,16 @@ def _load_run(label: str, root: Path) -> Dict[str, Any]:
     }
 
 
-def _load_failed_run(label: str, root: Path, log_path: Path) -> Dict[str, Any]:
+def _load_failed_run(
+    label: str,
+    root: Path,
+    log_path: Path,
+    expected_config: Dict[str, Any],
+) -> Dict[str, Any]:
     config = _load_json(root / "config.json")
     rows = _load_json(root / "task_metrics.json")
     history = _load_json(root / "training_history.json")
-    _validate_config(label, config)
+    _validate_config(label, config, expected_config)
     if (root / "seed_summary.json").exists():
         raise ValueError(f"Failed search run {label} unexpectedly has a summary")
     if (root / "checkpoints").exists():
@@ -174,16 +206,33 @@ def _focus_metrics(run: Dict[str, Any], task_id: int = 6) -> Dict[str, Any]:
 def summarize_loss_search(
     labeled_roots: Sequence[Tuple[str, Path]],
     failed_labeled_roots: Sequence[Tuple[str, Path, Path]] = (),
+    profile_name: str = "stage1_amp",
 ) -> Dict[str, Any]:
-    if len(labeled_roots) + len(failed_labeled_roots) != 1 + len(EXPECTED_CANDIDATES):
-        raise ValueError("Loss search requires one BCE control and 20 ASL outcomes")
+    profile = _profile(profile_name)
+    expected_candidates = {
+        (gamma_neg, clip)
+        for gamma_neg in profile["gamma_neg_values"]
+        for clip in profile["clip_values"]
+    }
+    expected_config = dict(EXPECTED_CONFIG)
+    expected_config["amp"] = profile["amp"]
+    if (
+        len(labeled_roots) + len(failed_labeled_roots)
+        != 1 + len(expected_candidates)
+    ):
+        raise ValueError(
+            "Loss search requires one BCE control and "
+            f"{len(expected_candidates)} ASL outcomes"
+        )
     labels = [label for label, _ in labeled_roots] + [
         label for label, _, _ in failed_labeled_roots
     ]
     if len(labels) != len(set(labels)):
         raise ValueError("Search labels must be unique")
-    runs = [_load_run(label, root) for label, root in labeled_roots] + [
-        _load_failed_run(label, root, log_path)
+    runs = [
+        _load_run(label, root, expected_config) for label, root in labeled_roots
+    ] + [
+        _load_failed_run(label, root, log_path, expected_config)
         for label, root, log_path in failed_labeled_roots
     ]
     commits = {
@@ -222,7 +271,7 @@ def summarize_loss_search(
         if not _close(asl.get("gamma_pos"), 0.0) or not _close(asl.get("eps"), 1e-8):
             raise ValueError(f"Candidate {run['label']} has invalid fixed ASL values")
         observed_grid.add((float(asl["gamma_neg"]), float(asl["clip"])))
-    if observed_grid != EXPECTED_CANDIDATES:
+    if observed_grid != expected_candidates:
         raise ValueError("Observed ASL candidates do not match the preregistered grid")
 
     baseline_summary = control["summary"]["metrics"]
@@ -317,7 +366,8 @@ def summarize_loss_search(
     return {
         "schema_version": 1,
         "status": "complete",
-        "comparison": "image_token_adapter_asl_seed0_full_8task_validation_loss_grid",
+        "search_profile": profile_name,
+        "comparison": profile["comparison"],
         "git": {"commit": next(iter(commits))[0], "tree": next(iter(commits))[1]},
         "selection_policy": {
             "primary": "final_mAP among candidates passing every hard gate",
@@ -372,13 +422,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--failed-run", type=_failed_labeled_root, action="append", default=[]
     )
+    parser.add_argument(
+        "--profile",
+        choices=tuple(SEARCH_PROFILES),
+        default="stage1_amp",
+    )
     parser.add_argument("--output", type=Path, required=True)
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    result = summarize_loss_search(args.run, args.failed_run)
+    result = summarize_loss_search(
+        args.run, args.failed_run, profile_name=args.profile
+    )
     text = json.dumps(result, indent=2, ensure_ascii=False) + "\n"
     output = args.output.expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)

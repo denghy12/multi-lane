@@ -1,6 +1,40 @@
 # 工作日志
 
-最后一次更新：2026-08-20。
+最后一次更新：2026-08-21。
+
+## 2026-08-21：同步并分析 Image-token Adapter-only ASL 第一阶段结果
+
+- 第一阶段batch `image_token_asl_loss_seed0_20260820_191924`已结束。21组预注册配置中18组
+  完整完成，均为8 tasks、240 epochs、13950 updates、skipped0；3组在task3因非有限ASL
+  loss失败：`gn4/clip0`、`gn6/clip0.025`、`gn9.8/clip0.025`。失败不是OOM，按预注册
+  完整性规则判为无效且不重跑。
+- 缺失的`gn9.8/clip0`已在原实验提交`b99480e`补齐并正常完成。failure-aware汇总器生成
+  `loss_search_summary.json`，服务器完整单元测试29/29通过，当前无本轮训练进程且GPU0--7
+  均空闲。
+- 相对joint-BCE validation，严格赢家`gn9.8/clip0.05`的final/average mAP为
+  `42.667273/49.237821`，提高`0.709193/0.922159`；final cF1/oF1提高
+  `0.686412/0.430169`，8个task mAP均提高。forgetting提高到`1.017189`，即恶化
+  `0.076460`。
+- 赢家task6 mAP提高`0.695724`；Sadness/Sensitivity/Suffering分别变化
+  `+1.404916/-0.530427/+8.675063`，三类均值提高`3.183184`。它通过所有硬门槛，但只证明
+  Suffering和整体排序获益，不能证明Sensitivity或旧类保持已解决。
+- 只有`gn9.8/clip0.05`和`gn9.8/clip0`通过全部门槛；后者final mAP提高`0.526062`，但
+  final cF1下降`0.176099`、forgetting恶化`0.108917`，综合列第二。其余若只看final mAP
+  会忽略Sadness/Suffering或F1门槛退化。
+- 107个结果/日志/清单文件已在服务器按白名单打包，无checkpoint，压缩包512KB；服务器与
+  本地archive SHA-256均为
+  `90e0ea0817ec0ea266e72f3961a58e4f2abe89603c31f4755ef91c8ad0ab7684`，逐文件SHA校验通过。
+  本地已解压至`output/emotic_track_a_image_token_asl_hparam/`并新增`analysis.md`。
+- 本轮未启动下一阶段。赢家gamma-neg仍处搜索上边界，建议先局部扩展到
+  `gamma_neg={8,9.8,12,16}`、`clip={0.0375,0.05,0.075}`，复用已有赢家后需11个新运行；
+  只有确认内部最优后才搜索gamma-pos，并继续只用validation。
+- 用户确认使用8张4090并行继续。进一步审计发现三个失败配置都在task3约2000次连续更新后
+  开始出现AMP GradScaler跳步，随后跳步增多并产生非有限logits/loss；这与默认GradScaler
+  增大loss scale的时间点吻合，不是数据缺失或OOM。
+- 从当前分支创建`exp/emotic-image-token-asl-stable-refine`。为避免把不同数值协议混排，
+  稳定版统一关闭AMP，以FP32重跑12个局部ASL组合及1个joint-BCE；因此不复用旧9.8/0.05。
+  新增8-GPU两轮队列、FP32 GPU smoke入口、稳定版严格汇总profile和有限logit/target诊断。
+  当前仅完成本地实现与静态检查，尚未启动服务器训练。
 
 ## 2026-08-20：Image-token Adapter-only ASL 参数搜索框架
 

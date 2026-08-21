@@ -1,26 +1,24 @@
 # 下一步任务
 
-最后一次更新：2026-08-20。
+最后一次更新：2026-08-21。
 
-## 当前最高优先级：Image-token Adapter-only ASL 第一阶段参数搜索
+## 当前最高优先级：运行 ASL FP32 稳定版局部边界搜索
 
-1. 已创建`exp/emotic-image-token-asl-hparam-search`并实现通用validation worker、8-GPU
-   队列、21组loss网格启动器、无checkpoint模式和严格结果汇总器。
-2. 第一阶段配置已预注册：seed0、完整8 tasks、30 epochs/task、val-only；固定主模型BCE、
-   legacy、CLIP normalization、crop0.05、image-token layer8/b32/LR4e-4/scale0.1/ReLU/
-   independent；搜索`gamma_neg={1,2,4,6,9.8}` ×
-   `clip={0,0.025,0.05,0.1}`、`gamma_pos=0`，另有joint-BCE，共21组。
-3. 首个实现提交`397d74d`已推送并安全同步到服务器ASL独立worktree；服务器完整Track-A
-   单元测试`28/28`通过。真实CLIP GPU smoke由资源门控在GPU空闲后先行执行，未在繁忙卡上
-   强行叠加。
-4. 当前GPU0--7全部被高负载任务占用，每卡仅余1.9--3.7GB；在任一卡没有足够安全余量前不
-   启动训练，也不终止现有进程。启动器已增加连续两次`free>=5000MiB`且`utilization<=10%`
-   的自动资源门控；排队后会先执行真实CLIP GPU smoke，再用8卡队列启动。首轮仍需核验配置、
-   84 steps、skipped0、显存与错误信号，然后让队列自动完成并汇总。
-   队列已在tmux `mla_image_token_asl_hparam_s0_20260820_191924`进入等待，batch ID为
-   `image_token_asl_loss_seed0_20260820_191924`；当前未启动smoke或训练。
-5. 第一阶段结束后才根据硬门槛进入gamma-pos搜索；不得提前并行启动依赖尚未产生的后续
-   LR/scale/layer/bottleneck阶段，也不得读取held-out test。
+1. 第一阶段21组已结束：18组完整完成，3组非有限loss失败；结果已同步、校验和分析，当前
+   无活动实验。严格赢家为`adapter_asl_gn9p8_clip0p05`，相对joint-BCE的final/average mAP
+   提高`0.709193/0.922159`，task6 Suffering提高`8.675063`，但Sensitivity下降`0.530427`、
+   forgetting恶化`0.076460`。
+2. 用户已确认继续。三个失败组合在task3约2000次更新后开始AMP overflow；稳定版统一使用
+   FP32，不能严格复用旧AMP结果。当前分支为`exp/emotic-image-token-asl-stable-refine`，应
+   运行`gamma_neg={8,9.8,12,16}` × `clip={0.0375,0.05,0.075}`的12个ASL组合，并加1个
+   同提交joint-BCE，共13组、8卡两轮。
+3. 继续沿用原硬门槛：task6/final mAP、Sadness、Suffering不得下降，final cF1/oF1下降不得
+   超过0.5；同时单列Sensitivity和forgetting，不能用final mAP掩盖二者退化。任何非有限loss
+   直接判为无效，不通过改变seed或重跑掩盖。
+4. 启动前必须先完成服务器完整单测与FP32 Adapter-ASL smoke；启动后核对13组config均为
+   `amp=false`、task0首轮steps84/skipped0且无OOM/NaN。若局部搜索得到内部最优，再进入gamma-pos；若最优仍在gamma-neg上边界，再决定是否扩展。
+   在validation参数选择完成并补独立seed前，不启动新的held-out test，也不同时调整LR、scale、
+   layer或bottleneck。
 
 ## 已完成：Image-token Adapter × ASL seed0 正式对照
 

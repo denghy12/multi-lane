@@ -8,6 +8,8 @@ from pathlib import Path
 from multi_lane.track_a.summarize_image_token_asl_search import (
     CLIP_VALUES,
     GAMMA_NEG_VALUES,
+    STABLE_REFINE_CLIP_VALUES,
+    STABLE_REFINE_GAMMA_NEG_VALUES,
     summarize_loss_search,
 )
 
@@ -25,6 +27,7 @@ def write_run(
     clip: float = 0.05,
     final_delta: float = 0.0,
     suffering_delta: float = 0.0,
+    amp: bool = True,
 ) -> None:
     config = {
         "seed": 0,
@@ -57,6 +60,7 @@ def write_run(
         "weight_decay": 0.0,
         "temperature": 1.0,
         "save_checkpoints": False,
+        "amp": amp,
         "task_sizes": [5, 3, 3, 3, 3, 3, 3, 3],
         "class_order": CLASS_ORDER,
         "parameter_group_loss_routing": routing,
@@ -144,6 +148,28 @@ def write_grid(root: Path) -> list[tuple[str, Path]]:
     return labeled_roots
 
 
+def write_stable_refine_grid(root: Path) -> list[tuple[str, Path]]:
+    labeled_roots = [("joint_bce", root / "joint_bce")]
+    write_run(root / "joint_bce", "joint_bce", "joint_bce", amp=False)
+    for gamma_neg in STABLE_REFINE_GAMMA_NEG_VALUES:
+        for clip in STABLE_REFINE_CLIP_VALUES:
+            label = f"g{gamma_neg}_c{clip}"
+            run_root = root / label
+            winning = gamma_neg == 12.0 and clip == 0.05
+            write_run(
+                run_root,
+                label,
+                "adapter_asl",
+                gamma_neg,
+                clip,
+                final_delta=1.0 if winning else 0.1,
+                suffering_delta=2.0 if winning else 0.1,
+                amp=False,
+            )
+            labeled_roots.append((label, run_root))
+    return labeled_roots
+
+
 def convert_to_failed_run(
     labeled_roots: list[tuple[str, Path]], label: str
 ) -> tuple[str, Path, Path]:
@@ -175,6 +201,16 @@ class TrackAImageTokenASLSearchTest(unittest.TestCase):
         self.assertEqual(result["winner"], "g4.0_c0.05")
         self.assertEqual(len(result["candidates"]), 20)
         self.assertEqual(result["joint_bce"]["summary_metrics"]["final_mAP"], 47.0)
+
+    def test_validates_stable_refine_fp32_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            result = summarize_loss_search(
+                write_stable_refine_grid(Path(directory)),
+                profile_name="stable_refine_fp32",
+            )
+        self.assertEqual(result["search_profile"], "stable_refine_fp32")
+        self.assertEqual(result["winner"], "g12.0_c0.05")
+        self.assertEqual(len(result["candidates"]), 12)
 
     def test_rejects_configuration_drift(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

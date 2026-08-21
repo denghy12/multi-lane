@@ -41,9 +41,15 @@ def main() -> None:
         choices=("joint_bce", "model_asl", "adapter_asl", "both_asl"),
         default="joint_bce",
     )
+    parser.add_argument(
+        "--no-amp",
+        action="store_true",
+        help="Run the smoke in full precision, matching stable search runs.",
+    )
     args = parser.parse_args()
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is required")
+    amp = not args.no_amp
     visual = load_openai_clip_visual(args.clip_checkpoint)
     model = MultiLaneModel(
         visual,
@@ -79,7 +85,7 @@ def main() -> None:
                     f"layer {layer_index}"
                 )
         model.eval()
-        with torch.no_grad(), torch.cuda.amp.autocast():
+        with torch.no_grad(), torch.cuda.amp.autocast(enabled=amp):
             adapter_logits = model.current_all_logits(images)
             model.set_adapter_runtime_enabled(False)
             baseline_logits = model.current_all_logits(images)
@@ -87,11 +93,13 @@ def main() -> None:
         max_initial_difference = float(
             (adapter_logits - baseline_logits).abs().max().cpu()
         )
+        tolerance = 1e-4 if amp else 1e-6
         if not torch.allclose(
-            adapter_logits, baseline_logits, atol=1e-4, rtol=1e-4
+            adapter_logits, baseline_logits, atol=tolerance, rtol=tolerance
         ):
             raise RuntimeError(
-                "Zero-initialized adapter changed initial logits beyond AMP "
+                "Zero-initialized adapter changed initial logits beyond "
+                f"{'AMP' if amp else 'FP32'} "
                 f"tolerance: max_difference={max_initial_difference}"
             )
     model.train()
@@ -99,8 +107,8 @@ def main() -> None:
     adapter_parameters = list(model.adapter_optimizer_parameters())
     if args.loss_routing in {"adapter_asl", "both_asl"} and not adapter_parameters:
         raise RuntimeError("Adapter ASL smoke requires an enabled Adapter")
-    scaler = torch.cuda.amp.GradScaler(enabled=True)
-    with torch.cuda.amp.autocast():
+    scaler = torch.cuda.amp.GradScaler(enabled=amp)
+    with torch.cuda.amp.autocast(enabled=amp):
         logits = model.current_all_logits(images)
         current_targets = torch.zeros(2, 5, device="cuda")
         bce_loss = compute_training_loss(
@@ -139,7 +147,7 @@ def main() -> None:
     if any(parameter.grad is not None for parameter in model.visual_encoder.parameters()):
         raise RuntimeError("Frozen visual tower received gradients")
     model.eval()
-    with torch.no_grad(), torch.cuda.amp.autocast():
+    with torch.no_grad(), torch.cuda.amp.autocast(enabled=amp):
         seen = model.seen_logits(images)
     if tuple(seen.shape) != (2, 5) or not torch.isfinite(seen).all():
         raise RuntimeError("Concat inference smoke failed")
@@ -154,6 +162,7 @@ def main() -> None:
         "MULTI_LANE_TRACK_A_SMOKE_OK "
         f"adapter_mode={args.adapter_mode} task_init={args.adapter_task_init} "
         f"loss_routing={args.loss_routing} "
+        f"precision={'amp' if amp else 'fp32'} "
         f"adapter_layers={','.join(map(str, args.adapter_layer_indices))} "
         f"trainable_parameters={trainable} "
         f"max_initial_difference={max_initial_difference if model.adapter_bank is not None else 0.0}"

@@ -209,6 +209,10 @@ def compute_asymmetric_training_loss(
     loss_logits, loss_targets = training_loss_view(
         logits, current_targets, current_class_indices, loss_mode
     )
+    if not torch.isfinite(loss_logits).all():
+        raise FloatingPointError("ASL received non-finite training logits")
+    if not torch.isfinite(loss_targets).all():
+        raise FloatingPointError("ASL received non-finite training targets")
     probabilities = torch.sigmoid(loss_logits.float() / temperature)
     negative_probabilities = 1.0 - probabilities
     if clip > 0:

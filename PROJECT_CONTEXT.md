@@ -1,7 +1,7 @@
 # 项目上下文
 
-最后一次更新：2026-08-20；当前本地分支为
-`exp/emotic-image-token-asl-hparam-search`。服务器为原Image-token BCE与ASL三组实验分别
+最后一次更新：2026-08-21；当前本地分支为
+`exp/emotic-image-token-asl-stable-refine`。服务器为原Image-token BCE与ASL三组实验分别
 保留独立clean worktree；额外test-only worktree保持原分支和原有未提交状态，未被本轮同步、
 分析或实验修改。
 
@@ -201,6 +201,34 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   `mla_image_token_asl_hparam_s0_20260820_191924`，batch ID为
   `image_token_asl_loss_seed0_20260820_191924`。首次门控快照GPU5仅余3520MiB且利用率99%，
   因而正确保持等待；此时尚未运行GPU smoke、尚未创建任何训练run，也没有占用新增显存。
+- 第一阶段最终完成18/21组；所有完整组均为240 epochs、13950 updates、skipped0，另有
+  `gn4/clip0`、`gn6/clip0.025`、`gn9.8/clip0.025`在task3因非有限ASL loss主动终止，
+  判为数值无效而不进入排名。不是OOM，当前GPU0--7均已释放。
+- 严格汇总按预先硬门槛选出`adapter_asl_gn9p8_clip0p05`。相对同轨迹joint-BCE validation，
+  其final/average mAP提高`0.709193/0.922159`，final cF1/oF1提高
+  `0.686412/0.430169`，task6 mAP提高`0.695724`；8个task的mAP均有改善。
+- 最优配置task6 Sadness/Sensitivity/Suffering变化为
+  `+1.404916/-0.530427/+8.675063`，三类均值提高`3.183184`。它解决了本阶段硬性关注的
+  Suffering方向，但未改善Sensitivity；forgetting由`0.940729`变为`1.017189`，恶化
+  `0.076460`，因此不能宣称已解决遗忘或所有稀有新类。
+- 唯一另一组全门槛合格配置为`gn9.8/clip0`，其final mAP提高`0.526062`，但cF1、forgetting
+  与Suffering均弱于赢家。此前held-out test探索恰好使用同一赢家参数，final mAP与Suffering
+  同方向改善；由于test已被观察，仍不能把它当作调参后的未触碰最终检验。
+- 结果已按107文件白名单打包并同步本地，含18组JSON/日志和失败日志，不含checkpoint；
+  压缩包SHA-256为`90e0ea0817ec0ea266e72f3961a58e4f2abe89603c31f4755ef91c8ad0ab7684`，
+  详细报告位于本地结果目录`analysis.md`。服务器failure-aware汇总实现完整单测29/29通过。
+- 当前没有活动实验。由于赢家`gamma_neg=9.8`仍位于预注册搜索上边界，下一阶段若获确认，
+  应先用seed0完整8-task val-only做`gamma_neg={8,9.8,12,16}` ×
+  `clip={0.0375,0.05,0.075}`局部边界确认（复用已有9.8/0.05，共11个新运行），得到内部最优
+  后才搜索gamma-pos；不得直接启动新test。
+- 失败日志进一步表明三组均在task3约2000次连续更新后开始出现AMP GradScaler跳步，恰好接近
+  默认loss scale增长区间；随后跳步逐渐增多并出现非有限logits/loss。因此稳定版不用特殊LR
+  掩盖失败，而是让joint-BCE与全部12个局部ASL组合统一使用FP32，重新生成同提交对照。
+- 新分支`exp/emotic-image-token-asl-stable-refine`已准备FP32 smoke、13组8-GPU启动器和
+  `stable_refine_fp32`严格汇总profile。局部网格为`gamma_neg={8,9.8,12,16}` ×
+  `clip={0.0375,0.05,0.075}`、gamma-pos0；由于精度协议变化，旧9.8/0.05不再复用，需重跑
+  12个ASL加1个joint-BCE。runner额外在ASL入口显式检查logits/targets有限性，便于区分上游
+  NaN与loss公式异常；历史AMP入口默认行为保持不变。
 
 - 当前实验分支为 `exp/emotic-multilane-transformer-adapter`，起点是已严格复现注册结果的
   `ce7d9a0`；严格复现分支保持冻结。
