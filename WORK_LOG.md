@@ -1,6 +1,26 @@
 # 工作日志
 
-最后一次更新：2026-08-21。
+最后一次更新：2026-08-22。
+
+## 2026-08-22：同步并分析 ASL FP32 稳定版局部搜索
+
+- batch`image_token_asl_stable_refine_seed0_20260821_231444`的13组全部完成：12个ASL
+  局部组合与1个joint-BCE均为8 tasks、240 epochs、13950 updates、skipped0、exit code0，
+  同一clean`3564e12`且`amp=false`。无OOM、非有限数值或异常，FP32成功消除上一轮AMP失败。
+- 严格`stable_refine_fp32`汇总没有合格赢家。12个ASL的final cF1全部低于BCE，forgetting
+  全部更差；虽然部分提高final mAP、oF1和Suffering，但没有配置同时保护Sadness与宏观指标。
+- FP32 BCE五项为`42.164859/48.795463/37.501026/58.083137/0.832476`。final mAP最高的
+  `gn9.8/clip0.05`五项变化为`+0.425109/+0.660861/-0.635873/+0.443694/+0.058057`，
+  task6 Sadness/Sensitivity/Suffering变化`-2.088062/-1.408021/+6.074236`。
+- `gn16/clip0.075`只失败Sadness硬门槛，average mAP/oF1/Suffering分别提高
+  `0.850003/0.841133/6.925002`，但Sadness下降`2.326867`、forgetting恶化`0.213311`，
+  不按单项收益放宽预注册规则。
+- 同参数9.8/0.05由AMP切到FP32后，cF1与Sadness增益从`+0.6864/+1.4049`变为
+  `-0.6359/-2.0881`；Suffering仍提高但幅度从`8.6751`降至`6.0742`。说明小幅收益对精度
+  与优化轨迹敏感，单seed不能视为稳健结论。
+- 81个JSON、日志、清单文件已打包同步，无checkpoint；服务器/本地archive SHA-256均为
+  `5e917f92033491bf6d281a6e9f281167434f40194dd6188cd624ac6a1f302e22`，归档内逐文件校验
+  全部通过。详细分析写入本地结果目录`analysis.md`，未启动gamma-pos或新test。
 
 ## 2026-08-21：同步并分析 Image-token Adapter-only ASL 第一阶段结果
 

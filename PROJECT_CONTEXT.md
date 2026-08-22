@@ -1,6 +1,6 @@
 # 项目上下文
 
-最后一次更新：2026-08-21；当前本地分支为
+最后一次更新：2026-08-22；当前本地分支为
 `exp/emotic-image-token-asl-stable-refine`。服务器为原Image-token BCE与ASL三组实验分别
 保留独立clean worktree；额外test-only worktree保持原分支和原有未提交状态，未被本轮同步、
 分析或实验修改。
@@ -239,6 +239,23 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - 第一轮8组config均记录clean`3564e12`与`amp=false`；task0 epoch1均为84 steps、skipped0，
   单卡显存约2.8--3.0GB且仍余约21GB，无OOM、NaN、Traceback或RuntimeError。服务器ASL
   worktree在13组全部结束前不得fast-forward到后续文档提交，否则第二轮Git commit会不一致。
+- FP32稳定版13/13组已完成，每组8 tasks、240 epochs、13950 updates、skipped0、exit code0；
+  总计3120 epochs、181350 updates。严格汇总确认同一clean`3564e12`、`amp=false`，无OOM、
+  NaN、Inf或异常，说明上一轮三个非有限loss确由AMP数值轨迹触发，FP32已解决运行稳定性。
+- 但严格硬门槛没有合格赢家。FP32 joint-BCE的final/average mAP、cF1、oF1、forgetting为
+  `42.164859/48.795463/37.501026/58.083137/0.832476`；12个ASL组合的final cF1全部下降、
+  forgetting全部恶化，不能宣称ASL整体优于BCE。
+- final mAP最高仍为`gn9.8/clip0.05`，相对FP32 BCE为
+  `final mAP +0.425109 / average mAP +0.660861 / cF1 -0.635873 / oF1 +0.443694 /
+  forgetting +0.058057`；task6 Sadness/Sensitivity/Suffering为
+  `-2.088062/-1.408021/+6.074236`，失败Sadness与cF1门槛。
+- 最接近全部门槛的`gn16/clip0.075`仅失败Sadness门槛，final/average mAP提高
+  `0.362468/0.850003`，Suffering提高`6.925002`，但Sadness下降`2.326867`、forgetting
+  恶化`0.213311`，按预先规则仍不得选中或据此放宽门槛。
+- 81文件无checkpoint结果包已同步本地并逐文件SHA-256通过；压缩包SHA为
+  `5e917f92033491bf6d281a6e9f281167434f40194dd6188cd624ac6a1f302e22`，详细报告见本地
+  `image_token_asl_stable_refine_seed0_20260821_231444_results/analysis.md`。当前不启动
+  gamma-pos或test，建议收口无目标的gamma扩展。
 
 - 当前实验分支为 `exp/emotic-multilane-transformer-adapter`，起点是已严格复现注册结果的
   `ce7d9a0`；严格复现分支保持冻结。

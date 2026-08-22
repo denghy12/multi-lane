@@ -1,29 +1,18 @@
 # 下一步任务
 
-最后一次更新：2026-08-21。
+最后一次更新：2026-08-22。
 
-## 当前最高优先级：运行 ASL FP32 稳定版局部边界搜索
+## 当前最高优先级：收口 ASL gamma 搜索，选择下一方法假设
 
-1. 第一阶段21组已结束：18组完整完成，3组非有限loss失败；结果已同步、校验和分析，当前
-   无活动实验。严格赢家为`adapter_asl_gn9p8_clip0p05`，相对joint-BCE的final/average mAP
-   提高`0.709193/0.922159`，task6 Suffering提高`8.675063`，但Sensitivity下降`0.530427`、
-   forgetting恶化`0.076460`。
-2. 用户已确认继续。三个失败组合在task3约2000次更新后开始AMP overflow；稳定版统一使用
-   FP32，不能严格复用旧AMP结果。当前分支为`exp/emotic-image-token-asl-stable-refine`，应
-   运行`gamma_neg={8,9.8,12,16}` × `clip={0.0375,0.05,0.075}`的12个ASL组合，并加1个
-   同提交joint-BCE，共13组、8卡两轮。
-3. 继续沿用原硬门槛：task6/final mAP、Sadness、Suffering不得下降，final cF1/oF1下降不得
-   超过0.5；同时单列Sensitivity和forgetting，不能用final mAP掩盖二者退化。任何非有限loss
-   直接判为无效，不通过改变seed或重跑掩盖。
-4. 启动前必须先完成服务器完整单测与FP32 Adapter-ASL smoke；启动后核对13组config均为
-   `amp=false`、task0首轮steps84/skipped0且无OOM/NaN。若局部搜索得到内部最优，再进入gamma-pos；若最优仍在gamma-neg上边界，再决定是否扩展。
-5. 上述验证已完成，13组已在batch
-   `image_token_asl_stable_refine_seed0_20260821_231444`运行。等待两轮全部结束后，用
-   `stable_refine_fp32`profile严格核验13组同commit、240 epochs、13950 updates、skipped0，
-   再比较8-task mAP/cF1/oF1、forgetting及task6 Sadness/Sensitivity/Suffering。实验结束前
-   不更新服务器ASL worktree HEAD，也不启动gamma-pos或test。
-   在validation参数选择完成并补独立seed前，不启动新的held-out test，也不同时调整LR、scale、
-   layer或bottleneck。
+1. FP32稳定版13组已全部完成并严格核验，同commit、240 epochs、13950 updates、skipped0且无
+   数值错误。结果没有eligible winner：12个ASL的final cF1全部下降、forgetting全部恶化；
+   `gn9.8/clip0.05`虽final mAP提高`0.425109`，但Sadness下降`2.088062`、cF1下降
+   `0.635873`。按规则停止gamma-neg/clip扩边界，不进入gamma-pos，不启动test。
+2. 当前稳定基线保留FP32 Image-token joint-BCE。若继续研究loss，应先提出直接处理class-wise
+   balance或lane间校准的新机制，并另建实验阶段；不能通过放宽Sadness门槛或只看Suffering/
+   average mAP选择`gn16/clip0.075`。任何新方向仍需seed0完整8-task validation预筛选。
+3. 结果包和详细分析已同步本地；当前没有活动实验。下一步应由用户确认新的方法假设，不同时
+   调整gamma-pos、LR、scale、layer或bottleneck，也不启动新的held-out test。
 
 ## 已完成：Image-token Adapter × ASL seed0 正式对照
 
