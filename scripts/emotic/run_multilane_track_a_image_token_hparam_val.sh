@@ -7,6 +7,7 @@ cd "${ROOT}"
 SEED="${SEED:-0}"
 GPU="${GPU:?GPU is required}"
 LOSS_ROUTING="${LOSS_ROUTING:-adapter_asl}"
+ADAPTER_MODE="${ADAPTER_MODE:-image_token}"
 ASL_GAMMA_NEG="${ASL_GAMMA_NEG:-9.8}"
 ASL_GAMMA_POS="${ASL_GAMMA_POS:-0.0}"
 ASL_CLIP="${ASL_CLIP:-0.05}"
@@ -28,12 +29,17 @@ RUN_ROOT="${OUTPUT_BASE}/${RUN_ID}"
 PYTHON="${PYTHON:-/opt/conda/envs/ddp/bin/python}"
 DATA_ROOT="${DATA_ROOT:-/mnt/haoyuan/workspace/multi-lane-main/datasets/EMOTIC}"
 CLIP_CHECKPOINT="${CLIP_CHECKPOINT:-/mnt/haoyuan/workspace/CODE_DDP-benchmark/pretrained/clip/ViT-B-16.pt}"
-LOG_DIR="${ROOT}/logs/emotic_track_a_image_token_hparam_val"
+LOG_DIR="${LOG_DIR:-${ROOT}/logs/emotic_track_a_image_token_hparam_val}"
 LOG_PATH="${LOG_DIR}/${RUN_ID}.log"
 
 read -r -a ADAPTER_LAYER_ARGS <<< "${ADAPTER_LAYERS}"
 [[ "${SEED}" == "0" || "${SEED}" == "1" || "${SEED}" == "2" ]] || { echo "SEED must be 0, 1, or 2" >&2; exit 2; }
 [[ "${LOSS_ROUTING}" == "joint_bce" || "${LOSS_ROUTING}" == "adapter_asl" ]] || { echo "Hyperparameter validation permits only joint_bce or adapter_asl" >&2; exit 2; }
+[[ "${ADAPTER_MODE}" == "disabled" || "${ADAPTER_MODE}" == "image_token" ]] || { echo "ADAPTER_MODE must be disabled or image_token" >&2; exit 2; }
+if [[ "${ADAPTER_MODE}" == "disabled" && "${LOSS_ROUTING}" != "joint_bce" ]]; then
+  echo "Disabled Adapter baseline requires joint_bce" >&2
+  exit 2
+fi
 [[ "${ADAPTER_ACTIVATION}" == "relu" || "${ADAPTER_ACTIVATION}" == "gelu" ]] || { echo "Invalid Adapter activation" >&2; exit 2; }
 [[ "${ADAPTER_TASK_INIT}" == "independent" || "${ADAPTER_TASK_INIT}" == "copy_previous" ]] || { echo "Invalid Adapter task initialization" >&2; exit 2; }
 [[ "${NO_AMP}" == "0" || "${NO_AMP}" == "1" ]] || { echo "NO_AMP must be 0 or 1" >&2; exit 2; }
@@ -48,7 +54,7 @@ if [[ "${NO_AMP}" == "1" ]]; then
   AMP_ARGS+=(--no-amp)
 fi
 
-echo "Image-token hyperparameter validation: seed=${SEED} gpu=${GPU} routing=${LOSS_ROUTING} gamma_neg=${ASL_GAMMA_NEG} gamma_pos=${ASL_GAMMA_POS} clip=${ASL_CLIP} layers=${ADAPTER_LAYERS} bottleneck=${BOTTLENECK} adapter_lr=${ADAPTER_LR} scale=${ADAPTER_SCALE} activation=${ADAPTER_ACTIVATION} task_init=${ADAPTER_TASK_INIT} epochs=${EPOCHS} source_lr=${SOURCE_LR} weight_decay=${WEIGHT_DECAY} temperature=${TEMPERATURE} precision=$([[ "${NO_AMP}" == "1" ]] && echo fp32 || echo amp) reporting=val checkpoints=disabled"
+echo "Image-token hyperparameter validation: seed=${SEED} gpu=${GPU} adapter_mode=${ADAPTER_MODE} routing=${LOSS_ROUTING} gamma_neg=${ASL_GAMMA_NEG} gamma_pos=${ASL_GAMMA_POS} clip=${ASL_CLIP} layers=${ADAPTER_LAYERS} bottleneck=${BOTTLENECK} adapter_lr=${ADAPTER_LR} scale=${ADAPTER_SCALE} activation=${ADAPTER_ACTIVATION} task_init=${ADAPTER_TASK_INIT} epochs=${EPOCHS} source_lr=${SOURCE_LR} weight_decay=${WEIGHT_DECAY} temperature=${TEMPERATURE} precision=$([[ "${NO_AMP}" == "1" ]] && echo fp32 || echo amp) reporting=val checkpoints=disabled"
 CUDA_VISIBLE_DEVICES="${GPU}" "${PYTHON}" -m multi_lane.track_a.runner \
   --seed "${SEED}" \
   --data-root "${DATA_ROOT}" \
@@ -74,7 +80,7 @@ CUDA_VISIBLE_DEVICES="${GPU}" "${PYTHON}" -m multi_lane.track_a.runner \
   --input-mode full \
   --input-normalization clip \
   --train-crop-scale 0.05 1.0 \
-  --adapter-mode image_token \
+  --adapter-mode "${ADAPTER_MODE}" \
   --adapter-bottleneck-dim "${BOTTLENECK}" \
   --adapter-layer-indices "${ADAPTER_LAYER_ARGS[@]}" \
   --adapter-residual-scale "${ADAPTER_SCALE}" \

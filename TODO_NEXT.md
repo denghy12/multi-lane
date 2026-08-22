@@ -2,17 +2,29 @@
 
 最后一次更新：2026-08-22。
 
-## 当前最高优先级：收口 ASL gamma 搜索，选择下一方法假设
+## 当前最高优先级：Image-token Adapter 单层位置成对诊断
+
+1. 先完成并严格汇总25组FP32、seed0、完整8-task validation-only运行：disabled BCE锚点，
+   以及zero-based layer0--11各一组Image-token Adapter-BCE和一组主模型BCE + Adapter ASL。
+   固定b32/LR4e-4/scale0.1/ReLU/independent与ASL 9.8/0/0.05，不读test、不存checkpoint。
+2. 服务器GPU0--7当前均忙。代码提交、服务器完整单测通过后，将8卡门控队列置于tmux等待；
+   smoke使用最先空闲卡，每卡只有连续两次满足free>=8000MiB且util<=10%才开始自己的任务。
+   不停止或干扰现有进程，也不因单卡先空闲而要求其余七卡同时空闲。
+3. 选择规则按层成对比较：BCE对disabled；ASL同时对同层BCE和disabled。除final/task6 mAP
+   外，Sadness与Suffering必须不降，Sensitivity/cF1/oF1最多下降0.5点，forgetting不得恶化。
+   只提高总mAP但压低Suffering的层判为不合格。
+4. 只有本阶段产生合格位置赢家，才在该层进入bottleneck与Adapter LR搜索；scale/activation
+   和最终ASL微调继续后置。不得提前排队依赖赢家的后续实验，避免在选择结果未知时形成无效
+   全因子网格。
+
+## 已完成：ASL gamma 搜索收口
 
 1. FP32稳定版13组已全部完成并严格核验，同commit、240 epochs、13950 updates、skipped0且无
    数值错误。结果没有eligible winner：12个ASL的final cF1全部下降、forgetting全部恶化；
    `gn9.8/clip0.05`虽final mAP提高`0.425109`，但Sadness下降`2.088062`、cF1下降
    `0.635873`。按规则停止gamma-neg/clip扩边界，不进入gamma-pos，不启动test。
-2. 当前稳定基线保留FP32 Image-token joint-BCE。若继续研究loss，应先提出直接处理class-wise
-   balance或lane间校准的新机制，并另建实验阶段；不能通过放宽Sadness门槛或只看Suffering/
-   average mAP选择`gn16/clip0.075`。任何新方向仍需seed0完整8-task validation预筛选。
-3. 结果包和详细分析已同步本地；当前没有活动实验。下一步应由用户确认新的方法假设，不同时
-   调整gamma-pos、LR、scale、layer或bottleneck，也不启动新的held-out test。
+2. 当前稳定loss基线保留FP32 Image-token joint-BCE；结构搜索仍保留同层Adapter-BCE对照，
+   并将9.8/0/0.05 Adapter-ASL作为主要候选，但不会放宽Sadness/Suffering门槛。
 
 ## 已完成：Image-token Adapter × ASL seed0 正式对照
 

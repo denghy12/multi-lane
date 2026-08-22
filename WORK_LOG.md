@@ -2,6 +2,25 @@
 
 最后一次更新：2026-08-22。
 
+## 2026-08-22：准备 Image-token Adapter 结构调参第一阶段
+
+- 从`exp/emotic-image-token-asl-stable-refine@fb8037f`创建
+  `exp/emotic-image-token-structure-tuning`。本阶段系统搜索Image-token Adapter本身的层位置，
+  不使用此前Task-lane layer5/8/11结论，也不同时改变层、容量、LR、scale或activation。
+- 第一阶段预注册25组：1个FP32 Adapter-disabled joint-BCE锚点，以及zero-based layer0--11
+  各一组Image-token joint-BCE和一组主模型BCE + Adapter ASL。结构固定b32、Adapter LR4e-4、
+  scale0.1、ReLU、independent；ASL固定9.8/0/0.05。全部为seed0完整8-task validation-only、
+  30 epochs/task、batch64、legacy监督、CLIP normalization、crop0.05，不保存checkpoint。
+- validation worker支持显式`disabled/image_token`和独立日志目录。新增8-GPU启动器，把25组轮转
+  分配到GPU0--7；全局smoke使用最先空闲卡，随后每张卡在每个任务前独立等待连续两次
+  `free>=8000MiB`且`util<=10%`，默认间隔60秒，不抢占当前GPU任务。
+- 新增层搜索严格汇总器和3项合成结果测试。汇总器拒绝配置/精度/Git漂移、不完整epoch、更新
+  数不符、skipped step与checkpoint；位置选择必须同时保护task6 Sadness和Suffering，并以
+  同层BCE为Adapter-ASL的直接对照；ASL还必须相对disabled通过同一组门槛。后续
+  bottleneck/LR阶段依赖本阶段赢家，本轮不提前排队。
+- 本地Shell语法、Python 3.9编译、`git diff --check`和3项隔离汇总器测试通过；完整Track-A
+  unittest需服务器`ddp`环境，因本地Python没有torch而不能按正常包入口运行完整套件。
+
 ## 2026-08-22：同步并分析 ASL FP32 稳定版局部搜索
 
 - batch`image_token_asl_stable_refine_seed0_20260821_231444`的13组全部完成：12个ASL

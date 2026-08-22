@@ -1,7 +1,7 @@
 # 项目上下文
 
 最后一次更新：2026-08-22；当前本地分支为
-`exp/emotic-image-token-asl-stable-refine`。服务器为原Image-token BCE与ASL三组实验分别
+`exp/emotic-image-token-structure-tuning`。服务器为原Image-token BCE与ASL三组实验分别
 保留独立clean worktree；额外test-only worktree保持原分支和原有未提交状态，未被本轮同步、
 分析或实验修改。
 
@@ -256,6 +256,22 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   `5e917f92033491bf6d281a6e9f281167434f40194dd6188cd624ac6a1f302e22`，详细报告见本地
   `image_token_asl_stable_refine_seed0_20260821_231444_results/analysis.md`。当前不启动
   gamma-pos或test，建议收口无目标的gamma扩展。
+- 2026-08-22按新的结构调参计划创建`exp/emotic-image-token-structure-tuning`。第一阶段只
+  诊断Image-token Adapter的单层位置，不复用Task-lane Adapter的位置结论：zero-based
+  layer `0--11`分别成对运行Adapter-BCE与“主模型BCE + Adapter ASL”，并加入同轨迹
+  Adapter-disabled BCE锚点，共25组。ASL固定`gamma_neg=9.8/gamma_pos=0/clip=0.05`。
+- 25组统一使用FP32、seed0、完整8-task validation-only、30 epochs/task、batch64、
+  `legacy_full_zero + CLIP normalization + crop(0.05,1.0)`、Image-token b32、Adapter
+  LR4e-4、scale0.1、ReLU、independent初始化；不读test、不保存checkpoint。只有层位置确定后
+  才允许进入bottleneck/LR搜索，后续依赖阶段不会预先排队。
+- 新增8卡独立资源门控启动器：全局真实CLIP FP32 Adapter-ASL smoke使用最先空闲的任意GPU；
+  每个GPU lane在每组训练前都必须连续两次满足空闲显存至少8000MiB、利用率不高于10%，默认
+  间隔60秒。现有GPU0--7均被其他高负载任务占用，启动器必须保持等待且不得终止现有进程。
+- 新增严格层搜索汇总器：强制25组同一clean commit/tree、完整240 epochs/13950 updates、
+  skipped0、无checkpoint和配置完全一致；每层先比较BCE与disabled，再比较ASL与同层BCE。
+  选择除final/task6 mAP外还要求Sadness与Suffering不降、Sensitivity/cF1/oF1下降不超过
+  0.5点且forgetting不恶化；ASL候选需要同时相对同层BCE与disabled锚点通过这些门槛，防止
+  只靠aggregate mAP或较弱的同层BCE掩盖task6新类退化。
 
 - 当前实验分支为 `exp/emotic-multilane-transformer-adapter`，起点是已严格复现注册结果的
   `ce7d9a0`；严格复现分支保持冻结。
