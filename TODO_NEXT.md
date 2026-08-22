@@ -7,15 +7,19 @@
 1. 先完成并严格汇总25组FP32、seed0、完整8-task validation-only运行：disabled BCE锚点，
    以及zero-based layer0--11各一组Image-token Adapter-BCE和一组主模型BCE + Adapter ASL。
    固定b32/LR4e-4/scale0.1/ReLU/independent与ASL 9.8/0/0.05，不读test、不存checkpoint。
-2. 服务器GPU0--7当前均忙。代码提交、服务器完整单测通过后，将8卡门控队列置于tmux等待；
-   smoke使用最先空闲卡，每卡只有连续两次满足free>=8000MiB且util<=10%才开始自己的任务。
-   不停止或干扰现有进程，也不因单卡先空闲而要求其余七卡同时空闲。
+2. 实现`d63da6b`与服务器33/33测试已通过。8卡门控队列已在tmux
+   `mla_image_token_layer_s0_20260822_235242`等待；首轮快照所有卡都低于8000MiB，尚未smoke
+   或训练。smoke使用最先空闲卡，每卡只有连续两次满足free>=8000MiB且util<=10%才开始自己的
+   任务；不停止现有进程，也不要求其余七卡同时空闲。
 3. 选择规则按层成对比较：BCE对disabled；ASL同时对同层BCE和disabled。除final/task6 mAP
    外，Sadness与Suffering必须不降，Sensitivity/cF1/oF1最多下降0.5点，forgetting不得恶化。
    只提高总mAP但压低Suffering的层判为不合格。
 4. 只有本阶段产生合格位置赢家，才在该层进入bottleneck与Adapter LR搜索；scale/activation
    和最终ASL微调继续后置。不得提前排队依赖赢家的后续实验，避免在选择结果未知时形成无效
    全因子网格。
+5. 队列运行期间服务器实验worktree固定在`d63da6b`。等待25个exit code与自动生成的
+   `layer_search_summary.json`；若任一组失败，只保留已完成产物并先分析失败原因，不自动启动
+   bottleneck/LR或重跑正式test。
 
 ## 已完成：ASL gamma 搜索收口
 

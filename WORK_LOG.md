@@ -20,6 +20,13 @@
   bottleneck/LR阶段依赖本阶段赢家，本轮不提前排队。
 - 本地Shell语法、Python 3.9编译、`git diff --check`和3项隔离汇总器测试通过；完整Track-A
   unittest需服务器`ddp`环境，因本地Python没有torch而不能按正常包入口运行完整套件。
+- 实现提交`d63da6b`已推送；Automatic Upload漂移备份到
+  `/mnt/haoyuan/workspace/git-sync-backup-image-token-layer-search-upload-20260822`后，服务器
+  ASL独立worktree安全切到该clean提交，完整Track-A测试33/33通过，test-only未触碰。
+- 8卡队列进入tmux`mla_image_token_layer_s0_20260822_235242`等待，batch为
+  `image_token_layer_search_seed0_20260822_235242`。首轮门控快照8卡仅余1906--4604MiB，
+  均未达到8000MiB；输出只有manifest，无config、GPU smoke或训练runner。实验worktree固定
+  `d63da6b`直到全部运行结束，避免各轮结果Git元数据不一致。
 
 ## 2026-08-22：同步并分析 ASL FP32 稳定版局部搜索
 

@@ -272,6 +272,18 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   选择除final/task6 mAP外还要求Sadness与Suffering不降、Sensitivity/cF1/oF1下降不超过
   0.5点且forgetting不恶化；ASL候选需要同时相对同层BCE与disabled锚点通过这些门槛，防止
   只靠aggregate mAP或较弱的同层BCE掩盖task6新类退化。
+- 实现提交`d63da6b`已推送并由服务器ASL独立worktree切换到同一clean HEAD；服务器完整
+  Track-A单元测试33/33通过。Automatic Upload产生的服务器主worktree漂移已完整备份到
+  `/mnt/haoyuan/workspace/git-sync-backup-image-token-layer-search-upload-20260822`并恢复clean，
+  test-only worktree保持原有未提交状态且未被修改。
+- 8卡门控队列已于2026-08-22 23:52放入tmux
+  `mla_image_token_layer_s0_20260822_235242`，batch ID为
+  `image_token_layer_search_seed0_20260822_235242`。启动审计时GPU0--7空闲显存仅
+  1906--4604MiB，全部低于8000MiB门槛；launcher log显示8卡均在等待，输出目录只有
+  `search_manifest.tsv`，尚未执行GPU smoke、创建训练config或启动任何本批runner。
+- 服务器实验worktree必须固定在`d63da6b`直至25组全部结束并汇总；后续文档提交只推送远端，
+  此期间不对该worktree fast-forward。某张GPU率先连续两次满足门槛后会先执行全局smoke，
+  smoke通过才创建8个独立lane，其他繁忙GPU继续各自等待。
 
 - 当前实验分支为 `exp/emotic-multilane-transformer-adapter`，起点是已严格复现注册结果的
   `ce7d9a0`；严格复现分支保持冻结。
