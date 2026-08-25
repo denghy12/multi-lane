@@ -318,6 +318,17 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   legacy+CLIP normalization+crop0.05、b32/LR4e-4/scale0.1/ReLU/independent，不读test、不存
   checkpoint。多层除原Sadness/Sensitivity/Suffering/F1/forgetting门槛外，final与task6 mAP
   还不得低于同批single3/single11中同loss最佳值，避免仅靠增加参数得到无意义小幅波动。
+- 多层实现提交`976f2a1`已推送并安全同步到服务器独立实验worktree；服务器完整Track-A测试
+  36/36通过。GPU0真实CLIP layers`[3,11]` FP32 Adapter-ASL smoke通过，可训练参数789082，
+  zero-init与disabled logits最大差`1.7695e-08`，梯度路由和冻结visual正常。
+- 15组队列已于2026-08-25 11:16启动，batch ID为
+  `image_token_multilayer_screen_seed0_20260825_111638`，tmux为
+  `mla_image_token_multilayer_s0_20260825_111638`。第一轮GPU0--7依次运行disabled、single3
+  BCE/ASL、single11 BCE/ASL、pair2_3 BCE/ASL和pair3_7 BCE；8组task0 epoch1均完成84
+  steps、skipped0，约16.0--18.0秒，无异常。
+- 第一轮单卡总显存占用约2.4--3.3GB，仍余20.8GB以上，无OOM风险信号。第二轮由各GPU lane
+  自动接续pair3_7 ASL、pair3_11 BCE/ASL、late8_9 BCE/ASL与late_blocks8_12 BCE/ASL；
+  每组开跑前继续执行8GB/10%资源门控。实验worktree固定`976f2a1`直至15组全部结束并汇总。
 
 - 当前实验分支为 `exp/emotic-multilane-transformer-adapter`，起点是已严格复现注册结果的
   `ce7d9a0`；严格复现分支保持冻结。

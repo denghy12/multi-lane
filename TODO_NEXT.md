@@ -9,11 +9,15 @@
 2. 运行15组FP32、seed0、完整8-task validation-only两轮队列：disabled；single3/single11的
    BCE/ASL；以及多层`[2,3]`、`[3,7]`、`[3,11]`、`[8,9]`、`[7,8,9,10,11]`各自的
    BCE/ASL。固定b32/LR4e-4/scale0.1/ReLU/independent与ASL9.8/0/0.05，不存checkpoint。
-3. 服务器同步后先运行完整Track-A单测与真实CLIP FP32 layers3+11 smoke；8卡均空闲时并行启动
-   第一轮8组，各lane完成后自动接第二轮剩余7组。每卡开跑前仍检查free>=8000MiB、util<=10%。
+3. 实现`976f2a1`已同步，服务器36/36单测和真实CLIP FP32 layers3+11 smoke通过。15组队列已
+   在tmux`mla_image_token_multilayer_s0_20260825_111638`启动；第一轮8组task0 epoch1均为84
+   steps/skipped0且无异常，剩余7组将自动接续。每卡开跑前仍检查free>=8000MiB、util<=10%。
 4. 多层候选必须相对disabled通过task6/final/Sadness/Suffering/F1/forgetting门槛；ASL还必须
    相对同结构BCE通过；final/task6 mAP不得低于同批single3/single11同loss最佳值。若无合格
    候选，立即停止多层与正式test；若有，再向用户汇报并确认是否运行held-out test。
+5. 等待15组完成后核对240 epochs、13950 updates、skipped0、同commit/tree和无checkpoint，
+   再同步小文件结果并分析。实验结束前服务器worktree固定`976f2a1`，不得fast-forward后续
+   文档提交。
 
 ## 已完成：ASL gamma 搜索收口
 

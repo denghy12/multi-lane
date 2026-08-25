@@ -21,6 +21,13 @@
   `[3,11]` smoke验证forward/backward、梯度路由和冻结行为。
 - 本地Shell语法、Python3.9编译、3项隔离多层汇总测试与`git diff --check`已通过；完整Track-A
   测试和GPU smoke待代码经Git同步到服务器独立实验worktree后执行。
+- 实现提交`976f2a1`已推送并安全同步；服务器完整Track-A单测36/36通过。GPU0真实CLIP
+  layers3+11 FP32 Adapter-ASL smoke通过，可训练参数789082，zero-init最大差`1.7695e-08`，
+  无冻结、梯度或数值异常。
+- 15组队列在tmux`mla_image_token_multilayer_s0_20260825_111638`启动，batch ID为
+  `image_token_multilayer_screen_seed0_20260825_111638`。第一轮8组均完成task0 epoch1，84
+  steps/skipped0、16.0--18.0秒；GPU总占用约2.4--3.3GB且每卡仍余20.8GB以上，无OOM、NaN、
+  Traceback或RuntimeError。剩余7组由各lane在第一轮结束后自动接续，不启动正式test。
 
 ## 2026-08-25：同步并分析 Image-token Adapter 单层位置搜索
 
