@@ -1,7 +1,7 @@
 # 项目上下文
 
 最后一次更新：2026-08-25；当前本地分支为
-`exp/emotic-image-token-structure-tuning`。服务器为原Image-token BCE与ASL三组实验分别
+`exp/emotic-image-token-multilayer-screen`。服务器为原Image-token BCE与ASL三组实验分别
 保留独立clean worktree；额外test-only worktree保持原分支和原有未提交状态，未被本轮同步、
 分析或实验修改。
 
@@ -304,6 +304,20 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - 当前layer8 BCE与上一批相同训练数学和seed的FP32 layer8 joint-BCE相比，final/average mAP
   仍出现`-0.307112/-0.719150`的重复运行差异，且从task0 epoch1已有微小数值分叉；两次位于
   不同物理GPU。因此本批约0.1--0.4点的小幅位置收益不能视为可靠结构优势。
+- 2026-08-25按用户要求继续做一次受控多层诊断，但不直接把失败硬门槛的layer3/11送入正式
+  held-out test：layer3牺牲Suffering，layer11牺牲Sensitivity且forgetting显著恶化，尚不能
+  判断为“预期正式效果好”。新分支为`exp/emotic-image-token-multilayer-screen`。
+- 多层screen共15组、8卡两轮：同批重跑disabled锚点与single3/single11的BCE/ASL作为数值
+  可重复性控制；多层结构为zero-based`[2,3]`、`[3,7]`、`[3,11]`、`[8,9]`与物理block
+  8--12对应的zero-based`[7,8,9,10,11]`，每种均成对运行BCE和Adapter-ASL 9.8/0/0.05。
+- 多层Adapter不是级联改写CLIP残差流：每个选定block拥有独立task-specific Adapter，只将
+  该层`LN1(CLS+patch)`的适配结果用于selector匹配与patch汇聚；冻结CLIP image-token残差流
+  继续原样传到下一block。5层配置每task新增`5*49952=249760`个当前可训练Adapter参数，远低于
+  4090显存容量，但仍需真实CLIP多层FP32 smoke后才启动训练。
+- 15组继续固定seed0、完整8-task validation-only、FP32、30 epochs/task、batch64、
+  legacy+CLIP normalization+crop0.05、b32/LR4e-4/scale0.1/ReLU/independent，不读test、不存
+  checkpoint。多层除原Sadness/Sensitivity/Suffering/F1/forgetting门槛外，final与task6 mAP
+  还不得低于同批single3/single11中同loss最佳值，避免仅靠增加参数得到无意义小幅波动。
 
 - 当前实验分支为 `exp/emotic-multilane-transformer-adapter`，起点是已严格复现注册结果的
   `ce7d9a0`；严格复现分支保持冻结。

@@ -2,17 +2,18 @@
 
 最后一次更新：2026-08-25。
 
-## 当前最高优先级：收口 Image-token Adapter 单层位置路线
+## 当前最高优先级：完成一次受控 Image-token 多层 validation screen
 
-1. 25组FP32、seed0、完整8-task validation-only单层成对搜索已全部完成并严格汇总；运行完整、
-   同一clean commit且没有数值错误，但BCE/ASL都没有任何层通过预注册门槛。
-2. 不以layer3 ASL的final mAP`+0.976536`作为赢家，因为它同时使task6 Suffering下降
-   `2.695190`、forgetting恶化`0.043960`；也不选择layer9 BCE，因为Sadness下降且forgetting
-   恶化。不得放宽规则只按aggregate mAP选层。
-3. 按依赖计划停止bottleneck/LR、scale、activation、ASL gamma和多层搜索，不启动新的held-out
-   test。当前最稳锚点保留为Adapter-disabled FP32 BCE。
-4. 若继续Image-token方向，必须先提出直接处理task6类别间梯度冲突和forgetting的新机制，另建
-   独立实验阶段并继续使用seed0完整8-task validation预筛选；不要继续无目标扩层数或容量网格。
+1. 不直接运行layer3/layer11正式test：两者分别牺牲Suffering以及Sensitivity/forgetting，均未
+   通过预注册validation门槛。先用同批single3/single11重跑判断`+0.9765`等收益是否可重复。
+2. 运行15组FP32、seed0、完整8-task validation-only两轮队列：disabled；single3/single11的
+   BCE/ASL；以及多层`[2,3]`、`[3,7]`、`[3,11]`、`[8,9]`、`[7,8,9,10,11]`各自的
+   BCE/ASL。固定b32/LR4e-4/scale0.1/ReLU/independent与ASL9.8/0/0.05，不存checkpoint。
+3. 服务器同步后先运行完整Track-A单测与真实CLIP FP32 layers3+11 smoke；8卡均空闲时并行启动
+   第一轮8组，各lane完成后自动接第二轮剩余7组。每卡开跑前仍检查free>=8000MiB、util<=10%。
+4. 多层候选必须相对disabled通过task6/final/Sadness/Suffering/F1/forgetting门槛；ASL还必须
+   相对同结构BCE通过；final/task6 mAP不得低于同批single3/single11同loss最佳值。若无合格
+   候选，立即停止多层与正式test；若有，再向用户汇报并确认是否运行held-out test。
 
 ## 已完成：ASL gamma 搜索收口
 

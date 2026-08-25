@@ -2,6 +2,26 @@
 
 最后一次更新：2026-08-25。
 
+## 2026-08-25：准备 Image-token Adapter 多层受控诊断
+
+- 用户提出直接对layer3/layer11运行正式test并探索多层。根据上一阶段预注册规则，两者都不能
+  视为预期稳健：layer3 ASL虽final mAP提高`0.976536`但Suffering下降`2.695190`；layer11
+  ASL虽改善Sadness/Suffering但Sensitivity下降`1.126123`、forgetting恶化`0.300807`。因此
+  暂不消耗held-out test，先做同批validation复核。
+- 从`exp/emotic-image-token-structure-tuning@5ba055b`创建
+  `exp/emotic-image-token-multilayer-screen`。设计15组8卡两轮：disabled，single3/single11
+  的BCE/ASL，以及`[2,3]`、`[3,7]`、`[3,11]`、`[8,9]`、`[7,8,9,10,11]`五种多层的
+  BCE/ASL。最后一组表示物理第8--12个block；所有代码参数继续使用zero-based索引。
+- 新增多层8卡启动器和严格汇总器。多层必须先通过相对disabled的全部硬门槛，ASL还必须
+  相对同结构BCE通过；此外final/task6 mAP不能低于同批single3/single11同loss最佳值。只有
+  通过者才允许讨论正式test，不能只按多层final mAP排序。
+- 当前实现的多层Image-token Adapter在各指定block独立处理冻结`LN1(CLS+patch)`，仅影响该层
+  selector匹配，不把适配token写回CLIP残差流，也不是前一层Adapter输出喂给后一层的级联结构。
+  5层配置每task Adapter参数为249760，8卡24GB 4090预计有充足空间，仍先以真实CLIP FP32
+  `[3,11]` smoke验证forward/backward、梯度路由和冻结行为。
+- 本地Shell语法、Python3.9编译、3项隔离多层汇总测试与`git diff --check`已通过；完整Track-A
+  测试和GPU smoke待代码经Git同步到服务器独立实验worktree后执行。
+
 ## 2026-08-25：同步并分析 Image-token Adapter 单层位置搜索
 
 - batch`image_token_layer_search_seed0_20260822_235242`的25/25组全部完成：同一clean
