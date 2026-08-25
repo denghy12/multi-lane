@@ -2,6 +2,20 @@
 
 最后一次更新：2026-08-25。
 
+## 2026-08-25：准备 pair8/9 BCE 最小同批确认
+
+- 用户确认执行fresh disabled、single8、single9、pair`[8,9]`四组最小BCE validation；从
+  `exp/emotic-image-token-multilayer-screen@1014831`创建
+  `exp/emotic-image-token-pair89-confirmation`。四组使用GPU0--3同批一轮，GPU4--7不占用。
+- 固定seed0、完整8-task val-only、FP32、30 epochs/task、batch64、legacy、CLIP normalization、
+  crop0.05、b32、Adapter LR4e-4、scale0.1、ReLU、independent、无checkpoint；不运行ASL或
+  held-out test。
+- 新增4-GPU资源门控启动器和严格确认汇总器。pair除相对disabled的全部硬门槛外，还必须相对
+  fresh single9保护final/average/task6 mAP、task6三个新类与forgetting，F1下降不超过0.5；
+  只有全部通过才标记`confirmed_for_formal_test=true`。
+- 本地Shell语法、Python3.9编译、3项隔离汇总器测试和`git diff --check`通过；完整Track-A测试
+  与pair8/9真实CLIP smoke待Git同步服务器后执行。
+
 ## 2026-08-25：准备 Image-token Adapter 多层受控诊断
 
 - 用户提出直接对layer3/layer11运行正式test并探索多层。根据上一阶段预注册规则，两者都不能

@@ -4,17 +4,14 @@
 
 ## 当前最高优先级：最小确认 `[8,9]` BCE 是否真优于single9
 
-1. 多层screen 15/15组已完成并严格汇总。唯一合格结构是zero-based`[8,9]` BCE，相对disabled
-   final/task6 mAP提高`0.939906/1.007650`，task6三类全部提高且forgetting改善；多层ASL没有
-   任何合格结构，停止ASL和dense多层扩展。
-2. 当前仍不启动正式test：上一轮BCE最佳单层是layer9，但本批fresh控制只有single3/11；
-   `[8,9]`相对旧single9绝对final只高`0.113899`，而两批disabled相差`0.423396`，无法排除
-   重复运行/GPU轨迹波动。
-3. 若用户确认继续，下一步只运行最小BCE-only validation确认：fresh single8、fresh single9、
-   fresh pair8_9，固定同一commit/protocol并最好加入fresh disabled，共4组，可在4张空闲GPU
-   一轮完成；不再运行ASL、layer3/11或五层dense组合。
-4. 只有fresh pair8_9继续超过single9，并保护Sadness/Sensitivity/Suffering和forgetting，才
-   启动held-out正式test；否则选择参数更少的single9/single11并停止多层路线。
+1. 用户已确认执行4组BCE-only validation：fresh disabled、single8、single9、pair`[8,9]`；
+   固定同一提交与协议，在GPU0--3一轮并行。不运行ASL、其他多层或held-out test。
+2. 服务器同步后运行完整Track-A单测和pair8/9真实CLIP FP32 smoke，再以8GB/10%门槛启动。每组
+   必须完成240 epochs、13950 updates、skipped0且无checkpoint，配置和Git commit/tree一致。
+3. pair必须相对disabled通过原门槛，并相对fresh single9同时保护final/average/task6 mAP、
+   Sadness/Sensitivity/Suffering和forgetting，F1下降不得超过0.5；任一失败即不正式test。
+4. 完成后同步小结果包。若`confirmed_for_formal_test=true`，再向用户汇报并确认正式test；若为
+   false，选择fresh single8/9中final mAP更好的单层并停止多层路线。
 
 ## 已完成：ASL gamma 搜索收口
 

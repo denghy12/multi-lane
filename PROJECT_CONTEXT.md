@@ -1,7 +1,7 @@
 # 项目上下文
 
 最后一次更新：2026-08-25；当前本地分支为
-`exp/emotic-image-token-multilayer-screen`。服务器为原Image-token BCE与ASL三组实验分别
+`exp/emotic-image-token-pair89-confirmation`。服务器为原Image-token BCE与ASL三组实验分别
 保留独立clean worktree；额外test-only worktree保持原分支和原有未提交状态，未被本轮同步、
 分析或实验修改。
 
@@ -350,6 +350,16 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - 93文件白名单结果包已同步本地并逐项SHA-256通过，无checkpoint；压缩包SHA为
   `ddd5c6c0a07702a70094f4b89cec2cf0a2ef47db5be5a2006d60630688ce2f44`。详细分析位于
   `output/emotic_image_token_tuning/multilayer_screen/image_token_multilayer_screen_seed0_20260825_111638_results/analysis.md`。
+- 2026-08-25按用户确认进入最小BCE-only pair8/9复核分支
+  `exp/emotic-image-token-pair89-confirmation`。只运行fresh disabled、single8、single9和
+  pair`[8,9]`四组，同一提交在GPU0--3一轮完成；不再运行ASL、layer3/11或其他多层结构。
+- 四组继续固定seed0、完整8-task validation-only、FP32、30 epochs/task、batch64、
+  legacy+CLIP normalization+crop0.05、b32/LR4e-4/scale0.1/ReLU/independent，不读test、不存
+  checkpoint。启动前使用pair`[8,9]` BCE做真实CLIP FP32 smoke，每卡连续两次满足8GB/10%
+  资源门槛后才开跑。
+- 严格确认规则预先固定：pair先通过相对disabled的原硬门槛；相对fresh single9还必须同时满足
+  final/average/task6 mAP不降、Sadness/Sensitivity/Suffering不降、forgetting不增，final
+  cF1/oF1下降不超过0.5。任一失败都不进入正式test，并推荐参数更少的fresh最佳单层。
 
 - 当前实验分支为 `exp/emotic-multilane-transformer-adapter`，起点是已严格复现注册结果的
   `ce7d9a0`；严格复现分支保持冻结。
