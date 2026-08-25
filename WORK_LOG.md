@@ -1,6 +1,28 @@
 # 工作日志
 
-最后一次更新：2026-08-22。
+最后一次更新：2026-08-25。
+
+## 2026-08-25：同步并分析 Image-token Adapter 单层位置搜索
+
+- batch`image_token_layer_search_seed0_20260822_235242`的25/25组全部完成：同一clean
+  `d63da6b`、每组8 tasks/240 epochs/13950 updates/skipped0/exit code0，总计6000 epochs与
+  348750 updates，无OOM、NaN、Inf或异常，无checkpoint；tmux已退出且无残留runner。
+- disabled锚点final/average mAP为`41.955741/48.656124`。BCE的aggregate最佳为layer9，
+  final/task6 mAP提高`0.402611/0.469971`，但Sadness下降`1.836305`、forgetting恶化
+  `0.216600`；全部12个BCE层都使forgetting恶化，没有合格层。
+- ASL aggregate最佳为layer3，final/average/task6 mAP提高`0.976536/0.956794/1.048385`，
+  但Suffering下降`2.695190`、forgetting恶化`0.043960`。layer7牺牲Sadness换Suffering，
+  layer11同时提高Sadness/Suffering但牺牲Sensitivity并显著恶化forgetting；没有ASL层同时
+  通过相对同层BCE和disabled的全部门槛。
+- 自动汇总最终为`eligible_bce_layers=[]`、`eligible_asl_layers=[]`、两者winner均null，按预先
+  规则不进入bottleneck/LR，不扩大容量或多层，不启动test。位置效应非单调且主要表现为
+  task6类别收益交换，不能只按final mAP选择layer3。
+- 本批layer8 BCE与上一批同训练数学/seed的FP32 layer8 BCE仍有final/average mAP
+  `-0.307112/-0.719150`重复运行差异，提示小于约0.3--0.7点的收益可能落在GPU数值轨迹波动
+  范围内；本轮更不能把layer9 BCE的`+0.4026`视作稳健改进。
+- 153文件白名单结果包已同步本地，无checkpoint；archive和本地SHA均为
+  `8f6d4dd4f6fa0cb9aa0f917dd6f7f971c0acde77b5742e01608142ab356e7c05`，包内153/153逐项
+  校验通过。详细分析位于结果目录`analysis.md`。
 
 ## 2026-08-22：准备 Image-token Adapter 结构调参第一阶段
 

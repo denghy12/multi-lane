@@ -1,6 +1,6 @@
 # 项目上下文
 
-最后一次更新：2026-08-22；当前本地分支为
+最后一次更新：2026-08-25；当前本地分支为
 `exp/emotic-image-token-structure-tuning`。服务器为原Image-token BCE与ASL三组实验分别
 保留独立clean worktree；额外test-only worktree保持原分支和原有未提交状态，未被本轮同步、
 分析或实验修改。
@@ -284,6 +284,26 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - 服务器实验worktree必须固定在`d63da6b`直至25组全部结束并汇总；后续文档提交只推送远端，
   此期间不对该worktree fast-forward。某张GPU率先连续两次满足门槛后会先执行全局smoke，
   smoke通过才创建8个独立lane，其他繁忙GPU继续各自等待。
+- 25组已全部正常结束并自动汇总：每组8 tasks、240 epochs、13950 updates、skipped0、exit
+  code0，总计6000 epochs与348750 updates；同一clean`d63da6b`，无OOM、非有限数值或异常，
+  无checkpoint。当前tmux已退出、无残留runner，GPU0--7均空闲。
+- disabled锚点final/average mAP、cF1、oF1、forgetting为
+  `41.955741/48.656124/37.493415/58.151120/0.806163`。BCE final mAP最高为layer9，
+  相对disabled提高`0.402611`，但Sadness下降`1.836305`且forgetting恶化`0.216600`；
+  12个BCE层的forgetting均恶化，因此没有BCE层通过硬门槛。
+- ASL final mAP最高为layer3，相对disabled的final/average/task6 mAP提高
+  `0.976536/0.956794/1.048385`，cF1/oF1提高`0.655264/1.155307`，但Suffering下降
+  `2.695190`且forgetting恶化`0.043960`。layer7以Sadness下降换取Suffering上升；layer11
+  虽同时改善Sadness/Suffering，却使Sensitivity下降`1.126123`、forgetting恶化`0.300807`。
+- 严格汇总结果`eligible_bce_layers=[]`、`eligible_asl_layers=[]`，两种loss均无winner和continue
+  标志。层位置没有消除task6类别间交换或遗忘，按预注册依赖关系不进入bottleneck/LR、scale、
+  activation或ASL微调，也不启动新test。
+- 结果已按153文件白名单打包同步本地并逐项SHA-256通过，不含checkpoint；压缩包SHA为
+  `8f6d4dd4f6fa0cb9aa0f917dd6f7f971c0acde77b5742e01608142ab356e7c05`，详细报告见本地
+  `output/emotic_image_token_tuning/layer_search/image_token_layer_search_seed0_20260822_235242_results/analysis.md`。
+- 当前layer8 BCE与上一批相同训练数学和seed的FP32 layer8 joint-BCE相比，final/average mAP
+  仍出现`-0.307112/-0.719150`的重复运行差异，且从task0 epoch1已有微小数值分叉；两次位于
+  不同物理GPU。因此本批约0.1--0.4点的小幅位置收益不能视为可靠结构优势。
 
 - 当前实验分支为 `exp/emotic-multilane-transformer-adapter`，起点是已严格复现注册结果的
   `ce7d9a0`；严格复现分支保持冻结。
