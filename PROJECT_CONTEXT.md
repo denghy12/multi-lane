@@ -1,9 +1,9 @@
 # 项目上下文
 
 最后一次更新：2026-08-25；当前本地分支为
-`exp/emotic-image-token-pair89-confirmation`。服务器为原Image-token BCE与ASL三组实验分别
-保留独立clean worktree；额外test-only worktree保持原分支和原有未提交状态，未被本轮同步、
-分析或实验修改。
+`exp/emotic-image-token-pair89-confirmation`。服务器独立实验worktree固定在clean`e50b4a3`并
+运行四组pair8/9 BCE同批确认；额外test-only worktree保持原分支和原有未提交状态，未被本轮
+同步、分析或实验修改。
 
 ## 项目目标
 
@@ -360,6 +360,13 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - 严格确认规则预先固定：pair先通过相对disabled的原硬门槛；相对fresh single9还必须同时满足
   final/average/task6 mAP不降、Sadness/Sensitivity/Suffering不降、forgetting不增，final
   cF1/oF1下降不超过0.5。任一失败都不进入正式test，并推荐参数更少的fresh最佳单层。
+- 确认实现提交`e50b4a3`已推送，服务器39/39完整Track-A测试通过；pair`[8,9]`真实CLIP FP32
+  BCE smoke通过，可训练参数789082，zero-init最大差`1.4901161e-08`。
+- 四组于2026-08-25 13:21在GPU0--3同批启动，batch ID为
+  `image_token_pair89_confirmation_seed0_20260825_132139`，tmux为
+  `mla_image_token_pair89_s0_20260825_132139`。disabled、single8、single9、pair8_9的task0
+  epoch1均为84 steps、skipped0、12.5--14.6秒；每卡占用约2.4--2.8GB、剩余21.2GB以上，
+  无OOM、NaN、Inf或异常。GPU4--7未占用，本轮没有ASL、其他多层或held-out test。
 
 - 当前实验分支为 `exp/emotic-multilane-transformer-adapter`，起点是已严格复现注册结果的
   `ce7d9a0`；严格复现分支保持冻结。

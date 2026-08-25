@@ -15,6 +15,15 @@
   只有全部通过才标记`confirmed_for_formal_test=true`。
 - 本地Shell语法、Python3.9编译、3项隔离汇总器测试和`git diff --check`通过；完整Track-A测试
   与pair8/9真实CLIP smoke待Git同步服务器后执行。
+- 实现提交`e50b4a3`已推送并安全同步到服务器独立实验worktree；服务器完整Track-A测试
+  39/39通过。pair`[8,9]`真实CLIP FP32 BCE smoke通过，可训练参数789082，zero-init最大差
+  `1.4901161e-08`，未发现冻结、梯度路由或数值异常。
+- 四组已于2026-08-25 13:21在tmux`mla_image_token_pair89_s0_20260825_132139`启动，batch ID为
+  `image_token_pair89_confirmation_seed0_20260825_132139`。GPU0--3分别运行disabled、single8、
+  single9和pair8_9；四组task0 epoch1均完成84 steps、skipped0，耗时12.5--14.6秒，训练loss
+  有限且日志中无OOM、NaN、Inf、Traceback或RuntimeError。
+- 启动观察时每卡总显存占用约2.4--2.8GB、剩余21.2GB以上；GPU4--7保持空闲。实验worktree
+  固定clean`e50b4a3`直至四组完成并自动生成严格确认汇总；当前没有ASL、其他多层或正式test。
 
 ## 2026-08-25：准备 Image-token Adapter 多层受控诊断
 

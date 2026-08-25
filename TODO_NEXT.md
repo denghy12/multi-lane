@@ -6,9 +6,11 @@
 
 1. 用户已确认执行4组BCE-only validation：fresh disabled、single8、single9、pair`[8,9]`；
    固定同一提交与协议，在GPU0--3一轮并行。不运行ASL、其他多层或held-out test。
-2. 服务器同步后运行完整Track-A单测和pair8/9真实CLIP FP32 smoke，再以8GB/10%门槛启动。每组
-   必须完成240 epochs、13950 updates、skipped0且无checkpoint，配置和Git commit/tree一致。
-3. pair必须相对disabled通过原门槛，并相对fresh single9同时保护final/average/task6 mAP、
+2. 已完成服务器同步、39/39完整Track-A单测和pair8/9真实CLIP FP32 smoke；四组已在GPU0--3
+   同批启动，task0 epoch1均为84 steps、skipped0且无异常。继续等待每组完成240 epochs、
+   13950 updates、skipped0且无checkpoint，并核对配置和Git commit/tree一致。
+3. 完成后由严格汇总器判断：pair必须相对disabled通过原门槛，并相对fresh single9同时保护
+   final/average/task6 mAP、
    Sadness/Sensitivity/Suffering和forgetting，F1下降不得超过0.5；任一失败即不正式test。
 4. 完成后同步小结果包。若`confirmed_for_formal_test=true`，再向用户汇报并确认正式test；若为
    false，选择fresh single8/9中final mAP更好的单层并停止多层路线。
