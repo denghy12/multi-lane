@@ -28,6 +28,19 @@
   `image_token_multilayer_screen_seed0_20260825_111638`。第一轮8组均完成task0 epoch1，84
   steps/skipped0、16.0--18.0秒；GPU总占用约2.4--3.3GB且每卡仍余20.8GB以上，无OOM、NaN、
   Traceback或RuntimeError。剩余7组由各lane在第一轮结束后自动接续，不启动正式test。
+- 15组最终全部完成，每组240 epochs/13950 updates/skipped0/exit code0，同一clean`976f2a1`，
+  无异常且无checkpoint。唯一严格合格多层为`[8,9]` BCE：相对disabled final/average/task6
+  mAP提高`0.939906/0.844164/1.007650`，task6三类提高
+  `3.473313/2.236642/3.889481`，cF1提高`1.052756`，forgetting改善`0.048449`。
+- 5个多层ASL相对各自BCE的final mAP全部下降`0.252--1.369`，没有ASL赢家；五层dense后段
+  同样压低Suffering并恶化forgetting，停止ASL和继续堆层。
+- `[8,9]`相对fresh single11 BCE的final/task6优势仅`0.185944/0.189651`；本批缺少fresh
+  single9对照，而跨批pair相对旧single9绝对final只高`0.113899`，低于disabled跨批
+  `0.423396`波动。因此当前只保留候选，不启动正式test，下一步最小验证是BCE-only fresh
+  single8/single9/pair8_9。
+- 93文件小结果包已同步本地并逐项SHA-256通过，不含checkpoint；archive SHA为
+  `ddd5c6c0a07702a70094f4b89cec2cf0a2ef47db5be5a2006d60630688ce2f44`，详细分析已写入本地
+  结果目录`analysis.md`。
 
 ## 2026-08-25：同步并分析 Image-token Adapter 单层位置搜索
 

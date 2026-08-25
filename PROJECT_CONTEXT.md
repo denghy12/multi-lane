@@ -329,6 +329,27 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - 第一轮单卡总显存占用约2.4--3.3GB，仍余20.8GB以上，无OOM风险信号。第二轮由各GPU lane
   自动接续pair3_7 ASL、pair3_11 BCE/ASL、late8_9 BCE/ASL与late_blocks8_12 BCE/ASL；
   每组开跑前继续执行8GB/10%资源门控。实验worktree固定`976f2a1`直至15组全部结束并汇总。
+- 15/15组已全部完成：每组8 tasks、240 epochs、13950 updates、skipped0、exit code0，总计
+  3600 epochs与209250 updates；同一clean`976f2a1`，无OOM、NaN、Inf或异常，无checkpoint。
+  tmux已退出、无残留runner，GPU0--7均空闲。
+- 同批disabled锚点final/average mAP为`41.532346/48.189057`。single3 ASL仍以Suffering
+  `-4.979032`换取final mAP`+0.823415`，确认不能正式test；single11 BCE本批通过全部门槛，
+  final/task6 mAP`+0.753962/+0.817999`且三类均不降，但其跨批方向仍有明显波动。
+- 多层唯一合格结构为zero-based`[8,9]` BCE：相对disabled的final/average/task6 mAP为
+  `+0.939906/+0.844164/+1.007650`，cF1`+1.052756`，Sadness/Sensitivity/Suffering为
+  `+3.473313/+2.236642/+3.889481`，forgetting改善`0.048449`。严格汇总
+  `winner_bce_structure=late8_9`且`continue_with_bce=true`。
+- 所有5个多层ASL相对同结构BCE的final mAP均下降`0.252--1.369`点，且没有候选通过类别/F1/
+  forgetting门槛；`eligible_asl_structures=[]`。dense zero-based`[7,8,9,10,11]`也使Suffering
+  下降`4.981710`、forgetting恶化`0.194592`，说明增加层数不是单调收益，停止多层ASL与dense
+  后段扩展。
+- `[8,9]` BCE相对同批single11 BCE仅提高final/task6 mAP`0.185944/0.189651`；上一批最佳
+  single9 BCE绝对final mAP为`42.358352`，本批pair为`42.472252`，跨批只差`0.113899`且两批
+  disabled自身相差`0.423396`。由于本批没有fresh single9，尚不能证明双层优于layer9单层，
+  暂不启动held-out test。
+- 93文件白名单结果包已同步本地并逐项SHA-256通过，无checkpoint；压缩包SHA为
+  `ddd5c6c0a07702a70094f4b89cec2cf0a2ef47db5be5a2006d60630688ce2f44`。详细分析位于
+  `output/emotic_image_token_tuning/multilayer_screen/image_token_multilayer_screen_seed0_20260825_111638_results/analysis.md`。
 
 - 当前实验分支为 `exp/emotic-multilane-transformer-adapter`，起点是已严格复现注册结果的
   `ce7d9a0`；严格复现分支保持冻结。

@@ -2,22 +2,19 @@
 
 最后一次更新：2026-08-25。
 
-## 当前最高优先级：完成一次受控 Image-token 多层 validation screen
+## 当前最高优先级：最小确认 `[8,9]` BCE 是否真优于single9
 
-1. 不直接运行layer3/layer11正式test：两者分别牺牲Suffering以及Sensitivity/forgetting，均未
-   通过预注册validation门槛。先用同批single3/single11重跑判断`+0.9765`等收益是否可重复。
-2. 运行15组FP32、seed0、完整8-task validation-only两轮队列：disabled；single3/single11的
-   BCE/ASL；以及多层`[2,3]`、`[3,7]`、`[3,11]`、`[8,9]`、`[7,8,9,10,11]`各自的
-   BCE/ASL。固定b32/LR4e-4/scale0.1/ReLU/independent与ASL9.8/0/0.05，不存checkpoint。
-3. 实现`976f2a1`已同步，服务器36/36单测和真实CLIP FP32 layers3+11 smoke通过。15组队列已
-   在tmux`mla_image_token_multilayer_s0_20260825_111638`启动；第一轮8组task0 epoch1均为84
-   steps/skipped0且无异常，剩余7组将自动接续。每卡开跑前仍检查free>=8000MiB、util<=10%。
-4. 多层候选必须相对disabled通过task6/final/Sadness/Suffering/F1/forgetting门槛；ASL还必须
-   相对同结构BCE通过；final/task6 mAP不得低于同批single3/single11同loss最佳值。若无合格
-   候选，立即停止多层与正式test；若有，再向用户汇报并确认是否运行held-out test。
-5. 等待15组完成后核对240 epochs、13950 updates、skipped0、同commit/tree和无checkpoint，
-   再同步小文件结果并分析。实验结束前服务器worktree固定`976f2a1`，不得fast-forward后续
-   文档提交。
+1. 多层screen 15/15组已完成并严格汇总。唯一合格结构是zero-based`[8,9]` BCE，相对disabled
+   final/task6 mAP提高`0.939906/1.007650`，task6三类全部提高且forgetting改善；多层ASL没有
+   任何合格结构，停止ASL和dense多层扩展。
+2. 当前仍不启动正式test：上一轮BCE最佳单层是layer9，但本批fresh控制只有single3/11；
+   `[8,9]`相对旧single9绝对final只高`0.113899`，而两批disabled相差`0.423396`，无法排除
+   重复运行/GPU轨迹波动。
+3. 若用户确认继续，下一步只运行最小BCE-only validation确认：fresh single8、fresh single9、
+   fresh pair8_9，固定同一commit/protocol并最好加入fresh disabled，共4组，可在4张空闲GPU
+   一轮完成；不再运行ASL、layer3/11或五层dense组合。
+4. 只有fresh pair8_9继续超过single9，并保护Sadness/Sensitivity/Suffering和forgetting，才
+   启动held-out正式test；否则选择参数更少的single9/single11并停止多层路线。
 
 ## 已完成：ASL gamma 搜索收口
 
