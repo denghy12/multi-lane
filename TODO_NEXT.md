@@ -4,12 +4,11 @@
 
 ## 当前最高优先级：运行 Image-token Adapter-ASL 容量/LR阶段一
 
-1. 用户已明确固定主模型BCE + Image-token Adapter ASL 9.8/0/0.05。阶段一实现完成后提交推送，
-   服务器独立实验worktree安全切换同一clean提交，再运行完整Track-A测试和b64严格FP32 GPU
-   smoke。
-2. smoke通过后在GPU0--7一次启动13组：bottleneck`{8,16,32,64}` × Adapter LR
-   `{1e-4,2e-4,4e-4}`加fresh disabled；每卡自动续跑，期间固定实验worktree提交。
-3. 全部完成后严格比较相对disabled和b32/LR4e-4锚点的final/average/task6 mAP、
+1. 阶段一实现`94f3327`、服务器42/42测试及b64严格FP32 GPU smoke均已通过。
+2. 13组已在GPU0--7一次启动：bottleneck`{8,16,32,64}` × Adapter LR
+   `{1e-4,2e-4,4e-4}`加fresh disabled；首轮8组正常，GPU0--4会自动续跑剩余5组。继续等待
+   自动完成，期间实验worktree固定`94f3327`。
+3. 完成后严格比较相对disabled和b32/LR4e-4锚点的final/average/task6 mAP、
    Sadness/Sensitivity/Suffering、cF1/oF1和forgetting。只有全部通过且final mAP至少提高0.5的
    候选才进入阶段二scale×activation，不读取held-out test。
 4. 若阶段一没有合格候选，保留原b32/LR4e-4冠军参数并停止容量/LR扩网格；再决定是否转向

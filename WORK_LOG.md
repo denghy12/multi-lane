@@ -19,6 +19,15 @@
 - worker已增加`NO_TF32`开关，smoke增加`--no-tf32`并输出实际TF32状态；新增b64最大容量
   Adapter-ASL smoke、13组自动队列、严格汇总器和3项测试。本地Shell语法、Python3.9编译及
   `git diff --check`通过；本机系统Python缺少PyTorch，完整测试待服务器`ddp`环境执行。
+- 实现提交`94f3327`已推送并由服务器独立实验worktree安全切换；服务器完整Track-A测试42/42
+  通过。GPU1 b64真实CLIP严格FP32 Adapter-ASL smoke通过，日志确认TF32 off、可训练参数
+  788314、zero-init最大差`1.8626451e-08`。
+- 13组队列在tmux`mla_image_token_asl_caplr_s0_20260826_164945`启动，batch ID为
+  `image_token_asl_capacity_lr_seed0_20260826_164945`。首轮GPU0--7依次运行disabled、冠军
+  b32/LR4e-4、b8三种LR及b16三种LR；8组均已完成至少task0 epoch4，84 steps、skipped0，
+  ASL loss有限且无异常。
+- 启动观察时每卡总显存约2.8--3.0GB、剩余21GB以上。GPU0--4首组完成后会自动接续b32低LR
+  和b64三种LR；当前不运行正式test，实验worktree固定clean`94f3327`直至13组完成并汇总。
 
 ## 2026-08-26：同步并分析 pair8/9 BCE 同批确认
 

@@ -391,6 +391,14 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - worker新增显式`NO_TF32`路由，GPU smoke新增`--no-tf32`并报告TF32状态；新增13组资源门控
   launcher、严格汇总器和3项隔离测试。启动前先在服务器运行完整Track-A测试及b64真实CLIP
   Adapter-ASL严格FP32 smoke。
+- 阶段一实现提交`94f3327`已推送并安全同步至服务器独立实验worktree，完整Track-A测试42/42
+  通过。GPU1 b64最大容量真实CLIP Adapter-ASL smoke通过，明确记录`precision=fp32 tf32=off`、
+  可训练参数788314、zero-init最大差`1.8626451e-08`，无冻结、梯度或数值异常。
+- 13组总队列已于2026-08-26 16:49启动，batch ID为
+  `image_token_asl_capacity_lr_seed0_20260826_164945`，tmux为
+  `mla_image_token_asl_caplr_s0_20260826_164945`。首轮8组已全部运行到task0 epoch4--5，均为
+  84 steps、skipped0，ASL loss有限；每卡约占2.8--3.0GB、仍余21GB以上，无OOM、NaN、Inf或
+  异常。GPU0--4将在首组结束后自动接续剩余5组，实验worktree固定`94f3327`直至自动汇总。
 
 - 当前实验分支为 `exp/emotic-multilane-transformer-adapter`，起点是已严格复现注册结果的
   `ce7d9a0`；严格复现分支保持冻结。
