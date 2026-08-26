@@ -399,6 +399,13 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   `mla_image_token_asl_caplr_s0_20260826_164945`。首轮8组已全部运行到task0 epoch4--5，均为
   84 steps、skipped0，ASL loss有限；每卡约占2.8--3.0GB、仍余21GB以上，无OOM、NaN、Inf或
   异常。GPU0--4将在首组结束后自动接续剩余5组，实验worktree固定`94f3327`直至自动汇总。
+- 用户确认单卡显存允许并行多进程后，没有中止已运行到task4的首轮8组；从同一`94f3327`
+  创建临时detached clean worktree`/mnt/haoyuan/workspace/multi-lane-main-asl-capacity-lr-parallel`，
+  将剩余5组立即放到GPU0--4。现在13组全部同时运行，GPU0--4双进程总占用约5.9--6.1GB、
+  仍余约18GB；新增5组task0 epoch1均为84 steps、skipped0、ASL loss有限且无异常。
+- 为后续可复现，launcher已改为默认一次启动13个进程：GPU0--4各两组、GPU5--7各一组，并以
+  8GB显存门槛保护启动。当前批次仍全部记录同一实现commit/tree`94f3327`；原总launcher随后
+  对已存在的第二轮目录会安全失败退出，因此本批完成后需基于13份完整产物手动运行严格汇总器。
 
 - 当前实验分支为 `exp/emotic-multilane-transformer-adapter`，起点是已严格复现注册结果的
   `ce7d9a0`；严格复现分支保持冻结。

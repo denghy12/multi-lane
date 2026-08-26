@@ -28,6 +28,13 @@
   ASL loss有限且无异常。
 - 启动观察时每卡总显存约2.8--3.0GB、剩余21GB以上。GPU0--4首组完成后会自动接续b32低LR
   和b64三种LR；当前不运行正式test，实验worktree固定clean`94f3327`直至13组完成并汇总。
+- 用户确认可以单卡并行多组时，首轮8组已到task4，因此不停止重跑。新增临时detached clean
+  worktree`/mnt/haoyuan/workspace/multi-lane-main-asl-capacity-lr-parallel@94f3327`，把原计划
+  第二轮5组立即分别加入GPU0--4；13组现已全部同时运行。
+- 新增5组task0 epoch1均完成84 steps、skipped0，约24--25秒；GPU0--4双进程实际总占用
+  5.9--6.1GB、剩余约18GB，无OOM或非有限ASL loss。launcher本地实现同步改为默认13进程
+  同启，便于未来一键复现；当前批次完成后需手动运行严格汇总，避免原串行父launcher的重复
+  目录检测影响结果判定。
 
 ## 2026-08-26：同步并分析 pair8/9 BCE 同批确认
 

@@ -7,7 +7,7 @@ cd "${ROOT}"
 GPUS_TEXT="${GPUS:-0 1 2 3 4 5 6 7}"
 read -r -a GPU_LIST <<< "${GPUS_TEXT}"
 GPU_MIN_FREE_MIB="${GPU_MIN_FREE_MIB:-8000}"
-GPU_MAX_UTIL_PERCENT="${GPU_MAX_UTIL_PERCENT:-10}"
+GPU_MAX_UTIL_PERCENT="${GPU_MAX_UTIL_PERCENT:-100}"
 GPU_READY_CHECKS="${GPU_READY_CHECKS:-2}"
 GPU_WAIT_SECONDS="${GPU_WAIT_SECONDS:-60}"
 PYTHON="${PYTHON:-/opt/conda/envs/ddp/bin/python}"
@@ -35,7 +35,7 @@ MANIFEST="${OUTPUT_BASE}/search_manifest.tsv"
 STATUS_DIR="${OUTPUT_BASE}/launcher_status"
 mkdir -p "${STATUS_DIR}"
 
-# The first eight jobs occupy all GPUs. GPUs 0--4 then continue with jobs 8--12.
+# All 13 jobs start together. GPUs 0--4 each host two runs; GPUs 5--7 host one.
 labels=(
   disabled_bce
   b32_lr4e4_asl
@@ -111,37 +111,33 @@ CUDA_VISIBLE_DEVICES="${GPU_LIST[1]}" "${PYTHON}" -m multi_lane.track_a.smoke \
   --no-tf32
 echo "IMAGE_TOKEN_ASL_CAPACITY_LR_STRICT_FP32_SMOKE_COMPLETE gpu=${GPU_LIST[1]}"
 
-run_gpu_lane() {
-  local lane_index="$1"
-  local gpu="${GPU_LIST[$lane_index]}"
-  local job_index label run_id lane_failed=0
-  for ((job_index=lane_index; job_index<${#labels[@]}; job_index+=${#GPU_LIST[@]})); do
-    label="${labels[$job_index]}"
-    run_id="${BATCH_ID}_${label}"
-    wait_for_gpu_ready "${gpu}" "${label}"
-    echo "Starting ${label} on physical GPU ${gpu} with AMP off and TF32 off"
-    if SEED=0 GPU="${gpu}" ADAPTER_MODE="${adapter_modes[$job_index]}" \
-      LOSS_ROUTING="${routings[$job_index]}" ADAPTER_LAYERS=8 \
-      BOTTLENECK="${bottlenecks[$job_index]}" \
-      ADAPTER_LR="${adapter_lrs[$job_index]}" ADAPTER_SCALE=0.1 \
-      ADAPTER_ACTIVATION=relu ADAPTER_TASK_INIT=independent \
-      ASL_GAMMA_NEG=9.8 ASL_GAMMA_POS=0.0 ASL_CLIP=0.05 \
-      NO_AMP=1 NO_TF32=1 PYTHON="${PYTHON}" \
-      CLIP_CHECKPOINT="${CLIP_CHECKPOINT}" DATA_ROOT="${DATA_ROOT}" \
-      RUN_ID="${run_id}" OUTPUT_BASE="${OUTPUT_BASE}" LOG_DIR="${LOG_DIR}" \
-      bash scripts/emotic/run_multilane_track_a_image_token_hparam_val.sh; then
-      printf '0\n' > "${STATUS_DIR}/${label}.exit_code"
-    else
-      printf '1\n' > "${STATUS_DIR}/${label}.exit_code"
-      lane_failed=1
-    fi
-  done
-  return "${lane_failed}"
+run_one() {
+  local job_index="$1"
+  local gpu="${GPU_LIST[$((job_index % ${#GPU_LIST[@]}))]}"
+  local label="${labels[$job_index]}"
+  local run_id="${BATCH_ID}_${label}"
+  wait_for_gpu_ready "${gpu}" "${label}"
+  echo "Starting ${label} on physical GPU ${gpu} with AMP off and TF32 off"
+  if SEED=0 GPU="${gpu}" ADAPTER_MODE="${adapter_modes[$job_index]}" \
+    LOSS_ROUTING="${routings[$job_index]}" ADAPTER_LAYERS=8 \
+    BOTTLENECK="${bottlenecks[$job_index]}" \
+    ADAPTER_LR="${adapter_lrs[$job_index]}" ADAPTER_SCALE=0.1 \
+    ADAPTER_ACTIVATION=relu ADAPTER_TASK_INIT=independent \
+    ASL_GAMMA_NEG=9.8 ASL_GAMMA_POS=0.0 ASL_CLIP=0.05 \
+    NO_AMP=1 NO_TF32=1 PYTHON="${PYTHON}" \
+    CLIP_CHECKPOINT="${CLIP_CHECKPOINT}" DATA_ROOT="${DATA_ROOT}" \
+    RUN_ID="${run_id}" OUTPUT_BASE="${OUTPUT_BASE}" LOG_DIR="${LOG_DIR}" \
+    bash scripts/emotic/run_multilane_track_a_image_token_hparam_val.sh; then
+    printf '0\n' > "${STATUS_DIR}/${label}.exit_code"
+  else
+    printf '1\n' > "${STATUS_DIR}/${label}.exit_code"
+    return 1
+  fi
 }
 
 pids=()
-for lane_index in "${!GPU_LIST[@]}"; do
-  run_gpu_lane "${lane_index}" &
+for job_index in "${!labels[@]}"; do
+  run_one "${job_index}" &
   pids+=("$!")
 done
 

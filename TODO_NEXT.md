@@ -5,14 +5,17 @@
 ## 当前最高优先级：运行 Image-token Adapter-ASL 容量/LR阶段一
 
 1. 阶段一实现`94f3327`、服务器42/42测试及b64严格FP32 GPU smoke均已通过。
-2. 13组已在GPU0--7一次启动：bottleneck`{8,16,32,64}` × Adapter LR
-   `{1e-4,2e-4,4e-4}`加fresh disabled；首轮8组正常，GPU0--4会自动续跑剩余5组。继续等待
-   自动完成，期间实验worktree固定`94f3327`。
+2. 13组已全部同时运行：GPU0--4各两组、GPU5--7各一组；原8组和新增5组均正常，双进程卡
+   仍余约18GB。继续等待13份`seed_summary.json`全部生成，期间两个实验worktree均固定
+   clean`94f3327`。
 3. 完成后严格比较相对disabled和b32/LR4e-4锚点的final/average/task6 mAP、
    Sadness/Sensitivity/Suffering、cF1/oF1和forgetting。只有全部通过且final mAP至少提高0.5的
    候选才进入阶段二scale×activation，不读取held-out test。
 4. 若阶段一没有合格候选，保留原b32/LR4e-4冠军参数并停止容量/LR扩网格；再决定是否转向
    双视图上下文融合，不以单个最高mAP放宽硬门槛。
+5. 当前批次由原串行父launcher和新增5个独立tmux共同完成；13组结束后手动调用
+   `summarize_image_token_asl_capacity_lr`生成`capacity_lr_summary.json`，并忽略父launcher对
+   已存在第二轮目录的预期重复检测退出。
 
 ## 已完成：ASL gamma 搜索收口
 
