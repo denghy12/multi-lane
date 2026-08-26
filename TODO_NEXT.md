@@ -1,19 +1,18 @@
 # 下一步任务
 
-最后一次更新：2026-08-25。
+最后一次更新：2026-08-26。
 
-## 当前最高优先级：最小确认 `[8,9]` BCE 是否真优于single9
+## 当前最高优先级：收口pair8/9并诊断single8的过拟合/方差
 
-1. 用户已确认执行4组BCE-only validation：fresh disabled、single8、single9、pair`[8,9]`；
-   固定同一提交与协议，在GPU0--3一轮并行。不运行ASL、其他多层或held-out test。
-2. 已完成服务器同步、39/39完整Track-A单测和pair8/9真实CLIP FP32 smoke；四组已在GPU0--3
-   同批启动，task0 epoch1均为84 steps、skipped0且无异常。继续等待每组完成240 epochs、
-   13950 updates、skipped0且无checkpoint，并核对配置和Git commit/tree一致。
-3. 完成后由严格汇总器判断：pair必须相对disabled通过原门槛，并相对fresh single9同时保护
-   final/average/task6 mAP、
-   Sadness/Sensitivity/Suffering和forgetting，F1下降不得超过0.5；任一失败即不正式test。
-4. 完成后同步小结果包。若`confirmed_for_formal_test=true`，再向用户汇报并确认正式test；若为
-   false，选择fresh single8/9中final mAP更好的单层并停止多层路线。
+1. 四组BCE-only同批确认已完成，pair8_9因Sensitivity和forgetting失败，明确不运行正式test；
+   single9、多层、扩大bottleneck和ASL路线均停止。
+2. 当前只保留single8 BCE作为下一轮validation探索锚点。若用户确认继续，先让launcher支持
+   并强制`--no-tf32`，再降低而非增加Adapter容量/更新强度：在fresh disabled和b32/LR4e-4
+   控制下，受控比较b8/b16/b32及Adapter LR1e-4/2e-4/4e-4的精简组合，其他配置完全固定。
+3. 选择仍要求final/average/task6 mAP、Sadness/Sensitivity/Suffering和forgetting全部过门槛，
+   不能只按final mAP选参；不读取held-out test。
+4. 若小容量/低LR仍不能消除task6类别交换，则结束Image-token Adapter结构调参，转向full image
+   与person crop双视图/上下文融合，解决Sensitivity等语义线索问题。
 
 ## 已完成：ASL gamma 搜索收口
 

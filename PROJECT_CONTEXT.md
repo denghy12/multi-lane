@@ -1,9 +1,9 @@
 # 项目上下文
 
-最后一次更新：2026-08-25；当前本地分支为
-`exp/emotic-image-token-pair89-confirmation`。服务器独立实验worktree固定在clean`e50b4a3`并
-运行四组pair8/9 BCE同批确认；额外test-only worktree保持原分支和原有未提交状态，未被本轮
-同步、分析或实验修改。
+最后一次更新：2026-08-26；当前本地分支为
+`exp/emotic-image-token-pair89-confirmation`。服务器四组pair8/9 BCE同批确认已在clean
+`e50b4a3`完成并退出；额外test-only worktree保持原分支和原有未提交状态，未被本轮同步、
+分析或实验修改。
 
 ## 项目目标
 
@@ -367,6 +367,18 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   `mla_image_token_pair89_s0_20260825_132139`。disabled、single8、single9、pair8_9的task0
   epoch1均为84 steps、skipped0、12.5--14.6秒；每卡占用约2.4--2.8GB、剩余21.2GB以上，
   无OOM、NaN、Inf或异常。GPU4--7未占用，本轮没有ASL、其他多层或held-out test。
+- 四组最终均完成240 epochs、13950 updates、skipped0、exit code0，无异常或checkpoint。
+  disabled/single8/single9/pair的final mAP为`41.863114/42.422405/41.615440/42.350681`。
+- pair相对single9的final/average/task6 mAP虽提高`0.735241/1.187716/1.020656`，但Sensitivity
+  下降`1.210430`、forgetting恶化`0.216919`，且相对disabled forgetting也恶化`0.193886`；
+  因此`confirmed_for_formal_test=false`，停止pair、多层、扩容和ASL，不运行正式test。
+- single8相对disabled在八个task阶段的mAP均提高，final/average提高`0.559291/0.902963`且
+  forgetting改善`0.093862`，但Sadness下降`5.071147`，只能作为下一轮validation探索锚点，
+  不能宣称已通过方法门槛。task6仅627个训练样本而pair每task参数99904，下一方向应优先测试
+  single8小容量/低Adapter LR来降低方差；若仍有类别交换，再转双视图上下文融合。
+- 本批虽关闭AMP，但四组`config.json`仍记录`tf32=true`，所以此前“FP32”应准确表述为
+  AMP off而非严格IEEE FP32。该设置不破坏本批同配置比较；下一轮筛选小效应前应显式
+  `--no-tf32`并重跑同批fresh anchors。
 
 - 当前实验分支为 `exp/emotic-multilane-transformer-adapter`，起点是已严格复现注册结果的
   `ce7d9a0`；严格复现分支保持冻结。

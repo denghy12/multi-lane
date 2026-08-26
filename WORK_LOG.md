@@ -1,6 +1,31 @@
 # 工作日志
 
-最后一次更新：2026-08-25。
+最后一次更新：2026-08-26。
+
+## 2026-08-26：同步并分析 pair8/9 BCE 同批确认
+
+- batch`image_token_pair89_confirmation_seed0_20260825_132139`四组全部完成；每组8 tasks、
+  240 epochs、13950 updates、skipped0、exit code0，同一clean`e50b4a3`，无OOM、NaN、Inf、
+  异常或checkpoint。
+- disabled/single8/single9/pair8_9的final mAP分别为
+  `41.863114/42.422405/41.615440/42.350681`，average mAP分别为
+  `48.406695/49.309657/47.820751/49.008467`。single8是本批final/average mAP最高且
+  forgetting最低的结构。
+- pair相对fresh single9虽提高final/average/task6 mAP`0.735241/1.187716/1.020656`，但
+  Sensitivity下降`1.210430`、forgetting恶化`0.216919`；相对disabled也使forgetting恶化
+  `0.193886`。严格结果为`confirmed_for_formal_test=false`，不运行正式test。
+- single8相对disabled在task0--7各阶段mAP均提高，final/average/task6提高
+  `0.559291/0.902963/0.652256`且forgetting改善`0.093862`，但Sadness下降`5.071147`，仍未
+  通过全部硬门槛。single9整体退化；停止single9、pair、多层、扩容与ASL。
+- task6训练视图只有627个样本，三类正例为Sadness260、Sensitivity316、Suffering188；
+  Sensitivity并非最稀有却只有约6--7 AP。pair将每task Adapter参数从49952加倍到99904后主要
+  产生类别收益交换和更高forgetting，现象更符合小数据下的方差/过拟合而非容量不足。
+- 28文件小结果包已同步本地并逐项SHA-256通过，不含checkpoint；archive SHA为
+  `3e449853a5520b30d7c413a41a3283ddf332757065f1ac5bd33fbcb386982ad2`，详细分析见结果目录
+  `analysis.md`。
+- 配置复核发现此前日志中的FP32表示AMP关闭，但`config.json`实际为`tf32=true`；四组相对比较
+  仍公平，下一轮若筛选约0.1--0.5点小效应，应先在launcher显式传`--no-tf32`并同批重建
+  disabled/single8控制，避免继续混用“AMP off”和“严格FP32”概念。
 
 ## 2026-08-25：准备 pair8/9 BCE 最小同批确认
 
