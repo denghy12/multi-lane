@@ -2,6 +2,24 @@
 
 最后一次更新：2026-08-26。
 
+## 2026-08-26：准备 Image-token Adapter-ASL 容量/LR阶段一
+
+- 用户明确固定主模型BCE、Adapter ASL，不再把Adapter-BCE作为主优化方向。从
+  `exp/emotic-image-token-pair89-confirmation@4213310`创建
+  `exp/emotic-image-token-asl-capacity-lr`。
+- 阶段一预注册12个Adapter-ASL组合：zero-based layer8、scale0.1、ReLU、independent、
+  ASL 9.8/0/0.05固定，联合搜索bottleneck`8/16/32/64`和Adapter LR
+  `1e-4/2e-4/4e-4`；加入fresh Adapter-disabled joint-BCE锚点，共13组。
+- 8卡launcher先并行8组，GPU0--4完成首组后自动接续剩余5组，一次启动即可完成阶段一。
+  每组均为seed0完整8-task val-only、30 epochs/task、batch64、legacy、CLIP normalization、
+  crop0.05、AMP off、TF32 off、无checkpoint；不运行正式test。
+- 汇总器逐组核验同一clean commit/tree、240 epochs、13950 updates、skipped0、无checkpoint、
+  精确Adapter参数量和ASL路由。候选需相对disabled与b32/LR4e-4锚点通过全部类别/F1/forgetting
+  门槛，且final mAP至少提高0.5，才允许进入scale×activation阶段。
+- worker已增加`NO_TF32`开关，smoke增加`--no-tf32`并输出实际TF32状态；新增b64最大容量
+  Adapter-ASL smoke、13组自动队列、严格汇总器和3项测试。本地Shell语法、Python3.9编译及
+  `git diff --check`通过；本机系统Python缺少PyTorch，完整测试待服务器`ddp`环境执行。
+
 ## 2026-08-26：同步并分析 pair8/9 BCE 同批确认
 
 - batch`image_token_pair89_confirmation_seed0_20260825_132139`四组全部完成；每组8 tasks、

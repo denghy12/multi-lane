@@ -46,10 +46,18 @@ def main() -> None:
         action="store_true",
         help="Run the smoke in full precision, matching stable search runs.",
     )
+    parser.add_argument(
+        "--no-tf32",
+        action="store_true",
+        help="Disable TF32 matmul paths for strict numeric search controls.",
+    )
     args = parser.parse_args()
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is required")
     amp = not args.no_amp
+    tf32 = not args.no_tf32
+    torch.backends.cuda.matmul.allow_tf32 = tf32
+    torch.backends.cudnn.allow_tf32 = tf32
     visual = load_openai_clip_visual(args.clip_checkpoint)
     model = MultiLaneModel(
         visual,
@@ -163,6 +171,7 @@ def main() -> None:
         f"adapter_mode={args.adapter_mode} task_init={args.adapter_task_init} "
         f"loss_routing={args.loss_routing} "
         f"precision={'amp' if amp else 'fp32'} "
+        f"tf32={'on' if tf32 else 'off'} "
         f"adapter_layers={','.join(map(str, args.adapter_layer_indices))} "
         f"trainable_parameters={trainable} "
         f"max_initial_difference={max_initial_difference if model.adapter_bank is not None else 0.0}"

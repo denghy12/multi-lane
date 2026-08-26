@@ -1,9 +1,9 @@
 # 项目上下文
 
 最后一次更新：2026-08-26；当前本地分支为
-`exp/emotic-image-token-pair89-confirmation`。服务器四组pair8/9 BCE同批确认已在clean
-`e50b4a3`完成并退出；额外test-only worktree保持原分支和原有未提交状态，未被本轮同步、
-分析或实验修改。
+`exp/emotic-image-token-asl-capacity-lr`。服务器四组pair8/9 BCE同批确认已在clean`e50b4a3`
+完成并退出；新的Image-token Adapter-ASL容量/LR阶段一实现待提交同步。额外test-only worktree
+保持原分支和原有未提交状态，未被本轮同步、分析或实验修改。
 
 ## 项目目标
 
@@ -379,6 +379,18 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - 本批虽关闭AMP，但四组`config.json`仍记录`tf32=true`，所以此前“FP32”应准确表述为
   AMP off而非严格IEEE FP32。该设置不破坏本批同配置比较；下一轮筛选小效应前应显式
   `--no-tf32`并重跑同批fresh anchors。
+- 2026-08-26用户明确后续方法固定为“主模型BCE + Image-token Adapter ASL”，不再以BCE
+  Adapter作为主候选。新的阶段一分支为`exp/emotic-image-token-asl-capacity-lr`，固定zero-based
+  layer8、scale0.1、ReLU、independent及ASL 9.8/0/0.05，联合搜索
+  bottleneck`{8,16,32,64}` × Adapter LR`{1e-4,2e-4,4e-4}`，另加fresh disabled BCE，
+  共13组、8卡自动两轮。
+- 阶段一统一seed0完整8-task validation-only、30 epochs/task、batch64、legacy、CLIP
+  normalization、crop0.05、AMP off、TF32 off、无checkpoint，不读取held-out test。b32/LR4e-4
+  是同数值协议下的当前冠军参数锚点；候选必须同时相对disabled和该锚点保护final/average/task6
+  mAP、task6三类、F1和forgetting，并至少提高0.5 final mAP才进入scale/activation阶段。
+- worker新增显式`NO_TF32`路由，GPU smoke新增`--no-tf32`并报告TF32状态；新增13组资源门控
+  launcher、严格汇总器和3项隔离测试。启动前先在服务器运行完整Track-A测试及b64真实CLIP
+  Adapter-ASL严格FP32 smoke。
 
 - 当前实验分支为 `exp/emotic-multilane-transformer-adapter`，起点是已严格复现注册结果的
   `ce7d9a0`；严格复现分支保持冻结。

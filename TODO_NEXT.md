@@ -2,17 +2,18 @@
 
 最后一次更新：2026-08-26。
 
-## 当前最高优先级：收口pair8/9并诊断single8的过拟合/方差
+## 当前最高优先级：运行 Image-token Adapter-ASL 容量/LR阶段一
 
-1. 四组BCE-only同批确认已完成，pair8_9因Sensitivity和forgetting失败，明确不运行正式test；
-   single9、多层、扩大bottleneck和ASL路线均停止。
-2. 当前只保留single8 BCE作为下一轮validation探索锚点。若用户确认继续，先让launcher支持
-   并强制`--no-tf32`，再降低而非增加Adapter容量/更新强度：在fresh disabled和b32/LR4e-4
-   控制下，受控比较b8/b16/b32及Adapter LR1e-4/2e-4/4e-4的精简组合，其他配置完全固定。
-3. 选择仍要求final/average/task6 mAP、Sadness/Sensitivity/Suffering和forgetting全部过门槛，
-   不能只按final mAP选参；不读取held-out test。
-4. 若小容量/低LR仍不能消除task6类别交换，则结束Image-token Adapter结构调参，转向full image
-   与person crop双视图/上下文融合，解决Sensitivity等语义线索问题。
+1. 用户已明确固定主模型BCE + Image-token Adapter ASL 9.8/0/0.05。阶段一实现完成后提交推送，
+   服务器独立实验worktree安全切换同一clean提交，再运行完整Track-A测试和b64严格FP32 GPU
+   smoke。
+2. smoke通过后在GPU0--7一次启动13组：bottleneck`{8,16,32,64}` × Adapter LR
+   `{1e-4,2e-4,4e-4}`加fresh disabled；每卡自动续跑，期间固定实验worktree提交。
+3. 全部完成后严格比较相对disabled和b32/LR4e-4锚点的final/average/task6 mAP、
+   Sadness/Sensitivity/Suffering、cF1/oF1和forgetting。只有全部通过且final mAP至少提高0.5的
+   候选才进入阶段二scale×activation，不读取held-out test。
+4. 若阶段一没有合格候选，保留原b32/LR4e-4冠军参数并停止容量/LR扩网格；再决定是否转向
+   双视图上下文融合，不以单个最高mAP放宽硬门槛。
 
 ## 已完成：ASL gamma 搜索收口
 

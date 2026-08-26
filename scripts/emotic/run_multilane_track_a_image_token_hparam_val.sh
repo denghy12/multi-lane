@@ -23,6 +23,7 @@ SOURCE_LR="${SOURCE_LR:-0.05}"
 WEIGHT_DECAY="${WEIGHT_DECAY:-0.0}"
 TEMPERATURE="${TEMPERATURE:-1.0}"
 NO_AMP="${NO_AMP:-0}"
+NO_TF32="${NO_TF32:-0}"
 RUN_ID="${RUN_ID:?RUN_ID is required}"
 OUTPUT_BASE="${OUTPUT_BASE:?OUTPUT_BASE is required}"
 RUN_ROOT="${OUTPUT_BASE}/${RUN_ID}"
@@ -43,6 +44,7 @@ fi
 [[ "${ADAPTER_ACTIVATION}" == "relu" || "${ADAPTER_ACTIVATION}" == "gelu" ]] || { echo "Invalid Adapter activation" >&2; exit 2; }
 [[ "${ADAPTER_TASK_INIT}" == "independent" || "${ADAPTER_TASK_INIT}" == "copy_previous" ]] || { echo "Invalid Adapter task initialization" >&2; exit 2; }
 [[ "${NO_AMP}" == "0" || "${NO_AMP}" == "1" ]] || { echo "NO_AMP must be 0 or 1" >&2; exit 2; }
+[[ "${NO_TF32}" == "0" || "${NO_TF32}" == "1" ]] || { echo "NO_TF32 must be 0 or 1" >&2; exit 2; }
 [[ ! -e "${RUN_ROOT}" ]] || { echo "Run root already exists: ${RUN_ROOT}" >&2; exit 2; }
 [[ -f "${CLIP_CHECKPOINT}" ]] || { echo "Missing CLIP checkpoint: ${CLIP_CHECKPOINT}" >&2; exit 2; }
 [[ -f "${DATA_ROOT}/CVPR17_Annotations.mat" ]] || { echo "Missing EMOTIC annotations: ${DATA_ROOT}" >&2; exit 2; }
@@ -53,8 +55,12 @@ AMP_ARGS=()
 if [[ "${NO_AMP}" == "1" ]]; then
   AMP_ARGS+=(--no-amp)
 fi
+TF32_ARGS=()
+if [[ "${NO_TF32}" == "1" ]]; then
+  TF32_ARGS+=(--no-tf32)
+fi
 
-echo "Image-token hyperparameter validation: seed=${SEED} gpu=${GPU} adapter_mode=${ADAPTER_MODE} routing=${LOSS_ROUTING} gamma_neg=${ASL_GAMMA_NEG} gamma_pos=${ASL_GAMMA_POS} clip=${ASL_CLIP} layers=${ADAPTER_LAYERS} bottleneck=${BOTTLENECK} adapter_lr=${ADAPTER_LR} scale=${ADAPTER_SCALE} activation=${ADAPTER_ACTIVATION} task_init=${ADAPTER_TASK_INIT} epochs=${EPOCHS} source_lr=${SOURCE_LR} weight_decay=${WEIGHT_DECAY} temperature=${TEMPERATURE} precision=$([[ "${NO_AMP}" == "1" ]] && echo fp32 || echo amp) reporting=val checkpoints=disabled"
+echo "Image-token hyperparameter validation: seed=${SEED} gpu=${GPU} adapter_mode=${ADAPTER_MODE} routing=${LOSS_ROUTING} gamma_neg=${ASL_GAMMA_NEG} gamma_pos=${ASL_GAMMA_POS} clip=${ASL_CLIP} layers=${ADAPTER_LAYERS} bottleneck=${BOTTLENECK} adapter_lr=${ADAPTER_LR} scale=${ADAPTER_SCALE} activation=${ADAPTER_ACTIVATION} task_init=${ADAPTER_TASK_INIT} epochs=${EPOCHS} source_lr=${SOURCE_LR} weight_decay=${WEIGHT_DECAY} temperature=${TEMPERATURE} precision=$([[ "${NO_AMP}" == "1" ]] && echo fp32 || echo amp) tf32=$([[ "${NO_TF32}" == "1" ]] && echo off || echo on) reporting=val checkpoints=disabled"
 CUDA_VISIBLE_DEVICES="${GPU}" "${PYTHON}" -m multi_lane.track_a.runner \
   --seed "${SEED}" \
   --data-root "${DATA_ROOT}" \
@@ -76,6 +82,7 @@ CUDA_VISIBLE_DEVICES="${GPU}" "${PYTHON}" -m multi_lane.track_a.runner \
   --asl-clip "${ASL_CLIP}" \
   --asl-eps "${ASL_EPS}" \
   "${AMP_ARGS[@]}" \
+  "${TF32_ARGS[@]}" \
   --no-save-checkpoints \
   --input-mode full \
   --input-normalization clip \
