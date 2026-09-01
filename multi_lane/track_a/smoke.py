@@ -25,6 +25,12 @@ def main() -> None:
     )
     parser.add_argument("--adapter-bottleneck-dim", type=int, default=64)
     parser.add_argument(
+        "--adapter-bottleneck-dims-per-task",
+        type=int,
+        nargs="+",
+        default=None,
+    )
+    parser.add_argument(
         "--adapter-layer-indices",
         type=int,
         nargs="+",
@@ -67,6 +73,7 @@ def main() -> None:
         adapter_layer_indices=tuple(args.adapter_layer_indices),
         adapter_residual_scale=0.1,
         adapter_task_initialization=args.adapter_task_init,
+        adapter_bottleneck_dims_per_task=args.adapter_bottleneck_dims_per_task,
     ).float().cuda()
     model.activate_task(0)
     images = torch.randn(2, 3, 224, 224, device="cuda")

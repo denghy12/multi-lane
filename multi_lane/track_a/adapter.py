@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Iterable, Sequence, Tuple
+from typing import Iterable, Optional, Sequence, Tuple
 
 import torch
 from torch import nn
@@ -46,11 +46,14 @@ class TaskLaneTransformerAdapterBank(nn.Module):
         residual_scale: float = 0.1,
         activation: str = "relu",
         task_initialization: str = "independent",
+        bottleneck_dims_per_task: Optional[Sequence[int]] = None,
     ) -> None:
         super().__init__()
         layers = tuple(int(index) for index in layer_indices)
         if num_tasks <= 0:
             raise ValueError("Adapter task count must be positive")
+        if bottleneck_dim <= 0:
+            raise ValueError("Adapter reference bottleneck dimension must be positive")
         if not layers or any(index < 0 for index in layers):
             raise ValueError("Adapter layer indices must be non-negative")
         if len(set(layers)) != len(layers):
@@ -61,30 +64,56 @@ class TaskLaneTransformerAdapterBank(nn.Module):
             raise ValueError(
                 "Adapter task initialization must be independent or copy_previous"
             )
+        if bottleneck_dims_per_task is None:
+            bottleneck_dims = (int(bottleneck_dim),) * int(num_tasks)
+        else:
+            bottleneck_dims = tuple(
+                int(value) for value in bottleneck_dims_per_task
+            )
+            if len(bottleneck_dims) != int(num_tasks):
+                raise ValueError(
+                    "Per-task Adapter bottleneck dimensions must match task count"
+                )
+        if any(value <= 0 for value in bottleneck_dims):
+            raise ValueError("Per-task Adapter bottleneck dimensions must be positive")
+        if task_initialization == "copy_previous" and len(set(bottleneck_dims)) > 1:
+            raise ValueError(
+                "copy_previous Adapter initialization requires uniform bottleneck dimensions"
+            )
         self.num_tasks = int(num_tasks)
         self.hidden_dim = int(hidden_dim)
         self.bottleneck_dim = int(bottleneck_dim)
+        self.bottleneck_dims_per_task = bottleneck_dims
         self.layer_indices = tuple(sorted(layers))
         self.residual_scale = float(residual_scale)
         self.activation_name = activation
         self.task_initialization = task_initialization
         self._current_task_id = -1
 
-        self.task_adapters = nn.ModuleList(
-            [
-                nn.ModuleDict(
-                    {
-                        str(layer_id): TransformerBlockAdapter(
-                            hidden_dim=self.hidden_dim,
-                            bottleneck_dim=self.bottleneck_dim,
-                            activation=activation,
-                        )
-                        for layer_id in self.layer_indices
-                    }
-                )
-                for _ in range(self.num_tasks)
-            ]
-        )
+        def build_task_adapters(task_bottleneck_dim: int) -> nn.ModuleDict:
+            return nn.ModuleDict(
+                {
+                    str(layer_id): TransformerBlockAdapter(
+                        hidden_dim=self.hidden_dim,
+                        bottleneck_dim=task_bottleneck_dim,
+                        activation=activation,
+                    )
+                    for layer_id in self.layer_indices
+                }
+            )
+
+        task_adapters = []
+        for task_bottleneck_dim in self.bottleneck_dims_per_task:
+            state_before_task = torch.get_rng_state()
+            task_adapters.append(build_task_adapters(task_bottleneck_dim))
+            if task_bottleneck_dim != self.bottleneck_dim:
+                # Keep later task initializations identical to the uniform
+                # reference-bottleneck control.  Otherwise changing task 0's
+                # capacity would shift the initialization RNG of tasks 1--N
+                # and confound a task-dependent capacity experiment.
+                torch.set_rng_state(state_before_task)
+                build_task_adapters(self.bottleneck_dim)
+        self.task_adapters = nn.ModuleList(task_adapters)
         self.requires_grad_(False)
 
     @property
@@ -143,8 +172,19 @@ class TaskLaneTransformerAdapterBank(nn.Module):
     def total_parameter_count(self) -> int:
         return sum(parameter.numel() for parameter in self.parameters())
 
-    def per_task_parameter_count(self) -> int:
-        return sum(parameter.numel() for parameter in self.task_adapters[0].parameters())
+    def per_task_parameter_count(self, task_id: int = 0) -> int:
+        if not 0 <= int(task_id) < self.num_tasks:
+            raise ValueError("Adapter task id is outside the protocol")
+        return sum(
+            parameter.numel()
+            for parameter in self.task_adapters[int(task_id)].parameters()
+        )
+
+    def per_task_parameter_counts(self) -> Tuple[int, ...]:
+        return tuple(
+            self.per_task_parameter_count(task_id)
+            for task_id in range(self.num_tasks)
+        )
 
 
 class TaskImageTokenAdapterBank(TaskLaneTransformerAdapterBank):

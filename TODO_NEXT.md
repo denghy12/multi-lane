@@ -1,21 +1,63 @@
 # 下一步任务
 
-最后一次更新：2026-08-26。
+最后一次更新：2026-09-01。
 
-## 当前最高优先级：运行 Image-token Adapter-ASL 容量/LR阶段一
+## 当前最高优先级：等待阶段二ASL局部8组正式test完成
 
-1. 阶段一实现`94f3327`、服务器42/42测试及b64严格FP32 GPU smoke均已通过。
-2. 13组已全部同时运行：GPU0--4各两组、GPU5--7各一组；原8组和新增5组均正常，双进程卡
-   仍余约18GB。继续等待13份`seed_summary.json`全部生成，期间两个实验worktree均固定
-   clean`94f3327`。
-3. 完成后严格比较相对disabled和b32/LR4e-4锚点的final/average/task6 mAP、
-   Sadness/Sensitivity/Suffering、cF1/oF1和forgetting。只有全部通过且final mAP至少提高0.5的
-   候选才进入阶段二scale×activation，不读取held-out test。
-4. 若阶段一没有合格候选，保留原b32/LR4e-4冠军参数并停止容量/LR扩网格；再决定是否转向
-   双视图上下文融合，不以单个最高mAP放宽硬门槛。
-5. 当前批次由原串行父launcher和新增5个独立tmux共同完成；13组结束后手动调用
-   `summarize_image_token_asl_capacity_lr`生成`capacity_lr_summary.json`，并忽略父launcher对
-   已存在第二轮目录的预期重复检测退出。
+1. layer1已以正式seed0 final mAP`32.5365`超过layer8旧冠军`32.4193`，差值`+0.1172`；
+   average mAP、cF1、oF1和forgetting也全部改善，8个task mAP均未下降。当前最优配置只把
+   Adapter zero-based层索引从8改为1，其余保持原冠军参数。
+2. 首批15组已经全部完成且skipped0。layer1局部网格最高仅b32/LR3e-4的`32.1281`；
+   single7 FP32为`31.7931`，均未超过当前冠军。
+3. 归一化多层最高为`[1,2]` b16/scale0.05的`32.3233`，低冠军`0.2132`；已有`[1,2]`
+   b32/scale0.05仅`31.7764`，说明该组合扩大容量明显不利。
+4. 追加5组每层b32上界正式test已全部完成并同步。最高`[1,4]` b32/s0.05仅`32.2213`；
+   其余为`31.6235--32.0605`，没有配置超过`32.5365`。
+5. 20组统一结论已经满足停止条件：固定single1 b32/LR4e-4/scale0.1，停止所有多层、
+   bottleneck和Adapter LR扩张。下一步只能转ASL局部微调或稳定性复核。
+6. 首批15组已经独立同步并分析，结果包SHA-256为
+   `b6eb43e335ec0031f36d022ac701ff80aba0f78c29be27af393e906221169cbb`；无需再次下载。待追加5组
+   已另包同步，SHA-256为`72995ac436e75d0f9d51eff3da2c0c1c0823cbc8051b47c4b13d3b7e8eb37698`。
+7. 阶段一`image_token_asl_layer1_lr_scale_formal_seed0_20260901_171236`已完成并同步。同批
+   LR4e-4/scale0.1精确复现`32.5365`并保持第一；次优LR5e-4/scale0.075为`32.3851`，
+   LR6e-4不占优，因此不补7e-4。
+8. 阶段二`image_token_asl_layer1_asl_local_formal_seed0_20260901_182542`已启动：固定layer1/
+   b32/LR4e-4/scale0.1，运行ASL锚点、gamma-neg8/12、clip0.0375/0.075及gamma-pos
+   0.25/0.5/1.0共8组正式test，GPU0--7各一组、无checkpoint。
+9. 阶段二只按完整运行后的final mAP判断是否超过`32.5365`；若gamma-pos边界1.0成为冠军，
+   再考虑向1.5扩展，否则ASL局部搜索收口。average mAP、F1和类别AP只用于解释。
+
+## 已完成：容量/LR局部正式搜索
+
+1. 用户已将目标改为尽快最大化正式test final mAP，允许个别类别下降。按final/average
+   validation mAP选出b16/LR4e-4和b64/LR4e-4两个候选；原类别/F1/forgetting
+   硬门槛仅保留为观察指标。
+2. 两组seed0完整8-task held-out test已于2026-08-31 00:35在GPU0/1并行启动并完成，batch为
+   `image_token_asl_capacity_formal_seed0_20260831_003546`。两组固定layer8、LR4e-4、scale0.1、
+   ReLU、independent、主模型BCE + Adapter ASL 9.8/0/0.05、FP32且TF32 off。
+3. b16/b64均完成240 epochs、13950 updates、skipped0，无OOM、NaN或写盘异常。final mAP
+   分别为`32.0269/31.3193`，均未超过历史b32冠军`32.4193`；b16明显优于b64。
+4. 结果包已同步本地并通过SHA-256校验，不含checkpoint。历史冠军的数值模式为
+   `AMP=true, TF32=true`，新两组为`AMP=false, TF32=false`，容量与精度模式同时改变。
+5. 用户已确认同时并行执行两阶段。b16/LR4e-4的AMP/TF32-on正式test与以b32/LR4e-4为
+   基线的scale`{0.025,0.05,0.1,0.2}` × activation`{ReLU,GELU}` 8组validation已一次启动。
+6. 新批次`20260831_114209`已完成并同步。b16 AMP/TF32-on正式test final mAP为
+   `31.3796`，低于历史b32冠军`1.0397`；不再保留b16为正式候选。
+7. 8组scale×activation中5组完整成功；`0.1/GELU`、`0.2/ReLU`、`0.2/GELU`在task3因
+   非有限logits失败。有效结果中原`0.1/ReLU`在final、average和task5--7平均mAP三项均第一，
+   final mAP为`42.6673`；停止scale和activation搜索。
+8. 用户考虑validation与test耗时接近后，明确授权跳过validation，直接将bottleneck
+   `{24,28,32,40}` × Adapter LR`{3e-4,4e-4}` 8组放入seed0完整held-out test。
+9. 批次`image_token_asl_local_capacity_lr_amp_formal_seed0_20260831_124751`已全部完成并同步；
+   8组均240 epochs、13950 updates、skipped0，无OOM、NaN或写盘异常。
+10. 没有新冠军：同批b32/LR4e-4精确复现`32.4193`并仍排名第一。最接近的b24/LR3e-4
+    为`32.2492`，低`0.1702`；它的average mAP高`0.2668`，但task6类别组均AP低`3.5030`。
+11. 统一容量/LR搜索已基本收口。若层位置正式test无新冠军，下一步二选一：保持
+    b32/LR4e-4进入ASL局部微调；或实现task-dependent Adapter，task0--5候选b24/LR3e-4、
+    task6--7保留b32/LR4e-4。
+12. 已经用户批准删除8个明确失败/中止实验checkpoint，释放约6.48 GiB；无进一步
+   删除授权。若需使非root `df` 恢复可用空间，必须另行列出已完成实验的可归档
+   checkpoint并再次获得用户批准。
 
 ## 已完成：ASL gamma 搜索收口
 
@@ -461,3 +503,19 @@
 当前状态：已于 2026-06-24 将 `19417f1 Add DDP semantic prompt diagnostics`
 推送至 `origin/feature/clip-taskCLS-posneg-text-head`。后续仍需完成论文实现细节核对和
 VOC 对照实验，不应在现阶段合并到 `main`。
+
+## 2026-09-01 当前Image-token Adapter下一步
+
+1. 阶段二ASL局部8组正式test已完成；原9.8/0/0.05锚点以final mAP`32.5365`保持第一，
+   且8个task mAP逐项第一。停止gamma-neg、gamma-pos和clip扩展。
+2. 下一批将阶段三和阶段四合并并行：阶段三比较uniform b32与task0 b24/b28、其余task b32
+   的按任务bottleneck；阶段四在uniform b32上联合比较主模型实际LR
+   `{0.010,0.0125,0.015}`与Adapter专属weight decay`{0,1e-5,1e-4}`。
+3. 两阶段共用原配置作为同批锚点，去重后共11组；固定layer1、Adapter LR4e-4、scale0.1、
+   ReLU、ASL 9.8/0/0.05、AMP/TF32 on、seed0完整8-task test、无checkpoint。
+4. 实现前需新建实验分支，增加per-task bottleneck和Adapter-only weight decay CLI、单元测试、
+   GPU smoke。提交推送与服务器Git同步仍需用户明确确认；当前没有启动阶段三/四。
+5. 用户现已确认运行阶段三/四；实现和11组launcher已经完成静态检查。下一步提交推送实验分支，
+   服务器fetch并新建/切换独立实验worktree，运行完整单元测试和代表性task0-b24 GPU smoke。
+6. 测试通过后启动batch `image_token_asl_layer1_stage34_formal_seed0_<timestamp>`。启动核验必须确认
+   11份config逐字段正确、GPU0--2双进程仍有安全余量、所有组epoch1 skipped0且无非有限值。

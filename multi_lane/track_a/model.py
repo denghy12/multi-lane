@@ -8,7 +8,7 @@ copying, shared classifier, and concat inference remain method-specific.
 
 from __future__ import annotations
 
-from typing import Iterable, List, Sequence, Tuple
+from typing import Iterable, List, Optional, Sequence, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -34,6 +34,7 @@ class MultiLaneModel(nn.Module):
         adapter_residual_scale: float = 0.1,
         adapter_activation: str = "relu",
         adapter_task_initialization: str = "independent",
+        adapter_bottleneck_dims_per_task: Optional[Sequence[int]] = None,
     ) -> None:
         super().__init__()
         if not task_sizes or any(int(size) <= 0 for size in task_sizes):
@@ -154,6 +155,7 @@ class MultiLaneModel(nn.Module):
                     residual_scale=adapter_residual_scale,
                     activation=adapter_activation,
                     task_initialization=adapter_task_initialization,
+                    bottleneck_dims_per_task=adapter_bottleneck_dims_per_task,
                 )
             self.adapter_bank = adapter_bank
 

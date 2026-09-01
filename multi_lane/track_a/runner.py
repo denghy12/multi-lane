@@ -21,6 +21,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 import numpy as np
 import torch
 import torch.nn.functional as F
+from torch import nn
 from torch.utils.data import DataLoader, Dataset, Subset
 from torchvision import transforms
 
@@ -427,6 +428,43 @@ def current_validation_map(
     ]))
 
 
+def build_optimizer_groups(
+    model: MultiLaneModel,
+    weight_decay: float,
+    adapter_learning_rate: Optional[float] = None,
+    adapter_weight_decay: Optional[float] = None,
+) -> Tuple[List[nn.Parameter], List[nn.Parameter], List[Dict[str, object]]]:
+    if weight_decay < 0:
+        raise ValueError("Weight decay must be non-negative")
+    model_parameters = list(model.base_optimizer_parameters())
+    optimizer_groups: List[Dict[str, object]] = [
+        {
+            "params": [model.selectors, *list(model.prompts)],
+            "weight_decay": weight_decay,
+        },
+        {"params": list(model.head.parameters()), "weight_decay": 0.0},
+    ]
+    adapter_parameters = list(model.adapter_optimizer_parameters())
+    if adapter_parameters:
+        if adapter_learning_rate is None or adapter_learning_rate <= 0:
+            raise ValueError("Enabled adapters require a positive learning rate")
+        resolved_adapter_weight_decay = (
+            weight_decay
+            if adapter_weight_decay is None
+            else float(adapter_weight_decay)
+        )
+        if resolved_adapter_weight_decay < 0:
+            raise ValueError("Adapter weight decay must be non-negative")
+        optimizer_groups.append(
+            {
+                "params": adapter_parameters,
+                "weight_decay": resolved_adapter_weight_decay,
+                "lr": adapter_learning_rate,
+            }
+        )
+    return model_parameters, adapter_parameters, optimizer_groups
+
+
 def train_task(
     model: MultiLaneModel,
     loader: DataLoader,
@@ -439,6 +477,7 @@ def train_task(
     temperature: float,
     amp: bool,
     adapter_learning_rate: Optional[float] = None,
+    adapter_weight_decay: Optional[float] = None,
     loss_mode: str = "legacy_full_zero",
     loss_routing: str = "joint_bce",
     asl_gamma_neg: float = 9.8,
@@ -450,27 +489,14 @@ def train_task(
         "joint_bce", "model_asl", "adapter_asl", "both_asl"
     }:
         raise ValueError("Unknown model/Adapter loss routing")
-    model_parameters = list(model.base_optimizer_parameters())
-    optimizer_groups = [
-        {
-            "params": [model.selectors, *list(model.prompts)],
-            "weight_decay": weight_decay,
-        },
-        {"params": list(model.head.parameters()), "weight_decay": 0.0},
-    ]
-    adapter_parameters = list(model.adapter_optimizer_parameters())
+    model_parameters, adapter_parameters, optimizer_groups = build_optimizer_groups(
+        model=model,
+        weight_decay=weight_decay,
+        adapter_learning_rate=adapter_learning_rate,
+        adapter_weight_decay=adapter_weight_decay,
+    )
     if loss_routing in {"adapter_asl", "both_asl"} and not adapter_parameters:
         raise ValueError("Adapter ASL routing requires an enabled Adapter")
-    if adapter_parameters:
-        if adapter_learning_rate is None or adapter_learning_rate <= 0:
-            raise ValueError("Enabled adapters require a positive learning rate")
-        optimizer_groups.append(
-            {
-                "params": adapter_parameters,
-                "weight_decay": weight_decay,
-                "lr": adapter_learning_rate,
-            }
-        )
     optimizer = torch.optim.Adam(optimizer_groups, lr=learning_rate)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
     scaler = torch.cuda.amp.GradScaler(enabled=amp)
@@ -674,6 +700,16 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--adapter-bottleneck-dim", type=int, default=64)
     parser.add_argument(
+        "--adapter-bottleneck-dims-per-task",
+        type=int,
+        nargs="+",
+        default=None,
+        help=(
+            "Optional bottleneck dimensions for every protocol task. "
+            "When omitted, --adapter-bottleneck-dim is shared by all tasks."
+        ),
+    )
+    parser.add_argument(
         "--adapter-layer-indices", type=int, nargs="+", default=[11]
     )
     parser.add_argument("--adapter-residual-scale", type=float, default=0.1)
@@ -681,6 +717,15 @@ def parse_args() -> argparse.Namespace:
         "--adapter-activation", choices=("relu", "gelu"), default="relu"
     )
     parser.add_argument("--adapter-learning-rate", type=float, default=4e-4)
+    parser.add_argument(
+        "--adapter-weight-decay",
+        type=float,
+        default=None,
+        help=(
+            "Adapter-only weight decay. Defaults to the shared --weight-decay "
+            "for backward compatibility."
+        ),
+    )
     parser.add_argument(
         "--adapter-task-init",
         choices=("independent", "copy_previous"),
@@ -703,6 +748,16 @@ def main() -> None:
         raise ValueError(f"max-tasks must be between 1 and {len(TASK_SIZES)}")
     if args.loss_routing in {"adapter_asl", "both_asl"} and args.adapter_mode == "disabled":
         raise ValueError("Adapter ASL routing requires an enabled Adapter")
+    if args.adapter_bottleneck_dims_per_task is not None:
+        if len(args.adapter_bottleneck_dims_per_task) != len(TASK_SIZES):
+            raise ValueError(
+                "adapter-bottleneck-dims-per-task must provide one value for "
+                f"each of the {len(TASK_SIZES)} protocol tasks"
+            )
+        if any(value <= 0 for value in args.adapter_bottleneck_dims_per_task):
+            raise ValueError("Per-task Adapter bottleneck dimensions must be positive")
+    if args.adapter_weight_decay is not None and args.adapter_weight_decay < 0:
+        raise ValueError("Adapter weight decay must be non-negative")
     if not torch.cuda.is_available() or args.device != "cuda":
         raise RuntimeError("Formal Track-A reproduction requires CUDA")
     amp = not args.no_amp
@@ -731,6 +786,7 @@ def main() -> None:
         adapter_residual_scale=args.adapter_residual_scale,
         adapter_activation=args.adapter_activation,
         adapter_task_initialization=args.adapter_task_init,
+        adapter_bottleneck_dims_per_task=args.adapter_bottleneck_dims_per_task,
     ).float().to(device)
     model.visual_encoder.requires_grad_(False)
     model.assert_visual_frozen()
@@ -744,11 +800,15 @@ def main() -> None:
         model.adapter_bank.per_task_parameter_count()
         if model.adapter_bank is not None else 0
     )
+    adapter_parameter_counts_per_task = (
+        list(model.adapter_bank.per_task_parameter_counts())
+        if model.adapter_bank is not None else []
+    )
     print(
         f"trainable_parameters={lane_parameters + classifier_parameters + adapter_parameters_per_task} "
         f"task_lane={lane_parameters} classifier={classifier_parameters} "
         f"adapter_total={adapter_parameters} "
-        f"adapter_per_task={adapter_parameters_per_task}",
+        f"adapter_per_task={adapter_parameter_counts_per_task}",
         flush=True,
     )
 
@@ -855,6 +915,11 @@ def main() -> None:
         "max_tasks": args.max_tasks,
         "adapter_mode": args.adapter_mode,
         "adapter_bottleneck_dim": args.adapter_bottleneck_dim,
+        "adapter_bottleneck_dims_per_task": (
+            list(args.adapter_bottleneck_dims_per_task)
+            if args.adapter_bottleneck_dims_per_task is not None
+            else [args.adapter_bottleneck_dim] * len(TASK_SIZES)
+        ),
         "adapter_layer_indices": list(args.adapter_layer_indices),
         "adapter_residual_scale": args.adapter_residual_scale,
         "adapter_activation": args.adapter_activation,
@@ -875,6 +940,14 @@ def main() -> None:
         "adapter_learning_rate": (
             args.adapter_learning_rate if args.adapter_mode != "disabled" else None
         ),
+        "adapter_weight_decay": (
+            (
+                args.weight_decay
+                if args.adapter_weight_decay is None
+                else args.adapter_weight_decay
+            )
+            if args.adapter_mode != "disabled" else None
+        ),
         "clip_checkpoint": str(args.clip_checkpoint.resolve()),
         "clip_checkpoint_sha256": OPENAI_VIT_B16_SHA256,
         "data_root": str(dataset_parent / "EMOTIC"),
@@ -891,6 +964,7 @@ def main() -> None:
         "classifier_parameters": classifier_parameters,
         "adapter_parameters": adapter_parameters,
         "adapter_parameters_per_task": adapter_parameters_per_task,
+        "adapter_parameter_counts_per_task": adapter_parameter_counts_per_task,
     }
     (output / "config.json").write_text(
         json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
@@ -920,10 +994,15 @@ def main() -> None:
         history = train_task(
             model, train_loader, val_loader, device, task_id,
             args.epochs, learning_rate, args.weight_decay,
-            args.temperature, amp, args.adapter_learning_rate,
-            args.training_loss_mode, args.loss_routing,
-            args.asl_gamma_neg, args.asl_gamma_pos,
-            args.asl_clip, args.asl_eps,
+            args.temperature, amp,
+            adapter_learning_rate=args.adapter_learning_rate,
+            adapter_weight_decay=args.adapter_weight_decay,
+            loss_mode=args.training_loss_mode,
+            loss_routing=args.loss_routing,
+            asl_gamma_neg=args.asl_gamma_neg,
+            asl_gamma_pos=args.asl_gamma_pos,
+            asl_clip=args.asl_clip,
+            asl_eps=args.asl_eps,
         )
         row = evaluate(
             model, reporting_loader, device, task_id, args.threshold, amp

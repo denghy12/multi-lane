@@ -16,6 +16,7 @@ from multi_lane.track_a.runner import (
     TASK_SIZES,
     TaskMetrics,
     backward_routed_training_losses,
+    build_optimizer_groups,
     build_transforms,
     compute_asymmetric_training_loss,
     compute_training_loss,
@@ -154,6 +155,79 @@ class TrackAModelTest(unittest.TestCase):
         expected = sum(named[name].numel() for name in model.optimizer_parameter_names())
         actual = sum(parameter.numel() for parameter in model.optimizer_parameters())
         self.assertEqual(actual, expected)
+
+    def test_per_task_adapter_bottlenecks_change_only_task_capacity(self) -> None:
+        model = MultiLaneModel(
+            FakeVisual(), (2, 1), num_selectors=2, num_prompts=2,
+            num_prompt_layers=1, adapter_mode="image_token",
+            adapter_bottleneck_dim=3,
+            adapter_bottleneck_dims_per_task=(2, 5),
+            adapter_layer_indices=(0,),
+        )
+        self.assertEqual(model.adapter_bank.bottleneck_dims_per_task, (2, 5))
+        self.assertEqual(
+            model.adapter_bank.per_task_parameter_counts(),
+            (2 * 8 * 2 + 2 + 8, 2 * 8 * 5 + 5 + 8),
+        )
+        model.activate_task(0)
+        self.assertEqual(
+            sum(p.numel() for p in model.adapter_optimizer_parameters()),
+            model.adapter_bank.per_task_parameter_count(0),
+        )
+        model.activate_task(1)
+        self.assertEqual(
+            sum(p.numel() for p in model.adapter_optimizer_parameters()),
+            model.adapter_bank.per_task_parameter_count(1),
+        )
+
+    def test_adapter_optimizer_weight_decay_is_independent(self) -> None:
+        model = MultiLaneModel(
+            FakeVisual(), (2, 1), num_selectors=2, num_prompts=2,
+            num_prompt_layers=1, adapter_mode="image_token",
+            adapter_bottleneck_dim=3, adapter_layer_indices=(0,),
+        )
+        model.activate_task(0)
+        _, adapter_parameters, groups = build_optimizer_groups(
+            model,
+            weight_decay=0.01,
+            adapter_learning_rate=4e-4,
+            adapter_weight_decay=1e-4,
+        )
+        self.assertTrue(adapter_parameters)
+        self.assertEqual([group["weight_decay"] for group in groups], [0.01, 0.0, 1e-4])
+        self.assertEqual(groups[-1]["lr"], 4e-4)
+
+    def test_copy_previous_rejects_nonuniform_bottlenecks(self) -> None:
+        with self.assertRaisesRegex(ValueError, "uniform bottleneck"):
+            MultiLaneModel(
+                FakeVisual(), (2, 1), num_selectors=2, num_prompts=2,
+                num_prompt_layers=1, adapter_mode="image_token",
+                adapter_bottleneck_dims_per_task=(2, 5),
+                adapter_layer_indices=(0,),
+                adapter_task_initialization="copy_previous",
+            )
+
+    def test_taskwise_capacity_preserves_later_task_initialization_rng(self) -> None:
+        torch.manual_seed(41)
+        uniform = TaskImageTokenAdapterBank(
+            num_tasks=2,
+            hidden_dim=8,
+            bottleneck_dim=4,
+            bottleneck_dims_per_task=(4, 4),
+            layer_indices=(0,),
+        )
+        torch.manual_seed(41)
+        taskwise = TaskImageTokenAdapterBank(
+            num_tasks=2,
+            hidden_dim=8,
+            bottleneck_dim=4,
+            bottleneck_dims_per_task=(2, 4),
+            layer_indices=(0,),
+        )
+        for name, value in uniform.task_adapters[1].state_dict().items():
+            self.assertTrue(
+                torch.equal(value, taskwise.task_adapters[1].state_dict()[name])
+            )
 
     def test_image_token_adapter_preserves_then_changes_selector_input(self) -> None:
         torch.manual_seed(29)

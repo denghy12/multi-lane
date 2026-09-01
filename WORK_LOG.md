@@ -1,6 +1,216 @@
 # 工作日志
 
-最后一次更新：2026-08-26。
+最后一次更新：2026-09-01。
+
+## 2026-09-01：阶段一完成并启动阶段二ASL局部8组正式test
+
+- 阶段一8组均完成240 epochs、13950 updates、skipped0，无运行异常。同批
+  LR4e-4/scale0.1精确复现single1历史冠军final/average mAP`32.5365/39.1445`并排名第一。
+- 次优LR5e-4/scale0.075为`32.3851/39.2462`，average高`0.1017`但final低`0.1514`；
+  task0--4略高、task5--7下降，Sadness提高约`4.18`而Suffering下降约`4.50` AP。
+  LR6e-4两组至少低`0.4977`，不扩展7e-4；阶段二固定LR4e-4/scale0.1。
+- 阶段一40个小文件已同步，无checkpoint。180KB archive两端SHA-256均为
+  `403004fba2f2244dc9c1f630c1f1490f89cc256dfe734d808a9cda64a941bc89`；分析文件为
+  `output/emotic_track_a_image_token_asl_layer1_lr_scale_formal/20260901_171236/analysis.md`。
+- 阶段二按用户要求继续直接report test。批次
+  `image_token_asl_layer1_asl_local_formal_seed0_20260901_182542`包含锚点9.8/0/0.05、
+  gamma-neg 8/12、clip0.0375/0.075及gamma-pos0.25/0.5/1.0共8组；固定layer1/b32/
+  LR4e-4/scale0.1/ReLU/independent、AMP/TF32 on、无checkpoint，GPU0--7各一组。
+
+## 2026-09-01：启动layer1 Adapter LR×scale阶段一8组正式test
+
+- 用户明确validation与test耗时相近，要求跳过validation并直接并行全部8组held-out test。
+  固定zero-based layer1、b32、ReLU、independent、主模型BCE + Adapter ASL 9.8/0/0.05、
+  seed0、8 tasks×30 epochs、batch64、CLIP normalization、crop0.05、AMP/TF32 on、无checkpoint。
+- 组合为LR4e-4×scale`0.075/0.1/0.125`、LR5e-4×三种scale、LR6e-4×scale`0.075/0.1`；
+  `4e-4/0.1`作为同批冠军锚点，高风险`6e-4/0.125`未运行。
+- 批次ID为`image_token_asl_layer1_lr_scale_formal_seed0_20260901_171236`。两次SSH握手被服务器
+  reset，端口与密钥复核成功后才执行状态检查，未产生半启动目录。
+- GPU0--7启动前均空闲、无runner；clean实验worktree为`94f3327`。8组各占一张GPU，均已生成
+  config并开始初始化；每卡约1.8--2.5GB、最低仍余21.6GB，无OOM或启动异常。
+
+## 2026-09-01：同步5组每层b32多层结果，多层路线收口
+
+- 5组均完成240 epochs、13950 updates、skipped0，日志无OOM、非有限值、Traceback或写盘
+  错误。最佳`[1,4]` b32/s0.05的final/average mAP为`32.2213/38.9746`，相对single1冠军
+  低`0.3152/0.1699`；task1--7均下降，task6/7低`0.2804/0.3152`。
+- `[0,1]` b32/s0.05、三层`[0,1,2]` b32/s1/30、`[1,8]` b32/s0.05、`[1,2]`
+  b32/s0.1的final mAP依次为`32.0605/31.9493/31.7306/31.6235`，均未超过冠军或首批
+  多层最佳`[1,2]` b16/s0.05的`32.3233`。
+- b32相对小容量对应组的final变化为`[0,1] +0.1816`、`[1,4] -0.0277`、
+  `[1,8] -0.3211`、三层`+0.1629`、`[1,2]` s0.1 `-0.1307`。容量效应没有一致方向，
+  无法形成可推广的多层收益。
+- 5组25个小文件已单独同步，不含checkpoint；112KB archive两端SHA-256均为
+  `72995ac436e75d0f9d51eff3da2c0c1c0823cbc8051b47c4b13d3b7e8eb37698`。详细分析见
+  `output/emotic_track_a_image_token_asl_layer1_multilayer_formal/20260901_100337_b32_extension5/analysis.md`。
+- 服务器已无本批runner。20组统一结论为固定single1 b32/LR4e-4/scale0.1；停止多层、
+  bottleneck和Adapter LR扩展。当前未启动新实验。
+
+## 2026-09-01：首批15组完成并追加5组每层b32多层test
+
+- `image_token_asl_layer1_local_multilayer_formal_seed0_20260901_100337`首批15组均完成240
+  epochs、13950 updates、skipped0。layer1局部网格最佳b32/LR3e-4 final mAP`32.1281`，
+  其余b24/b28/b40组合为`31.5292--32.0788`，均未超过已完成的single1 b32/LR4e-4
+  冠军`32.5365`。single7 FP32补测为`31.7931`，也未取胜。
+- 多层归一化最佳为`[1,2]` b16/scale0.05的`32.3233`，其次`[1,4]` b16/scale0.05
+  `32.2490`；`[1,8]`为`32.0516`、`[0,1]`为`31.8789`、三层b12为`31.7864`。
+  `[1,2]` b32/scale0.05仅`31.7764`，而b16/scale0.1为`31.7542`，说明容量或总残差强度
+  放大都没有改善该相邻双层。
+- 用户要求多层再补每层b32版本。新增5组：`[0,1]/[1,4]/[1,8]` b32/scale0.05、
+  `[0,1,2]` b32/scale1/30、`[1,2]` b32/scale0.1；统一FP32/TF32 on、LR4e-4、正式test、
+  无checkpoint。它们用于补齐跨深度组合和容量/强度上界，不改变已完成的归一化结论。
+- 三层b32 FP32/TF32-off严格smoke通过，可训练参数839034、零初始化最大差`1.49e-8`。
+  5组已在GPU0--4启动，20个总配置目录均已生成，初始核验无OOM、非有限值或Traceback。
+- 首批15组已独立同步本地：75个小文件、无checkpoint，压缩包328KB，两端SHA-256均为
+  `b6eb43e335ec0031f36d022ac701ff80aba0f78c29be27af393e906221169cbb`。新增5组仍在服务器运行，
+  没有混入该包。
+- 详细逐task与类别分析确认：最佳多层`[1,2]` b16/s0.05相对single1在8个task全部下降，
+  final/average mAP低`0.2132/0.2309`，仅forgetting改善`0.1205`；single7 FP32在task6/7低
+  `0.7912/0.7434`。分析文件为
+  `output/emotic_track_a_image_token_asl_layer1_multilayer_formal/20260901_100337_initial15/analysis.md`。
+
+## 2026-09-01：并行启动single7 FP32、layer1局部网格和归一化多层test
+
+- 用户要求直接并行三条held-out test路线。批次
+  `image_token_asl_layer1_local_multilayer_formal_seed0_20260901_100337`共15组，统一为seed0、
+  8 tasks×30 epochs、batch64、主模型BCE + Adapter ASL 9.8/0/0.05、ReLU、independent、
+  CLIP normalization、crop0.05、TF32 on、无checkpoint。
+- single7使用FP32、layer7/b32/LR4e-4/scale0.1，补跑此前AMP非有限失败的高validation候选。
+  layer1局部网格使用AMP，运行bottleneck`24/28/32/40` × LR`3e-4/4e-4`中除已完成
+  b32/LR4e-4冠军外的7组。
+- 多层使用FP32并围绕layer1设计7组：`[0,1]/[1,2]/[1,4]/[1,8]`采用每层
+  b16/scale0.05，使总参数量和总残差强度近似single1 b32/scale0.1；增加`[1,2]`
+  b32/scale0.05与b16/scale0.1两个解耦控制，以及`[0,1,2]` b12/scale1/30三层归一化。
+- 初始FP32/TF32-on smoke被纯FP32容差拦截，单层/双层/三层最大差约`1.1e-5--2.2e-5`；
+  判定为TF32重复前向数值差而非多层特有错误。FP32/TF32-off严格复测中single7、四种双层及
+  三层全部通过，最大差约`6.52e-8`；正式训练按用户要求保持TF32 on。
+- 服务器主实验worktree为clean`94f3327`，8张GPU启动前均空闲。GPU0--6各两组、GPU7一组；
+  15组全部生成config并进入task0。各卡总显存约2.6--5.5GB，最低仍余18.6GB；启动核验没有
+  OOM、非有限值或Traceback。当前不持续盯跑，完成后同步JSON与日志分析。
+
+## 2026-09-01：同步层位置正式test，layer1成为探索性新冠军
+
+- 批次`image_token_asl_layer_formal_seed0_20260831_154234`已结束：single1/2/3/4/5/11均完整
+  完成240 epochs、13950 updates、skipped0；single7在task3 epoch16后因非有限ASL logits
+  终止；pair`[2,3]`完成240 epochs，但task3 epoch17--29共跳过91次AMP optimizer update。
+- zero-based single1的final/average mAP为`32.5365/39.1445`，相对layer8旧冠军
+  `32.4193/38.8789`提高`0.1172/0.2656`；cF1/oF1提高`0.4167/0.2811`，forgetting降低
+  `0.0934`。除层索引外配置逐字段相同，8个task mAP均高于layer8，因此它是当前正式指标的
+  探索性新冠军。
+- single1的收益集中于task4/5（`+0.5355/+0.6315`），task6/7仅`+0.0329/+0.1172`；最终
+  Fear/Fatigue/Aversion等改善，但Suffering/Sadness下降`7.0468/4.9255` AP，仍有类别交换。
+- 完整候选其余排名为single4`32.0577`、single5`31.9281`、single2`31.9014`、single3
+  `31.3633`、single11`31.0015`、pair`[2,3]``30.8747`。多层既无总mAP收益又有AMP跳步，
+  不再增加层数。
+- 旧FP32 validation与新AMP test在6个完整单层上的final mAP Pearson相关仅`-0.273`；
+  layer3的validation第一没有外推到test，数值模式与split共同造成排序反转。single7的失败
+  也表明AMP对ASL层位置并非无关扰动。
+- 结果已同步至本地，39个小文件、不含checkpoint。192KB archive在服务器与本地SHA-256均为
+  `d8e22c7c8cab09af697ce9c705530af5446c7de51b168d2b3049037cf46380c4`。分析见
+  `output/emotic_track_a_image_token_asl_layer_formal/image_token_asl_layer_formal_seed0_20260831_154234/analysis.md`。
+- `+0.1172`是从多个held-out test候选中筛出的探索性小效应，存在多重比较乐观偏差；不能作为
+  稳定或显著提升。当前未启动新实验。
+
+## 2026-08-31：审计层位置结果并排队8组正式test
+
+- 重新核对历史产物后确认：Image-token Adapter单层`0--11`搜索、15组多层screen以及
+  single8/single9/pair8_9 BCE确认均为seed0完整8-task validation-only，此前没有对
+  layer3/layer7/layer11或多层结构运行held-out test。
+- validation与test使用相同训练协议但不同评估split，并非互不相关；此前不同批次validation
+  波动约`0.4--0.6` mAP，而且层搜索使用AMP off/TF32 on、当前正式冠军使用AMP/TF32 on，
+  因此validation排序不能保证test排序。
+- 按用户当前“只追最终test mAP、个别类别可下降”的目标，取消旧的类别/F1/forgetting否决
+  门槛。单层ASL同批超过disabled的候选为zero-based layer`1/2/3/4/5/7/11`；其中layer3、
+  layer7相对同批layer8 final validation mAP分别高约`1.1007/0.8227`。多层仅保留各自同批
+  超过disabled且最高的`[2,3]`，其余多层ASL不进入test。
+- 8组共同配置为EMOTIC seed0、8 tasks×30 epochs、batch64、主模型BCE + Image-token
+  Adapter ASL 9.8/0/0.05、b32、Adapter LR4e-4、scale0.1、ReLU、independent、CLIP
+  normalization、crop0.05、AMP/TF32 on、reporting test、无checkpoint。
+- 批次ID为`image_token_asl_layer_formal_seed0_20260831_154234`，输出位于服务器
+  `/mnt/haoyuan/workspace/emotic_benchmark_runs/multi_lane_image_token_asl_layer_formal_v0.1/`。
+  启动时8张卡均被另一批进程占用、仅余约6--10GB；已为GPU0--7各挂一个等待器，要求空闲
+  显存至少20GB且连续两次60秒检查通过后才启动。8个等待器均已核验存活，当前未抢占显存。
+
+## 2026-08-31：直接启动 b32 附近容量/LR 8组正式test
+
+- 用户明确validation与test耗时接近时可跳过validation，直接追求最高正式test mAP。因此固定
+  当前最优b32/LR4e-4/scale0.1/ReLU协议，将bottleneck`24/28/32/40` × LR`3e-4/4e-4`
+  全8组直接运行seed0 held-out test，不先运行validation。
+- 批次ID为`image_token_asl_local_capacity_lr_amp_formal_seed0_20260831_124751`，GPU0--7各一组。
+  共同配置为8 tasks、30 epochs/task、batch64、layer8、scale0.1、ReLU、independent、主模型BCE +
+  Adapter ASL 9.8/0/0.05、CLIP normalization、crop0.05、AMP/TF32 on、无checkpoint。
+- 启动前8卡均有其他高利用率任务，但仍余8.6--11.8GB显存；按用户要求不等待空闲，不停止
+  其他进程，每卡追加一组。启动后最低仍余约6.2GB，未接近OOM。
+- 8组task0已到epoch3--4，均84 steps、skipped0，单epoch约15--17秒，无OOM、NaN、Inf、
+  Traceback、RuntimeError或写盘错误。服务器实验worktree为clean`94f3327`。
+- 8组随后均完成240 epochs、13950 updates、skipped0，完成标记各唯一，日志无OOM、NaN、Inf、
+  Traceback、RuntimeError或写盘错误。同批b32/LR4e-4精确复现历史冠军全部主指标和曲线，
+  final mAP为`32.4193`，仍是第一。
+- 排名2--8为b24/LR3e-4`32.2492`、b28/LR4e-4`32.1666`、b32/LR3e-4`32.1172`、
+  b40/LR4e-4`31.9602`、b28/LR3e-4`31.8790`、b24/LR4e-4`31.2931`、b40/LR3e-4
+  `31.1764`；没有新冠军。
+- b24/LR3e-4虽final mAP低`0.1702`，但average mAP高`0.2668`、task5--7平均高`0.0104`。
+  组别分解显示它改善多个早期任务，但task6组均低`3.5030`，Suffering低`8.2892`，因而最终落后。
+- 41个小文件已同步本地，archive 180KB，SHA-256为
+  `acc4e0682ecc6ff170dc92e1663dafb4d94e97cc5aa7d56c03696b440dc1a978`，不含checkpoint。统一容量/LR
+  搜索基本收口；下一步应转ASL局部微调或task-dependent Adapter超参。
+
+## 2026-08-31：并行启动 b16 AMP 正式test与 scale×activation 搜索
+
+- 用户要求不等b16正式结果，直接利用8卡同时完成一组b16 AMP/TF32-on held-out test和
+  8组b32 scale×activation完整validation。为对齐历史冠军，validation也使用AMP/TF32 on。
+- 共同配置为seed0、8 tasks×30 epochs、batch64、layer8、LR4e-4、independent、主模型BCE +
+  Image-token Adapter ASL 9.8/0/0.05、CLIP normalization、crop0.05、无checkpoint。formal使用b16、
+  scale0.1/ReLU/reporting test；validation固定b32，搜索scale`0.025/0.05/0.1/0.2`和ReLU/GELU。
+- 启动前GPU0--7全空闲、无残留runner，服务器实验worktree为clean`94f3327`。初次SSH握手
+  被重置两次，端口和密钥复核后恢复，未产生半启动任务。
+- formal batch为`image_token_asl_b16_amp_formal_seed0_20260831_114209`，validation batch为
+  `image_token_asl_scale_activation_amp_seed0_20260831_114209`。GPU0同时运行formal和一组validation，
+  GPU1--7各一组；共9个tmux会话。
+- 9组task0 epoch2均完成84 steps、skipped0，GPU0双进程约5.2GB，其他卡约2.4GB，无
+  OOM、NaN、Inf、Traceback、RuntimeError或写盘错误。预计约45--55分钟完成。
+- b16 AMP/TF32-on formal完整完成240 epochs、13950 updates、skipped0，final/average mAP为
+  `31.3796/38.8129`，未超过历史b32冠军`32.4193/38.8789`。它在task0--4略高，但task6/7
+  低`1.0856/1.0397`；因而排除“只对齐AMP/TF32就能让b16取胜”的假设。
+- scale×activation中`0.1/GELU`、`0.2/ReLU`、`0.2/GELU`在task3因非有限ASL logits终止，
+  其余5组完成240 epochs、13950 updates、skipped0。原`0.1/ReLU`在final/average/task5--7平均mAP
+  三项均第一，为`42.6673/49.2378/44.8851`；其他有效组final mAP低`0.5031--0.7962`。
+- 结论是保留b32/LR4e-4/scale0.1/ReLU/AMP+TF32，不运行新正式test，不继续扩scale或修复
+  GELU。下一局部搜索候选为bottleneck`24/28/32/40` × LR`3e-4/4e-4`。
+- 43个小文件已同步本地，archive为160KB、SHA-256
+  `29c87d99ddcc868bd0c1989ec921d5c22c20a36c9a6a6c77c9d8220254241461`，不含checkpoint。
+
+## 2026-08-31：启动 b16/b64 LR4e-4 正式test
+
+- 用户明确目标改为尽快最大化正式test final mAP，不再以Sadness、Sensitivity、
+  Suffering、F1或forgetting作为候选否决门槛。阶段一validation最高的b16/LR4e-4
+  与次高b64/LR4e-4进入一次性seed0 held-out test。
+- 服务器GPU0--7启动前均空闲；clean实验worktree为
+  `/mnt/haoyuan/workspace/multi-lane-main-asl-routing@94f3327`。b64真实CLIP FP32/TF32-off
+  Adapter-ASL smoke通过，可训练参数788314。
+- 两组于00:35在GPU0/1并行启动，batch ID为
+  `image_token_asl_capacity_formal_seed0_20260831_003546`。共同配置为8 tasks、30 epochs/task、
+  batch64、layer8、Adapter LR4e-4、scale0.1、ReLU、independent、主模型BCE + Adapter ASL
+  9.8/0/0.05、CLIP normalization、crop0.05、AMP/TF32 off、test reporting；仅bottleneck为16/64。
+- 服务器磁盘显示100%；为避免历史正式运行每组约2.7GB checkpoint导致中途写入失败，
+  本轮显式关闭checkpoint，预计每组仅约150KB JSON外加日志。根目录在root保留块上的
+  16MB写入测试通过。
+- b16/b64 task0 epoch1均完成84 steps、skipped0，loss为`0.614753/0.614830`，Adapter loss为
+  `0.028270/0.028179`；GPU显存约3.4/3.0GB，无OOM、NaN、Inf、Traceback或RuntimeError。
+- 两组后续均完成240 epochs、13950 updates、skipped0，完成标记各唯一且日志无数值、显存或
+  写盘错误。b16的final/average mAP为`32.0269/38.6674`，b64为`31.3193/38.4295`；
+  两者均未超过历史b32冠军`32.4193/38.8789`。
+- b16相对冠军final mAP仅低`0.3924`，cF1/oF1反而高`0.1317/0.2205`；b64的final mAP
+  低`1.1000`。b16比b64高`0.7076` final mAP，容量64不再保留。
+- 历史b32配置为AMP/TF32 on，本轮b16/b64为AMP/TF32 off；核心代码差异只增加非有限值
+  检查和checkpoint开关，正常loss路径未改变。因此下一个最小对照应只b16对齐冠军精度模式。
+- 11个小文件与两份日志已同步本地；压缩包48KB，SHA-256为
+  `66ef7139375d2913830bc5683f26c378506c3e2430fc7f18b47d0b9bd74d1484`，不含checkpoint。
+- 按用户批准对服务器checkpoint做了限定清理：只删除CocoER、旧Task Adapter Bank、
+  EMOT-Net+CCIM和DSCT的8个明确失败/中止实验`checkpoints/`目录，保留日志、
+  配置与指标。实际释放`6796956 KiB`（约6.48 GiB），8个目标均已复核不存在。
+  删除未触及任何成功实验或当前b16/b64运行；两组正式test仍正常。ext4预留块使
+  `df`仍显示100%，root可用的实际空间约139.3 GiB。
 
 ## 2026-08-26：准备 Image-token Adapter-ASL 容量/LR阶段一
 
@@ -35,6 +245,16 @@
   5.9--6.1GB、剩余约18GB，无OOM或非有限ASL loss。launcher本地实现同步改为默认13进程
   同启，便于未来一键复现；当前批次完成后需手动运行严格汇总，避免原串行父launcher的重复
   目录检测影响结果判定。
+
+- 13/13组随后全部完成并已同步到本地结果包；每组均为240 epochs、13950 updates、skipped0，
+  无OOM、NaN、Inf、Traceback或RuntimeError。fresh disabled、b16/LR4e-4、b64/LR2e-4的
+  final mAP分别为`42.0628/42.5718/42.3616`，但最高mAP候选牺牲Sensitivity并恶化
+  forgetting；b32/LR1e-4虽通过锚点门槛，却相对fresh disabled压低task6的Sadness和Suffering。
+  严格汇总无合格winner，不进入scale×activation、不扩大容量/LR、不运行正式test。详细结果与
+  白名单归档见本地`output/emotic_image_token_tuning/asl_capacity_lr/...results_package_v2/`。
+- 2026-08-30再次从服务器核验并同步同一batch，严格汇总内容与原分析完全一致。
+  本地新归档为`..._results_20260830.tar.gz`（344 KB），SHA-256校验通过，含68个结果文件和
+  19个日志，不含checkpoint。服务器实验worktree仍为clean`94f3327`。
 
 ## 2026-08-26：同步并分析 pair8/9 BCE 同批确认
 
@@ -2056,3 +2276,29 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
   两端 HEAD/upstream、工作树状态和文件校验和。
 - 用户已确认将 `.gitignore` 和四份迁移上下文文档提交并推送到
   `fix/independent-git-worktrees`，再由服务器使用 `git pull --ff-only` 同步。
+
+## 2026-09-01：同步并分析layer1 ASL局部正式test
+
+- 确认服务器已无本批runner，8个目录均包含config、task metrics、training history和
+  complete seed summary；服务器实验worktree保持clean`94f3327`。
+- 结果和日志已打包同步到本地，不含checkpoint；archive两端SHA-256均为
+  `c8258d3215747c4dfd7abc30c35c004e6b9196ea230d394e1a8c2ae71f665691`。
+- 锚点ASL 9.8/0/0.05 final/average mAP为`32.5365/39.1445`，且8个task mAP逐项第一。
+  其余7组final mAP为`31.6761--32.1476`，没有新冠军。
+- gamma-pos1在task3共跳过11次AMP optimizer update；其余7组skipped0。由于该组final
+  mAP仍低锚点`0.3889`，不补FP32，也不扩大gamma-pos。
+- 阶段二ASL局部搜索正式收口。阶段三/四尚未启动；它们需要新增按task bottleneck和
+  Adapter专属weight decay入口，并在用户确认提交推送后才能按Git流程部署服务器。
+
+## 2026-09-01：实现阶段三/四并行实验入口
+
+- 用户确认运行阶段三和阶段四，创建`exp/emotic-image-token-stage34`实验分支。
+- `adapter.py/model.py/runner.py/smoke.py`新增每task bottleneck、Adapter-only weight decay、
+  逐task参数统计及GPU smoke参数；优化器仍保持selectors/prompts使用全局weight decay、head为0，
+  Adapter单独使用新值。
+- 修复潜在对照混杂：非统一task0容量构造后，显式推进到uniform b32参考RNG位置，使后续task
+  Adapter初始化不受task0形状影响；增加对应相等性测试。
+- 新增单组正式入口和8卡launcher。11组同时启动，GPU0--2各两组、GPU3--7各一组；launcher
+  启动前要求8卡连续两次至少12GB空闲，全部无checkpoint，结果写外部benchmark目录，日志写`logs/`。
+- shell语法、Python静态编译和`git diff --check`通过。本地系统Python缺少NumPy，完整单元测试
+  留待服务器`ddp`环境在部署后执行。
