@@ -2302,3 +2302,44 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
   启动前要求8卡连续两次至少12GB空闲，全部无checkpoint，结果写外部benchmark目录，日志写`logs/`。
 - shell语法、Python静态编译和`git diff --check`通过。本地系统Python缺少NumPy，完整单元测试
   留待服务器`ddp`环境在部署后执行。
+
+## 2026-09-01：部署并启动阶段三/四共11组正式test
+
+- 提交`8e56b8a Add taskwise Adapter stage 3 and 4 search`已推送到
+  `origin/exp/emotic-image-token-stage34`。服务器先审计全部worktree，再创建独立clean worktree
+  `/mnt/haoyuan/workspace/multi-lane-main-stage34`，未切换ASL、primary或test-only工作树。
+- Automatic Upload把本次代码和脚本也写入服务器primary；已把3份文档和7个代码/脚本逐文件
+  归档到`/mnt/haoyuan/workspace/git-sync-backup-stage34-deploy-docs-20260901-ooz0O8`，然后恢复primary
+  clean。上传代码归档SHA-256为
+  `0a843bfc3a5be08372c9006c6c8d72e3d155fef37ce95af6b7694a2033b38522`。
+- 服务器`ddp`环境21项完整单元测试通过；uniform b32和task0-b24混合容量的真实CLIP
+  AMP/TF32-on Adapter-ASL GPU smoke均通过，trainable参数分别为739130/726834。
+- batch`image_token_asl_layer1_stage34_formal_seed0_20260901_203100`已在tmux
+  `image_token_stage34_20260901_203100`启动。11组config全部生成且逐字段核验正确，均记录
+  clean commit`8e56b8a`。GPU0--2双进程约4.2--4.6GB，GPU3--7单进程约2.1GB。
+- 11组已到task0 epoch4--5，每epoch84 steps、skipped0，日志无OOM、non-finite、Traceback或
+  RuntimeError。当前让实验继续运行，不持续盯跑；结束后只同步JSON与日志，不下载checkpoint。
+
+## 2026-09-01：同步并分析阶段三/四结果
+
+- 11/11组完成，launcher退出码均为0；每组240 epochs、13950 optimizer updates、skipped0，
+  无OOM、non-finite、Traceback、RuntimeError或checkpoint目录。
+- 小结果、manifest、状态与日志已同步本地；2.5MB解压目录中的archive两端SHA-256均为
+  `bde0e9746985cb74751cc946332b8ada3e823401a7ea5bb1db732def30fcecfd`。
+- 阶段三b24/b28在task0有正收益，但从task1开始整体转负，final mAP为`31.9938/32.0368`。
+  因后续Adapter RNG已严格对齐锚点，结论指向selectors/prompts复制造成的持续路径差异。
+- 阶段四冠军仍为LR0.0125/WD0的`32.5365`。LR0.015/WD1e-5达到`32.5023`，只低`0.0343`，
+  同时获得本批最高average mAP`39.6697`和cF1`33.1460`；task0--6均高、task7仅低`0.0343`。
+- 下一方向收缩到LR0.015/WD1e-5附近的窄网格；不继续task0小容量或全局weight decay扩展。
+
+## 2026-09-01：准备统一LR×Adapter WD局部直接test
+
+- 用户将下一阶段从validation-only改为直接held-out test，并接受其仅为exploratory结论。
+- 创建`exp/emotic-image-token-global-lr-wd`，新增9组8卡launcher；GPU0承载锚点和一组候选，
+  GPU1--7各一组。
+- 候选实际主模型LR为`0.014/0.0145/0.015/0.0155`，对应source LR
+  `0.056/0.058/0.060/0.062`；Adapter WD为`3e-6/1e-5`。所有task使用同一组合，保持未知未来
+  增量数据设定，不使用按task手调参数。
+- 固定seed0、8 tasks×30 epochs、batch64、Image-token layer1/b32、Adapter LR4e-4、
+  scale0.1/ReLU、主模型BCE + Adapter ASL9.8/0/0.05、CLIP normalization、crop0.05、
+  AMP/TF32 on、无checkpoint。

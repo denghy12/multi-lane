@@ -935,3 +935,31 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   主模型实际LR`0.010/0.0125/0.015`×Adapter weight decay`0/1e-5/1e-4`九组。
   uniform b32/LR0.0125/WD0为共用锚点；固定layer1、Adapter LR4e-4、scale0.1、ReLU、
   ASL 9.8/0/0.05、AMP/TF32 on，无checkpoint。
+- 实现已提交推送为`exp/emotic-image-token-stage34@8e56b8a`，服务器独立worktree为
+  `/mnt/haoyuan/workspace/multi-lane-main-stage34`。服务器21项单元测试、uniform b32与
+  task0-b24两种真实CLIP Adapter-ASL GPU smoke均通过。
+- 正式batch为`image_token_asl_layer1_stage34_formal_seed0_20260901_203100`。11组config均记录
+  clean`8e56b8a`及正确逐task容量、实际主模型LR和Adapter weight decay；GPU0--2各两组、
+  GPU3--7各一组。启动后每卡仍余约19.5--22.0GB，11组均到task0 epoch4以上、84 steps/epoch、
+  skipped0，无OOM、非有限值或Traceback。
+- 11组随后全部完成240 epochs、13950 updates、skipped0，没有新冠军。uniform b32、实际主模型
+  LR0.0125、Adapter WD0精确复现`32.5365/39.1445`并保持final mAP第一。
+- 阶段三task0 b24/b28分别把task0提高`0.5923/0.2732`，但final mAP降低`0.5427/0.4997`。
+  后续Adapter初始化已与锚点对齐，退化来自task0对selectors/prompts复制轨迹的路径依赖；
+  task0-only容量路线停止。
+- 阶段四最接近候选为实际主模型LR0.015 + Adapter WD1e-5，final mAP`32.5023`，仅低冠军
+  `0.0343`；average mAP/cF1/oF1分别高`0.5252/0.5704/0.1764`。它在task0--6逐项提高，
+  仅task7低`0.0343`，成为下一轮唯一值得局部微调的方向。
+- 结果小包SHA-256为`bde0e9746985cb74751cc946332b8ada3e823401a7ea5bb1db732def30fcecfd`，
+  无checkpoint。详细分析见`output/emotic_track_a_image_token_stage34_formal/20260901_203100/analysis.md`。
+
+## 2026-09-01 全局主模型LR×Adapter WD局部直接test
+
+- 用户因validation与test耗时相近，明确要求将下一轮统一超参数局部网格直接运行完整test；
+  所有结果继续标记为exploratory test-tuning，不作为无偏最终评估。
+- 新分支`exp/emotic-image-token-global-lr-wd`固定Image-token layer1/b32、Adapter LR4e-4、
+  scale0.1/ReLU/independent、主模型BCE + Adapter ASL 9.8/0/0.05、AMP/TF32 on。
+- 搜索对所有task完全相同的实际主模型LR`0.014/0.0145/0.015/0.0155`与Adapter WD
+  `3e-6/1e-5`八组，增加LR0.0125/WD0同批锚点，共9组seed0完整8-task test，无checkpoint。
+- 固定更新预算与全局Adapter正则化暂不并行；它们必须等本批选定统一LR/WD后再逐阶段运行，
+  避免优化器与训练预算/方法改动同时变化而无法归因。
