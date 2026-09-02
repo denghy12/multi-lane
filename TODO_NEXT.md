@@ -552,3 +552,6 @@ VOC 对照实验，不应在现阶段合并到 `main`。
 20. 测试通过后启动18组batch。启动核验包括18份config全部记录clean同一commit、control精确保持
     epochs模式、7个预算值正确、6个正则配置含30-update calibration、4个gate配置各多8个总参数，
     每卡2--3进程仍有安全显存、首轮无OOM/non-finite/skipped。
+21. 服务器50项单元测试和四种真实CLIP GPU smoke已全部通过。下一步将本次验证上下文commit推送并让
+    独立实验worktree`git pull --ff-only`，然后启动batch
+    `image_token_asl_layer1_training_mechanisms_formal_seed0_20260902_150731`。

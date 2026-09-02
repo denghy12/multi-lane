@@ -2399,3 +2399,15 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
   和gate入口。新增单组正式脚本与18组8卡launcher，外部结果目录不保存checkpoint。
 - 本地`py_compile`、两个shell的`bash -n`、18组数组长度和`git diff --check`通过。本地完整测试因系统
   Python缺少Torch/NumPy无法执行，这是环境缺失而非测试失败；部署后必须在服务器`ddp`环境跑完整套件。
+- 提交`2cafb04 Add Image-token Adapter training mechanism search`已推送。Automatic Upload写入primary的
+  8个受控文件和2个未跟踪脚本已备份到
+  `/mnt/haoyuan/workspace/git-sync-backup-training-mechanisms-deploy-20260902-jsBiUR`并逐路径恢复；primary
+  clean，test-only原有改动未触碰。
+- 服务器从远端创建clean独立worktree`/mnt/haoyuan/workspace/multi-lane-main-training-mechanisms`，HEAD、
+  upstream均为`exp/emotic-image-token-training-mechanisms@2cafb04`。
+- 服务器`ddp`环境完整50项单元测试全部通过。真实ViT-B/16 AMP/TF32-on GPU smoke覆盖control、
+  residual_ratio10%、feature_cosine10%和learnable gate0.1，均确认主模型/Adapter梯度隔离、冻结视觉塔、
+  concat inference与有限梯度；固定模式trainable739130，gate模式739131。
+- 正式18组batch ID预定为
+  `image_token_asl_layer1_training_mechanisms_formal_seed0_20260902_150731`。启动前仍需确认8卡连续两次
+  至少18GB空闲；launcher随后一次并行启动全部配置，不保存checkpoint。

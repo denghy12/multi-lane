@@ -1004,3 +1004,10 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   无checkpoint。8卡一次启动，每卡2--3组，启动前要求每卡连续两次至少18GB空闲。
 - 本地静态编译、shell语法和diff检查已通过；本地系统Python缺少Torch/NumPy，完整单元测试与
   三种真实CLIP GPU smoke需在服务器`ddp`环境执行后才能启动正式batch。
+- 实现提交已推送为`exp/emotic-image-token-training-mechanisms@2cafb04`，服务器独立worktree为
+  `/mnt/haoyuan/workspace/multi-lane-main-training-mechanisms`。服务器`ddp`环境50项完整单元测试
+  全部通过；control、residual10%、cosine10%与learnable-gate0.1四种真实CLIP AMP/TF32 smoke
+  全部通过，trainable参数分别为739130/739130/739130/739131。
+- 计划正式batch为`image_token_asl_layer1_training_mechanisms_formal_seed0_20260902_150731`；结果写
+  `/mnt/haoyuan/workspace/emotic_benchmark_runs/multi_lane_image_token_training_mechanisms_formal_v0.1/`，
+  日志写独立实验worktree的`logs/emotic_track_a_image_token_training_mechanisms_formal/`。
