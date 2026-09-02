@@ -576,3 +576,6 @@ VOC 对照实验，不应在现阶段合并到 `main`。
 30. 实现`7449b30`已推送，服务器独立worktree clean；53项完整单元测试和代表性真实CLIP
     Adapter-ASL AMP/TF32 smoke均通过。下一步提交推送本次验证上下文、服务器ff-only更新后立即启动
     8组正式batch，并核验8份config、首轮steps/skipped与显存。
+31. 正式batch`..._20260902_171919`已一组一卡启动，8份clean config和task0首轮随机轨迹/84 steps/
+    skipped0已核验，显存与错误扫描正常。当前只等待完成，不重复启动；结束后运行严格汇总器，并只
+    同步JSON、manifest、launcher status与日志的小结果包，不同步checkpoint。

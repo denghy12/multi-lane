@@ -2467,3 +2467,13 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
   `exp/emotic-image-token-epoch-search@7449b30`。ddp环境53项完整单元测试通过；GPU0真实CLIP
   Image-token layer1/b32、Adapter-ASL、AMP/TF32 smoke通过，trainable739130、冻结视觉塔无梯度、
   初始零残差max logit差`7.63e-05`。8卡当前均余23.6GB以上，可进入正式启动。
+- 验证记录已提交推送为`7091da6`，服务器实验worktree使用`git pull --ff-only`同步并保持clean。
+  Automatic Upload写入primary的三份文档已备份至
+  `/mnt/haoyuan/workspace/git-sync-backup-epoch-search-validation-docs-20260902-afQHL2`并恢复；test-only未触碰。
+- batch`image_token_asl_layer1_epoch_search_formal_seed0_20260902_171919`已在tmux
+  `image_token_epoch_search_20260902_171919`启动。8卡连续两次至少23.6GB空闲后，一卡一组运行
+  epoch18/22/26/30/34/38/42/48；8份config均为clean`7091da6`、seed0/test/batch64、冠军结构、
+  AMP/TF32 on、no-checkpoint，除epochs外字段一致。
+- 八组task0 cycle1均完成84 optimizer steps、skipped0，loss`0.61478711`、Adapter ASL
+  `0.02839343`完全相同；每组GPU约占1.99--2.07GB，仍余约22GB。日志扫描无OOM/non-finite/
+  FloatingPointError/RuntimeError/Traceback，当前继续运行且不启动其他batch。

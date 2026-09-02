@@ -1048,3 +1048,11 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   `/mnt/haoyuan/workspace/multi-lane-main-epoch-search`并跟踪同名远端分支；服务器ddp环境完整53项
   单元测试通过。真实ViT-B/16 Image-token layer1/b32、Adapter-ASL、AMP/TF32 GPU smoke通过，
   trainable参数739130、初始零残差logit最大差`7.63e-05`且所有梯度有限。
+- 验证上下文提交`7091da6`已推送并在服务器实验worktree ff-only同步后启动正式batch
+  `image_token_asl_layer1_epoch_search_formal_seed0_20260902_171919`，tmux为
+  `image_token_epoch_search_20260902_171919`。启动时8卡均余23.6GB以上，连续两次通过18GB门槛，
+  一卡一组原子启动；结果写入`/mnt/haoyuan/workspace/emotic_benchmark_runs/`
+  `multi_lane_image_token_epoch_search_formal_v0.1/<batch>`，日志写实验worktree的专用logs目录。
+- 8份config全部记录clean`7091da6`且除epoch外固定协议一致。八组task0 cycle1均为84 steps、
+  skipped0，loss`0.61478711`、Adapter loss`0.02839343`逐项相同；每组约占2.0GB，无OOM、
+  non-finite、RuntimeError或Traceback。让本批继续运行，不启动重复batch。
