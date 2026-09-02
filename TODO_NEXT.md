@@ -555,3 +555,21 @@ VOC 对照实验，不应在现阶段合并到 `main`。
 21. 服务器50项单元测试和四种真实CLIP GPU smoke已全部通过。下一步将本次验证上下文commit推送并让
     独立实验worktree`git pull --ff-only`，然后启动batch
     `image_token_asl_layer1_training_mechanisms_formal_seed0_20260902_150731`。
+22. 18组已全部安全启动且配置/显存/首轮数值核验通过。当前只需等待完成；不要重复启动、不修改运行
+    worktree。结束后验证18份complete summary、各预算组总updates=`目标×8`、epoch组13950 updates、
+    skipped0和无错误，再打包同步小结果。
+23. 分析时分阶段排名：阶段一先比较final mAP并以average mAP破平；阶段二分别判断residual/cosine；
+    阶段三同时报告final mAP和8个learned gate终值。若不同阶段各有赢家，再只补一组赢家组合确认。
+24. 18组已完成并同步；三阶段均未超过`32.5365`，因此取消组合确认。固定updates、Adapter输出正则、
+    learnable gate三条路线停止，继续保留原30-epoch/fixed-scale0.1/no-reg冠军。
+25. 若继续优化，优先使用对所有task统一的exposure-based epoch/scheduler或仅依据当前task validation的
+    同一early-stop规则，不按task编号或未来难度手调。正式论文结论前必须锁定配置并做paired 3 seeds；
+    已查看test的所有seed0结果仍标记exploratory。
+26. 用户已确认先执行统一epoch搜索。新分支`exp/emotic-image-token-epoch-search`实现8组
+    `18/22/26/30/34/38/42/48` epochs一组一卡launcher、固定冠军单组runner和严格自动汇总器。
+27. 提交前运行Python编译、两个shell语法、epoch汇总器单测与完整现有测试；提交推送后必须审计服务器
+    所有worktree，并使用新的clean独立worktree，不能直接污染primary或test-only。
+28. 服务器测试通过后启动8组batch。核对每组config仅epochs不同、8份clean同commit/tree、AMP/TF32
+    on、no-checkpoint；首轮应分别形成对应run目录且task0 skipped0，无OOM/non-finite错误。
+29. 完成后只按final test mAP排名、average mAP破平。内部赢家补上下3个整数epoch；48赢家补54/60；
+    30保持第一则停止epoch调参并转scheduler。所有本批结果继续标记exploratory test-tuning。

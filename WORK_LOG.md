@@ -2411,3 +2411,52 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - 正式18组batch ID预定为
   `image_token_asl_layer1_training_mechanisms_formal_seed0_20260902_150731`。启动前仍需确认8卡连续两次
   至少18GB空闲；launcher随后一次并行启动全部配置，不保存checkpoint。
+- 验证记录follow-up提交`5505a36`已推送并在服务器实验worktree`git pull --ff-only`。Automatic
+  Upload再次写入primary的三份文档已备份到
+  `/mnt/haoyuan/workspace/git-sync-backup-training-mechanisms-validation-docs-20260902-FMyt8a`并恢复clean。
+- 8卡启动前均余23.6GB以上，launcher连续两次通过18GB门槛后在tmux
+  `image_token_training_mechanisms_20260902_150731`原子启动18组。run目录与config均为18/18；GPU0/1
+  各3组、其余每卡2组，峰值初始占用约6.7GB，无资源冲突。
+- 18份config均记录clean`5505a36`、seed0/test/no-checkpoint、main LR0.0125、Adapter LR4e-4/WD0、
+  layer1/b32、BCE+Adapter-ASL、AMP/TF32。预算分布为epochs11组/updates7组，updates值精确为
+  `900--2700`；正则6组与gate4组字段、每task参数49952/49953均正确。
+- control task0 cycle1--5与历史冠军loss、LR和Adapter loss逐项一致。六个正则组在30个成功updates
+  后均生成非零固定权重；task0首cycle的1%/3%/10% residual权重为
+  `15.7632/47.2897/157.6324`，cosine为`31.5044/94.5132/315.0440`，验证校准比例正确。
+- 当前全部日志无OOM、non-finite、FloatingPointError、RuntimeError或Traceback，首轮skipped0。
+  让实验继续运行，结束后只同步JSON、manifest、launcher status和日志，不下载checkpoint。
+
+## 2026-09-02：同步并分析训练机制三阶段18组结果
+
+- tmux与18个runner均已退出，batch status complete，18个launcher exit code全部为0；18份config和
+  complete seed summary齐全。所有运行skipped0、无OOM/non-finite/Traceback/RuntimeError，且没有
+  checkpoint目录。
+- 7个固定预算组总成功updates分别精确为`7200/9600/12000/14400/16800/19200/21600`；control、
+  6个正则组和4个gate组均为240 cycles、13950 updates，协议完整性通过。
+- 阶段一control继续以`32.5365/39.1445`领先。固定updates最佳1800为
+  `30.8757/38.2894`，final下降`1.6608`；其他固定预算下降`1.8004--2.1743`。
+- 阶段二最佳final为residual1%的`32.0751`，下降`0.4614`；cosine最佳为10%的`32.0490`，
+  下降`0.4875`。所有正则都压低task5--7和task6，没有稳定性换取final收益。
+- 阶段三gate init0.05最接近，final/average为`32.3397/39.0774`，低control`0.1969/0.0671`；
+  cF1提高`0.0271`、forgetting改善`0.0868`，但不符合用户final mAP主目标。最终8个gate为
+  `0.0696/0.0720/0.0570/0.0860/0.0688/0.0689/0.0550/0.0633`。
+- 三个机制各自最佳均为负收益，因此不补组合实验。保留30 epochs、fixed scale0.1、无输出正则、
+  LR0.0125/Adapter WD0冠军；关闭固定updates、输出正则与learnable gate路线。
+- 结果JSON、manifest、launcher status和日志已同步本地。860KB压缩包两端SHA-256均为
+  `fc051087a60a293ae06824396c7981c8cbeaeb9f04a24d0cd1226981a81c003a`，不含checkpoint。
+
+## 2026-09-02：实现8组统一epoch正式test搜索
+
+- 从`exp/emotic-image-token-training-mechanisms@5505a36`创建
+  `exp/emotic-image-token-epoch-search`，保留上一批已更新但未提交的三份上下文文档。
+- 新增`run_multilane_track_a_image_token_epoch_search_formal.sh`，只把`--epochs`暴露为严格正整数，
+  其余训练参数精确固定为当前single1 b32冠军；每组使用独立输出根和日志，不保存checkpoint。
+- 新增`launch_multilane_track_a_image_token_epoch_search_formal_8gpu.sh`，8卡分别运行
+  `18/22/26/30/34/38/42/48` epochs，启动前要求8卡连续两次至少18GB空闲，生成manifest与逐组
+  exit code，并在全部成功后自动调用严格汇总器。
+- 新增`multi_lane.track_a.summarize_image_token_epoch_search`，核验完整网格、clean Git、共同
+  commit/tree、固定协议、task/epoch/update/skipped/checkpoint完整性；输出final/average/late-task/
+  task6/F1/forgetting排名及相对30-epoch锚点变化，并按预声明规则给出refinement。
+- 新增3项单元测试，覆盖内部34-epoch赢家应建议`31/32/33/35/36/37`、30-epoch赢家应停止搜索、
+  以及batch size协议漂移必须拒绝。下一步先完成本地静态检查，再提交推送并在服务器ddp环境运行
+  完整单元测试；通过后才启动8组正式实验。

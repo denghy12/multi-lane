@@ -1011,3 +1011,36 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - 计划正式batch为`image_token_asl_layer1_training_mechanisms_formal_seed0_20260902_150731`；结果写
   `/mnt/haoyuan/workspace/emotic_benchmark_runs/multi_lane_image_token_training_mechanisms_formal_v0.1/`，
   日志写独立实验worktree的`logs/emotic_track_a_image_token_training_mechanisms_formal/`。
+- 验证上下文已follow-up提交为`5505a36`，服务器实验worktree已fast-forward并保持clean。正式batch
+  已在tmux`image_token_training_mechanisms_20260902_150731`一次启动18组；全部config记录clean
+  `5505a36`且矩阵字段核验正确。
+- GPU0/1各3进程、GPU2--7各2进程，启动后每卡约占4.2--6.7GB，仍余17.4--19.9GB，无OOM、
+  non-finite或Traceback。control task0前5个cycle的loss/LR/Adapter loss与历史冠军逐项一致。
+- 六个正则组均在task0前30个成功updates校准后产生非零固定权重；1%/3%/10%的权重严格成比例，
+  首cycle正则loss亦随目标比例单调增加。当前让18组继续运行，不启动其他实验。
+- 18组随后全部完成，launcher退出码18/18为0；所有配置status complete、skipped0，无错误日志或
+  checkpoint。固定预算组实际总updates精确等于目标×8，其他11组均为13950 updates。
+- 三阶段均未超过control`32.5365`。固定updates最佳1800仅`30.8757`（-1.6608）；输出正则最佳
+  residual1%为`32.0751`（-0.4614）；learnable gate最佳init0.05为`32.3397`（-0.1969）。
+- 固定updates失败的根因是等epoch已经等化每样本曝光；等updates反而让1800步对应task0--7约
+  `21/26/129/12/26/45/180/75`次数据遍历，同时欠训练大task3并过度重复小task2/6/7。
+- 正则确实压低Adapter扰动，但所有强度均降低final，说明当前residual主要承载有效判别信号；gate0.05
+  最终学习到`0.055--0.086`，仍低于固定0.1并损失后期mAP。没有阶段赢家，不运行组合实验。
+- 小结果包SHA-256为`fc051087a60a293ae06824396c7981c8cbeaeb9f04a24d0cd1226981a81c003a`，
+  不含checkpoint。详细分析见
+  `output/emotic_track_a_image_token_training_mechanisms_formal/20260902_150731/analysis.md`。
+
+## 2026-09-02 Image-token Adapter统一epoch搜索
+
+- 用户确认把统一数据暴露作为最后一轮单视图参数优化，固定现有冠军全部结构、loss、优化器与
+  预处理，只搜索所有task共同的`epochs/task={18,22,26,30,34,38,42,48}`。该规则不使用task
+  编号、未来数据规模或已知难度，符合未知增量任务设定。
+- 新分支`exp/emotic-image-token-epoch-search`固定seed0、完整8-task exploratory test、full image、
+  CLIP normalization、crop0.05、Image-token layer1/b32/LR4e-4/scale0.1/ReLU/independent、main
+  LR0.0125/WD0、main BCE + Adapter ASL9.8/0/0.05、batch64、per-task cosine、AMP/TF32 on、
+  no-checkpoint。30 epochs作为同批锚点，只按final mAP排名并用average mAP破平。
+- 新增单组epoch runner、8-GPU一组一卡原子launcher和严格汇总器。汇总器要求8组同一clean
+  commit/tree、完整task0--7、每task历史长度等于声明epoch、总epochs=`8×epoch`、总updates=
+  `465×epoch`、skipped0、协议字段完全一致且无checkpoint；完成后自动生成JSON和Markdown排名。
+- 预声明下一步：内部epoch获胜则补其上下3个整数epoch；48获胜则扩展54/60；30保持第一则停止
+  epoch搜索并进入scheduler诊断。所有直接test选择继续标记exploratory，最终需paired多seed确认。
