@@ -591,3 +591,6 @@ VOC 对照实验，不应在现阶段合并到 `main`。
     scheduler工作树；运行完整单元测试和scheduler LR轨迹/GPU smoke，通过后8卡一组一卡启动。
 36. 启动核验必须检查8份config仅scheduler字段不同、共同clean commit、30 epochs/13950 updates目标、
     task0首轮LR符合预期且skipped0。完成后按final mAP/average mAP排名，不因单类变化否决。
+37. 实现`58eb233`已推送，服务器scheduler工作树clean；60项完整测试、8种LR轨迹审计和真实CLIP
+    Adapter-ASL AMP/TF32 smoke均通过。下一步提交本次验证记录、服务器ff-only同步后立即8卡启动，
+    并核验8份config及各自首轮/关键epoch LR。

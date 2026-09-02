@@ -2511,3 +2511,13 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
   自动严格核验240 epochs、13950 updates、skipped0、clean共同commit、no-checkpoint和四条LR轨迹。
 - 本地Python编译、shell语法和diff检查已通过；完整Torch单测需提交推送后在服务器ddp环境执行，
   通过并完成8种代表性scheduler轨迹smoke后才启动正式实验。
+- 实现提交`58eb233 Add Image-token Adapter scheduler search`已推送。Automatic Upload写入primary的
+  9个受控文件已逐项备份至`/mnt/haoyuan/workspace/git-sync-backup-scheduler-search-deploy-20260902-H8IHWD`
+  并恢复primary clean；epoch工作树clean、test-only历史修改未触碰。
+- 服务器新建独立clean worktree`/mnt/haoyuan/workspace/multi-lane-main-scheduler-search`，HEAD/upstream
+  均为`58eb233`。ddp环境60项完整单元测试全部通过。
+- 8种30-epoch实际LR轨迹审计通过：anchor最终主/Adapter LR均为0；min1%最终为
+  `1.25e-4/4e-6`，min10%为`1.25e-3/4e-5`；warmup5%首轮为基础LR的1/2，warmup10%前3轮
+  为1/3、2/3、1；linear最终0，constant全程不变，multistep在18/26轮后为0.1/0.01倍。
+- GPU0真实CLIP Image-token layer1/b32、Adapter-ASL、AMP/TF32 smoke通过，trainable739130、
+  frozen视觉塔无梯度、初始零残差logit最大差`3.05e-05`。当前8卡均余23.6GB以上，可正式启动。

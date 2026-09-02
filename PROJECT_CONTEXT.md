@@ -1079,3 +1079,7 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   协议外逐task逐epoch核验主模型/Adapter的当前及下一LR轨迹。
 - 本批仍为seed0完整8-task held-out test、AMP/TF32 on、no-checkpoint，final mAP优先、average mAP
   破平，继续标记exploratory。若历史cosine保持第一，停止单视图scheduler路线并转双视图融合。
+- 实现提交`58eb233`已推送，服务器新建clean独立worktree
+  `/mnt/haoyuan/workspace/multi-lane-main-scheduler-search`。ddp环境完整60项单元测试全部通过；8种
+  30-epoch主模型/Adapter LR关键点审计与预期一致。真实ViT-B/16 Image-token layer1/b32、
+  Adapter-ASL、AMP/TF32 GPU smoke通过，trainable参数739130且梯度有限。
