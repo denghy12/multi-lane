@@ -1044,3 +1044,7 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   `465×epoch`、skipped0、协议字段完全一致且无checkpoint；完成后自动生成JSON和Markdown排名。
 - 预声明下一步：内部epoch获胜则补其上下3个整数epoch；48获胜则扩展54/60；30保持第一则停止
   epoch搜索并进入scheduler诊断。所有直接test选择继续标记exploratory，最终需paired多seed确认。
+- 实现提交`7449b30`已推送。服务器创建clean独立worktree
+  `/mnt/haoyuan/workspace/multi-lane-main-epoch-search`并跟踪同名远端分支；服务器ddp环境完整53项
+  单元测试通过。真实ViT-B/16 Image-token layer1/b32、Adapter-ASL、AMP/TF32 GPU smoke通过，
+  trainable参数739130、初始零残差logit最大差`7.63e-05`且所有梯度有限。

@@ -573,3 +573,6 @@ VOC 对照实验，不应在现阶段合并到 `main`。
     on、no-checkpoint；首轮应分别形成对应run目录且task0 skipped0，无OOM/non-finite错误。
 29. 完成后只按final test mAP排名、average mAP破平。内部赢家补上下3个整数epoch；48赢家补54/60；
     30保持第一则停止epoch调参并转scheduler。所有本批结果继续标记exploratory test-tuning。
+30. 实现`7449b30`已推送，服务器独立worktree clean；53项完整单元测试和代表性真实CLIP
+    Adapter-ASL AMP/TF32 smoke均通过。下一步提交推送本次验证上下文、服务器ff-only更新后立即启动
+    8组正式batch，并核验8份config、首轮steps/skipped与显存。

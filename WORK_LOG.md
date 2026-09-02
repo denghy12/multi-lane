@@ -2460,3 +2460,10 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - 新增3项单元测试，覆盖内部34-epoch赢家应建议`31/32/33/35/36/37`、30-epoch赢家应停止搜索、
   以及batch size协议漂移必须拒绝。下一步先完成本地静态检查，再提交推送并在服务器ddp环境运行
   完整单元测试；通过后才启动8组正式实验。
+- 实现提交`7449b30 Add Image-token Adapter epoch search`已推送。Automatic Upload写入primary的
+  7个文件已逐项备份至`/mnt/haoyuan/workspace/git-sync-backup-epoch-search-deploy-20260902-BmmkzK`
+  并恢复primary clean；test-only原有修改未触碰。
+- 服务器新建独立clean worktree`/mnt/haoyuan/workspace/multi-lane-main-epoch-search`，HEAD/upstream均为
+  `exp/emotic-image-token-epoch-search@7449b30`。ddp环境53项完整单元测试通过；GPU0真实CLIP
+  Image-token layer1/b32、Adapter-ASL、AMP/TF32 smoke通过，trainable739130、冻结视觉塔无梯度、
+  初始零残差max logit差`7.63e-05`。8卡当前均余23.6GB以上，可进入正式启动。
