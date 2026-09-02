@@ -2521,3 +2521,13 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
   为1/3、2/3、1；linear最终0，constant全程不变，multistep在18/26轮后为0.1/0.01倍。
 - GPU0真实CLIP Image-token layer1/b32、Adapter-ASL、AMP/TF32 smoke通过，trainable739130、
   frozen视觉塔无梯度、初始零残差logit最大差`3.05e-05`。当前8卡均余23.6GB以上，可正式启动。
+- 验证记录提交`7337f96`已推送，服务器scheduler工作树使用`git pull --ff-only`同步并保持clean。
+  Automatic Upload写入primary的三份文档备份至
+  `/mnt/haoyuan/workspace/git-sync-backup-scheduler-search-validation-docs-20260902-1jhTrQ`并恢复clean。
+- batch`image_token_asl_layer1_scheduler_search_formal_seed0_20260902_185259`已在tmux
+  `image_token_scheduler_search_20260902_185259`启动。8卡连续两次至少23.6GB空闲后，一卡一组
+  原子启动；8份config均为clean`7337f96`，scheduler模式/min/warmup/warmup epochs/milestone/gamma
+  字段逐组正确，其他协议一致。
+- 非warmup六组task0 cycle1完全复现锚点loss`0.61478711`、Adapter loss`0.02839343`、LR0.0125；
+  warmup5%/10%首轮LR分别为0.00625/0.00416667，loss相应为0.62027323/0.62566431。八组均84
+  steps、skipped0；每卡约2.0GB，日志无OOM/non-finite/RuntimeError/Traceback，当前继续运行。

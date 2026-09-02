@@ -1083,3 +1083,10 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   `/mnt/haoyuan/workspace/multi-lane-main-scheduler-search`。ddp环境完整60项单元测试全部通过；8种
   30-epoch主模型/Adapter LR关键点审计与预期一致。真实ViT-B/16 Image-token layer1/b32、
   Adapter-ASL、AMP/TF32 GPU smoke通过，trainable参数739130且梯度有限。
+- 验证提交`7337f96`已推送并在服务器实验worktree ff-only同步。正式batch
+  `image_token_asl_layer1_scheduler_search_formal_seed0_20260902_185259`已在tmux
+  `image_token_scheduler_search_20260902_185259`一组一卡启动，结果写benchmark外部目录，日志写
+  scheduler工作树专用logs目录。
+- 8份config均记录clean`7337f96`、30 epochs、冠军固定协议和正确scheduler字段。非warmup六组
+  task0 cycle1的loss/Adapter loss均为`0.61478711/0.02839343`且LR0.0125；warmup5%/10%首轮
+  LR为`0.00625/0.00416667`。八组均84 steps、skipped0，每卡约2GB，无错误，继续运行。

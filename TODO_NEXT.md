@@ -594,3 +594,6 @@ VOC 对照实验，不应在现阶段合并到 `main`。
 37. 实现`58eb233`已推送，服务器scheduler工作树clean；60项完整测试、8种LR轨迹审计和真实CLIP
     Adapter-ASL AMP/TF32 smoke均通过。下一步提交本次验证记录、服务器ff-only同步后立即8卡启动，
     并核验8份config及各自首轮/关键epoch LR。
+38. 正式batch`..._20260902_185259`已一组一卡启动；8份clean config、首轮LR/loss/84 steps/
+    skipped0和显存均核验通过。当前只等待完成，不重复启动；结束后严格核验240 epochs、13950 updates、
+    全LR轨迹和错误日志，再打包同步JSON/日志且不含checkpoint。
