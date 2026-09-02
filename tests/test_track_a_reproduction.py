@@ -17,6 +17,7 @@ from multi_lane.track_a.runner import (
     TASK_SIZES,
     TaskMetrics,
     backward_routed_training_losses,
+    build_learning_rate_scheduler,
     build_optimizer_groups,
     build_transforms,
     compute_asymmetric_training_loss,
@@ -24,6 +25,8 @@ from multi_lane.track_a.runner import (
     compute_metrics,
     calibrated_adapter_regularization_weight,
     summarize_tasks,
+    scheduler_milestone_epochs,
+    scheduler_warmup_epochs,
     train_task,
 )
 
@@ -235,6 +238,69 @@ class TrackAModelTest(unittest.TestCase):
         self.assertEqual(sum(row["optimizer_steps"] for row in history), 3)
         self.assertEqual(history[-1]["completed_task_optimizer_updates"], 3)
         self.assertAlmostEqual(history[-1]["next_learning_rate"], 0.0)
+
+    def test_relative_min_cosine_scales_every_parameter_group(self) -> None:
+        first = nn.Parameter(torch.ones(()))
+        second = nn.Parameter(torch.ones(()))
+        optimizer = torch.optim.Adam(
+            [{"params": [first]}, {"params": [second], "lr": 4e-4}],
+            lr=0.0125,
+        )
+        scheduler = build_learning_rate_scheduler(
+            optimizer, epochs=30, mode="cosine", min_lr_ratio=0.01
+        )
+        self.assertEqual([group["lr"] for group in optimizer.param_groups], [0.0125, 4e-4])
+        for _ in range(30):
+            optimizer.step()
+            scheduler.step()
+        self.assertAlmostEqual(optimizer.param_groups[0]["lr"], 0.000125)
+        self.assertAlmostEqual(optimizer.param_groups[1]["lr"], 0.000004)
+
+    def test_cosine_warmup_uses_two_and_three_epoch_prefixes(self) -> None:
+        self.assertEqual(scheduler_warmup_epochs(30, 0.05), 2)
+        self.assertEqual(scheduler_warmup_epochs(30, 0.10), 3)
+        parameter = nn.Parameter(torch.ones(()))
+        optimizer = torch.optim.Adam([parameter], lr=0.0125)
+        scheduler = build_learning_rate_scheduler(
+            optimizer, epochs=30, mode="cosine", warmup_ratio=0.05
+        )
+        self.assertAlmostEqual(optimizer.param_groups[0]["lr"], 0.00625)
+        optimizer.step()
+        scheduler.step()
+        self.assertAlmostEqual(optimizer.param_groups[0]["lr"], 0.0125)
+        for _ in range(29):
+            optimizer.step()
+            scheduler.step()
+        self.assertAlmostEqual(optimizer.param_groups[0]["lr"], 0.0)
+
+    def test_linear_constant_and_multistep_scheduler_endpoints(self) -> None:
+        self.assertEqual(scheduler_milestone_epochs(30, (0.6, 0.85)), (18, 26))
+        expected = {
+            "linear": (0.0125, 0.0),
+            "constant": (0.0125, 0.0125),
+            "multistep": (0.0125, 0.000125),
+        }
+        for mode, (initial, final) in expected.items():
+            parameter = nn.Parameter(torch.ones(()))
+            optimizer = torch.optim.Adam([parameter], lr=0.0125)
+            scheduler = build_learning_rate_scheduler(
+                optimizer, epochs=30, mode=mode,
+                multistep_milestone_fractions=(0.6, 0.85),
+                multistep_gamma=0.1,
+            )
+            self.assertAlmostEqual(optimizer.param_groups[0]["lr"], initial)
+            for _ in range(30):
+                optimizer.step()
+                scheduler.step()
+            self.assertAlmostEqual(optimizer.param_groups[0]["lr"], final)
+
+    def test_noncosine_scheduler_rejects_warmup(self) -> None:
+        parameter = nn.Parameter(torch.ones(()))
+        optimizer = torch.optim.Adam([parameter], lr=0.0125)
+        with self.assertRaisesRegex(ValueError, "only supported by cosine"):
+            build_learning_rate_scheduler(
+                optimizer, epochs=30, mode="linear", warmup_ratio=0.05
+            )
 
     def test_calibrated_regularization_matches_requested_loss_fraction(self) -> None:
         weight = calibrated_adapter_regularization_weight(

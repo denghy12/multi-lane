@@ -1056,3 +1056,26 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - 8份config全部记录clean`7091da6`且除epoch外固定协议一致。八组task0 cycle1均为84 steps、
   skipped0，loss`0.61478711`、Adapter loss`0.02839343`逐项相同；每组约占2.0GB，无OOM、
   non-finite、RuntimeError或Traceback。让本批继续运行，不启动重复batch。
+- 8组随后全部完成，exit code全0、skipped0、无错误或checkpoint，严格自动汇总通过。30 epochs
+  精确复现并以final/average mAP`32.5365/39.1445`保持第一；26 epochs为第二，final低`0.1684`，
+  虽使average提高`0.0495`，但task5/6/7分别下降`0.0619/0.1539/0.1684`。
+- 34和48 epochs相对30 epochs在8个task全部下降，final分别低`0.5990/0.9864`；同时末轮训练loss
+  继续下降，证明延长训练主要造成泛化退化而非弥补欠拟合。按预声明规则停止epoch搜索，不补相邻
+  整数epoch；下一阶段固定30 epochs进入全局统一scheduler诊断。
+- 小结果包SHA-256为`460890c5b44eb2788f2254b333a3d3376e3df6a310cbc18431065537d2632f30`，
+  不含checkpoint。详细分析见
+  `output/emotic_track_a_image_token_epoch_search_formal/20260902_171919/analysis.md`。
+
+## 2026-09-02 Image-token Adapter统一scheduler搜索
+
+- 新分支`exp/emotic-image-token-scheduler-search`固定30 epochs冠军的全部数据、结构、loss、优化器、
+  精度与报告协议，只比较8种对所有task统一且每task重置的scheduler：历史cosine锚点、cosine相对
+  min LR 1%/10%、cosine线性warmup 5%/10%、linear、constant、multistep 60%/85%。
+- scheduler同时对主模型和Adapter参数组使用同一相对倍率，避免将主模型绝对min LR错误用于Adapter。
+  30 epochs下5%/10% warmup向上取整为2/3 epochs；multistep在epoch18/26以gamma0.1衰减。
+  历史cosine锚点继续使用原生`CosineAnnealingLR(T_max=30)`，保持旧冠军数学路径不变。
+- runner新增scheduler CLI、严格参数校验和完整config元数据；固定update预算仍只允许旧cosine，避免改变
+  已有实验语义。新增LR曲线单测、单组正式runner、8-GPU原子launcher和严格汇总器；汇总器除完整
+  协议外逐task逐epoch核验主模型/Adapter的当前及下一LR轨迹。
+- 本批仍为seed0完整8-task held-out test、AMP/TF32 on、no-checkpoint，final mAP优先、average mAP
+  破平，继续标记exploratory。若历史cosine保持第一，停止单视图scheduler路线并转双视图融合。

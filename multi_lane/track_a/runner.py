@@ -488,6 +488,108 @@ def calibrated_adapter_regularization_weight(
     return float(target_fraction) * float(reference_loss_total) / float(metric_total)
 
 
+def scheduler_warmup_epochs(epochs: int, warmup_ratio: float) -> int:
+    if epochs <= 0:
+        raise ValueError("Epochs must be positive")
+    if not 0 <= warmup_ratio < 1:
+        raise ValueError("Scheduler warmup ratio must be in [0, 1)")
+    return int(math.ceil(epochs * warmup_ratio)) if warmup_ratio else 0
+
+
+def scheduler_milestone_epochs(
+    epochs: int, milestone_fractions: Sequence[float]
+) -> Tuple[int, ...]:
+    if epochs <= 0:
+        raise ValueError("Epochs must be positive")
+    fractions = tuple(float(value) for value in milestone_fractions)
+    if not fractions or any(not 0 < value < 1 for value in fractions):
+        raise ValueError("Scheduler milestone fractions must be in (0, 1)")
+    if tuple(sorted(set(fractions))) != fractions:
+        raise ValueError("Scheduler milestone fractions must be unique and sorted")
+    return tuple(int(math.ceil(epochs * value)) for value in fractions)
+
+
+def build_learning_rate_scheduler(
+    optimizer: torch.optim.Optimizer,
+    epochs: int,
+    optimizer_updates_per_task: Optional[int] = None,
+    mode: str = "cosine",
+    min_lr_ratio: float = 0.0,
+    warmup_ratio: float = 0.0,
+    multistep_milestone_fractions: Sequence[float] = (0.6, 0.85),
+    multistep_gamma: float = 0.1,
+) -> torch.optim.lr_scheduler.LRScheduler:
+    if mode not in {"cosine", "linear", "constant", "multistep"}:
+        raise ValueError("Unknown scheduler mode")
+    if not 0 <= min_lr_ratio < 1:
+        raise ValueError("Scheduler minimum LR ratio must be in [0, 1)")
+    if not 0 < multistep_gamma < 1:
+        raise ValueError("Scheduler multistep gamma must be in (0, 1)")
+    warmup_epochs = scheduler_warmup_epochs(epochs, warmup_ratio)
+    milestones = scheduler_milestone_epochs(
+        epochs, multistep_milestone_fractions
+    )
+    if optimizer_updates_per_task is not None:
+        if (
+            mode != "cosine" or min_lr_ratio != 0 or warmup_ratio != 0
+        ):
+            raise ValueError(
+                "Fixed-update budgets only support the legacy cosine scheduler"
+            )
+        return torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=int(optimizer_updates_per_task)
+        )
+    if mode != "cosine" and (min_lr_ratio != 0 or warmup_ratio != 0):
+        raise ValueError(
+            "Minimum LR and warmup ratios are only supported by cosine mode"
+        )
+    if mode == "cosine" and min_lr_ratio == 0 and warmup_ratio == 0:
+        # Preserve the historical champion path exactly.
+        return torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=epochs
+        )
+
+    def multiplier(step: int) -> float:
+        bounded_step = min(max(int(step), 0), epochs)
+        if mode == "constant":
+            return 1.0
+        if mode == "linear":
+            return 1.0 - bounded_step / epochs
+        if mode == "multistep":
+            drops = sum(bounded_step >= milestone for milestone in milestones)
+            return float(multistep_gamma ** drops)
+        if warmup_epochs and bounded_step < warmup_epochs:
+            return float(bounded_step + 1) / float(warmup_epochs)
+        cosine_steps = epochs - warmup_epochs
+        cosine_step = bounded_step - warmup_epochs
+        progress = min(max(cosine_step / cosine_steps, 0.0), 1.0)
+        cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
+        return min_lr_ratio + (1.0 - min_lr_ratio) * cosine
+
+    return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=multiplier)
+
+
+def scheduler_config_name(
+    optimizer_updates_per_task: Optional[int],
+    mode: str,
+    min_lr_ratio: float,
+    warmup_ratio: float,
+) -> str:
+    if optimizer_updates_per_task is not None:
+        return "CosineAnnealingLR_reset_per_task_by_optimizer_step"
+    if mode == "cosine" and min_lr_ratio == 0 and warmup_ratio == 0:
+        return "CosineAnnealingLR_reset_per_task"
+    if mode == "cosine" and warmup_ratio:
+        return "LinearWarmupCosineAnnealingLR_reset_per_task"
+    if mode == "cosine":
+        return "RelativeMinCosineAnnealingLR_reset_per_task"
+    return {
+        "linear": "LinearLR_reset_per_task",
+        "constant": "ConstantLR_reset_per_task",
+        "multistep": "MultiStepLR_reset_per_task",
+    }[mode]
+
+
 def train_task(
     model: MultiLaneModel,
     loader: DataLoader,
@@ -511,6 +613,11 @@ def train_task(
     adapter_regularization: str = "none",
     adapter_regularization_fraction: float = 0.0,
     adapter_regularization_calibration_updates: int = 30,
+    scheduler_mode: str = "cosine",
+    scheduler_min_lr_ratio: float = 0.0,
+    scheduler_warmup_ratio: float = 0.0,
+    scheduler_multistep_milestone_fractions: Sequence[float] = (0.6, 0.85),
+    scheduler_multistep_gamma: float = 0.1,
 ) -> List[Dict[str, float]]:
     if loss_routing not in {
         "joint_bce", "model_asl", "adapter_asl", "both_asl"
@@ -537,12 +644,17 @@ def train_task(
     if loss_routing in {"adapter_asl", "both_asl"} and not adapter_parameters:
         raise ValueError("Adapter ASL routing requires an enabled Adapter")
     optimizer = torch.optim.Adam(optimizer_groups, lr=learning_rate)
-    scheduler_steps = (
-        int(optimizer_updates_per_task)
-        if optimizer_updates_per_task is not None else epochs
-    )
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=scheduler_steps
+    scheduler = build_learning_rate_scheduler(
+        optimizer=optimizer,
+        epochs=epochs,
+        optimizer_updates_per_task=optimizer_updates_per_task,
+        mode=scheduler_mode,
+        min_lr_ratio=scheduler_min_lr_ratio,
+        warmup_ratio=scheduler_warmup_ratio,
+        multistep_milestone_fractions=(
+            scheduler_multistep_milestone_fractions
+        ),
+        multistep_gamma=scheduler_multistep_gamma,
     )
     scaler = torch.cuda.amp.GradScaler(enabled=amp)
     current = list(task_indices(task_id))
@@ -790,6 +902,21 @@ def parse_args() -> argparse.Namespace:
             "When set, --epochs is ignored for stopping and cosine scheduling."
         ),
     )
+    parser.add_argument(
+        "--scheduler-mode",
+        choices=("cosine", "linear", "constant", "multistep"),
+        default="cosine",
+    )
+    parser.add_argument("--scheduler-min-lr-ratio", type=float, default=0.0)
+    parser.add_argument("--scheduler-warmup-ratio", type=float, default=0.0)
+    parser.add_argument(
+        "--scheduler-multistep-milestones",
+        type=float,
+        nargs="+",
+        default=(0.6, 0.85),
+        metavar="FRACTION",
+    )
+    parser.add_argument("--scheduler-multistep-gamma", type=float, default=0.1)
     parser.add_argument("--train-batch-size", type=int, default=64)
     parser.add_argument("--eval-batch-size", type=int, default=64)
     parser.add_argument("--workers", type=int, default=2)
@@ -910,6 +1037,28 @@ def main() -> None:
         raise ValueError("Adapter weight decay must be non-negative")
     if args.optimizer_updates_per_task is not None and args.optimizer_updates_per_task <= 0:
         raise ValueError("optimizer-updates-per-task must be positive")
+    scheduler_warmup_epochs(args.epochs, args.scheduler_warmup_ratio)
+    scheduler_milestone_epochs(
+        args.epochs, args.scheduler_multistep_milestones
+    )
+    if not 0 <= args.scheduler_min_lr_ratio < 1:
+        raise ValueError("scheduler-min-lr-ratio must be in [0, 1)")
+    if not 0 < args.scheduler_multistep_gamma < 1:
+        raise ValueError("scheduler-multistep-gamma must be in (0, 1)")
+    if args.scheduler_mode != "cosine" and (
+        args.scheduler_min_lr_ratio != 0 or args.scheduler_warmup_ratio != 0
+    ):
+        raise ValueError(
+            "scheduler min LR and warmup ratios require cosine mode"
+        )
+    if args.optimizer_updates_per_task is not None and (
+        args.scheduler_mode != "cosine"
+        or args.scheduler_min_lr_ratio != 0
+        or args.scheduler_warmup_ratio != 0
+    ):
+        raise ValueError(
+            "Fixed-update budgets only support the legacy cosine scheduler"
+        )
     if args.adapter_residual_gate_mode == "learnable":
         if args.adapter_mode != "image_token":
             raise ValueError("Learnable residual gates require Image-token Adapter mode")
@@ -1073,10 +1222,30 @@ def main() -> None:
         "workers": args.workers,
         "optimizer": "Adam_reset_per_task",
         "learning_rate": learning_rate,
-        "scheduler": (
-            "CosineAnnealingLR_reset_per_task_by_optimizer_step"
-            if args.optimizer_updates_per_task is not None
-            else "CosineAnnealingLR_reset_per_task"
+        "scheduler": scheduler_config_name(
+            args.optimizer_updates_per_task,
+            args.scheduler_mode,
+            args.scheduler_min_lr_ratio,
+            args.scheduler_warmup_ratio,
+        ),
+        "scheduler_mode": args.scheduler_mode,
+        "scheduler_min_lr_ratio": args.scheduler_min_lr_ratio,
+        "scheduler_warmup_ratio": args.scheduler_warmup_ratio,
+        "scheduler_warmup_epochs": scheduler_warmup_epochs(
+            args.epochs, args.scheduler_warmup_ratio
+        ),
+        "scheduler_multistep_milestone_fractions": list(
+            args.scheduler_multistep_milestones
+        ),
+        "scheduler_multistep_milestone_epochs": list(
+            scheduler_milestone_epochs(
+                args.epochs, args.scheduler_multistep_milestones
+            )
+        ),
+        "scheduler_multistep_gamma": args.scheduler_multistep_gamma,
+        "scheduler_step_unit": (
+            "successful_optimizer_update"
+            if args.optimizer_updates_per_task is not None else "epoch"
         ),
         "weight_decay": args.weight_decay,
         "temperature": args.temperature,
@@ -1207,6 +1376,13 @@ def main() -> None:
             adapter_regularization_calibration_updates=(
                 args.adapter_regularization_calibration_updates
             ),
+            scheduler_mode=args.scheduler_mode,
+            scheduler_min_lr_ratio=args.scheduler_min_lr_ratio,
+            scheduler_warmup_ratio=args.scheduler_warmup_ratio,
+            scheduler_multistep_milestone_fractions=(
+                args.scheduler_multistep_milestones
+            ),
+            scheduler_multistep_gamma=args.scheduler_multistep_gamma,
         )
         row = evaluate(
             model, reporting_loader, device, task_id, args.threshold, amp

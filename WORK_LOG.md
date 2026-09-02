@@ -2477,3 +2477,37 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - 八组task0 cycle1均完成84 optimizer steps、skipped0，loss`0.61478711`、Adapter ASL
   `0.02839343`完全相同；每组GPU约占1.99--2.07GB，仍余约22GB。日志扫描无OOM/non-finite/
   FloatingPointError/RuntimeError/Traceback，当前继续运行且不启动其他batch。
+
+## 2026-09-02：同步并分析统一epoch搜索
+
+- tmux与runner均已结束；batch status complete、8份seed summary和8个exit code齐全，exit code全0。
+  严格汇总确认所有run同一clean`7091da6`、task0--7完整、总epochs和updates与声明epoch精确对应、
+  skipped0、无checkpoint；日志无OOM/non-finite/Traceback/RuntimeError。
+- 30 epochs精确复现历史冠军final/average mAP`32.5365/39.1445`并排名第一。26 epochs第二，
+  final`32.3681`低`0.1684`，average`39.1940`高`0.0495`；其提升集中于task0--4，task5--7
+  分别低`0.0619/0.1539/0.1684`，不满足用户final mAP目标。
+- 34/38/42/48 epochs final分别为`31.9376/31.8459/31.9648/31.5501`。34与48相对30在8个
+  task全部退化；48的task6/final低`1.0287/0.9864`，而多数末轮训练loss更低，属于延长训练后的
+  过拟合/泛化下降，不是优化不足。
+- 按预声明规则，30保持第一即停止epoch搜索，不运行31--33或27--29。下一步固定30 epochs，进入
+  对所有task统一的scheduler模式搜索；若仍无冠军，再转full image + person crop双视图。
+- JSON、严格汇总、manifest、launcher status与原始日志已同步本地，压缩包两端SHA-256均为
+  `460890c5b44eb2788f2254b333a3d3376e3df6a310cbc18431065537d2632f30`，不含checkpoint。
+
+## 2026-09-02：实现8组统一scheduler搜索
+
+- 从`exp/emotic-image-token-epoch-search@4e8616d`创建
+  `exp/emotic-image-token-scheduler-search`，保留已同步epoch结果与三份待提交上下文更新。
+- `runner.py`新增`cosine/linear/constant/multistep`模式、相对min LR、warmup比例、multistep比例/
+  gamma入口。历史无warmup/min cosine继续走原生PyTorch路径；其他模式用共同relative multiplier
+  同步缩放主模型LR0.0125和Adapter LR4e-4。
+- warmup定义为30 epochs下前2/3 epochs从`1/W`线性达到基础LR，再进入余下周期的cosine-to-zero；
+  multistep里程碑为ceil(30×0.6/0.85)=18/26，gamma0.1。config记录模式、比例、实际warmup epochs、
+  milestone比例/epoch、gamma与step unit。
+- 新增4项scheduler数学测试，覆盖relative min对所有parameter group、2/3 epoch warmup、linear/
+  constant/multistep端点和非法组合拒绝；新增完整scheduler搜索汇总器3项测试，覆盖赢家选择、锚点
+  收口以及逐epoch LR漂移拒绝。
+- 新增正式单组runner与一组一卡8-GPU launcher；所有run固定30 epochs和single1 b32冠军参数，结束后
+  自动严格核验240 epochs、13950 updates、skipped0、clean共同commit、no-checkpoint和四条LR轨迹。
+- 本地Python编译、shell语法和diff检查已通过；完整Torch单测需提交推送后在服务器ddp环境执行，
+  通过并完成8种代表性scheduler轨迹smoke后才启动正式实验。

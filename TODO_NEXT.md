@@ -579,3 +579,15 @@ VOC 对照实验，不应在现阶段合并到 `main`。
 31. 正式batch`..._20260902_171919`已一组一卡启动，8份clean config和task0首轮随机轨迹/84 steps/
     skipped0已核验，显存与错误扫描正常。当前只等待完成，不重复启动；结束后运行严格汇总器，并只
     同步JSON、manifest、launcher status与日志的小结果包，不同步checkpoint。
+32. 8组已全部完成并同步。30 epochs以final mAP`32.5365`保持第一；26 epochs虽把average提高
+    `0.0495`，但final低`0.1684`且task5--7均下降。34以上训练loss继续下降而test全面退化，停止
+    epoch搜索，不补相邻整数epoch。
+33. 下一阶段固定30 epochs和其余冠军参数，只实现对所有task相同的scheduler网格；仍以同批30-epoch
+    current cosine为锚点。scheduler若不能稳定超过`32.5365`，结束单视图参数搜索并开始
+    full image + person crop双视图低参数融合诊断。
+34. 阶段B代码已实现：8组为cosine anchor、相对min1%/10%、warmup5%/10%、linear、constant和
+    multistep18/26 gamma0.1；主模型和Adapter共享相对LR曲线，历史anchor路径保持原样。
+35. 下一步提交推送`exp/emotic-image-token-scheduler-search`，服务器审计worktree并创建新的clean
+    scheduler工作树；运行完整单元测试和scheduler LR轨迹/GPU smoke，通过后8卡一组一卡启动。
+36. 启动核验必须检查8份config仅scheduler字段不同、共同clean commit、30 epochs/13950 updates目标、
+    task0首轮LR符合预期且skipped0。完成后按final mAP/average mAP排名，不因单类变化否决。
