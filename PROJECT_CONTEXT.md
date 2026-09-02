@@ -963,3 +963,44 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   `3e-6/1e-5`八组，增加LR0.0125/WD0同批锚点，共9组seed0完整8-task test，无checkpoint。
 - 固定更新预算与全局Adapter正则化暂不并行；它们必须等本批选定统一LR/WD后再逐阶段运行，
   避免优化器与训练预算/方法改动同时变化而无法归因。
+- 实现已提交推送为`exp/emotic-image-token-global-lr-wd@4b45dd9`，服务器独立worktree为
+  `/mnt/haoyuan/workspace/multi-lane-main-global-lr-wd`，21项单元测试通过。
+- batch`image_token_asl_layer1_global_lr_wd_formal_seed0_20260901_224909`已排入tmux
+  `image_token_global_lr_wd_20260901_224909`。启动时8卡被其他任务占用、仅余4.5--5.1GB；
+  launcher要求8卡连续两次至少12GB空闲后才原子启动9组，因此当前安全等待且未创建训练进程。
+- 该batch随后自动启动。8组已完整结束，均为240 epochs、13950 optimizer updates、
+  skipped0。原锚点LR0.0125/WD0仍以final mAP`32.5365`暂列第一；最接近候选
+  LR0.015/WD1e-5为`32.5023`，仅低`0.0343`，但average mAP/cF1/oF1分别提高
+  `0.5252/0.5704/0.1764`。
+- LR0.0155/WD1e-5原进程在task6开始时因GPU0被外部进程突然占用而OOM；这是显存资源冲突，
+  不是ASL数值故障。已在GPU1从头补跑为`..._lr0155_wd1e5_retry1`，当前进行中。
+- 已先同步8组完整结果及全部原始日志到本地；partial archive SHA-256为
+  `4be9b24748df8dc32f3a4759b31157b1e44b2384b1e3c690f43b6372234356b4`，不含checkpoint。
+  在补跑完成前，9组最终排名仍未封口；所有结果均属于exploratory test-tuning。
+- LR0.0155/WD1e-5补跑已完整结束：240 epochs、13950 updates、skipped0，final/average mAP为
+  `31.8789/39.2960`，未超过冠军且final排名第8。原锚点LR0.0125/WD0继续以`32.5365`保持第一，
+  LR0.015/WD1e-5以`32.5023`保持第二。
+- 9组最终小结果包SHA-256为
+  `724611f09c4df5501257b92238790cb4309074571828c692eec09862767a2fba`，包含完整JSON、原始日志、
+  失败诊断和clean retry日志，不含checkpoint。LR/WD局部搜索正式收口；下一优先级是固定每task
+  optimizer updates的全局统一预算实验。
+
+## 2026-09-02 Image-token Adapter训练机制三阶段并行实现
+
+- 新实验分支为`exp/emotic-image-token-training-mechanisms`。用户要求将固定updates、Adapter输出
+  正则和learnable residual gate三阶段同批并行；为保持可归因性，阶段二/三均以当前30-epoch
+  冠军为锚点，不预先假设阶段一未知的最佳预算。若阶段一产生新预算，只对各阶段赢家补组合确认。
+- 阶段一共8组：原30 epochs control，以及所有task统一使用成功optimizer updates
+  `900/1200/1500/1800/2100/2400/2700`。update模式循环当前task数据直到精确成功步数，cosine
+  scheduler按成功step推进；相同预声明规则用于全部task，不读取未来task难度。
+- 阶段二共6组：冻结原结构和30-epoch预算，分别测试normalized Adapter residual ratio与adapted/
+  frozen token cosine distance，目标贡献比例为Adapter ASL的`1%/3%/10%`。每task统一先用30个成功
+  updates校准量级，再固定该task正则权重；规则、warm-up和目标比例对所有task相同。
+- 阶段三共4组：每task独立learnable sigmoid gate，统一初始输出比例
+  `0.025/0.05/0.1/0.2`，新task使用相同初始化；旧task gate随Adapter一起冻结，不会被后续task
+  的optimizer动量改写。
+- 三阶段去重后18组，固定seed0、Image-token layer1/b32、main LR0.0125、Adapter LR4e-4、WD0、
+  ReLU/independent、main BCE + Adapter ASL9.8/0/0.05、AMP/TF32 on、完整8-task exploratory test、
+  无checkpoint。8卡一次启动，每卡2--3组，启动前要求每卡连续两次至少18GB空闲。
+- 本地静态编译、shell语法和diff检查已通过；本地系统Python缺少Torch/NumPy，完整单元测试与
+  三种真实CLIP GPU smoke需在服务器`ddp`环境执行后才能启动正式batch。

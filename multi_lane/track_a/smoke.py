@@ -42,6 +42,20 @@ def main() -> None:
         choices=("independent", "copy_previous"),
         default="independent",
     )
+    parser.add_argument("--adapter-residual-scale", type=float, default=0.1)
+    parser.add_argument(
+        "--adapter-residual-gate-mode",
+        choices=("fixed", "learnable"),
+        default="fixed",
+    )
+    parser.add_argument(
+        "--adapter-regularization",
+        choices=("none", "residual_ratio", "feature_cosine"),
+        default="none",
+    )
+    parser.add_argument(
+        "--adapter-regularization-fraction", type=float, default=0.0
+    )
     parser.add_argument(
         "--loss-routing",
         choices=("joint_bce", "model_asl", "adapter_asl", "both_asl"),
@@ -71,9 +85,11 @@ def main() -> None:
         adapter_mode=args.adapter_mode,
         adapter_bottleneck_dim=args.adapter_bottleneck_dim,
         adapter_layer_indices=tuple(args.adapter_layer_indices),
-        adapter_residual_scale=0.1,
+        adapter_residual_scale=args.adapter_residual_scale,
         adapter_task_initialization=args.adapter_task_init,
         adapter_bottleneck_dims_per_task=args.adapter_bottleneck_dims_per_task,
+        adapter_residual_gate_mode=args.adapter_residual_gate_mode,
+        adapter_auxiliary_metric_mode=args.adapter_regularization,
     ).float().cuda()
     model.activate_task(0)
     images = torch.randn(2, 3, 224, 224, device="cuda")
@@ -136,17 +152,27 @@ def main() -> None:
             asl_loss
             if args.loss_routing in {"model_asl", "both_asl"} else bce_loss
         )
-        adapter_loss = (
+        adapter_base_loss = (
             asl_loss
             if args.loss_routing in {"adapter_asl", "both_asl"} else bce_loss
         )
+        regularization_loss = logits.new_zeros(())
+        if args.adapter_regularization != "none":
+            regularization_loss = (
+                args.adapter_regularization_fraction
+                * model.adapter_auxiliary_metric(args.adapter_regularization)
+            )
+        adapter_loss = adapter_base_loss + regularization_loss
     backward_routed_training_losses(
         model_loss=model_loss,
         adapter_loss=adapter_loss,
         model_parameters=model_parameters,
         adapter_parameters=adapter_parameters,
         scaler=scaler,
-        same_objective=args.loss_routing in {"joint_bce", "both_asl"},
+        same_objective=(
+            args.loss_routing in {"joint_bce", "both_asl"}
+            and args.adapter_regularization == "none"
+        ),
     )
     model.assert_visual_frozen()
     if model.selectors.grad is None or not torch.isfinite(model.selectors.grad).all():
@@ -176,6 +202,9 @@ def main() -> None:
     print(
         "MULTI_LANE_TRACK_A_SMOKE_OK "
         f"adapter_mode={args.adapter_mode} task_init={args.adapter_task_init} "
+        f"gate_mode={args.adapter_residual_gate_mode} "
+        f"regularization={args.adapter_regularization}:"
+        f"{args.adapter_regularization_fraction} "
         f"loss_routing={args.loss_routing} "
         f"precision={'amp' if amp else 'fp32'} "
         f"tf32={'on' if tf32 else 'off'} "

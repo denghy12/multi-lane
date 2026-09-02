@@ -465,6 +465,29 @@ def build_optimizer_groups(
     return model_parameters, adapter_parameters, optimizer_groups
 
 
+def calibrated_adapter_regularization_weight(
+    metric_total: float,
+    reference_loss_total: float,
+    samples: int,
+    target_fraction: float,
+    eps: float = 1e-12,
+) -> float:
+    """Derive one fixed per-task weight from a shared warm-up rule.
+
+    Every task calibrates on the same number of successful updates.  The
+    resulting fixed weight makes the warm-up metric approximately the requested
+    fraction of the Adapter objective without consulting task ids, validation,
+    test labels, or future-task statistics.
+    """
+    if not 0 <= target_fraction <= 1:
+        raise ValueError("Adapter regularization fraction must be between 0 and 1")
+    if samples <= 0:
+        raise ValueError("Adapter regularization calibration requires samples")
+    if metric_total <= eps:
+        return 0.0
+    return float(target_fraction) * float(reference_loss_total) / float(metric_total)
+
+
 def train_task(
     model: MultiLaneModel,
     loader: DataLoader,
@@ -484,11 +507,27 @@ def train_task(
     asl_gamma_pos: float = 0.0,
     asl_clip: float = 0.05,
     asl_eps: float = 1e-8,
+    optimizer_updates_per_task: Optional[int] = None,
+    adapter_regularization: str = "none",
+    adapter_regularization_fraction: float = 0.0,
+    adapter_regularization_calibration_updates: int = 30,
 ) -> List[Dict[str, float]]:
     if loss_routing not in {
         "joint_bce", "model_asl", "adapter_asl", "both_asl"
     }:
         raise ValueError("Unknown model/Adapter loss routing")
+    if optimizer_updates_per_task is not None and optimizer_updates_per_task <= 0:
+        raise ValueError("Optimizer updates per task must be positive")
+    if adapter_regularization not in {
+        "none", "residual_ratio", "feature_cosine"
+    }:
+        raise ValueError("Unknown Adapter regularization mode")
+    if adapter_regularization == "none" and adapter_regularization_fraction != 0:
+        raise ValueError("Disabled Adapter regularization requires fraction zero")
+    if adapter_regularization != "none" and not 0 < adapter_regularization_fraction <= 1:
+        raise ValueError("Enabled Adapter regularization requires fraction in (0, 1]")
+    if adapter_regularization_calibration_updates <= 0:
+        raise ValueError("Adapter regularization calibration updates must be positive")
     model_parameters, adapter_parameters, optimizer_groups = build_optimizer_groups(
         model=model,
         weight_decay=weight_decay,
@@ -498,14 +537,33 @@ def train_task(
     if loss_routing in {"adapter_asl", "both_asl"} and not adapter_parameters:
         raise ValueError("Adapter ASL routing requires an enabled Adapter")
     optimizer = torch.optim.Adam(optimizer_groups, lr=learning_rate)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+    scheduler_steps = (
+        int(optimizer_updates_per_task)
+        if optimizer_updates_per_task is not None else epochs
+    )
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=scheduler_steps
+    )
     scaler = torch.cuda.amp.GradScaler(enabled=amp)
     current = list(task_indices(task_id))
     history: List[Dict[str, float]] = []
-    for epoch in range(epochs):
+    completed_task_updates = 0
+    regularization_metric_calibration_total = 0.0
+    regularization_reference_calibration_total = 0.0
+    regularization_calibration_samples = 0
+    regularization_weight: Optional[float] = None
+    epoch = 0
+    while (
+        completed_task_updates < optimizer_updates_per_task
+        if optimizer_updates_per_task is not None
+        else epoch < epochs
+    ):
         model.train()
         loss_total = 0.0
         adapter_loss_total = 0.0
+        adapter_base_loss_total = 0.0
+        adapter_regularization_total = 0.0
+        adapter_regularization_metric_total = 0.0
         batches = 0
         optimizer_steps = 0
         skipped_steps = 0
@@ -516,6 +574,11 @@ def train_task(
         )
         epoch_start = time.time()
         for images, current_targets in loader:
+            if (
+                optimizer_updates_per_task is not None
+                and completed_task_updates >= optimizer_updates_per_task
+            ):
+                break
             images = images.to(device, non_blocking=True).float()
             current_targets = current_targets.to(device, non_blocking=True).float()
             optimizer.zero_grad(set_to_none=True)
@@ -546,11 +609,33 @@ def train_task(
                     if loss_routing in {"model_asl", "both_asl"}
                     else bce_loss
                 )
-                adapter_loss = (
+                adapter_base_loss = (
                     asl_loss
                     if loss_routing in {"adapter_asl", "both_asl"}
                     else bce_loss
                 )
+                regularization_metric = logits.new_zeros(())
+                regularization_loss = logits.new_zeros(())
+                if adapter_regularization != "none":
+                    regularization_metric = model.adapter_auxiliary_metric(
+                        adapter_regularization
+                    )
+                    if (
+                        regularization_weight is None
+                        and completed_task_updates
+                        >= adapter_regularization_calibration_updates
+                    ):
+                        regularization_weight = calibrated_adapter_regularization_weight(
+                            regularization_metric_calibration_total,
+                            regularization_reference_calibration_total,
+                            regularization_calibration_samples,
+                            adapter_regularization_fraction,
+                        )
+                    if regularization_weight is not None:
+                        regularization_loss = (
+                            regularization_metric * regularization_weight
+                        )
+                adapter_loss = adapter_base_loss + regularization_loss
             scale_before = float(scaler.get_scale())
             backward_routed_training_losses(
                 model_loss=model_loss,
@@ -558,27 +643,62 @@ def train_task(
                 model_parameters=model_parameters,
                 adapter_parameters=adapter_parameters,
                 scaler=scaler,
-                same_objective=loss_routing in {"joint_bce", "both_asl"},
+                same_objective=(
+                    loss_routing in {"joint_bce", "both_asl"}
+                    and adapter_regularization == "none"
+                ),
             )
             scaler.step(optimizer)
             scaler.update()
             if float(scaler.get_scale()) >= scale_before:
                 optimizer_steps += 1
+                completed_task_updates += 1
+                if (
+                    adapter_regularization != "none"
+                    and regularization_weight is None
+                    and completed_task_updates
+                    <= adapter_regularization_calibration_updates
+                ):
+                    regularization_metric_calibration_total += float(
+                        regularization_metric.detach().cpu()
+                    )
+                    regularization_reference_calibration_total += float(
+                        adapter_base_loss.detach().cpu()
+                    )
+                    regularization_calibration_samples += 1
+                if optimizer_updates_per_task is not None:
+                    scheduler.step()
             else:
                 skipped_steps += 1
             loss_total += float(model_loss.detach().cpu())
             adapter_loss_total += float(adapter_loss.detach().cpu())
+            adapter_base_loss_total += float(adapter_base_loss.detach().cpu())
+            adapter_regularization_total += float(
+                regularization_loss.detach().cpu()
+            )
+            adapter_regularization_metric_total += float(
+                regularization_metric.detach().cpu()
+            )
             batches += 1
         if not batches:
             raise RuntimeError("Training loader produced no batches")
-        if optimizer_steps:
+        if optimizer_steps and optimizer_updates_per_task is None:
             scheduler.step()
         row = {
             "epoch": float(epoch),
             "current_loss": loss_total / batches,
             "model_objective_loss": loss_total / batches,
             "adapter_objective_loss": adapter_loss_total / batches,
+            "adapter_base_objective_loss": adapter_base_loss_total / batches,
+            "adapter_regularization_loss": adapter_regularization_total / batches,
+            "adapter_regularization_metric": (
+                adapter_regularization_metric_total / batches
+            ),
+            "adapter_regularization_weight": (
+                regularization_weight if regularization_weight is not None else 0.0
+            ),
             "optimizer_steps": float(optimizer_steps),
+            "completed_task_optimizer_updates": float(completed_task_updates),
             "skipped_optimizer_steps": float(skipped_steps),
             "learning_rate": epoch_lr,
             "next_learning_rate": float(optimizer.param_groups[0]["lr"]),
@@ -591,13 +711,18 @@ def train_task(
             )
         history.append(row)
         print(
-            f"task={task_id} epoch={epoch + 1}/{epochs} "
+            f"task={task_id} cycle={epoch + 1} "
+            f"budget={optimizer_updates_per_task or epochs} "
+            f"budget_mode={'updates' if optimizer_updates_per_task else 'epochs'} "
             f"loss={row['current_loss']:.8f} lr={epoch_lr:.8f} "
             f"adapter_loss={row['adapter_objective_loss']:.8f} "
+            f"adapter_reg={row['adapter_regularization_loss']:.8f} "
+            f"adapter_reg_weight={row['adapter_regularization_weight']:.8f} "
             f"steps={optimizer_steps} skipped={skipped_steps} "
             f"seconds={row['elapsed_seconds']:.1f}",
             flush=True,
         )
+        epoch += 1
     history[-1]["validation_current_mAP"] = current_validation_map(
         model, validation_loader, device, amp
     )
@@ -656,6 +781,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--epochs", type=int, default=30)
+    parser.add_argument(
+        "--optimizer-updates-per-task",
+        type=int,
+        default=None,
+        help=(
+            "Use one exact successful-optimizer-update budget for every task. "
+            "When set, --epochs is ignored for stopping and cosine scheduling."
+        ),
+    )
     parser.add_argument("--train-batch-size", type=int, default=64)
     parser.add_argument("--eval-batch-size", type=int, default=64)
     parser.add_argument("--workers", type=int, default=2)
@@ -714,6 +848,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--adapter-residual-scale", type=float, default=0.1)
     parser.add_argument(
+        "--adapter-residual-gate-mode",
+        choices=("fixed", "learnable"),
+        default="fixed",
+    )
+    parser.add_argument(
         "--adapter-activation", choices=("relu", "gelu"), default="relu"
     )
     parser.add_argument("--adapter-learning-rate", type=float, default=4e-4)
@@ -730,6 +869,17 @@ def parse_args() -> argparse.Namespace:
         "--adapter-task-init",
         choices=("independent", "copy_previous"),
         default="independent",
+    )
+    parser.add_argument(
+        "--adapter-regularization",
+        choices=("none", "residual_ratio", "feature_cosine"),
+        default="none",
+    )
+    parser.add_argument(
+        "--adapter-regularization-fraction", type=float, default=0.0
+    )
+    parser.add_argument(
+        "--adapter-regularization-calibration-updates", type=int, default=30
     )
     parser.add_argument("--max-tasks", type=int, default=len(TASK_SIZES))
     parser.add_argument(
@@ -758,6 +908,29 @@ def main() -> None:
             raise ValueError("Per-task Adapter bottleneck dimensions must be positive")
     if args.adapter_weight_decay is not None and args.adapter_weight_decay < 0:
         raise ValueError("Adapter weight decay must be non-negative")
+    if args.optimizer_updates_per_task is not None and args.optimizer_updates_per_task <= 0:
+        raise ValueError("optimizer-updates-per-task must be positive")
+    if args.adapter_residual_gate_mode == "learnable":
+        if args.adapter_mode != "image_token":
+            raise ValueError("Learnable residual gates require Image-token Adapter mode")
+        if not 0 < args.adapter_residual_scale < 1:
+            raise ValueError("Learnable residual gate initialization must be in (0, 1)")
+    if args.adapter_regularization == "none":
+        if args.adapter_regularization_fraction != 0:
+            raise ValueError(
+                "adapter-regularization-fraction must be zero when regularization is disabled"
+            )
+    else:
+        if args.adapter_mode != "image_token":
+            raise ValueError("Adapter output regularization requires Image-token mode")
+        if not 0 < args.adapter_regularization_fraction <= 1:
+            raise ValueError(
+                "Enabled Adapter regularization requires fraction in (0, 1]"
+            )
+    if args.adapter_regularization_calibration_updates <= 0:
+        raise ValueError(
+            "adapter-regularization-calibration-updates must be positive"
+        )
     if not torch.cuda.is_available() or args.device != "cuda":
         raise RuntimeError("Formal Track-A reproduction requires CUDA")
     amp = not args.no_amp
@@ -787,6 +960,8 @@ def main() -> None:
         adapter_activation=args.adapter_activation,
         adapter_task_initialization=args.adapter_task_init,
         adapter_bottleneck_dims_per_task=args.adapter_bottleneck_dims_per_task,
+        adapter_residual_gate_mode=args.adapter_residual_gate_mode,
+        adapter_auxiliary_metric_mode=args.adapter_regularization,
     ).float().to(device)
     model.visual_encoder.requires_grad_(False)
     model.assert_visual_frozen()
@@ -885,13 +1060,24 @@ def main() -> None:
         "evaluation_scope": "samples_intersect_seen_classes",
         "save_checkpoints": save_checkpoints,
         "threshold": args.threshold,
-        "epochs_per_task": args.epochs,
+        "training_budget_mode": (
+            "optimizer_updates"
+            if args.optimizer_updates_per_task is not None else "epochs"
+        ),
+        "epochs_per_task": (
+            None if args.optimizer_updates_per_task is not None else args.epochs
+        ),
+        "optimizer_updates_per_task": args.optimizer_updates_per_task,
         "train_batch_size": args.train_batch_size,
         "eval_batch_size": args.eval_batch_size,
         "workers": args.workers,
         "optimizer": "Adam_reset_per_task",
         "learning_rate": learning_rate,
-        "scheduler": "CosineAnnealingLR_reset_per_task",
+        "scheduler": (
+            "CosineAnnealingLR_reset_per_task_by_optimizer_step"
+            if args.optimizer_updates_per_task is not None
+            else "CosineAnnealingLR_reset_per_task"
+        ),
         "weight_decay": args.weight_decay,
         "temperature": args.temperature,
         "input_mode": args.input_mode,
@@ -922,6 +1108,8 @@ def main() -> None:
         ),
         "adapter_layer_indices": list(args.adapter_layer_indices),
         "adapter_residual_scale": args.adapter_residual_scale,
+        "adapter_residual_gate_mode": args.adapter_residual_gate_mode,
+        "adapter_residual_gate_initial_value": args.adapter_residual_scale,
         "adapter_activation": args.adapter_activation,
         "adapter_task_initialization": args.adapter_task_init,
         "adapter_target": (
@@ -947,6 +1135,16 @@ def main() -> None:
                 else args.adapter_weight_decay
             )
             if args.adapter_mode != "disabled" else None
+        ),
+        "adapter_regularization": args.adapter_regularization,
+        "adapter_regularization_fraction": args.adapter_regularization_fraction,
+        "adapter_regularization_calibration_updates": (
+            args.adapter_regularization_calibration_updates
+            if args.adapter_regularization != "none" else None
+        ),
+        "adapter_regularization_scaling": (
+            "fixed_per_task_weight_calibrated_on_successful_updates"
+            if args.adapter_regularization != "none" else None
         ),
         "clip_checkpoint": str(args.clip_checkpoint.resolve()),
         "clip_checkpoint_sha256": OPENAI_VIT_B16_SHA256,
@@ -1003,6 +1201,12 @@ def main() -> None:
             asl_gamma_pos=args.asl_gamma_pos,
             asl_clip=args.asl_clip,
             asl_eps=args.asl_eps,
+            optimizer_updates_per_task=args.optimizer_updates_per_task,
+            adapter_regularization=args.adapter_regularization,
+            adapter_regularization_fraction=args.adapter_regularization_fraction,
+            adapter_regularization_calibration_updates=(
+                args.adapter_regularization_calibration_updates
+            ),
         )
         row = evaluate(
             model, reporting_loader, device, task_id, args.threshold, amp
@@ -1039,7 +1243,9 @@ def main() -> None:
         "track": TRACK,
         "seed": args.seed,
         "elapsed_seconds": time.time() - start,
-        "completed_epochs": args.epochs * args.max_tasks,
+        "completed_epochs": sum(
+            len(history) for history in training_history.values()
+        ),
         "completed_optimizer_updates": int(sum(
             row["optimizer_steps"]
             for history in training_history.values()
@@ -1047,6 +1253,10 @@ def main() -> None:
         )),
         "metrics": summarize_tasks(task_rows),
         "task_metrics": [asdict(item) for item in task_rows],
+        "adapter_residual_gate_final_values": (
+            list(model.adapter_bank.gate_values())
+            if model.adapter_bank is not None else None
+        ),
         "config": config,
     }
     (output / "seed_summary.json").write_text(

@@ -35,6 +35,8 @@ class MultiLaneModel(nn.Module):
         adapter_activation: str = "relu",
         adapter_task_initialization: str = "independent",
         adapter_bottleneck_dims_per_task: Optional[Sequence[int]] = None,
+        adapter_residual_gate_mode: str = "fixed",
+        adapter_auxiliary_metric_mode: str = "none",
     ) -> None:
         super().__init__()
         if not task_sizes or any(int(size) <= 0 for size in task_sizes):
@@ -156,6 +158,8 @@ class MultiLaneModel(nn.Module):
                     activation=adapter_activation,
                     task_initialization=adapter_task_initialization,
                     bottleneck_dims_per_task=adapter_bottleneck_dims_per_task,
+                    residual_gate_mode=adapter_residual_gate_mode,
+                    auxiliary_metric_mode=adapter_auxiliary_metric_mode,
                 )
             self.adapter_bank = adapter_bank
 
@@ -347,6 +351,8 @@ class MultiLaneModel(nn.Module):
         self, images: torch.Tensor, all_seen_lanes: bool
     ) -> torch.Tensor:
         lane_ids = self._lane_ids(all_seen_lanes)
+        if self.adapter_bank is not None:
+            self.adapter_bank.reset_auxiliary_metrics()
         image_tokens = self._visual_tokens(images)
         lane_tokens = self._initial_lane_tokens(images.shape[0], lane_ids)
         for layer_id, block in enumerate(self.visual_encoder.transformer.resblocks):
@@ -368,6 +374,13 @@ class MultiLaneModel(nn.Module):
         if self.normalize == "pre-head":
             lane_cls = F.normalize(lane_cls, dim=-1)
         return lane_cls
+
+    def adapter_auxiliary_metric(self, mode: str) -> torch.Tensor:
+        if self.adapter_mode != "image_token" or self.adapter_bank is None:
+            raise RuntimeError(
+                "Adapter output regularization requires an Image-token Adapter"
+            )
+        return self.adapter_bank.auxiliary_metric(mode)
 
     def lane_logits(
         self, images: torch.Tensor, all_seen_lanes: bool

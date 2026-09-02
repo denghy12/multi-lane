@@ -529,3 +529,26 @@ VOC 对照实验，不应在现阶段合并到 `main`。
     直接test：LR`{0.014,0.0145,0.015,0.0155}`×WD`{3e-6,1e-5}`加原冠军锚点。
 10. 该批完成后只选择统一全局配置。随后才进入固定optimizer update预算实验；任何动态规则
     必须对所有task使用同一预定义公式，不能按已知task编号或test难度手调。
+11. 9组launcher已在服务器安全等待GPU释放，当前没有训练进程。自动启动后需核对9份config、
+    GPU0双进程余量、epoch1的84 steps/skipped0以及错误日志；等待期间不要重复启动第二批。
+12. 8组已完整结束并同步；第9组LR0.0155/WD1e-5因外部显存占用失败后已在GPU1从头安全补跑。
+    等补跑产生完整`seed_summary.json`后，补同步该run及日志，验证240 epochs、13950 updates、
+    skipped0，再生成9组最终排名与正式小结果包。
+13. 当前临时结论是锚点`32.5365`仍领先，LR0.015/WD1e-5以`32.5023`接近且average mAP/F1更好。
+    在第9组完成前不启动固定更新预算或一致性正则实验，避免并行阶段混淆结论。
+14. 第9组已完成，final mAP`31.8789`，9组均未超过`32.5365`；全局LR×Adapter WD搜索停止。
+15. 下一阶段固定冠军LR0.0125/WD0以及既有Image-token Adapter结构，新增按optimizer updates终止和
+    按updates调度cosine的入口。使用同一预声明预算作用于全部task，不读取未来task难度。
+16. 计划8组为原30-epoch control，加每task updates`900/1200/1500/1800/2100/2400/2700`。
+    实现后先补单元测试和GPU smoke；按照当前用户要求，正式对比直接运行seed0完整8-task test，
+    继续标记exploratory。只有final mAP超过`32.5365`才升级冠军。
+17. 用户要求三个机制阶段并行一次跑完。实现已完成：阶段一8组；阶段二residual/cosine各
+    `1%/3%/10%`共6组；阶段三learnable gate init`0.025/0.05/0.1/0.2`共4组，总计18组。
+18. 下一步提交推送`exp/emotic-image-token-training-mechanisms`，服务器审计全部worktree后创建新的
+    clean独立worktree；Automatic Upload写入primary的副本必须逐文件备份并恢复，不触碰test-only。
+19. 在服务器`ddp`环境运行完整单元测试，再分别运行control、10% residual regularization、
+    learnable gate0.1三种真实CLIP AMP/TF32-on GPU smoke。任何梯度非有限、旧gate变化或update预算
+    不精确都必须先修复，不能启动正式实验。
+20. 测试通过后启动18组batch。启动核验包括18份config全部记录clean同一commit、control精确保持
+    epochs模式、7个预算值正确、6个正则配置含30-update calibration、4个gate配置各多8个总参数，
+    每卡2--3进程仍有安全显存、首轮无OOM/non-finite/skipped。

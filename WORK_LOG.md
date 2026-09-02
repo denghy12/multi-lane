@@ -2343,3 +2343,59 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - 固定seed0、8 tasks×30 epochs、batch64、Image-token layer1/b32、Adapter LR4e-4、
   scale0.1/ReLU、主模型BCE + Adapter ASL9.8/0/0.05、CLIP normalization、crop0.05、
   AMP/TF32 on、无checkpoint。
+- launcher与上下文已提交推送为`4b45dd9`；服务器创建clean独立worktree并通过21项单元测试。
+- Automatic Upload副本备份位于
+  `/mnt/haoyuan/workspace/git-sync-backup-global-lr-wd-deploy-20260901-RsLHVP`，primary恢复clean。
+- 8卡当前各被其他任务占用约19GB，未发现本项目runner。已在tmux
+  `image_token_global_lr_wd_20260901_224909`挂起自动等待；batch ID为
+  `image_token_asl_layer1_global_lr_wd_formal_seed0_20260901_224909`。每30秒检查一次，要求
+  全部GPU连续两次至少12GB空闲后再启动，不停止或抢占现有进程。
+
+## 2026-09-02：同步全局LR×Adapter WD首批8组并补跑资源失败组
+
+- 9组launcher已经运行；其中8组完整产出`seed_summary.json`，每组240 epochs、13950 updates、
+  skipped0。LR0.0155/WD1e-5原运行在task6开始时OOM，日志显示GPU0仅剩16.62MiB，属于外部
+  GPU进程临时占用引发的资源碰撞，并非loss非有限或模型容量超限。
+- GPU释放后，在GPU1以完全相同配置从task0重新补跑，run ID为
+  `image_token_asl_layer1_global_lr_wd_formal_seed0_20260901_224909_lr0155_wd1e5_retry1`，tmux为
+  `image_token_global_lr_wd_retry1_20260902`。启动后约占2.1GB，尚余约22GB，首4轮正常。
+- 已同步8组完整JSON、原launcher日志和失败诊断日志到本地，不含checkpoint。压缩包两端
+  SHA-256均为`4be9b24748df8dc32f3a4759b31157b1e44b2384b1e3c690f43b6372234356b4`。
+- 暂时排名仍由LR0.0125/WD0锚点`32.5365`领先；LR0.015/WD1e-5为`32.5023`，差`0.0343`，
+  但average mAP从`39.1445`升到`39.6697`，cF1从`32.5756`升到`33.1460`，oF1从
+  `49.3827`升到`49.5592`。其余6个候选final mAP均不超过`32.3674`。
+- 在三个已成对完成的LR点上，WD1e-5相对WD3e-6的final mAP分别提高`0.2662/0.0725/0.1348`，
+  average mAP分别提高`0.2588/0.3571/0.5826`，说明较强的候选WD方向一致优于3e-6；但主模型
+  LR收益在0.015附近才出现，非简单单调关系。
+
+## 2026-09-02：完成全局LR×Adapter WD最终9组分析
+
+- GPU1 clean retry完整结束，状态complete，240 epochs、13950 optimizer updates、skipped0；tmux与
+  runner均已退出。run记录clean`4b45dd9`，配置与原失败组一致。
+- LR0.0155/WD1e-5补跑final/average mAP为`31.8789/39.2960`，相对冠军final下降`0.6576`；
+  task5/6/7分别下降`0.0223/0.5944/0.6576`，说明LR0.0155已越过有效区域上界。
+- 最终冠军仍是LR0.0125/WD0的`32.5365`。LR0.015/WD1e-5以`32.5023`第二，虽提高average
+  mAP和F1，但没有满足用户以final mAP为主的替换条件。
+- WD1e-5相对3e-6在LR0.014/0.0145/0.015分别提高final mAP`0.2662/0.0725/0.1348`，到
+  LR0.0155反而下降`0.1775`，确认LR与WD存在窄区间交互，停止继续微调二者。
+- 最终小结果包已同步本地，archive两端SHA-256均为
+  `724611f09c4df5501257b92238790cb4309074571828c692eec09862767a2fba`，不含checkpoint。
+  最终分析写入`output/emotic_track_a_image_token_global_lr_wd_formal/20260901_224909/analysis.md`。
+
+## 2026-09-02：实现固定预算、Adapter输出正则与可学习gate
+
+- 从`4b45dd9`创建`exp/emotic-image-token-training-mechanisms`，保留已更新但尚未提交的三份上下文
+  文档。固定gate/无正则/epoch预算保持旧训练数学路径，作为同批control复现`32.5365`。
+- runner新增`--optimizer-updates-per-task`：每task按成功GradScaler/optimizer step精确停止，跳步不计
+  入预算；DataLoader按需重新shuffle循环，cosine scheduler逐成功step推进。config记录预算模式、
+  每task目标和scheduler语义，summary记录实际data cycles与总成功updates。
+- Image-token Adapter新增两种可微输出度量：scaled residual/frozen token二范数比、adapted/frozen
+  token cosine distance。正则只加入Adapter ASL分支，主模型selectors/prompts/head仍只接收BCE梯度。
+  每task用最初30个成功updates进行无正则量级校准，之后固定权重，避免zero-init早期除以极小量造成
+  梯度爆炸。
+- 新增按task独立的sigmoid residual gate。gate作为对应task Adapter optimizer参数，激活新task时
+  仅当前gate可训练；旧gate及旧Adapter冻结。固定模式不新增参数，learnable模式每task仅增加1参数。
+- 新增固定预算精确停止、校准权重、辅助度量、gate初始化/冻结/参数统计单元测试；GPU smoke增加正则
+  和gate入口。新增单组正式脚本与18组8卡launcher，外部结果目录不保存checkpoint。
+- 本地`py_compile`、两个shell的`bash -n`、18组数组长度和`git diff --check`通过。本地完整测试因系统
+  Python缺少Torch/NumPy无法执行，这是环境缺失而非测试失败；部署后必须在服务器`ddp`环境跑完整套件。

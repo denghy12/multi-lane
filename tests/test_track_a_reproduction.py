@@ -5,6 +5,7 @@ import unittest
 import numpy as np
 import torch
 from torch import nn
+from torch.utils.data import DataLoader, TensorDataset
 
 from multi_lane.track_a.adapter import (
     TaskImageTokenAdapterBank,
@@ -21,7 +22,9 @@ from multi_lane.track_a.runner import (
     compute_asymmetric_training_loss,
     compute_training_loss,
     compute_metrics,
+    calibrated_adapter_regularization_weight,
     summarize_tasks,
+    train_task,
 )
 
 
@@ -197,6 +200,52 @@ class TrackAModelTest(unittest.TestCase):
         self.assertEqual([group["weight_decay"] for group in groups], [0.01, 0.0, 1e-4])
         self.assertEqual(groups[-1]["lr"], 4e-4)
 
+    def test_fixed_update_budget_stops_on_exact_successful_updates(self) -> None:
+        torch.manual_seed(43)
+        model = MultiLaneModel(
+            FakeVisual(), TASK_SIZES, num_selectors=2, num_prompts=2,
+            num_prompt_layers=1,
+        )
+        model.activate_task(0)
+        images = torch.randn(4, 3, 4, 4)
+        targets = torch.tensor(
+            [
+                [1, 0, 1, 0, 1],
+                [0, 1, 0, 1, 0],
+                [1, 1, 0, 0, 1],
+                [0, 0, 1, 1, 0],
+            ],
+            dtype=torch.float32,
+        )
+        loader = DataLoader(TensorDataset(images, targets), batch_size=2)
+        history = train_task(
+            model,
+            loader,
+            loader,
+            torch.device("cpu"),
+            task_id=0,
+            epochs=30,
+            learning_rate=1e-3,
+            weight_decay=0.0,
+            temperature=1.0,
+            amp=False,
+            optimizer_updates_per_task=3,
+        )
+        self.assertEqual(len(history), 2)
+        self.assertEqual(sum(row["optimizer_steps"] for row in history), 3)
+        self.assertEqual(history[-1]["completed_task_optimizer_updates"], 3)
+        self.assertAlmostEqual(history[-1]["next_learning_rate"], 0.0)
+
+    def test_calibrated_regularization_matches_requested_loss_fraction(self) -> None:
+        weight = calibrated_adapter_regularization_weight(
+            metric_total=2.5,
+            reference_loss_total=20.0,
+            samples=10,
+            target_fraction=0.03,
+        )
+        self.assertAlmostEqual(weight, 0.24, places=6)
+        self.assertAlmostEqual(weight * (2.5 / 10), 0.03 * (20.0 / 10))
+
     def test_copy_previous_rejects_nonuniform_bottlenecks(self) -> None:
         with self.assertRaisesRegex(ValueError, "uniform bottleneck"):
             MultiLaneModel(
@@ -333,6 +382,58 @@ class TrackAAdapterBankTest(unittest.TestCase):
         )
         self.assertTrue(all(not parameter.requires_grad for parameter in bank.task_adapters[0].parameters()))
         self.assertTrue(all(parameter.requires_grad for parameter in bank.task_adapters[1].parameters()))
+
+    def test_learnable_gate_is_task_specific_and_preserves_initial_scale(self) -> None:
+        bank = TaskImageTokenAdapterBank(
+            num_tasks=2,
+            hidden_dim=8,
+            bottleneck_dim=3,
+            layer_indices=(0,),
+            residual_scale=0.1,
+            residual_gate_mode="learnable",
+        )
+        self.assertTrue(all(abs(value - 0.1) < 1e-6 for value in bank.gate_values()))
+        self.assertEqual(bank.per_task_parameter_count(), 2 * 8 * 3 + 3 + 8 + 1)
+        bank.activate_task(0)
+        self.assertTrue(bank.task_gates[0].requires_grad)
+        self.assertFalse(bank.task_gates[1].requires_grad)
+        bank.activate_task(1)
+        self.assertFalse(bank.task_gates[0].requires_grad)
+        self.assertTrue(bank.task_gates[1].requires_grad)
+
+    def test_image_token_auxiliary_metrics_measure_adapter_perturbation(self) -> None:
+        bank = TaskImageTokenAdapterBank(
+            num_tasks=1,
+            hidden_dim=8,
+            bottleneck_dim=3,
+            layer_indices=(0,),
+            residual_scale=0.5,
+            auxiliary_metric_mode="residual_ratio",
+        )
+        frozen = torch.randn(2, 5, 8)
+        bank.reset_auxiliary_metrics()
+        bank.adapted_tokens_for_layer(0, frozen, (0,))
+        self.assertEqual(float(bank.auxiliary_metric("residual_ratio")), 0.0)
+        with torch.no_grad():
+            bank.task_adapters[0]["0"].up.bias[0] = 2.0
+        bank.reset_auxiliary_metrics()
+        bank.adapted_tokens_for_layer(0, frozen, (0,))
+        self.assertGreater(float(bank.auxiliary_metric("residual_ratio")), 0.0)
+        cosine_bank = TaskImageTokenAdapterBank(
+            num_tasks=1,
+            hidden_dim=8,
+            bottleneck_dim=3,
+            layer_indices=(0,),
+            residual_scale=0.5,
+            auxiliary_metric_mode="feature_cosine",
+        )
+        with torch.no_grad():
+            cosine_bank.task_adapters[0]["0"].up.bias[0] = 2.0
+        cosine_bank.reset_auxiliary_metrics()
+        cosine_bank.adapted_tokens_for_layer(0, frozen, (0,))
+        self.assertGreater(
+            float(cosine_bank.auxiliary_metric("feature_cosine")), 0.0
+        )
 
     def test_copy_previous_warm_starts_only_the_new_task(self) -> None:
         bank = TaskLaneTransformerAdapterBank(
