@@ -701,3 +701,15 @@ VOC 对照实验，不应在现阶段合并到 `main`。
 44. Image-token冠军seed1/2已完成并与既有seed0汇总：final mAP `32.1562 ± 0.3701`，相对注册
     baseline平均提高`0.8567`且三个配对seed均为正。结果已同步、哈希核对并打包；本配置到此锁定，
     不再依据seed1/2调参。论文报告时同时给出三种子均值/标准差，并说明此前seed0 test探索的边界。
+45. 完成样本级人物可靠性门控实现审查和回归测试；禁止继续搜索静态alpha、bbox阈值或类别独立权重。
+46. 提交推送当前实验分支；Automatic Upload若污染服务器primary，先逐文件哈希、备份并恢复，随后
+    只在独立`multi-lane-main-constrained-gated-fusion` worktree执行ff-only同步，禁止触碰test-only。
+47. 服务器先运行完整单测，再做真实EMOTIC图像组calibration划分/score dump smoke、compact state
+    restore与真实CLIP Image-token Adapter GPU smoke；任一失败则不启动完整实验。
+48. 测试通过后用GPU0--5并行3 seeds×Full/Person共6组完整8-task validation source。固定基础协议为
+    30 epochs/task、main LR0.0125、layer1/b32/Adapter LR4e-4/scale0.1/ReLU/independent、主BCE+
+    Adapter ASL9.8/0/0.05、AMP/TF32；train图像组90% fit/10% calibration，无完整checkpoint。
+49. 只在calibration训练8个共享门控候选，并在三种子validation选择prior；必须每个seed不低于同批
+    固定0.20 final mAP才可锁定。若不满足，记录拒绝并停止，test保持未访问。
+50. 若validation锁定赢家，使用per-task compact states对三个seed的Full/Person test各导出一次概率，
+    只评估锁定赢家一次。同步JSON/NPZ/日志和compact states，不同步冻结CLIP或完整checkpoint。

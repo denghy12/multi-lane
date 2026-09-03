@@ -1264,3 +1264,19 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - 同步结果、日志、三种子汇总和analysis已保存到
   `output/emotic_track_a_image_token_seed_confirmation_formal/20260903_123014/`；144KB小结果包
   不含checkpoint，SHA-256为`480838060a634d242776a38f698f027cbf1560527e32a24b573f3a9fbe48a330`。
+
+## 2026-09-04：样本级人物可靠性门控
+
+- 静态融合、bbox阈值和类别独立权重搜索已经停止。当前分支开始实现跨task共享的小型MLP，每个
+  样本只输出一个Person概率融合权重，结构性限制为`[0.10,0.35]`并正则回固定锚点`0.20`。
+- 门控固定使用bbox面积/长宽比/人物数量/多人标记，以及Full/Person两视图的置信度、二元熵和
+  概率差异共10维特征。门控不读取类别ID，也不输出类别独立权重。
+- 为防止validation标签泄漏，基础Full/Person模型将train按稳定图像组哈希拆成90% fit和10%
+  calibration；同图全部人物、两个视图和三个seed使用一致分桶。门控每个task只在当前task的
+  calibration标签上顺序训练，不回放旧task样本，validation只负责选择正则强度。
+- 计划网格为hidden`{8,16}`×归一化prior strength`{0.1,0.3,1,3}`，固定AdamW LR`1e-3`、
+  WD`1e-4`、80 epochs/task、batch64。候选必须在三个seed各自的final validation mAP上不低于
+  同批固定0.20锚点；合格后按三种子mean final mAP、mean average mAP排序。
+- runner新增calibration score和不含冻结CLIP视觉塔的per-task compact state；只有validation明确
+  锁定赢家后，独立导出器才从compact state对test推理，并且最终只评估这一种门控。若无候选通过，
+  launcher必须结束且不访问test。

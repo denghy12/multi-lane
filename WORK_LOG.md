@@ -2888,3 +2888,18 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - 本地`analysis.md`和`formal_seed_summary.json`已生成。144KB下载包
   `image_token_asl_layer1_seed012_small_results_20260903_123014.tar.gz`不含checkpoint，SHA-256为
   `480838060a634d242776a38f698f027cbf1560527e32a24b573f3a9fbe48a330`。
+
+## 2026-09-04：实现learned reliability gate（进行中）
+
+- 在`exp/emotic-constrained-gated-fusion`上开始实现下一阶段，尚未提交或启动正式实验。
+- `runner.py`新增按图像组SHA-256确定性拆分fit/calibration、calibration逐样本概率保存，以及省略
+  `visual_encoder.*`的per-task compact checkpoint。默认fraction0保持旧训练入口兼容。
+- 新增`learned_reliability_gate.py`：10维样本特征、共享两层MLP、单一有界人物权重、锚点正则、
+  8组正则/hidden组合、三种子validation硬门槛和锁定单次test评估。
+- 新增`export_compact_test_scores.py`，强制校验validation selection、source run、checkpoint哈希/
+  provenance和clean Git，仅恢复compact method state并输出test概率，不执行训练或test搜索。
+- 新增6卡launcher和source/export脚本：先并行3 seeds×2 views validation source，离线选门控；无
+  合格赢家则停止，有赢家才并行导出6组test端点并评估一次锁定门控。
+- 新增回归测试覆盖图像组切分、Full/Person一致性、compact state完整性、MLP初始0.20/输出边界、
+  特征和validation lock。macOS系统Python缺numpy，仅完成py_compile/bash语法/diff静态检查；完整
+  单测和真实数据/GPU smoke需提交后在服务器ddp环境执行。

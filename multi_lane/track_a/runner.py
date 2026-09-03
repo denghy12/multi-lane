@@ -8,6 +8,7 @@ benchmark protocol used for the registered MULTI-LANE Track-A result.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -107,6 +108,51 @@ def dataset_view(
     if not indices:
         raise RuntimeError("EMOTIC protocol view contains no samples")
     return LabelView(source, indices, class_indices, include_sample_id)
+
+
+def fit_calibration_indices(
+    source: EMOTIC,
+    class_indices: Sequence[int],
+    calibration_fraction: float,
+    split_salt: str = "emotic-reliability-calibration-v1",
+) -> Tuple[List[int], List[int]]:
+    """Deterministically hold out image groups across every view and seed."""
+    if not 0.0 <= calibration_fraction < 0.5:
+        raise ValueError("Calibration fraction must be in [0, 0.5)")
+    eligible = [
+        index
+        for index, target in enumerate(source.targets)
+        if _intersects(target, class_indices)
+    ]
+    if not eligible:
+        raise RuntimeError("EMOTIC protocol view contains no samples")
+    if calibration_fraction == 0:
+        return eligible, []
+    cutoff = int(calibration_fraction * (1 << 64))
+    fit, calibration = [], []
+    for index in eligible:
+        sample_id = str(source.sample_ids[index])
+        image_group = sample_id.rsplit("#person=", 1)[0]
+        digest = hashlib.sha256(
+            f"{split_salt}:{image_group}".encode("utf-8")
+        ).digest()
+        value = int.from_bytes(digest[:8], byteorder="big", signed=False)
+        (calibration if value < cutoff else fit).append(index)
+    if not fit or not calibration:
+        raise RuntimeError("Deterministic calibration split produced an empty partition")
+    return fit, calibration
+
+
+def compact_model_state_dict(model: nn.Module) -> Dict[str, torch.Tensor]:
+    """Save method state while omitting the reconstructable frozen CLIP tower."""
+    state = {
+        name: value.detach().cpu()
+        for name, value in model.state_dict().items()
+        if not name.startswith("visual_encoder.")
+    }
+    if not state or any(name.startswith("visual_encoder.") for name in state):
+        raise RuntimeError("Compact model state contains an invalid parameter set")
+    return state
 
 
 class PadToSquare:
@@ -1131,6 +1177,22 @@ def parse_args() -> argparse.Namespace:
         help="Save per-sample logits/targets/IDs for an explicitly declared purpose.",
     )
     parser.add_argument(
+        "--calibration-fraction",
+        type=float,
+        default=0.0,
+        help="Stable fraction of each task's train samples held out for gate calibration.",
+    )
+    parser.add_argument(
+        "--save-calibration-scores",
+        action="store_true",
+        help="Save deterministic held-out train scores after every task.",
+    )
+    parser.add_argument(
+        "--save-compact-checkpoints",
+        action="store_true",
+        help="Save per-task method state without the frozen CLIP visual tower.",
+    )
+    parser.add_argument(
         "--evaluation-score-purpose",
         choices=("validation_search", "fixed_test_fusion"),
         default="validation_search",
@@ -1237,6 +1299,19 @@ def main() -> None:
         raise ValueError(
             "fixed_test_fusion purpose requires --save-evaluation-scores"
         )
+    if (
+        not math.isfinite(args.calibration_fraction)
+        or not 0 <= args.calibration_fraction < 0.5
+    ):
+        raise ValueError("calibration-fraction must be finite and in [0, 0.5)")
+    if args.save_calibration_scores and args.calibration_fraction <= 0:
+        raise ValueError(
+            "Calibration score export requires a positive calibration fraction"
+        )
+    if args.calibration_fraction > 0 and not args.save_calibration_scores:
+        raise ValueError("A calibration holdout must save its score provenance")
+    if args.calibration_fraction > 0 and args.reporting_split != "val":
+        raise ValueError("Calibration holdout source training is validation-only")
     if args.adapter_bottleneck_dims_per_task is not None:
         if len(args.adapter_bottleneck_dims_per_task) != len(TASK_SIZES):
             raise ValueError(
@@ -1304,6 +1379,10 @@ def main() -> None:
     save_checkpoints = not args.no_save_checkpoints
     if save_checkpoints:
         (output / "checkpoints").mkdir()
+    if args.save_calibration_scores:
+        (output / "calibration_scores").mkdir()
+    if args.save_compact_checkpoints:
+        (output / "compact_checkpoints").mkdir()
 
     metadata = git_metadata(root)
     visual = load_openai_clip_visual(args.clip_checkpoint)
@@ -1361,6 +1440,15 @@ def main() -> None:
         str(dataset_parent), train=True, transform=train_transform,
         input_mode=args.input_mode, person_crop_margin=args.person_crop_margin,
     )
+    calibration_source = (
+        EMOTIC(
+            str(dataset_parent), train=True, transform=eval_transform,
+            input_mode=args.input_mode,
+            person_crop_margin=args.person_crop_margin,
+        )
+        if args.calibration_fraction > 0
+        else None
+    )
     val_source = EMOTIC(
         str(dataset_parent), train=False, transform=eval_transform,
         eval_splits=("val",), input_mode=args.input_mode,
@@ -1376,6 +1464,8 @@ def main() -> None:
     else:
         reporting_source = val_source
         validate_classes(train_source, val_source)
+    if calibration_source is not None:
+        validate_classes(train_source, calibration_source)
 
     learning_rate = args.source_learning_rate * (
         args.train_batch_size / args.source_reference_batch_size
@@ -1485,6 +1575,18 @@ def main() -> None:
             args.evaluation_score_purpose
             if args.save_evaluation_scores else None
         ),
+        "calibration_fraction": args.calibration_fraction,
+        "calibration_split": (
+            "stable_sha256_image_group_v1"
+            if args.calibration_fraction > 0
+            else None
+        ),
+        "calibration_training_exclusion": args.calibration_fraction > 0,
+        "save_calibration_scores": args.save_calibration_scores,
+        "save_compact_checkpoints": args.save_compact_checkpoints,
+        "compact_checkpoint_excludes_frozen_visual": (
+            args.save_compact_checkpoints
+        ),
         "input_normalization": args.input_normalization,
         "input_normalization_mean": (
             list(CLIP_IMAGE_MEAN) if args.input_normalization == "clip" else None
@@ -1573,12 +1675,17 @@ def main() -> None:
     )
 
     task_rows: List[TaskMetrics] = []
+    calibration_rows: List[TaskMetrics] = []
+    calibration_counts: Dict[str, object] = {}
     training_history: Dict[str, object] = {}
     start = time.time()
     for task_id in range(args.max_tasks):
         print(f"begin_task={task_id}", flush=True)
         model.activate_task(task_id)
-        train_view = dataset_view(train_source, task_indices(task_id))
+        fit_indices, calibration_indices = fit_calibration_indices(
+            train_source, task_indices(task_id), args.calibration_fraction
+        )
+        train_view = LabelView(train_source, fit_indices, task_indices(task_id))
         val_view = dataset_view(val_source, task_indices(task_id))
         reporting_view = dataset_view(
             reporting_source,
@@ -1597,6 +1704,29 @@ def main() -> None:
             reporting_view, batch_size=args.eval_batch_size, shuffle=False,
             num_workers=args.workers, pin_memory=False, drop_last=False,
         )
+        calibration_loader = None
+        if args.save_calibration_scores:
+            if calibration_source is None:
+                raise RuntimeError("Calibration source was not constructed")
+            calibration_view = LabelView(
+                calibration_source,
+                calibration_indices,
+                seen_indices(task_id),
+                include_sample_id=True,
+            )
+            calibration_loader = DataLoader(
+                calibration_view,
+                batch_size=args.eval_batch_size,
+                shuffle=False,
+                num_workers=args.workers,
+                pin_memory=False,
+                drop_last=False,
+            )
+        calibration_counts[str(task_id)] = {
+            "eligible": len(fit_indices) + len(calibration_indices),
+            "fit": len(fit_indices),
+            "calibration": len(calibration_indices),
+        }
         history = train_task(
             model, train_loader, val_loader, device, task_id,
             args.epochs, learning_rate, args.weight_decay,
@@ -1636,6 +1766,19 @@ def main() -> None:
             ),
         )
         task_rows.append(row)
+        if calibration_loader is not None:
+            calibration_row = evaluate(
+                model,
+                calibration_loader,
+                device,
+                task_id,
+                args.threshold,
+                amp,
+                score_output_path=(
+                    output / "calibration_scores" / f"task{task_id}.npz"
+                ),
+            )
+            calibration_rows.append(calibration_row)
         training_history[str(task_id)] = history
         if save_checkpoints:
             torch.save(
@@ -1645,6 +1788,16 @@ def main() -> None:
                 },
                 output / "checkpoints" / f"task{task_id}.pth",
             )
+        if args.save_compact_checkpoints:
+            torch.save(
+                {
+                    "schema_version": 1,
+                    "model": compact_model_state_dict(model),
+                    "task_id": task_id,
+                    "source_git": metadata,
+                },
+                output / "compact_checkpoints" / f"task{task_id}.pth",
+            )
         (output / "task_metrics.json").write_text(
             json.dumps([asdict(item) for item in task_rows], indent=2) + "\n",
             encoding="utf-8",
@@ -1652,6 +1805,17 @@ def main() -> None:
         (output / "training_history.json").write_text(
             json.dumps(training_history, indent=2) + "\n", encoding="utf-8"
         )
+        if calibration_rows:
+            (output / "calibration_metrics.json").write_text(
+                json.dumps(
+                    [asdict(item) for item in calibration_rows], indent=2
+                ) + "\n",
+                encoding="utf-8",
+            )
+            (output / "calibration_counts.json").write_text(
+                json.dumps(calibration_counts, indent=2) + "\n",
+                encoding="utf-8",
+            )
         print(
             f"task={task_id} {args.reporting_split}_mAP={row.mAP:.6f} "
             f"{args.reporting_split}_cF1={row.cF1:.6f} "
@@ -1677,6 +1841,8 @@ def main() -> None:
         )),
         "metrics": summarize_tasks(task_rows),
         "task_metrics": [asdict(item) for item in task_rows],
+        "calibration_metrics": [asdict(item) for item in calibration_rows],
+        "calibration_counts": calibration_counts,
         "adapter_residual_gate_final_values": (
             list(model.adapter_bank.gate_values())
             if model.adapter_bank is not None else None
