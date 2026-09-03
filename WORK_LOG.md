@@ -2911,3 +2911,9 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - GPU0真实ViT-B/16 layer1/b32/Adapter-ASL AMP/TF32 smoke通过，trainable739,130、初始残差误差
   `3.8147e-05`、无冻结塔梯度；compact恢复覆盖41个method tensors/1,089,002参数并排除87,281,642
   总状态中的冻结视觉塔。8-task顺序门控合成smoke也通过。
+- 验证记录提交`65d3ca4`已推送，服务器实验worktree ff-only同步后启动唯一batch
+  `learned_reliability_gate_seed012_20260904_021636`，tmux为
+  `multilane_learned_gate_20260904_021636`。GPU0--5连续两次至少21GB空闲后同时启动6个source run。
+- 6份config全部记录clean`65d3ca4`，seed0/1/2×full/person_crop无缺失；图像组calibration0.10、
+  validation_search、compact state开启、完整checkpoint关闭及冠军模型参数均正确。task0 cycle1全部
+  76 steps、skipped0，显存约2.0--2.5GB，错误扫描为空。当前继续运行，不启动重复batch。

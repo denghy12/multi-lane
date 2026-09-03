@@ -715,3 +715,6 @@ VOC 对照实验，不应在现阶段合并到 `main`。
     只评估锁定赢家一次。同步JSON/NPZ/日志和compact states，不同步冻结CLIP或完整checkpoint。
 51. `2e352e0`的97项单测和全部预运行smoke已经通过。下一步提交推送本次验证记录并让实验worktree
     ff-only更新，然后检查GPU0--5连续空闲两次，启动唯一一批learned reliability gate实验。
+52. batch`learned_reliability_gate_seed012_20260904_021636`已正常启动且6份config/首轮通过审计。
+    当前只等待，不重复启动、不修改运行worktree。完成后先核验6×240 epochs、每task calibration/
+    val score与compact state、skipped0和错误日志，再读取validation selection；未通过门槛不得test。

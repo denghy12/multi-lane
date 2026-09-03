@@ -1283,3 +1283,7 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - 实现已提交为`2e352e0`并在服务器独立worktree ff-only同步；97项完整单测、真实EMOTIC同图分组
   划分、真实calibration score dump、真实ViT-B/16 Adapter-ASL AMP/TF32、compact state恢复和
   8-task顺序门控合成smoke全部通过。完整validation可安全启动。
+- 唯一batch`learned_reliability_gate_seed012_20260904_021636`已在tmux
+  `multilane_learned_gate_20260904_021636`启动，GPU0--5分别运行3 seeds×Full/Person。6份config
+  均为clean`65d3ca4`且协议审计通过；task0首轮均76 steps、skipped0，显存安全、无错误。launcher
+  将在validation结束后自动执行门控选择，只有通过三种子硬门槛才导出一次锁定test。
