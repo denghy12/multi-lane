@@ -597,3 +597,11 @@ VOC 对照实验，不应在现阶段合并到 `main`。
 38. 正式batch`..._20260902_185259`已一组一卡启动；8份clean config、首轮LR/loss/84 steps/
     skipped0和显存均核验通过。当前只等待完成，不重复启动；结束后严格核验240 epochs、13950 updates、
     全LR轨迹和错误日志，再打包同步JSON/日志且不含checkpoint。
+39. 8组已全部完成并同步。原cosine以`32.5365`保持第一；multistep虽把average提高`0.4074`，但
+    task6/7回落使final低`0.2196`。其余scheduler final低`0.2867--0.9827`，阶段B无冠军。
+40. 固定原30-epoch per-task cosine并关闭单视图scheduler路线。下一阶段开始full image + person crop
+    双视图低参数融合；第一轮必须含full冠军锚点、同协议person-only、固定logit融合、归一化feature
+    融合和全局标量gate，并保持所有task使用同一规则。
+41. `exp/emotic-person-only-layer1`已实现person-only第一步：bbox margin0.15、person训练crop
+    scale0.70--1.0，其他参数严格复现layer1冠军，正式test且不保存checkpoint。下一步经用户确认
+    commit/push后，在服务器新独立worktree运行完整单测和GPU smoke；通过后单卡启动seed0 8-task。

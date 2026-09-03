@@ -948,6 +948,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-tf32", action="store_true")
     parser.add_argument("--input-mode", choices=("full", "person_crop"), default="full")
     parser.add_argument(
+        "--person-crop-margin",
+        type=float,
+        default=0.0,
+        help=(
+            "Fraction of the annotated body-box width/height added on every "
+            "side before person cropping. Ignored for full-image input."
+        ),
+    )
+    parser.add_argument(
         "--input-normalization", choices=("none", "clip"), default="none"
     )
     parser.add_argument(
@@ -1025,6 +1034,8 @@ def main() -> None:
         raise ValueError(f"max-tasks must be between 1 and {len(TASK_SIZES)}")
     if args.loss_routing in {"adapter_asl", "both_asl"} and args.adapter_mode == "disabled":
         raise ValueError("Adapter ASL routing requires an enabled Adapter")
+    if not math.isfinite(args.person_crop_margin) or not 0 <= args.person_crop_margin <= 1:
+        raise ValueError("person-crop-margin must be finite and in [0, 1]")
     if args.adapter_bottleneck_dims_per_task is not None:
         if len(args.adapter_bottleneck_dims_per_task) != len(TASK_SIZES):
             raise ValueError(
@@ -1142,16 +1153,18 @@ def main() -> None:
     dataset_parent = resolve_dataset_parent(args.data_root)
     train_source = EMOTIC(
         str(dataset_parent), train=True, transform=train_transform,
-        input_mode=args.input_mode,
+        input_mode=args.input_mode, person_crop_margin=args.person_crop_margin,
     )
     val_source = EMOTIC(
         str(dataset_parent), train=False, transform=eval_transform,
         eval_splits=("val",), input_mode=args.input_mode,
+        person_crop_margin=args.person_crop_margin,
     )
     if args.reporting_split == "test":
         reporting_source = EMOTIC(
             str(dataset_parent), train=False, transform=eval_transform,
             eval_splits=("test",), input_mode=args.input_mode,
+            person_crop_margin=args.person_crop_margin,
         )
         validate_classes(train_source, val_source, reporting_source)
     else:
@@ -1250,6 +1263,7 @@ def main() -> None:
         "weight_decay": args.weight_decay,
         "temperature": args.temperature,
         "input_mode": args.input_mode,
+        "person_crop_margin": args.person_crop_margin,
         "input_normalization": args.input_normalization,
         "input_normalization_mean": (
             list(CLIP_IMAGE_MEAN) if args.input_normalization == "clip" else None

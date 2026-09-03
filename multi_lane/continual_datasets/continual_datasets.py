@@ -920,6 +920,7 @@ class EMOTIC(torch.utils.data.Dataset):
         download=False,
         eval_splits=('val', 'test'),
         input_mode='full',
+        person_crop_margin=0.0,
     ):
         self.root = os.path.expanduser(root)
         self.transform = transform
@@ -930,6 +931,9 @@ class EMOTIC(torch.utils.data.Dataset):
         if input_mode not in ('full', 'person_crop'):
             raise ValueError(f"Invalid EMOTIC input_mode '{input_mode}'. Expected 'full' or 'person_crop'.")
         self.input_mode = input_mode
+        self.person_crop_margin = float(person_crop_margin)
+        if not np.isfinite(self.person_crop_margin) or not 0.0 <= self.person_crop_margin <= 1.0:
+            raise ValueError('EMOTIC person_crop_margin must be finite and in [0, 1].')
 
         if self.download:
             raise RuntimeError('EMOTIC must be prepared manually under the data path.')
@@ -1008,6 +1012,16 @@ class EMOTIC(torch.utils.data.Dataset):
 
         width, height = img.size
         x1, y1, x2, y2 = bbox[:4]
+        box_width = float(x2 - x1)
+        box_height = float(y2 - y1)
+        if box_width <= 0.0 or box_height <= 0.0:
+            return img
+        margin_x = box_width * self.person_crop_margin
+        margin_y = box_height * self.person_crop_margin
+        x1 -= margin_x
+        y1 -= margin_y
+        x2 += margin_x
+        y2 += margin_y
         x1 = max(0.0, min(float(width), float(x1)))
         y1 = max(0.0, min(float(height), float(y1)))
         x2 = max(0.0, min(float(width), float(x2)))

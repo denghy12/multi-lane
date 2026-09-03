@@ -2531,3 +2531,33 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - 非warmup六组task0 cycle1完全复现锚点loss`0.61478711`、Adapter loss`0.02839343`、LR0.0125；
   warmup5%/10%首轮LR分别为0.00625/0.00416667，loss相应为0.62027323/0.62566431。八组均84
   steps、skipped0；每卡约2.0GB，日志无OOM/non-finite/RuntimeError/Traceback，当前继续运行。
+
+## 2026-09-03：同步并分析统一scheduler搜索
+
+- tmux和runner均结束；batch status complete、8份seed summary和8个exit code齐全，exit code全0。
+  严格汇总核验clean共同`7337f96`、每组240 epochs/13950 updates/skipped0、逐task逐epoch主模型/
+  Adapter current/next LR轨迹和no-checkpoint；日志无OOM/non-finite/Traceback/RuntimeError。
+- 历史cosine锚点精确复现final/average mAP`32.5365/39.1445`并保持第一。multistep第二为
+  `32.3170/39.5518`，final低`0.2196`但average高`0.4074`；linear第三final`32.2498`。
+- multistep相对anchor在task0--5提高`1.0186/0.8246/0.5947/0.4725/0.3237/0.3190`，task6/7
+  转为`-0.0747/-0.2196`。同一epoch18/26里程碑让大task获得大量高LR steps，而task6只获得约
+  180次高LR更新，解释其后期回落；final Suffering AP低`9.245`是主要类别交换之一。
+- cosine warmup5%/10%、min10%/1%、constant分别低anchor
+  `0.5607/0.9827/0.5662/0.6372/0.8466`。constant训练loss更低但test更差，尾部高LR造成过拟合；
+  warmup压低zero-init Adapter早期更新且剩余30-epoch预算不能补偿。
+- 原cosine继续作为冠军scheduler。按预声明规则停止单视图scheduler搜索，下一阶段转full image +
+  person crop双视图融合，不再继续微调min LR、warmup或multistep。
+- JSON、严格汇总、manifest、launcher status和日志已同步本地；小包两端SHA-256均为
+  `d9d78f47ebfe5a74d1866a1d8e795043da070fb55a3940b16637803ea88e90c9`，无checkpoint。
+
+## 2026-09-03：实现layer1冠军的person-only正式对照
+
+- 从`d7e9434`创建`exp/emotic-person-only-layer1`，保留此前尚未提交的scheduler结果文档。
+- EMOTIC person crop新增可配置bbox margin，按bbox宽高分别向四边扩展并裁到图像边界；默认0保证
+  历史命令不变。本轮固定margin0.15，避免紧框丢失少量邻近上下文。
+- runner新增`--person-crop-margin`合法性检查、数据集透传和config记录；新增3项单测覆盖零margin、
+  扩展后边界裁切和无效bbox回退。
+- 新增`run_multilane_track_a_person_only_formal.sh`：除输入为person crop、margin0.15、训练crop
+  scale0.70--1.0外，严格固定当前32.5365冠军训练协议；seed0完整8-task held-out test，关闭checkpoint。
+- 本地`git diff --check`、shell语法和Python静态编译通过；macOS系统Python缺少Pillow，完整单测需在
+  服务器ddp环境运行。当前尚未提交/推送，也未启动远端实验。

@@ -1090,3 +1090,18 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - 8份config均记录clean`7337f96`、30 epochs、冠军固定协议和正确scheduler字段。非warmup六组
   task0 cycle1的loss/Adapter loss均为`0.61478711/0.02839343`且LR0.0125；warmup5%/10%首轮
   LR为`0.00625/0.00416667`。八组均84 steps、skipped0，每卡约2GB，无错误，继续运行。
+- 8组随后全部完成并通过严格LR轨迹汇总：每组240 epochs、13950 updates、skipped0、exit code0，
+  无错误或checkpoint。历史cosine以final mAP`32.5365`保持第一；multistep第二为`32.3170`，虽使
+  average mAP提高`0.4074`，但final低`0.2196`。
+- multistep在task0--5均提高`0.3190--1.0186`，到task6/7转为`-0.0747/-0.2196`；epoch18/26
+  的强衰减对每epoch只有10/24 batches的小任务过早。constant/min-LR使尾部更新过强并过拟合，warmup
+  减少早期有效更新，均明显退化。固定原cosine，按预声明规则结束单视图scheduler搜索并转双视图。
+- 小结果包SHA-256为`d9d78f47ebfe5a74d1866a1d8e795043da070fb55a3940b16637803ea88e90c9`，
+  不含checkpoint。详细分析见
+  `output/emotic_track_a_image_token_scheduler_search_formal/20260902_185259/analysis.md`。
+- 2026-09-03按用户确认进入person-only阶段，在新分支`exp/emotic-person-only-layer1`实现
+  `--person-crop-margin`并将其传入train/val/test EMOTIC数据集及写入config；默认0保持旧实验兼容，
+  本轮计划使用0.15。新增person-only正式脚本，固定当前冠军zero-based layer1/b32/Adapter LR4e-4、
+  scale0.1/ReLU/independent、main BCE + Adapter ASL 9.8/0/0.05、main LR0.0125、30 epochs/task、
+  per-task cosine eta_min0/no warmup、AMP/TF32、seed0、test reporting、无checkpoint，只改变为
+  person crop并采用bbox margin0.15与人体训练crop scale0.70--1.0。代码尚未提交，远端实验尚未启动。
