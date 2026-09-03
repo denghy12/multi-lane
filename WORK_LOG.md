@@ -2560,4 +2560,16 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - 新增`run_multilane_track_a_person_only_formal.sh`：除输入为person crop、margin0.15、训练crop
   scale0.70--1.0外，严格固定当前32.5365冠军训练协议；seed0完整8-task held-out test，关闭checkpoint。
 - 本地`git diff --check`、shell语法和Python静态编译通过；macOS系统Python缺少Pillow，完整单测需在
-  服务器ddp环境运行。当前尚未提交/推送，也未启动远端实验。
+  服务器ddp环境运行。
+- 用户确认后提交并推送`d0f8e81`。Automatic Upload同时写入服务器主工作树7个本次文件；逐文件
+  SHA-256与本地一致后备份到`/mnt/haoyuan/workspace/git-sync-backup-person-only-IZ5eEXJ0`并恢复
+  主工作树clean，没有触碰test-only工作树。
+- 新建服务器独立worktree`/mnt/haoyuan/workspace/multi-lane-main-person-only`，HEAD为clean
+  `d0f8e81`。服务器ddp环境完整63项单测全部通过；真实数据检查得到train/val/test人物样本数
+  `16001/2397/5368`、输入`3x224x224`且有限。
+- GPU0真实CLIP Image-token layer1/b32、Adapter-ASL、AMP/TF32 smoke通过：trainable739130，
+  max initial difference `6.1035e-05`，冻结视觉塔、梯度路由和concat推理正常。
+- 正式run`person_only_layer1_b32_asl_formal_seed0_20260903_121738`在tmux
+  `multilane_person_only_s0_20260903_121738`的GPU0启动。输出位于
+  `/mnt/haoyuan/workspace/emotic_benchmark_runs/multi_lane_person_only_formal_v0.1/`；config记录clean
+  `d0f8e81`及全部预声明参数。前4个epoch每轮84 steps、skipped0，GPU约2.4GB，无异常，继续运行。

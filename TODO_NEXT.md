@@ -603,5 +603,8 @@ VOC 对照实验，不应在现阶段合并到 `main`。
     双视图低参数融合；第一轮必须含full冠军锚点、同协议person-only、固定logit融合、归一化feature
     融合和全局标量gate，并保持所有task使用同一规则。
 41. `exp/emotic-person-only-layer1`已实现person-only第一步：bbox margin0.15、person训练crop
-    scale0.70--1.0，其他参数严格复现layer1冠军，正式test且不保存checkpoint。下一步经用户确认
-    commit/push后，在服务器新独立worktree运行完整单测和GPU smoke；通过后单卡启动seed0 8-task。
+    scale0.70--1.0，其他参数严格复现layer1冠军，正式test且不保存checkpoint。`d0f8e81`已推送，
+    服务器63项单测、真实数据检查和GPU smoke均通过；run`..._20260903_121738`已在GPU0稳定启动。
+42. 等待person-only完成后同步config/task_metrics/training_history/seed_summary和日志，不同步checkpoint；
+    对比full冠军的完整8-task、逐类AP及错误互补性。只有person分支与full确有互补，才实现validation
+    score dump和全局标量logit/probability融合，不直接从person-only单项高低推断融合是否有效。

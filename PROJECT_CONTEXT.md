@@ -1104,4 +1104,8 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   本轮计划使用0.15。新增person-only正式脚本，固定当前冠军zero-based layer1/b32/Adapter LR4e-4、
   scale0.1/ReLU/independent、main BCE + Adapter ASL 9.8/0/0.05、main LR0.0125、30 epochs/task、
   per-task cosine eta_min0/no warmup、AMP/TF32、seed0、test reporting、无checkpoint，只改变为
-  person crop并采用bbox margin0.15与人体训练crop scale0.70--1.0。代码尚未提交，远端实验尚未启动。
+  person crop并采用bbox margin0.15与人体训练crop scale0.70--1.0。实现提交`d0f8e81`已推送；
+  服务器独立worktree`/mnt/haoyuan/workspace/multi-lane-main-person-only`已通过63项单测、真实
+  EMOTIC数据构建和GPU0真实CLIP Adapter-ASL smoke。正式run
+  `person_only_layer1_b32_asl_formal_seed0_20260903_121738`已在GPU0启动，clean commit、config和
+  前4个epoch的84 steps/skipped0均核验通过，当前继续运行。
