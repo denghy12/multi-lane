@@ -1,10 +1,14 @@
 # 项目上下文
 
-最后一次更新：2026-09-03；当前本地分支为`exp/emotic-dual-view-formal-test`。
+最后一次更新：2026-09-03；当前本地分支为`exp/emotic-dual-view-seed12`。
 服务器独立正式工作树使用clean实现提交`c9fa74c`。validation预先锁定的full0.80/person0.20
 probability融合已完成seed0完整8-task正式test：final mAP`33.2672`，超过同批单视图冠军
 `32.5365`共`0.7307`，8个task的mAP/cF1/oF1均提高。结果已同步本地并逐组核对哈希；
-未在test搜索融合参数，当前没有新训练。下一步优先锁定配置做seed1/2确认，而非继续test调参。
+未在test搜索融合参数。用户现已要求保持全部参数不变，补seed1/2正式配对确认。
+已审计服务器171份config：旧full seed1/2只有指标、没有scores/checkpoint，person seed1/2不存在；
+因此需补四个训练进程：seed1 full/person用GPU0/1，seed2 full/person用GPU2/3。
+本分支仅增加seed参数化、四卡调度和三种子严格配对汇总，不改变模型、数据或优化算法。
+提交同步后先全量单测及Adapter GPU smoke，再启动；固定probability full0.80/person0.20/threshold0.5。
 test-only工作树保持原样，未被本轮同步、分析或实验修改。以下旧实验条目作为历史记录保留。
 
 ## 项目目标

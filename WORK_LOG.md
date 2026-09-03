@@ -2,6 +2,25 @@
 
 最后一次更新：2026-09-03。
 
+## 2026-09-03：实现锁定双视图seed1/2配对确认
+
+- 用户要求固定全部参数补另外两个正式test，并解释结构与后续改进方向。从`39a30df`创建
+  `exp/emotic-dual-view-seed12`；未修改模型、训练数据处理或loss算法。
+- 核查服务器171份config及旧full seed1/2产物：其已完成但没有test scores或checkpoint，person
+  seed1/2没有历史结果。不能由summary/mAP恢复逐样本概率，需要四个训练进程来产生两个融合seed。
+- 正式脚本新增SEED=0/1/2，默认seed0行为保持不变；四卡launcher并行seed1 full/person和seed2
+  full/person，完成后固定0.80/0.20 probability融合并自动与现有seed0汇总，不进行任何test搜索。
+- 固定EMOTIC、8 tasks×30 epochs、batch64/workers2、Adam_reset_per_task/main LR0.0125/WD0、
+  per-task cosine/minLR0/no warmup、CLIP ViT-B/16、Image-token layer1/b32/LR4e-4/scale0.1/
+  ReLU/independent、main BCE+Adapter ASL9.8/0/0.05、legacy_full_zero、CLIP normalization、
+  AMP/TF32 on、无checkpoint。full维持crop0.05；person维持margin0.15/letterbox/轻量jitter。
+- 数据和权重沿用既有服务器路径；新结果放benchmark_runs的multi_lane_dual_view_seed_confirmation_v0.1，
+  日志与控制汇总分别写独立工作树logs/output下emotic_track_a_dual_view_seed_confirmation。
+- 新增三种子汇总器：强制相同锁定规则/validation SHA、完整训练预算、skipped0及除seed/Git外
+  配置一致；报告mean±sample std(ddof1)和同seed fusion-full差值，非显著性检验。
+- 新增三项单测覆盖统计值、重复seed拒绝、融合规则漂移拒绝；本地静态编译、shell语法及diff检查通过。
+  提交推送后在独立服务器worktree运行完整单测和Adapter GPU smoke，通过后才启动正式训练。
+
 ## 2026-09-03：恢复任务并同步锁定双视图正式test
 
 - 确认之前安全等待器已自动完成，tmux已退出，无需启动或补跑。两组同一clean`c9fa74c`，各240

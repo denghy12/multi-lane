@@ -2,16 +2,22 @@
 
 最后一次更新：2026-09-03。
 
-## 当前最高优先级：锁定双视图新seed0最佳，准备多种子确认
+## 当前最高优先级：执行锁定双视图seed1/2正式确认
 
 1. 锁定probability融合full0.80/person0.20已完成正式test：final mAP`33.2672`，超过同批full
    `32.5365`共`0.7307`。8个task mAP/F1均提高，当前不需要重跑seed0。
 2. 结果、test scores、日志与固定融合摘要已同步本地，完整性和哈希核验通过；详见
    `output/emotic_track_a_dual_view_formal_test/20260903_145816/analysis.md`。
-3. 后续优先固定现有结构、训练与融合规则补seed1/2配对确认，不再使用test调alpha/mode/threshold。
-   先查是否有可复用逐样本scores或checkpoint；单独summary/mAP不能用于融合。尚未启动新训练。
+3. 用户已要求固定现有结构、训练与融合规则补seed1/2配对确认，不再使用test调alpha/mode/threshold。
+   已核查171份config：旧full seed1/2没有逐样本scores/checkpoint，不能复用融合；person尚无结果。
+   新分支`exp/emotic-dual-view-seed12`参数化seed并编排GPU0/1的seed1 full/person及GPU2/3的seed2。
+   下一步提交推送、独立worktree运行完整单测及GPU smoke，通过后启动四个训练进程。
 4. 论文结论区分seed0最佳与三种子均值，计入双模型双视图计算成本。若做方法归因，考虑后续等计算量
    full+full集成对照，不能把双视图收益全部归因于Adapter或letterbox。
+5. 自动汇总复用完整seed0，核验六个run全部240 epochs/13950 updates/skipped0、clean Git、每个
+   视图除seed/Git外配置一致；报告full/person/fusion的三种子mean±sample std和配对增益。
+6. 待确认稳定性后，下一阶段优先在validation做等计算量full+full对照和人物框质量诊断；再考虑
+   低参数可靠性融合或蒸馏降低双模型成本。以上未启动，不继续盲目增大Adapter或在test调参。
 
 ## 历史记录：阶段二ASL局部8组正式test（已完成）
 

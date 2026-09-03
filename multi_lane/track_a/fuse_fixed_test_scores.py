@@ -168,6 +168,7 @@ def fuse_fixed_test_runs(
     full_final = float(full_metrics["final_mAP"])
     return {
         "schema_version": 1,
+        "seed": full_summary["config"]["seed"],
         "comparison": "locked_full_person_letterbox_formal_test_fusion",
         "evaluation_split": "test",
         "search_performed_on_test": False,
@@ -199,6 +200,7 @@ def fuse_fixed_test_runs(
             "task_metrics": [asdict(row) for row in fusion_rows],
         },
         "reference_champion_final_mAP": REFERENCE_CHAMPION_FINAL_MAP,
+        "reference_champion_seed": 0,
         "decision": {
             "beats_same_run_full_anchor": fusion_final > full_final,
             "gain_over_same_run_full_anchor": fusion_final - full_final,

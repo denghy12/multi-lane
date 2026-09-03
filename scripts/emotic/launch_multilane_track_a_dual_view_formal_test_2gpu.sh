@@ -5,6 +5,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${ROOT}"
 
 GPUS_TEXT="${GPUS:-0 1}"
+SEED="${SEED:-0}"
+[[ "${SEED}" =~ ^[012]$ ]] || { echo "SEED must be 0, 1, or 2" >&2; exit 2; }
 read -r -a GPU_LIST <<< "${GPUS_TEXT}"
 GPU_MIN_FREE_MIB="${GPU_MIN_FREE_MIB:-18000}"
 GPU_READY_CHECKS="${GPU_READY_CHECKS:-2}"
@@ -46,7 +48,7 @@ if not summary.get("decision", {}).get("advance_to_formal_test"):
 print("LOCKED_VALIDATION_SELECTION_OK mode=probability full=0.80 person=0.20")
 PY
 
-BATCH_ID="${BATCH_ID:-image_token_layer1_full_person_letterbox_formal_test_seed0_$(date +%Y%m%d_%H%M%S)}"
+BATCH_ID="${BATCH_ID:-image_token_layer1_full_person_letterbox_formal_test_seed${SEED}_$(date +%Y%m%d_%H%M%S)}"
 OUTPUT_BASE="${OUTPUT_BASE:-/mnt/haoyuan/workspace/emotic_benchmark_runs/multi_lane_dual_view_formal_v0.1/${BATCH_ID}}"
 LOG_DIR="${LOG_DIR:-${ROOT}/logs/emotic_track_a_dual_view_formal_test}"
 CONTROL_DIR="${ROOT}/output/emotic_track_a_dual_view_formal_test/${BATCH_ID}"
@@ -83,7 +85,7 @@ run_view() {
   local view="$1"
   local gpu="$2"
   local run_id="$3"
-  if GPU="${gpu}" RUN_ID="${run_id}" OUTPUT_BASE="${OUTPUT_BASE}" VIEW="${view}" \
+  if SEED="${SEED}" GPU="${gpu}" RUN_ID="${run_id}" OUTPUT_BASE="${OUTPUT_BASE}" VIEW="${view}" \
     PYTHON="${PYTHON}" DATA_ROOT="${DATA_ROOT}" CLIP_CHECKPOINT="${CLIP_CHECKPOINT}" \
     LOG_DIR="${LOG_DIR}" bash scripts/emotic/run_multilane_track_a_dual_view_formal_test.sh; then
     printf '0\n' > "${STATUS_DIR}/${view}.exit_code"

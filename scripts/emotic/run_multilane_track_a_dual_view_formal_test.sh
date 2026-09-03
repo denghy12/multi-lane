@@ -5,6 +5,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${ROOT}"
 
 GPU="${GPU:?GPU is required}"
+SEED="${SEED:-0}"
+[[ "${SEED}" =~ ^[012]$ ]] || { echo "SEED must be 0, 1, or 2" >&2; exit 2; }
 RUN_ID="${RUN_ID:?RUN_ID is required}"
 OUTPUT_BASE="${OUTPUT_BASE:?OUTPUT_BASE is required}"
 VIEW="${VIEW:?VIEW must be full or person}"
@@ -44,9 +46,9 @@ esac
 [[ -z "$(git status --porcelain)" ]] || { echo "Formal test requires a clean Git worktree" >&2; exit 2; }
 mkdir -p "${LOG_DIR}" "${OUTPUT_BASE}"
 
-echo "Locked dual-view formal test: run_id=${RUN_ID} view=${VIEW} seed=0 gpu=${GPU} dataset=EMOTIC input=${input_mode} bbox_margin=${person_margin} person_transform=${person_transform} person_jitter=${person_jitter_strength}@${person_jitter_probability} train_crop_scale=${crop_min},1.0 normalization=clip tasks=8 epochs=30 batch=64 scheduler=cosine eta_min=0 warmup=0 layer=1 bottleneck=32 main_lr=0.0125 adapter_lr=0.0004 adapter_weight_decay=0 scale=0.1 activation=relu init=independent main_loss=bce adapter_loss=asl9.8/0/0.05 amp=on tf32=on reporting=test score_purpose=fixed_test_fusion checkpoints=disabled"
+echo "Locked dual-view formal test: run_id=${RUN_ID} view=${VIEW} seed=${SEED} gpu=${GPU} dataset=EMOTIC input=${input_mode} bbox_margin=${person_margin} person_transform=${person_transform} person_jitter=${person_jitter_strength}@${person_jitter_probability} train_crop_scale=${crop_min},1.0 normalization=clip tasks=8 epochs=30 batch=64 scheduler=cosine eta_min=0 warmup=0 layer=1 bottleneck=32 main_lr=0.0125 adapter_lr=0.0004 adapter_weight_decay=0 scale=0.1 activation=relu init=independent main_loss=bce adapter_loss=asl9.8/0/0.05 amp=on tf32=on reporting=test score_purpose=fixed_test_fusion checkpoints=disabled"
 CUDA_VISIBLE_DEVICES="${GPU}" "${PYTHON}" -m multi_lane.track_a.runner \
-  --seed 0 \
+  --seed "${SEED}" \
   --data-root "${DATA_ROOT}" \
   --clip-checkpoint "${CLIP_CHECKPOINT}" \
   --output-root "${RUN_ROOT}" \
