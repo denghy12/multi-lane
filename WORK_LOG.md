@@ -2627,6 +2627,18 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
   `multilane_dual_view_val_20260903_134720`启动。GPU0跑full anchor、GPU1跑person letterbox；两份
   clean config逐字段核验通过。task0第1轮均84 steps/skipped0，每卡显存约2.4GB/2.0GB，错误扫描为空。
   launcher将在两组完整8-task validation结束后自动执行alpha步长0.05的logit/probability融合。
+- batch现已完整结束：两组exit0、各240 epochs/13,950 updates/skipped0、8个task和8份score dump齐全，
+  日志错误扫描为空且没有checkpoint。自动融合成功，probability alpha0.20以final mAP`43.3035`
+  超过full anchor `42.3799`共`0.9236`；average mAP提高`1.1631`，cF1/oF1提高`0.0599/0.2464`。
+- person独立final mAP仅`38.3044`，但小权重融合使8个task全部提高、最终21/26类提高；Sadness与
+  Suffering提高`3.3176/2.9992`，Sensitivity下降`1.0548`。probability alpha0.15--0.35均超过full，
+  表明互补收益有稳定区间。
+- 33个JSON/NPZ/状态/日志文件已同步到
+  `output/emotic_track_a_dual_view_val/20260903_134720/`，共约2.65MB。runs/control/logs聚合SHA-256
+  与服务器逐组一致，详细分析见该目录`analysis.md`。1.6MB小结果包
+  `output/emotic_track_a_dual_view_val/dual_view_val_seed0_20260903_134720_small_results.tar.gz`
+  不含checkpoint，SHA-256为`c988359a9b572c0799f3b1953beadfc7ccfabafae085d126dab19561748c2d0c`。
+  下一步只做锁定alpha0.20的正式test，不在test调参。
 
 ## 2026-09-03：启动Image-token layer1冠军seed1/2确认
 

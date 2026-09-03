@@ -1143,6 +1143,14 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   启动；两份config均为clean`6ab53c8`、seed0完整8-task val-only、score dump开启、checkpoint关闭。
   full与person的task0首轮均84 steps/skipped0，显存及数值状态正常；两run成功结束后launcher自动
   搜索logit/probability全局alpha并生成`fusion_summary.json`。
+- 双视图validation已完成并同步。full/person均240 epochs、13,950 updates、skipped0，8份score dump
+  的ID/targets逐task完全对齐。full与person final mAP为`42.3799/38.3044`；最佳为probability
+  fusion alpha0.20，final/average mAP为`43.3035/50.4283`，相对full提高`0.9236/1.1631`。
+- 融合在task0--7均提高mAP，最终26类有21类提高；Sadness/Suffering分别提高`3.3176/2.9992`，
+  Sensitivity下降`1.0548`。alpha0.15--0.35均超过full，结果不是单点尖峰。下一步应锁定alpha0.20
+  做一次seed0 held-out test，不在test上重新搜索融合权重。
+- 本地完整小结果位于`output/emotic_track_a_dual_view_val/20260903_134720/`，另有不含checkpoint的
+  1.6MB压缩包；其SHA-256为`c988359a9b572c0799f3b1953beadfc7ccfabafae085d126dab19561748c2d0c`。
 
 ## 2026-09-03 Image-token layer1冠军的seed1/2确认
 
