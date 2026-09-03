@@ -11,11 +11,14 @@
 3. 用户已要求固定现有结构、训练与融合规则补seed1/2配对确认，不再使用test调alpha/mode/threshold。
    已核查171份config：旧full seed1/2没有逐样本scores/checkpoint，不能复用融合；person尚无结果。
    新分支`exp/emotic-dual-view-seed12`参数化seed并编排GPU0/1的seed1 full/person及GPU2/3的seed2。
-   下一步提交推送、独立worktree运行完整单测及GPU smoke，通过后启动四个训练进程。
+   实现`d2442ee`已推送并建立独立clean工作树；75项完整单测和GPU smoke通过，四个训练进程
+   已在batch`dual_view_locked_formal_seed12_20260903_174938`启动，config除seed/Git外与seed0完全一致。
 4. 论文结论区分seed0最佳与三种子均值，计入双模型双视图计算成本。若做方法归因，考虑后续等计算量
    full+full集成对照，不能把双视图收益全部归因于Adapter或letterbox。
 5. 自动汇总复用完整seed0，核验六个run全部240 epochs/13950 updates/skipped0、clean Git、每个
    视图除seed/Git外配置一致；报告full/person/fusion的三种子mean±sample std和配对增益。
+   完成后同步该batch的四份run目录JSON/test_scores、logs和control/formal_seed_summary.json；
+   不下载checkpoint（本轮不生成）。若不完整先排查退出码，不自动改参数或扩展实验。
 6. 待确认稳定性后，下一阶段优先在validation做等计算量full+full对照和人物框质量诊断；再考虑
    低参数可靠性融合或蒸馏降低双模型成本。以上未启动，不继续盲目增大Adapter或在test调参。
 

@@ -8,7 +8,13 @@ probability融合已完成seed0完整8-task正式test：final mAP`33.2672`，超
 已审计服务器171份config：旧full seed1/2只有指标、没有scores/checkpoint，person seed1/2不存在；
 因此需补四个训练进程：seed1 full/person用GPU0/1，seed2 full/person用GPU2/3。
 本分支仅增加seed参数化、四卡调度和三种子严格配对汇总，不改变模型、数据或优化算法。
-提交同步后先全量单测及Adapter GPU smoke，再启动；固定probability full0.80/person0.20/threshold0.5。
+实现`d2442ee`已提交推送；服务器独立`multi-lane-main-dual-view-seed12`工作树clean，完整75项
+单测、Adapter GPU smoke、原seed0训练预算审计均通过。batch
+`dual_view_locked_formal_seed12_20260903_174938`已在GPU0--3并行启动；四份config逐字段核对，
+与对应seed0除seed/Git外完全一致。固定probability full0.80/person0.20/threshold0.5。
+每组完成后自动生成固定融合摘要，全部完成后汇总seed0/1/2的mean±sample std和同seed配对增益。
+本地后续仅提交运行记录，不更新正在训练的服务器工作树。Automatic Upload副本已逐文件哈希校验、
+备份到`/mnt/haoyuan/workspace/git-sync-backup-dual-view-seed12-DbO8J9xs`并恢复primary clean。
 test-only工作树保持原样，未被本轮同步、分析或实验修改。以下旧实验条目作为历史记录保留。
 
 ## 项目目标

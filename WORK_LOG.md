@@ -20,6 +20,22 @@
   配置一致；报告mean±sample std(ddof1)和同seed fusion-full差值，非显著性检验。
 - 新增三项单测覆盖统计值、重复seed拒绝、融合规则漂移拒绝；本地静态编译、shell语法及diff检查通过。
   提交推送后在独立服务器worktree运行完整单测和Adapter GPU smoke，通过后才启动正式训练。
+- 实现`d2442ee`已推送，服务器建立clean独立worktree
+  `/mnt/haoyuan/workspace/multi-lane-main-dual-view-seed12`。Automatic Upload的9个完全一致副本
+  已逐文件校验SHA并备份到`/mnt/haoyuan/workspace/git-sync-backup-dual-view-seed12-DbO8J9xs`，
+  恢复primary clean；test-only及其他工作树未改动。
+- ddp环境75项完整单测通过；GPU0真实ViT-B/16 smoke通过，Image-token layer1/b32、independent、
+  fixed scale0.1、Adapter-ASL、AMP/TF32配置下trainable739130、零初始化logits最大差6.1035e-05。
+  新汇总器对真实seed0的训练完整性/配置检查通过，并正确拒绝重复seed。模型/runner/Adapter/
+  dataset源码与seed0的`c9fa74c`没有差异。
+- batch`dual_view_locked_formal_seed12_20260903_174938`及tmux
+  `multilane_dual_view_seed12_20260903_174938`已启动，安全空闲检查连续两次通过；GPU0/1为seed1
+  full/person，GPU2/3为seed2 full/person。四份config均clean`d2442ee`，与对应seed0逐字段对比
+  除seed/Git外无变化；四组已开始task0，单进程初始显存约2GB。
+- 启动后task0前几轮均84 steps/skipped0，无OOM或数值错误；GPU0--3分别仍余约21.6/22.1/22.1/
+  22.1GB显存。运行记录只提交本地文档，不更新活动服务器工作树，避免改变运行期源码快照。
+- 完成后每seed自动固定融合，复用原seed0产生三种子formal_seed_summary.json；目前未获得seed1/2
+  新结果，不提前宣称跨seed稳定收益。本次只启动确认实验，没有启动full+full对照、权重搜索或蒸馏。
 
 ## 2026-09-03：恢复任务并同步锁定双视图正式test
 
