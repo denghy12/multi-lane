@@ -15,8 +15,9 @@ import torch
 from .fuse_validation_scores import (
     COMMON_CONFIG_FIELDS,
     fused_scores,
-    load_aligned_task_scores,
+    validated_run_scores,
 )
+from .evaluation_scores import align_evaluation_scores
 from .runner import TASK_SIZES, TaskMetrics, compute_metrics, summarize_tasks
 
 
@@ -117,8 +118,8 @@ def _compute_rows(
     alpha: float,
 ) -> List[TaskMetrics]:
     rows: List[TaskMetrics] = []
-    for task_id, (_, full_logits, person_logits, targets) in enumerate(task_arrays):
-        scores = fused_scores(full_logits, person_logits, alpha, mode)
+    for task_id, (_, full_logits, person_logits, targets, full_probs, person_probs) in enumerate(task_arrays):
+        scores = fused_scores(full_logits, person_logits, alpha, mode, full_probs, person_probs)
         rows.append(
             compute_metrics(
                 task_id,
@@ -140,13 +141,9 @@ def fuse_fixed_test_runs(
         validation_fusion_summary, expected_validation_sha256
     )
     full_summary, person_summary = _validate_test_runs(full_run, person_run)
-    task_arrays = [
-        load_aligned_task_scores(
-            full_run / "test_scores" / f"task{task_id}.npz",
-            person_run / "test_scores" / f"task{task_id}.npz",
-        )
-        for task_id in range(len(TASK_SIZES))
-    ]
+    full_dumps, _ = validated_run_scores(full_run, 'test')
+    person_dumps, _ = validated_run_scores(person_run, 'test')
+    task_arrays = [align_evaluation_scores(a, b) for a, b in zip(full_dumps, person_dumps)]
 
     full_rows = _compute_rows(task_arrays, "logit", 0.0)
     person_rows = _compute_rows(task_arrays, "logit", 1.0)
@@ -172,6 +169,10 @@ def fuse_fixed_test_runs(
         "comparison": "locked_full_person_letterbox_formal_test_fusion",
         "evaluation_split": "test",
         "search_performed_on_test": False,
+        "probability_source": {
+            "full": [dump.probability_source for dump in full_dumps],
+            "person": [dump.probability_source for dump in person_dumps],
+        },
         "locked_rule": {
             "mode": LOCKED_MODE,
             "full_weight": 1.0 - LOCKED_PERSON_ALPHA,

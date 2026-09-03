@@ -2,6 +2,57 @@
 
 最后一次更新：2026-09-03。
 
+## 2026-09-03：开发统计一致性修复与等计算量validation对照
+
+- 用户要求执行前两步骤。创建`exp/emotic-fusion-numerics-ensemble-control`，保留上轮三份未提交
+  结果文档改动。模型、Adapter、数据增强、loss与训练预算不变。
+- score schema2保存实际用于指标计算的CPU float32 probabilities、实际batch长度、操作与torch版本；
+  schema1兼容按原eval_batch_size重建。概率必须在各自原样本顺序重建后再按sample ID对齐。
+- fixed test与validation分析器统一使用已保存/重建概率，逐字段和全部类别AP以1e-10绝对误差校验；
+  不把原数值错误改成宽容差。新增形状相关一ULP模拟回归、schema2不重算sigmoid、batch尾部保存/
+  ID对齐/非法元数据测试；后续服务器还将使用本次实际出错scores做数值回归。
+- 固定对照模块仅接受完整clean seed0/1/2 validation来源，检查240 epochs/13950 updates/skipped0、
+  每视图除seed/Git外配置一致；拒绝test、配置漂移、重复seed与损坏指标。
+- 两模型预算一致，权重固定0.8/0.2：主seed0/1/2对应辅助seed1/2/0，比较full+full与full+person，
+  另外报告同seed full+person；循环复用模型，只报告描述性均值/std，不伪装独立重复显著性检验。
+- 四卡launcher复用已有seed0 full/person validation；GPU0/1为seed1两视图、GPU2/3为seed2两视图。
+  固定30 epochs/task、batch64/workers2、Adam_reset_per_task、main LR0.0125/WD0、cosine/min0/
+  no warmup、layer1/b32/Adapter LR4e-4/WD0/scale0.1/ReLU/independent、BCE+ASL9.8/0/0.05、
+  legacy_full_zero、CLIP normalization、AMP/TF32、无checkpoint；full crop0.05，person margin0.15/
+  letterbox/jitter0.10@0.20。数据与ViT-B/16权重沿用原路径，结果与日志在独立worktree的output/logs。
+- 本地静态编译、shell语法与diff检查通过；准备提交并通过Git创建独立工作树，先全量单测及smoke，
+  再启动四组完整8-task validation。不会新开正式test或改变融合权重。
+
+## 2026-09-03：同步双视图三种子并恢复离线融合分析
+
+- 四组seed1/2 full/person训练均exit0、240 epochs/13950 updates/skipped0，8份scores/run齐全、
+  无checkpoint或训练错误。六组（含seed0）每视图除seed/Git外配置一致、clean来源审计通过。
+- 原自动融合失败、seed1/2与总launcher exit1：全表CPU sigmoid与runner原batch64路径产生极少数
+  float32差异，改变AP并列排序。seed1 full task5有1个概率差7.45e-09、mAP差0.00439245；
+  seed2 full task6 mAP差-0.00057095。不是训练失败、样本错位或权重参数漂移。
+- 在独立analysis_recovery产物中按原batch64严格重建anchor，六组48个task所有指标/逐类AP与原记录
+  在1e-12以内一致；融合仍用原全表`fused_scores`，alpha/mode/threshold不变，未放宽容差。
+  seed0融合与既有JSON完全相同，batch化/全表的融合mAP在全部24个task也一致。原退出码保留为1。
+- 融合seed0/1/2 final mAP为33.2672295/32.7327739/32.4787647，均值32.8262560±0.4024591；
+  full均值32.1561593±0.3700888，配对增益0.7307103/0.5980922/0.6814878，均值0.6700968±0.0670388。
+- 24个seed×task mAP增益全正；average mAP/cF1/oF1平均提高0.7936236/0.2051686/0.2425607，
+  forgetting平均恶化0.0519295，seed1 cF1下降0.1019812。不能宣称所有指标或结果方差都改善。
+- task6 Sadness/Sensitivity/Suffering AP平均变化+1.691491/-0.033294/+3.596102；最终task7为
+  +1.894352/-0.035151/+3.498238。最终改善类别数21/19/18，按类别三种子均值为19/26。
+- 新full seed1/2训练历史除耗时外与上一轮完全一致，final指标一致；average mAP仅有数值路径引起的
+  -0.000551692/+0.000030786差异，未改变训练轨迹。
+- 70个原始/恢复文件同步到`output/emotic_track_a_dual_view_seed_confirmation/20260903_174938/`；
+  runs/logs/recovery及3组control的相对路径SHA清单摘要均与服务器相同，数值见该目录analysis.md。
+  结果包含32份新增test scores，原seed0数据复用已有本地目录，不含checkpoint。
+- 约6.4MB压缩包`dual_view_seed12_results_and_seed012_summary_20260903_174938.tar.gz`已生成于上述
+  output父目录，含完整分析和恢复审计；SHA-256为
+  `d2c3a236c6853b16ff289006fdbced6569826913d33a0053fa4d7d308aced822`。
+- 三份上下文文档本地未提交；Automatic Upload写入primary的同内容文档按SHA校验后保存在
+  `/mnt/haoyuan/workspace/git-sync-backup-dual-view-seed12-DbO8J9xs/results-analysis-records`，
+  primary从自身HEAD恢复clean，训练工作树和test-only保持原样。
+- 本轮只更新三份上下文文档与输出分析产物，未修改受控业务源码、未启动新实验。下一步先修复
+  通用分析脚本及回归测试，再在validation做等成本full+full对照和人物框质量诊断；不继续test调参。
+
 ## 2026-09-03：实现锁定双视图seed1/2配对确认
 
 - 用户要求固定全部参数补另外两个正式test，并解释结构与后续改进方向。从`39a30df`创建

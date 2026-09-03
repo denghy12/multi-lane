@@ -2,7 +2,20 @@
 
 最后一次更新：2026-09-03。
 
-## 当前最高优先级：执行锁定双视图seed1/2正式确认
+## 当前最高优先级：实现统计修复并启动固定权重validation归因对照
+
+- 用户已授权执行前两步骤；新分支`exp/emotic-fusion-numerics-ensemble-control`保留上轮未提交结果记录。
+- 当前实现：schema2保存实际评估probabilities与batch元数据；schema1按原eval_batch_size重建；
+  fixed test/validation离线anchor都严格核验全部指标与逐类AP，不增大容差。
+- 新对照固定0.8/0.2 probability/threshold0.5，比较full_s+full_next与full_s+person_next，
+  next为(1,2,0)，另报告full_s+person_s。循环配对复用模型，统计只做描述，不当作独立重复显著性检验。
+- 待提交同步后完成完整单测、已有score数值回归、真实data/score smoke与GPU smoke；通过后
+  GPU0/1运行seed1 full/person，GPU2/3运行seed2 full/person的完整8-task validation；复用seed0。
+- 配置不变：30 epochs/task、batch64/main LR0.0125、cosine/min0/no warmup、Image-token
+  layer1/b32/LR4e-4/scale0.1/ReLU/independent、BCE+Adapter ASL9.8/0/0.05、AMP/TF32 on。
+- 新launcher不会搜索alpha、读取test或自动启动test；完成后生成固定对照ensemble_comparison.json。
+
+## 已完成的三种子正式结果与本轮来源
 
 1. 锁定probability融合full0.80/person0.20已完成正式test：final mAP`33.2672`，超过同批full
    `32.5365`共`0.7307`。8个task mAP/F1均提高，当前不需要重跑seed0。
@@ -15,12 +28,18 @@
    已在batch`dual_view_locked_formal_seed12_20260903_174938`启动，config除seed/Git外与seed0完全一致。
 4. 论文结论区分seed0最佳与三种子均值，计入双模型双视图计算成本。若做方法归因，考虑后续等计算量
    full+full集成对照，不能把双视图收益全部归因于Adapter或letterbox。
-5. 自动汇总复用完整seed0，核验六个run全部240 epochs/13950 updates/skipped0、clean Git、每个
-   视图除seed/Git外配置一致；报告full/person/fusion的三种子mean±sample std和配对增益。
-   完成后同步该batch的四份run目录JSON/test_scores、logs和control/formal_seed_summary.json；
-   不下载checkpoint（本轮不生成）。若不完整先排查退出码，不自动改参数或扩展实验。
-6. 待确认稳定性后，下一阶段优先在validation做等计算量full+full对照和人物框质量诊断；再考虑
-   低参数可靠性融合或蒸馏降低双模型成本。以上未启动，不继续盲目增大Adapter或在test调参。
+5. 四组训练现已完整成功；原自动融合因sigmoid全表/batch64的float32差异触发anchor严格校验而失败。
+   已通过原batch64精确重建指标并保持锁定融合路径不变，离线完成seed0/1/2汇总，未放宽容差或重训。
+   70个结果文件已同步并校验；汇总位于该batch本地`analysis_recovery/formal_seed_summary.json`。
+6. 当前正式报告：融合`32.8263 ± 0.4025`，full`32.1562 ± 0.3701`，配对提高
+   `+0.6701 ± 0.0670`；三个seed全部8-task mAP均改善。forgetting平均`+0.0519`，仍略差。
+7. 下一次开发先修复通用离线anchor重建并加浮点并列分数回归测试；未来score dump保存实际probabilities。
+   本次仅产物分析恢复，业务源码尚未修复，不应原样重跑launcher或覆盖历史失败记录。
+8. 下一轮实验建议固定0.8/0.2在validation比较等预算full+full和full+person；可复用seed0两视图val，
+   补seed1/2两视图四组val，配对辅助seed一致以控制集成随机性。随后按框质量/遮挡/人物大小诊断，
+   再考虑轻量person-guided Selector。以上仅计划，尚未开始，不继续扩容Adapter或在test调参。
+9. final validation mAP优先，average/task5--7其次；类别AP/F1/forgetting仅作为解释指标，不恢复
+   用户已经撤销的逐类硬否决门槛。注意双模型计算成本及仅三种子的统计局限。
 
 ## 历史记录：阶段二ASL局部8组正式test（已完成）
 

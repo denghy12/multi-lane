@@ -13,6 +13,7 @@ import numpy as np
 import torch
 
 from .runner import TASK_SIZES, TaskMetrics, compute_metrics, summarize_tasks
+from .evaluation_scores import align_evaluation_scores, load_evaluation_scores
 
 
 COMMON_CONFIG_FIELDS = (
@@ -103,9 +104,22 @@ def fused_scores(
     person_logits: np.ndarray,
     alpha: float,
     mode: str,
+    full_probabilities: np.ndarray = None,
+    person_probabilities: np.ndarray = None,
 ) -> np.ndarray:
     if not 0 <= alpha <= 1:
         raise ValueError("Fusion alpha must be in [0, 1]")
+    if mode not in ('logit', 'probability'):
+        raise ValueError('Unknown fusion mode')
+    if (full_probabilities is None) != (person_probabilities is None):
+        raise ValueError("Both endpoint probability arrays are required")
+    if full_probabilities is not None:
+        if alpha == 0:
+            return full_probabilities.copy()
+        if alpha == 1:
+            return person_probabilities.copy()
+        if mode == 'probability':
+            return (1.0 - alpha) * full_probabilities + alpha * person_probabilities
     if mode == "logit":
         logits = (1.0 - alpha) * full_logits + alpha * person_logits
         return torch.sigmoid(torch.from_numpy(logits)).numpy()
@@ -123,29 +137,49 @@ def _metrics_close(left: Dict[str, Any], right: Dict[str, Any]) -> bool:
     )
 
 
+def validated_run_scores(run: Path, split: str):
+    """Audit every anchor field against the probabilities actually evaluated."""
+    if split not in ('val', 'test'):
+        raise ValueError('Expected val or test')
+    config = _load_json(run / 'config.json')
+    summary = _load_json(run / 'seed_summary.json')
+    if summary.get('config') != config or config.get('reporting_split') != split:
+        raise ValueError('Score/config reporting provenance mismatch')
+    if summary.get('status') != 'complete' or len(summary.get('task_metrics', [])) != len(TASK_SIZES):
+        raise ValueError('Incomplete score run')
+    folder = 'validation_scores' if split == 'val' else 'test_scores'
+    dumps, rows = [], []
+    for task in range(len(TASK_SIZES)):
+        dump = load_evaluation_scores(run / folder / f'task{task}.npz', config.get('eval_batch_size'))
+        if dump.task_id != task or dump.logits.shape[1] != sum(TASK_SIZES[:task+1]):
+            raise ValueError('Unexpected task/class score layout')
+        row = compute_metrics(task, torch.from_numpy(dump.probabilities), torch.from_numpy(dump.targets), config['threshold'])
+        for key, value in asdict(row).items():
+            if not np.allclose(value, summary['task_metrics'][task][key], rtol=0, atol=1e-10):
+                raise ValueError(f'{run.name} task{task} score dump does not reproduce {key}')
+        dumps.append(dump)
+        rows.append(row)
+    return dumps, rows
+
+
 def fuse_validation_runs(
     full_run: Path,
     person_run: Path,
     alphas: Sequence[float],
 ) -> Dict[str, Any]:
     full_summary, person_summary = _validate_runs(full_run, person_run)
-    task_arrays = []
-    for task_id in range(len(TASK_SIZES)):
-        task_arrays.append(
-            load_aligned_task_scores(
-                full_run / "validation_scores" / f"task{task_id}.npz",
-                person_run / "validation_scores" / f"task{task_id}.npz",
-            )
-        )
+    full_dumps, _ = validated_run_scores(full_run, 'val')
+    person_dumps, _ = validated_run_scores(person_run, 'val')
+    task_arrays = [align_evaluation_scores(a, b) for a, b in zip(full_dumps, person_dumps)]
 
     candidates: List[Dict[str, Any]] = []
     for mode in ("logit", "probability"):
         for alpha in alphas:
             rows: List[TaskMetrics] = []
-            for task_id, (_, full_logits, person_logits, targets) in enumerate(
+            for task_id, (_, full_logits, person_logits, targets, full_probs, person_probs) in enumerate(
                 task_arrays
             ):
-                scores = fused_scores(full_logits, person_logits, float(alpha), mode)
+                scores = fused_scores(full_logits, person_logits, float(alpha), mode, full_probs, person_probs)
                 rows.append(
                     compute_metrics(
                         task_id,

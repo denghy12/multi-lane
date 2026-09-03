@@ -1,7 +1,13 @@
 # 项目上下文
 
-最后一次更新：2026-09-03；当前本地分支为`exp/emotic-dual-view-seed12`。
-服务器独立正式工作树使用clean实现提交`c9fa74c`。validation预先锁定的full0.80/person0.20
+最后一次更新：2026-09-03；当前本地分支为`exp/emotic-fusion-numerics-ensemble-control`。
+用户已要求执行统计流程修复和固定权重的等计算量validation对照。本分支在已有三种子结果基础上，
+新增schema2 score dump（实际probabilities、batch长度及数值来源），兼容schema1按原batch重建；
+离线anchor逐字段/逐类AP核验，不放宽容差。runner只增加预测保存元数据，不改变优化或前向算法。
+新增full/full与full/person配对validation分析：固定0.8/0.2、threshold0.5，主seed0/1/2对应
+辅助seed1/2/0；另报告同seed双视图。复用seed0两视图val，计划GPU0--3补seed1/2四个run。
+不搜索融合参数，不启动新test。提交同步后先完整单测、历史数值回归、真实score dump和GPU smoke。
+服务器seed0独立正式工作树使用clean实现提交`c9fa74c`。validation预先锁定的full0.80/person0.20
 probability融合已完成seed0完整8-task正式test：final mAP`33.2672`，超过同批单视图冠军
 `32.5365`共`0.7307`，8个task的mAP/cF1/oF1均提高。结果已同步本地并逐组核对哈希；
 未在test搜索融合参数。用户现已要求保持全部参数不变，补seed1/2正式配对确认。
@@ -12,8 +18,15 @@ probability融合已完成seed0完整8-task正式test：final mAP`33.2672`，超
 单测、Adapter GPU smoke、原seed0训练预算审计均通过。batch
 `dual_view_locked_formal_seed12_20260903_174938`已在GPU0--3并行启动；四份config逐字段核对，
 与对应seed0除seed/Git外完全一致。固定probability full0.80/person0.20/threshold0.5。
-每组完成后自动生成固定融合摘要，全部完成后汇总seed0/1/2的mean±sample std和同seed配对增益。
-本地后续仅提交运行记录，不更新正在训练的服务器工作树。Automatic Upload副本已逐文件哈希校验、
+seed1/2现已完整结束，四组训练均exit0/240 epochs/13950 updates/skipped0；自动融合因全表与原
+batch64 sigmoid的细微浮点差异导致anchor指标校验失败，原launcher exit1记录保留。已按原batch64
+严格重建六个run所有task指标，并保持原固定融合计算不变，在独立analysis_recovery产物中完成汇总。
+融合final mAP为`32.8263 ± 0.4025`，full为`32.1562 ± 0.3701`；配对增益
+`+0.7307/+0.5981/+0.6815`，均值`+0.6701 ± 0.0670`。24个seed×task mAP差值均正。
+task6 Sadness/Suffering平均提高`1.6915/3.5961`，Sensitivity下降`0.0333`；forgetting平均恶化
+`0.0519`。70个结果/score/log/状态文件已同步并通过分组SHA校验，详见
+`output/emotic_track_a_dual_view_seed_confirmation/20260903_174938/analysis.md`。
+上述结果分析轮没有新训练；当前开发轮开始通用修复及validation对照。Automatic Upload副本已逐文件哈希校验、
 备份到`/mnt/haoyuan/workspace/git-sync-backup-dual-view-seed12-DbO8J9xs`并恢复primary clean。
 test-only工作树保持原样，未被本轮同步、分析或实验修改。以下旧实验条目作为历史记录保留。
 

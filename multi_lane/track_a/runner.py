@@ -477,6 +477,8 @@ def write_evaluation_scores(
     sample_ids: Sequence[str],
     logits: torch.Tensor,
     targets: torch.Tensor,
+    probabilities: Optional[torch.Tensor] = None,
+    batch_lengths: Optional[Sequence[int]] = None,
 ) -> None:
     if len(sample_ids) != logits.shape[0] or logits.shape != targets.shape:
         raise ValueError("Evaluation score dump shapes are inconsistent")
@@ -486,15 +488,32 @@ def write_evaluation_scores(
     targets_np = targets.float().cpu().numpy().astype(np.float32, copy=False)
     if not np.isfinite(logits_np).all() or not np.isfinite(targets_np).all():
         raise FloatingPointError("Evaluation score dump contains non-finite values")
+    metadata = {}
+    if probabilities is not None:
+        probabilities_np = probabilities.float().cpu().numpy()
+        if batch_lengths is None:
+            raise ValueError("Actual probabilities require evaluation batch lengths")
+        lengths = np.asarray(batch_lengths, dtype=np.int64)
+        if (probabilities_np.shape != logits_np.shape or not np.isfinite(probabilities_np).all()
+                or (probabilities_np < 0).any() or (probabilities_np > 1).any()):
+            raise ValueError("Invalid evaluation probabilities")
+        if lengths.ndim != 1 or not len(lengths) or (lengths <= 0).any() or lengths.sum() != len(logits_np):
+            raise ValueError("Invalid evaluation batch lengths")
+        metadata = dict(probabilities=probabilities_np, batch_lengths=lengths,
+                        probability_device=np.asarray('cpu'), probability_dtype=np.asarray('float32'),
+                        probability_operation=np.asarray('torch.sigmoid'), torch_version=np.asarray(str(torch.__version__)))
+    elif batch_lengths is not None:
+        raise ValueError("Batch metadata requires actual evaluation probabilities")
     path.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(
         path,
-        schema_version=np.asarray(1, dtype=np.int64),
+        schema_version=np.asarray(2 if probabilities is not None else 1, dtype=np.int64),
         task_id=np.asarray(task_id, dtype=np.int64),
         sample_ids=np.asarray(sample_ids, dtype=np.str_),
         class_indices=np.arange(logits_np.shape[1], dtype=np.int64),
         logits=logits_np,
         targets=targets_np,
+        **metadata,
     )
 
 
@@ -539,7 +558,8 @@ def evaluate(
         if not sample_ids:
             raise RuntimeError("Score dumping requires stable sample IDs")
         write_evaluation_scores(
-            score_output_path, task_id, sample_ids, all_logits, all_targets
+            score_output_path, task_id, sample_ids, all_logits, all_targets,
+            probabilities=all_scores, batch_lengths=[len(row) for row in scores],
         )
     return compute_metrics(task_id, all_scores, all_targets, threshold)
 

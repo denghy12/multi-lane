@@ -92,6 +92,7 @@ class DualViewScoreTest(unittest.TestCase):
             {
                 "protocol_id": "emotic_b5c3_v0.1",
                 "seed": 0,
+                "eval_batch_size": 64,
                 "task_sizes": list(TASK_SIZES),
                 "class_order": list(CLASS_ORDER),
                 "reporting_split": "val",
