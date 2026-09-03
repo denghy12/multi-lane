@@ -950,7 +950,9 @@ class EMOTIC(torch.utils.data.Dataset):
         annotation_mat = sio.loadmat(annotation_path, squeeze_me=True, struct_as_record=False)
         split_items = []
         for split in self.splits:
-            split_items.extend(self._as_list(annotation_mat[split]))
+            split_items.extend(
+                (split, item) for item in self._as_list(annotation_mat[split])
+            )
 
         category_names = set()
         for split in ['train', 'val', 'test']:
@@ -966,13 +968,14 @@ class EMOTIC(torch.utils.data.Dataset):
         self.file_paths = []
         self.targets = []
         self.body_bboxes = []
+        self.sample_ids = []
 
-        for item in split_items:
+        for split, item in split_items:
             img_path = os.path.join(self.path, 'cvpr_emotic', item.folder, item.filename)
             if not os.path.isfile(img_path):
                 raise RuntimeError(f'EMOTIC image not found at {img_path}')
 
-            for person in self._as_list(item.person):
+            for person_index, person in enumerate(self._as_list(item.person)):
                 categories = self._categories_from_person(person)
                 target = sorted({self.class2idx[c] for c in categories if c in self.class2idx})
                 if len(target) == 0:
@@ -981,6 +984,9 @@ class EMOTIC(torch.utils.data.Dataset):
                 self.file_paths.append(img_path)
                 self.targets.append(target)
                 self.body_bboxes.append(person.body_bbox)
+                self.sample_ids.append(
+                    self._sample_id(split, item.folder, item.filename, person_index)
+                )
 
     def __len__(self):
         return len(self.file_paths)
@@ -999,6 +1005,13 @@ class EMOTIC(torch.utils.data.Dataset):
             num_classes=len(self.classes)
         ).sum(dim=0)
         return img, target
+
+    @staticmethod
+    def _sample_id(split, folder, filename, person_index):
+        relative_path = '/'.join(
+            part.strip('/\\') for part in (str(folder), str(filename))
+        )
+        return f'{split}:{relative_path}#person={int(person_index)}'
 
     def _crop_person(self, img, bbox):
         try:

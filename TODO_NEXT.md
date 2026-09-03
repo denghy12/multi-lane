@@ -608,3 +608,16 @@ VOC 对照实验，不应在现阶段合并到 `main`。
 42. 等待person-only完成后同步config/task_metrics/training_history/seed_summary和日志，不同步checkpoint；
     对比full冠军的完整8-task、逐类AP及错误互补性。只有person分支与full确有互补，才实现validation
     score dump和全局标量logit/probability融合，不直接从person-only单项高低推断融合是否有效。
+43. person-only已完成：final mAP`28.7815`，低full冠军`3.7550`；8个task与最终26类全部负增益，
+    当前版本停止。若继续双视图，下一步先实现body-preserving pad-to-square/letterbox、稳定sample ID和
+    validation score dump；同批运行full anchor与校正person分支，validation融合不超过full则结束路线。
+44. `exp/emotic-dual-view-validation-fusion`已实现letterbox person transform、稳定ID、validation NPZ
+    score dump、全局logit/probability alpha融合器和两卡启动脚本。用户已确认直接commit/push；下一步
+    在服务器新独立worktree运行完整单测、真实数据/score dump smoke和GPU smoke，全部通过后GPU0/1
+    并行运行full/person完整8-task validation并自动离线融合，禁止读取test。
+45. 自2026-09-03起，用户已明确要求开始的实验，其实验分支commit/push、服务器Git-only独立worktree
+    同步、单测/smoke和已声明的非破坏性实验启动不再重复审批；main合并、删除数据、覆盖未提交改动或
+    触碰test-only工作树仍必须单独确认。
+44. Image-token冠军seed1/2已完成并与既有seed0汇总：final mAP `32.1562 ± 0.3701`，相对注册
+    baseline平均提高`0.8567`且三个配对seed均为正。结果已同步、哈希核对并打包；本配置到此锁定，
+    不再依据seed1/2调参。论文报告时同时给出三种子均值/标准差，并说明此前seed0 test探索的边界。

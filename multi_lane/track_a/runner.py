@@ -16,7 +16,7 @@ import subprocess
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import torch
@@ -24,6 +24,7 @@ import torch.nn.functional as F
 from torch import nn
 from torch.utils.data import DataLoader, Dataset, Subset
 from torchvision import transforms
+from torchvision.transforms import functional as transform_functional
 
 from multi_lane.continual_datasets.continual_datasets import EMOTIC
 
@@ -70,17 +71,23 @@ class LabelView(Dataset):
         source: EMOTIC,
         indices: Sequence[int],
         class_indices: Sequence[int],
+        include_sample_id: bool = False,
     ) -> None:
         self.source = source
         self.indices = tuple(int(value) for value in indices)
         self.class_indices = tuple(int(value) for value in class_indices)
+        self.include_sample_id = bool(include_sample_id)
 
     def __len__(self) -> int:
         return len(self.indices)
 
     def __getitem__(self, index: int):
-        image, target = self.source[self.indices[index]]
-        return image, target[list(self.class_indices)].float()
+        source_index = self.indices[index]
+        image, target = self.source[source_index]
+        selected_target = target[list(self.class_indices)].float()
+        if self.include_sample_id:
+            return image, selected_target, self.source.sample_ids[source_index]
+        return image, selected_target
 
 
 def _intersects(target: Sequence[int], class_indices: Sequence[int]) -> bool:
@@ -88,7 +95,9 @@ def _intersects(target: Sequence[int], class_indices: Sequence[int]) -> bool:
 
 
 def dataset_view(
-    source: EMOTIC, class_indices: Sequence[int]
+    source: EMOTIC,
+    class_indices: Sequence[int],
+    include_sample_id: bool = False,
 ) -> LabelView:
     indices = [
         index
@@ -97,12 +106,39 @@ def dataset_view(
     ]
     if not indices:
         raise RuntimeError("EMOTIC protocol view contains no samples")
-    return LabelView(source, indices, class_indices)
+    return LabelView(source, indices, class_indices, include_sample_id)
+
+
+class PadToSquare:
+    """Center-pad a PIL image without discarding any source pixels."""
+
+    def __init__(self, fill: Union[int, Tuple[int, int, int]] = 0) -> None:
+        self.fill = fill
+
+    def __call__(self, image):
+        width, height = image.size
+        side = max(width, height)
+        horizontal = side - width
+        vertical = side - height
+        padding = (
+            horizontal // 2,
+            vertical // 2,
+            horizontal - horizontal // 2,
+            vertical - vertical // 2,
+        )
+        return transform_functional.pad(image, padding, fill=self.fill)
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(fill={self.fill!r})"
 
 
 def build_transforms(
     input_normalization: str = "none",
     train_crop_scale: Sequence[float] = (0.05, 1.0),
+    input_mode: str = "full",
+    person_transform_mode: str = "legacy_crop",
+    person_color_jitter_strength: float = 0.0,
+    person_color_jitter_probability: float = 0.0,
 ):
     if input_normalization not in {"none", "clip"}:
         raise ValueError("Input normalization must be none or clip")
@@ -111,10 +147,63 @@ def build_transforms(
     crop_scale = tuple(float(value) for value in train_crop_scale)
     if not 0 < crop_scale[0] <= crop_scale[1] <= 1:
         raise ValueError("Train crop scale must satisfy 0 < min <= max <= 1")
+    if input_mode not in {"full", "person_crop"}:
+        raise ValueError("Input mode must be full or person_crop")
+    if person_transform_mode not in {"legacy_crop", "letterbox"}:
+        raise ValueError("Person transform mode must be legacy_crop or letterbox")
+    if not 0 <= person_color_jitter_strength <= 0.5:
+        raise ValueError("Person color jitter strength must be in [0, 0.5]")
+    if not 0 <= person_color_jitter_probability <= 1:
+        raise ValueError("Person color jitter probability must be in [0, 1]")
     normalize = (
         [transforms.Normalize(CLIP_IMAGE_MEAN, CLIP_IMAGE_STD)]
         if input_normalization == "clip" else []
     )
+    if input_mode == "person_crop" and person_transform_mode == "letterbox":
+        fill = (
+            tuple(int(round(value * 255)) for value in CLIP_IMAGE_MEAN)
+            if input_normalization == "clip" else 0
+        )
+        color_jitter = []
+        if person_color_jitter_strength and person_color_jitter_probability:
+            strength = float(person_color_jitter_strength)
+            color_jitter = [
+                transforms.RandomApply(
+                    [
+                        transforms.ColorJitter(
+                            brightness=strength,
+                            contrast=strength,
+                            saturation=strength,
+                            hue=min(0.5, strength * 0.2),
+                        )
+                    ],
+                    p=float(person_color_jitter_probability),
+                )
+            ]
+        train = transforms.Compose(
+            [
+                PadToSquare(fill=fill),
+                transforms.Resize(
+                    (224, 224), interpolation=transforms.InterpolationMode.BICUBIC
+                ),
+                transforms.RandomHorizontalFlip(),
+                *color_jitter,
+                transforms.ToTensor(),
+                *normalize,
+            ]
+        )
+        evaluate = transforms.Compose(
+            [
+                PadToSquare(fill=fill),
+                transforms.Resize(
+                    (224, 224), interpolation=transforms.InterpolationMode.BICUBIC
+                ),
+                transforms.ToTensor(),
+                *normalize,
+            ]
+        )
+        return train, evaluate
+
     train = transforms.Compose(
         [
             transforms.RandomResizedCrop(
@@ -382,6 +471,33 @@ def compute_metrics(
     )
 
 
+def write_evaluation_scores(
+    path: Path,
+    task_id: int,
+    sample_ids: Sequence[str],
+    logits: torch.Tensor,
+    targets: torch.Tensor,
+) -> None:
+    if len(sample_ids) != logits.shape[0] or logits.shape != targets.shape:
+        raise ValueError("Evaluation score dump shapes are inconsistent")
+    if len(set(sample_ids)) != len(sample_ids):
+        raise ValueError("Evaluation sample IDs must be unique")
+    logits_np = logits.float().cpu().numpy().astype(np.float32, copy=False)
+    targets_np = targets.float().cpu().numpy().astype(np.float32, copy=False)
+    if not np.isfinite(logits_np).all() or not np.isfinite(targets_np).all():
+        raise FloatingPointError("Evaluation score dump contains non-finite values")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(
+        path,
+        schema_version=np.asarray(1, dtype=np.int64),
+        task_id=np.asarray(task_id, dtype=np.int64),
+        sample_ids=np.asarray(sample_ids, dtype=np.str_),
+        class_indices=np.arange(logits_np.shape[1], dtype=np.int64),
+        logits=logits_np,
+        targets=targets_np,
+    )
+
+
 def evaluate(
     model: MultiLaneModel,
     loader: Iterable,
@@ -389,22 +505,43 @@ def evaluate(
     task_id: int,
     threshold: float,
     amp: bool,
+    score_output_path: Optional[Path] = None,
 ) -> TaskMetrics:
     model.eval()
+    logits_rows: List[torch.Tensor] = []
     scores: List[torch.Tensor] = []
     targets: List[torch.Tensor] = []
+    sample_ids: List[str] = []
     with torch.no_grad():
-        for images, target in loader:
+        for batch in loader:
+            if len(batch) == 2:
+                images, target = batch
+                batch_sample_ids = None
+            elif len(batch) == 3:
+                images, target, batch_sample_ids = batch
+            else:
+                raise ValueError("Evaluation batches must have two or three fields")
             images = images.to(device, non_blocking=True).float()
             with torch.cuda.amp.autocast(enabled=amp):
                 logits = model.seen_logits(images)
-            scores.append(torch.sigmoid(logits.float()).cpu())
+            logits_cpu = logits.float().cpu()
+            logits_rows.append(logits_cpu)
+            scores.append(torch.sigmoid(logits_cpu))
             targets.append(target.float().cpu())
+            if batch_sample_ids is not None:
+                sample_ids.extend(str(value) for value in batch_sample_ids)
     if not scores:
         raise RuntimeError("Evaluation loader produced no samples")
-    return compute_metrics(
-        task_id, torch.cat(scores), torch.cat(targets), threshold
-    )
+    all_logits = torch.cat(logits_rows)
+    all_scores = torch.cat(scores)
+    all_targets = torch.cat(targets)
+    if score_output_path is not None:
+        if not sample_ids:
+            raise RuntimeError("Score dumping requires stable sample IDs")
+        write_evaluation_scores(
+            score_output_path, task_id, sample_ids, all_logits, all_targets
+        )
+    return compute_metrics(task_id, all_scores, all_targets, threshold)
 
 
 def current_validation_map(
@@ -957,6 +1094,23 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--person-transform-mode",
+        choices=("legacy_crop", "letterbox"),
+        default="legacy_crop",
+        help="Body-crop transform; letterbox preserves the complete padded body box.",
+    )
+    parser.add_argument(
+        "--person-color-jitter-strength", type=float, default=0.0
+    )
+    parser.add_argument(
+        "--person-color-jitter-probability", type=float, default=0.0
+    )
+    parser.add_argument(
+        "--save-evaluation-scores",
+        action="store_true",
+        help="Save per-sample logits/targets/IDs for validation-only fusion.",
+    )
+    parser.add_argument(
         "--input-normalization", choices=("none", "clip"), default="none"
     )
     parser.add_argument(
@@ -1036,6 +1190,12 @@ def main() -> None:
         raise ValueError("Adapter ASL routing requires an enabled Adapter")
     if not math.isfinite(args.person_crop_margin) or not 0 <= args.person_crop_margin <= 1:
         raise ValueError("person-crop-margin must be finite and in [0, 1]")
+    if not 0 <= args.person_color_jitter_strength <= 0.5:
+        raise ValueError("person-color-jitter-strength must be in [0, 0.5]")
+    if not 0 <= args.person_color_jitter_probability <= 1:
+        raise ValueError("person-color-jitter-probability must be in [0, 1]")
+    if args.save_evaluation_scores and args.reporting_split != "val":
+        raise ValueError("Evaluation score dumps are restricted to validation runs")
     if args.adapter_bottleneck_dims_per_task is not None:
         if len(args.adapter_bottleneck_dims_per_task) != len(TASK_SIZES):
             raise ValueError(
@@ -1148,7 +1308,12 @@ def main() -> None:
     )
 
     train_transform, eval_transform = build_transforms(
-        args.input_normalization, args.train_crop_scale
+        args.input_normalization,
+        args.train_crop_scale,
+        input_mode=args.input_mode,
+        person_transform_mode=args.person_transform_mode,
+        person_color_jitter_strength=args.person_color_jitter_strength,
+        person_color_jitter_probability=args.person_color_jitter_probability,
     )
     dataset_parent = resolve_dataset_parent(args.data_root)
     train_source = EMOTIC(
@@ -1264,6 +1429,17 @@ def main() -> None:
         "temperature": args.temperature,
         "input_mode": args.input_mode,
         "person_crop_margin": args.person_crop_margin,
+        "person_transform_mode": args.person_transform_mode,
+        "person_color_jitter_strength": args.person_color_jitter_strength,
+        "person_color_jitter_probability": args.person_color_jitter_probability,
+        "person_letterbox_fill": (
+            [int(round(value * 255)) for value in CLIP_IMAGE_MEAN]
+            if args.input_mode == "person_crop"
+            and args.person_transform_mode == "letterbox"
+            and args.input_normalization == "clip"
+            else None
+        ),
+        "save_evaluation_scores": args.save_evaluation_scores,
         "input_normalization": args.input_normalization,
         "input_normalization_mean": (
             list(CLIP_IMAGE_MEAN) if args.input_normalization == "clip" else None
@@ -1359,7 +1535,11 @@ def main() -> None:
         model.activate_task(task_id)
         train_view = dataset_view(train_source, task_indices(task_id))
         val_view = dataset_view(val_source, task_indices(task_id))
-        reporting_view = dataset_view(reporting_source, seen_indices(task_id))
+        reporting_view = dataset_view(
+            reporting_source,
+            seen_indices(task_id),
+            include_sample_id=args.save_evaluation_scores,
+        )
         train_loader = DataLoader(
             train_view, batch_size=args.train_batch_size, shuffle=True,
             num_workers=args.workers, pin_memory=True, drop_last=False,
@@ -1399,7 +1579,16 @@ def main() -> None:
             scheduler_multistep_gamma=args.scheduler_multistep_gamma,
         )
         row = evaluate(
-            model, reporting_loader, device, task_id, args.threshold, amp
+            model,
+            reporting_loader,
+            device,
+            task_id,
+            args.threshold,
+            amp,
+            score_output_path=(
+                output / "validation_scores" / f"task{task_id}.npz"
+                if args.save_evaluation_scores else None
+            ),
         )
         task_rows.append(row)
         training_history[str(task_id)] = history

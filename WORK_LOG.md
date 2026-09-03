@@ -2573,3 +2573,80 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
   `multilane_person_only_s0_20260903_121738`的GPU0启动。输出位于
   `/mnt/haoyuan/workspace/emotic_benchmark_runs/multi_lane_person_only_formal_v0.1/`；config记录clean
   `d0f8e81`及全部预声明参数。前4个epoch每轮84 steps、skipped0，GPU约2.4GB，无异常，继续运行。
+
+## 2026-09-03：同步并分析person-only正式结果
+
+- tmux与runner已结束，外部exit code为0；config/task_metrics/training_history/seed_summary和日志齐全，
+  240 epochs、13,950 updates、全部skipped0，日志无OOM/non-finite/Traceback/RuntimeError，无checkpoint。
+- 小结果已同步到`output/emotic_track_a_person_only_formal/20260903_121738/`并逐文件SHA-256与服务器一致。
+- person-only final/average mAP为`28.7815/35.2444`，比full冠军低`3.7550/3.9001`；final cF1/oF1
+  低`1.6732/2.3651`。forgetting仅改善0.0380，但因整条曲线更低，不构成有效收益。
+- task0--7 mAP分别低`5.3958/4.6038/3.3542/3.2191/3.4181/3.3758/4.0789/3.7550`。
+  最终26类AP无一超过full；task6新类Sadness/Sensitivity/Suffering在引入时分别低
+  `14.5821/1.1381/11.5128`，当前crop没有修复task6。
+- test数据包含5,368人物样本、3,682唯一图；2,923样本来自1,237张多人物图，其中1,185张具有
+  不同人物target。人物身份歧义存在，但bbox绝对长宽比中位数1.561、54.14%>1.5、27.96%>2，
+  当前Resize+CenterCrop和方形RandomResizedCrop会严重截断细长人体，是person view的重要混杂因素。
+- 结论：拒绝当前person-only替代full；如继续双视图，先做body-preserving letterbox并保存逐样本
+  validation scores，同批full锚点与person校正分支只在validation离线融合，超过full才进入test。
+- 详细报告：`output/emotic_track_a_person_only_formal/20260903_121738/analysis.md`。
+- 32KB小结果包不含checkpoint，SHA-256为
+  `15e79e5f9dc3f33500b09d65e115b96e21c85608fd420ba16547d611cc150f6a`。
+
+## 2026-09-03：实现body-preserving双视图validation融合诊断
+
+- 从person-only结果分支创建`exp/emotic-dual-view-validation-fusion`，保留尚未提交的person结果文档。
+- EMOTIC为每个标注人物新增与视图无关的稳定sample ID；LabelView可仅在报告阶段携带ID，训练接口仍
+  保持`(image,target)`，因此不会改变历史训练路径或DataLoader随机轨迹。
+- runner新增`PadToSquare`与显式person transform模式。`legacy_crop`默认保持旧行为；`letterbox`在
+  bbox+margin后用CLIP均值padding成正方形再bicubic resize到224，训练只做水平翻转与低强度、低概率
+  ColorJitter，不包含RandomResizedCrop，验证完全确定性且保留完整人体。
+- 新增`--save-evaluation-scores`，硬性限定`reporting_split=val`；每个task保存压缩NPZ中的稳定ID、
+  logits和targets，不导出test scores。离线融合器验证两run公共协议、ID集合、targets、finite数值和
+  anchor指标重算，然后搜索logit/probability两种全局融合的alpha 0--1（步长0.05）。
+- 新增两卡并行启动脚本，固定GPU0 full anchor、GPU1 corrected person，均为冠军训练协议的seed0完整
+  8-task validation-only、无checkpoint；两run成功后自动产生`fusion_summary.json`和是否进入test决策。
+- 新增测试覆盖sample ID、LabelView、letterbox像素保留与CLIP fill、无RandomResizedCrop、score dump
+  ID重排、融合端点及完整8-task anchor重算。Python静态编译、shell语法和diff检查已通过；完整测试需
+  服务器ddp环境。代码未提交，实验未运行。
+- Automatic Upload把3份文档、2个源码文件和4个新增文件写入服务器主工作树。9个SHA-256与本地
+  完全一致后备份到`/mnt/haoyuan/workspace/git-sync-backup-dual-view-code-8ULK5BSO`；新增文件使用
+  可恢复移动、已跟踪文件从HEAD恢复，服务器主工作树重新clean。
+- 用户确认提交并推送当前双视图分支，要求服务器创建独立worktree并依次运行完整单测、真实数据/
+  score-dump smoke和Adapter GPU smoke；全部通过后在GPU0/1启动full/person两组完整validation并
+  自动融合。用户同时授权以后对其已要求启动的实验不再重复审批；授权边界已写入`AGENTS.md`。
+
+## 2026-09-03：启动Image-token layer1冠军seed1/2确认
+
+- 先审计本地历史汇总与服务器165份已有config。MULTI-LANE注册baseline的seed0/1/2已于
+  `multi_lane_main_track_a_seed012_20260811_132448`完整完成并同步本地，直接复用；冠军配置仅有
+  seed0，没有任何完整或部分匹配的seed1/2历史run。
+- 为保证与`32.5365` seed0一致，没有从当前person-only代码启动，而是使用服务器clean scheduler
+  工作树`/mnt/haoyuan/workspace/multi-lane-main-scheduler-search@7337f96`直接运行两个缺失seed。
+  权重SHA-256、数据入口、完整8-task test协议、训练参数、Adapter结构/loss、AMP/TF32及
+  no-checkpoint均与seed0 anchor一致，仅seed和GPU不同。
+- batch`image_token_asl_layer1_formal_seed12_20260903_123014`已在GPU1/2并行启动；结果位于
+  `/mnt/haoyuan/workspace/emotic_benchmark_runs/multi_lane_image_token_layer1_seed_confirmation_v0.1/`
+  对应batch目录，日志位于scheduler工作树的
+  `logs/emotic_track_a_image_token_seed_confirmation/`对应batch目录。
+- 启动检查通过：两份config均为clean commit`7337f96`，seed、30 epochs、main LR0.0125、原cosine、
+  layer1/b32/Adapter LR4e-4/scale0.1、BCE+ASL9.8/0/0.05、full/CLIP/crop0.05、AMP/TF32、
+  8 tasks/test/no-checkpoint逐项正确；task0前三轮均84 steps、skipped0，GPU显存充足且无数值异常。
+
+## 2026-09-03：同步并分析Image-token冠军三种子结果
+
+- seed1/2 tmux均正常退出，exit code0；严格核验每组240 epochs、13,950 updates、skipped0、
+  task0--7完整、clean commit`7337f96`、配置除seed外一致、无checkpoint，日志错误扫描为空。
+- seed1/2小结果与日志已同步本地，结果树和日志的组合SHA-256分别与服务器一致：
+  `f1bffb2fc59b16d73a833c4964db6d872989eaaf298e48d30b83e700e5fe21de`和
+  `989c63be18bdc3d81d30f822afefdf3ff1cb0494c10557b35234ea7fed6c2636`。
+- 复用scheduler cosine anchor的seed0后生成正式三种子汇总：final mAP
+  `32.1562 ± 0.3701`，比注册baseline `31.2995 ± 0.1410`高`0.8567`；三个同seed差值
+  `+1.1744/+0.7363/+0.6593`全部为正。average mAP、cF1和oF1也分别提高
+  `0.9274/0.5867/0.2949`，forgetting基本持平并平均降低`0.0164`。
+- task0--7平均mAP相对baseline全部提高，依次为
+  `1.0756/1.3327/0.7886/0.7894/0.9536/0.8432/0.7793/0.8567`。Suffering仍有
+  `-2.7971`的平均类别交换且seed敏感，但不改变整体三种子收益结论。
+- 本地`analysis.md`和`formal_seed_summary.json`已生成。144KB下载包
+  `image_token_asl_layer1_seed012_small_results_20260903_123014.tar.gz`不含checkpoint，SHA-256为
+  `480838060a634d242776a38f698f027cbf1560527e32a24b573f3a9fbe48a330`。

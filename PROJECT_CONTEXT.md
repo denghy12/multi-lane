@@ -1109,3 +1109,63 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   EMOTIC数据构建和GPU0真实CLIP Adapter-ASL smoke。正式run
   `person_only_layer1_b32_asl_formal_seed0_20260903_121738`已在GPU0启动，clean commit、config和
   前4个epoch的84 steps/skipped0均核验通过，当前继续运行。
+- person-only正式run现已完成并同步：240 epochs、13,950 updates、skipped0、exit0且无错误。
+  final/average mAP为`28.7815/35.2444`，相对full冠军下降`3.7550/3.9001`；8个task mAP全部
+  下降，最终26类AP也全部下降，task6 Sadness/Sensitivity/Suffering分别下降
+  `14.5821/1.1381/11.5128`。当前person-only不能替代full，也没有类别级oracle增益。
+- 数据诊断确认目标人物歧义真实存在，但当前人物预处理会破坏人体：test 5,368人物样本来自3,682
+  张图，2,923样本属于多人物图；人物框绝对长宽比中位数1.561，54.14%超过1.5、27.96%超过2。
+  `Resize(short=256)+CenterCrop(224)`及方形RandomResizedCrop会再次截断细长人物框。下一步若继续
+  双视图，应先改为pad-to-square/letterbox保全人体并保存validation逐样本score，再判断融合。
+- 本地32KB结果包`output/emotic_track_a_person_only_formal/person_only_layer1_b32_asl_formal_seed0_20260903_121738_results.tar.gz`
+  包含4个JSON、日志和analysis，不含checkpoint，SHA-256为
+  `15e79e5f9dc3f33500b09d65e115b96e21c85608fd420ba16547d611cc150f6a`。
+- 2026-09-03从`f2b9fdf`创建`exp/emotic-dual-view-validation-fusion`，开始修正person视图并建立
+  validation-only融合诊断。新增显式`letterbox`模式：bbox margin之后使用CLIP均值居中pad-to-square、
+  bicubic resize 224、水平翻转和0.10强度/0.20概率ColorJitter，完全移除person分支的
+  RandomResizedCrop；`legacy_crop`默认值保留历史复现。
+- EMOTIC数据集新增稳定`split:path#person=index` sample ID。runner新增仅允许validation使用的逐task
+  `.npz` score dump，包含sample IDs、seen-class logits和targets；离线融合器严格对齐ID/targets并验证
+  dump可重算原指标，然后在全局alpha 0--1、步长0.05上比较logit与probability融合。
+- 新增两卡validation脚本：GPU0为完整full冠军锚点，GPU1为letterbox person；两者固定seed0、8 tasks、
+  30 epochs/task、per-task cosine eta_min0/no warmup、main LR0.0125、Image-token layer1/b32/LR4e-4、
+  scale0.1/ReLU/independent、main BCE + Adapter ASL 9.8/0/0.05、AMP/TF32、无test、无checkpoint。
+  Python静态编译、shell语法和diff检查已通过；当前代码尚未提交，服务器实验尚未启动。
+- Automatic Upload再次把本轮9个文件写入服务器主工作树；SHA-256逐项与本地一致后已完整备份到
+  `/mnt/haoyuan/workspace/git-sync-backup-dual-view-code-8ULK5BSO`并恢复服务器主工作树clean。
+- 用户于2026-09-03授予后续实验执行的持续授权：用户已明确要求开始某项实验后，可直接完成实验分支
+  commit/push、服务器Git-only独立worktree同步、单测/smoke及已声明的非破坏性实验启动，不再重复
+  请求审批。合并main、删除产物、覆盖未提交改动、触碰test-only工作树等仍须单独确认。
+
+## 2026-09-03 Image-token layer1冠军的seed1/2确认
+
+- 用户要求对当前单视图冠军补跑seed1/2，并同时检查注册MULTI-LANE baseline的seed1/2；存在且
+  完整的seed必须直接复用，不能重复训练。
+- 历史baseline batch`multi_lane_main_track_a_seed012_20260811_132448`已经包含完整seed0/1/2，
+  三种子final mAP分别为`31.3621035/31.3983807/31.1379723`，聚合为
+  `31.2994855 ± 0.1410457`，因此baseline不启动任何新run。
+- 对服务器`emotic_benchmark_runs`现有165份config进行精确协议匹配后，没有找到冠军配置的
+  seed1或seed2完成结果。本次复用seed0 scheduler anchor，使用同一clean commit`7337f96`、
+  同一CLIP checkpoint SHA-256 `5806e77c...df416f`，只补跑seed1/2。
+- 两组固定完整8-task held-out test、30 epochs/task、batch64、main LR0.0125/WD0、per-task
+  cosine eta_min0/no warmup、full image/CLIP normalization/crop0.05、Image-token layer1/b32/
+  LR4e-4/scale0.1/ReLU/independent、main BCE + Adapter ASL9.8/0/0.05、AMP/TF32、no-checkpoint。
+- batch为`image_token_asl_layer1_formal_seed12_20260903_123014`，seed1/2分别在GPU1/2的tmux
+  `multilane_imgtok_l1_s1_20260903_123014`和`multilane_imgtok_l1_s2_20260903_123014`运行；
+  GPU0上的person-only保持独立。两份config全字段核验通过，task0前三轮均84 steps、skipped0，
+  每卡约2.0GB且loss有限，无OOM或启动异常。
+- seed1/2现已完成，exit code均为0；每组240 epochs、13,950 updates、skipped0、完整task0--7，
+  配置除seed外一致，日志无OOM/non-finite/Traceback/RuntimeError且没有checkpoint。seed1/2的
+  final mAP分别为`32.1347/31.7973`。
+- 与既有seed0 `32.5365`聚合后，当前方案三种子final mAP为`32.1562 ± 0.3701`，average mAP
+  `38.9260 ± 0.2789`，cF1 `32.3979 ± 0.1642`，oF1 `49.4041 ± 0.0504`，forgetting
+  `4.7720 ± 0.0793`。
+- 相对注册baseline三种子，final mAP同seed分别提高`+1.1744/+0.7363/+0.6593`，平均提高
+  `+0.8567`；average mAP/cF1/oF1分别提高`+0.9274/+0.5867/+0.2949`，forgetting平均改善
+  `0.0164`。8个task的平均mAP变化全部为正，说明收益不只来自seed0或某一个task。
+- 类别交换仍存在：final Sadness平均提高`+3.8635`，Sensitivity近似持平`+0.0818`，Suffering
+  平均下降`-2.7971`且三个seed变化差异较大。整体配置可以作为稳定超过baseline的三种子结果，
+  但完整增益同时包含CLIP normalization、crop和Image-token Adapter ASL，不能全归因于Adapter。
+- 同步结果、日志、三种子汇总和analysis已保存到
+  `output/emotic_track_a_image_token_seed_confirmation_formal/20260903_123014/`；144KB小结果包
+  不含checkpoint，SHA-256为`480838060a634d242776a38f698f027cbf1560527e32a24b573f3a9fbe48a330`。
