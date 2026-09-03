@@ -1,6 +1,6 @@
 # 工作日志
 
-最后一次更新：2026-09-03。
+最后一次更新：2026-09-04。
 
 ## 2026-09-03：开发统计一致性修复与等计算量validation对照
 
@@ -49,6 +49,45 @@
   修复推送后仅对已有scores重新运行固定汇总，保留原失败状态用于审计。
 - 启动记录提交后不更新正在运行的实验worktree；Automatic Upload的同内容运行文档备份到上述
   ensemble-control备份目录的launch-records子目录，再从primary自身HEAD恢复clean。
+
+## 2026-09-04：完成等计算量validation归因并同步结果
+
+- 新runner将score写入`val_scores/`而汇总器只识别旧`validation_scores/`，导致四组训练成功但
+  原launcher exit1。修复`343ddca`同时接受恰好一种目录命名并新增回归测试；原失败记录保留。
+- Automatic Upload写入服务器primary的5份同内容文件逐项SHA-256核验后备份到
+  `/mnt/haoyuan/workspace/git-sync-backup-ensemble-control-1CWO07Me/score-folder-compatibility`，
+  primary恢复clean；实验worktree经Git ff-only更新到`343ddca`，test-only未修改。
+- 服务器ddp环境88项完整单测通过。直接使用既有seed0/1/2 full/person validation score重新汇总，
+  没有重训、test访问、alpha/mode/threshold搜索或checkpoint生成。
+- 单Full final mAP为`42.3854 ± 0.4964`；同seed Full+Person为`43.2785 ± 0.3954`，配对增益
+  `+0.9236/+0.7763/+0.9795`，均值`+0.8931 ± 0.1050`。
+- 等计算量循环配对中，Full+Full为`42.9568 ± 0.3957`，Full+Person为`43.2849 ± 0.3656`；
+  人物视图净贡献`+0.2939/+0.3183/+0.3722`，均值`+0.3281 ± 0.0401`。average mAP净提高
+  `+0.4616 ± 0.0820`，24个seed×task差值全部为正。
+- final 26类中人物辅助相对Full辅助平均改善19类；Suffering/Sadness为`+1.9252/+0.5147`，
+  Pain/Peace为`-1.1262/-0.6027`。Person单模型仍弱，但其辅助排序信息稳定优于普通第二个Full模型。
+- 服务器output与logs已同步到本地`output/emotic_track_a_ensemble_control/20260903_191515/`；输出组和
+  日志组的聚合SHA-256分别为`e6d38d896c3e43666128a31339d0d6dd94c460a499f3e3b27b286ff4f0853dd5`
+  与`7308c27e4f323e540634ac55ef5fa2d0da76b9812b7e76dc6a0029a4923b3a19`。
+- 下一步先用现有score做bbox质量分层和强约束的类别/几何感知门控validation，锁定后只进行一次test；
+  若不能超过固定0.20融合，再转person token辅助selector结构。
+
+## 2026-09-04：实现强约束全局权重与几何/类别门控搜索
+
+- 从`343ddca`创建`exp/emotic-constrained-gated-fusion`，保留上一轮尚未提交的结果文档。只复用已有
+  seed0/1/2 validation/test逐样本概率，不修改或重训Full/Person模型。
+- 新分析器先在validation搜索probability person权重0.00--1.00、步长0.01；目标为三种子final mAP
+  均值，average mAP破平，同时报告各seed独立最优但不据此分别选test规则。
+- 从EMOTIC稳定sample ID重建原始bbox面积占比、绝对长宽比与同图人物数；固定12个面积×形状×人数
+  cell，使用final task全26类报告Person及固定0.20融合相对Full的supported-class mAP。
+- 类别方向只在固定0.20相对Full的AP变化三个seed均超过`±0.05`时启用；质量方向只在样本数至少50且
+  cell相对总体融合增益三个seed均超过`±0.05`时启用。门控仅搜索class/quality delta各
+  `{0,0.025,0.05}`，没有26类自由参数。
+- 门控候选必须每个seed的final mAP都不低于全局alpha赢家且三种子均值更高，否则锁定全局赢家。
+  validation选择先以独占写入保存，随后test只评估这一条锁定规则一次，输出显式记录候选数1和
+  `search_performed_on_test=false`。
+- 新增固定服务器路径launcher和回归测试；本地静态编译、shell语法与diff检查通过。本地系统Python
+  缺少NumPy，完整测试将在服务器ddp环境执行。通过后按持续授权直接运行，不需再次审批。
 
 ## 2026-09-03：同步双视图三种子并恢复离线融合分析
 

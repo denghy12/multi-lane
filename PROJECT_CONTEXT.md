@@ -1,6 +1,13 @@
 # 项目上下文
 
-最后一次更新：2026-09-03；当前本地分支为`exp/emotic-fusion-numerics-ensemble-control`。
+最后一次更新：2026-09-04；当前本地分支为`exp/emotic-constrained-gated-fusion`。
+用户已要求在三种子validation上搜索Full/Person全局概率权重、完成bbox可靠性分层，并尝试跨三个seed
+方向一致的强约束类别/几何门控；validation锁定后只允许一次正式test评估。当前从`343ddca`创建
+独立分支，复用已有六组validation和六组test score，不重新训练模型、不生成checkpoint。
+全局person权重搜索固定`0.00--1.00`步长0.01，以三种子final mAP均值优先、average mAP破平；
+门控以0.20为base，类别与质量方向需三seed一致且幅度至少0.05 AP/mAP，只搜索
+`class_delta,quality_delta ∈ {0,0.025,0.05}`。门控必须逐seed不低于全局权重赢家才可进入一次test。
+几何分层固定面积占比`<0.10/0.10--0.30/>=0.30`、绝对长宽比`<=2/>2`和单人/多人，不从test拟合。
 用户已要求执行统计流程修复和固定权重的等计算量validation对照。本分支在已有三种子结果基础上，
 新增schema2 score dump（实际probabilities、batch长度及数值来源），兼容schema1按原batch重建；
 离线anchor逐字段/逐类AP核验，不放宽容差。runner只增加预测保存元数据，不改变优化或前向算法。
@@ -21,6 +28,14 @@ GPU0/1为seed1 full/person，GPU2/3为seed2 full/person；只运行validation，
 四组训练已完整exit0/240 epochs/13950 updates/skipped0且新schema2 scores齐全；初次汇总因新runner
 写入`val_scores/`而汇总器沿用旧`validation_scores/`路径失败，原launcher exit1保留。当前修复
 显式兼容两种目录且要求只能存在一种，并增加回归测试；将直接使用现有scores汇总，不重跑训练。
+目录兼容修复`343ddca`已推送；服务器独立实验工作树ff-only同步后88项完整单测通过。恢复汇总
+使用原有六组validation scores完成，未重训、未读test、未搜索融合参数。等计算量循环配对中，
+Full+Person相对Full+Full的final mAP三组均提高`+0.2939/+0.3183/+0.3722`，平均
+`+0.3281 ± 0.0401`；average mAP平均提高`+0.4616 ± 0.0820`，24个seed×task mAP差值全部为正。
+同seed Full+Person相对单Full的final mAP平均提高`+0.8931 ± 0.1050`。因此人物视图具有超出普通
+双Full集成的稳定互补信息，但本轮只是validation归因，不产生新test成绩。
+服务器结果与日志已同步到本地`output/emotic_track_a_ensemble_control/20260903_191515/`并完成
+整体SHA-256一致性校验；详细报告为该目录`analysis.md`。
 Automatic Upload的逐文件一致副本已备份到`/mnt/haoyuan/workspace/git-sync-backup-ensemble-control-1CWO07Me`，
 primary已恢复clean，test-only保持不变；后续运行记录只提交本地文档，不更新活动训练工作树。
 服务器seed0独立正式工作树使用clean实现提交`c9fa74c`。validation预先锁定的full0.80/person0.20

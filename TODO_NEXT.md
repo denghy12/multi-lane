@@ -1,6 +1,6 @@
 # 下一步任务
 
-最后一次更新：2026-09-03。
+最后一次更新：2026-09-04。
 
 ## 当前最高优先级：实现统计修复并启动固定权重validation归因对照
 
@@ -26,6 +26,18 @@
 - 四组训练已成功但初次汇总路径失败：新runner保存`val_scores/`、汇总器读取旧
   `validation_scores/`。修复需同时支持新旧且拒绝二义目录，补测试后直接重跑现有scores汇总，
   不重训、不改权重；原launcher exit1必须保留并单独记录恢复汇总。
+- 修复`343ddca`已完成并通过88项完整单测；恢复汇总成功。matched auxiliary对照显示Full+Person
+  相对Full+Full的final/average mAP平均提高`0.3281/0.4616`，三个配对和24个seed×task mAP均为正。
+  统计修复与等计算量归因两步到此完成；不启动新的正式test。
+- 下一阶段优先复用已有validation scores和样本ID，补bbox面积/长宽比/多人物metadata诊断，并以
+  全局person权重0.20为锚点设计强约束的类别/框质量感知门控。只允许跨三个seed方向一致的少量偏移，
+  先在validation锁定规则；锁定后才做一次held-out test评估，禁止在test继续搜索。
+- 若低参数门控不能稳定超过固定0.20，再实现person CLS/patch summary辅助selector的单模型结构；
+  保留full-image视觉主干，并与双模型方案按相同推理计算量报告，不回到person-only替代路线。
+- 当前已进入上述门控阶段：新分支`exp/emotic-constrained-gated-fusion`实现全局alpha 0--1步长0.01、
+  bbox面积/长宽比/单多人固定分层、三seed一致类别/质量方向和9个小delta组合。下一步提交推送后在
+  新服务器worktree运行完整单测；再执行一次validation选择，先落盘不可变选择JSON，然后只计算该
+  锁定规则的一次三种子test。输出不得包含test候选表或权重搜索。
 
 ## 已完成的三种子正式结果与本轮来源
 
