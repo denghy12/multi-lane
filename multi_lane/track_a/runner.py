@@ -1108,7 +1108,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--save-evaluation-scores",
         action="store_true",
-        help="Save per-sample logits/targets/IDs for validation-only fusion.",
+        help="Save per-sample logits/targets/IDs for an explicitly declared purpose.",
+    )
+    parser.add_argument(
+        "--evaluation-score-purpose",
+        choices=("validation_search", "fixed_test_fusion"),
+        default="validation_search",
+        help=(
+            "validation_search permits validation-only fusion selection; "
+            "fixed_test_fusion permits one locked held-out test evaluation."
+        ),
     )
     parser.add_argument(
         "--input-normalization", choices=("none", "clip"), default="none"
@@ -1194,8 +1203,20 @@ def main() -> None:
         raise ValueError("person-color-jitter-strength must be in [0, 0.5]")
     if not 0 <= args.person_color_jitter_probability <= 1:
         raise ValueError("person-color-jitter-probability must be in [0, 1]")
-    if args.save_evaluation_scores and args.reporting_split != "val":
-        raise ValueError("Evaluation score dumps are restricted to validation runs")
+    if args.save_evaluation_scores:
+        expected_purpose = (
+            "validation_search"
+            if args.reporting_split == "val" else "fixed_test_fusion"
+        )
+        if args.evaluation_score_purpose != expected_purpose:
+            raise ValueError(
+                f"{args.reporting_split} score dumps require evaluation purpose "
+                f"{expected_purpose}"
+            )
+    elif args.evaluation_score_purpose != "validation_search":
+        raise ValueError(
+            "fixed_test_fusion purpose requires --save-evaluation-scores"
+        )
     if args.adapter_bottleneck_dims_per_task is not None:
         if len(args.adapter_bottleneck_dims_per_task) != len(TASK_SIZES):
             raise ValueError(
@@ -1440,6 +1461,10 @@ def main() -> None:
             else None
         ),
         "save_evaluation_scores": args.save_evaluation_scores,
+        "evaluation_score_purpose": (
+            args.evaluation_score_purpose
+            if args.save_evaluation_scores else None
+        ),
         "input_normalization": args.input_normalization,
         "input_normalization_mean": (
             list(CLIP_IMAGE_MEAN) if args.input_normalization == "clip" else None
@@ -1586,7 +1611,7 @@ def main() -> None:
             args.threshold,
             amp,
             score_output_path=(
-                output / "validation_scores" / f"task{task_id}.npz"
+                output / f"{args.reporting_split}_scores" / f"task{task_id}.npz"
                 if args.save_evaluation_scores else None
             ),
         )

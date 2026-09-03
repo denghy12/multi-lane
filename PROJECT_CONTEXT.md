@@ -1151,6 +1151,12 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   做一次seed0 held-out test，不在test上重新搜索融合权重。
 - 本地完整小结果位于`output/emotic_track_a_dual_view_val/20260903_134720/`，另有不含checkpoint的
   1.6MB压缩包；其SHA-256为`c988359a9b572c0799f3b1953beadfc7ccfabafae085d126dab19561748c2d0c`。
+- 2026-09-03按用户要求从validation结果提交创建`exp/emotic-dual-view-formal-test`。正式test规则在
+  代码中锁定为probability fusion、full权重0.80、person权重0.20、threshold0.5；固定融合程序必须
+  读取并验证原validation `fusion_summary.json`，test端没有alpha/mode/threshold搜索入口。
+- runner新增显式`evaluation_score_purpose=fixed_test_fusion`门禁，只有该用途才允许held-out test
+  score export；输出到独立`test_scores/`。正式脚本固定seed0、8 tasks、冠军训练协议、person
+  letterbox、AMP/TF32和no-checkpoint，完成后只计算一次锁定融合并比较`32.53651921448899`冠军。
 
 ## 2026-09-03 Image-token layer1冠军的seed1/2确认
 

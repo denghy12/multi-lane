@@ -2640,6 +2640,18 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
   不含checkpoint，SHA-256为`c988359a9b572c0799f3b1953beadfc7ccfabafae085d126dab19561748c2d0c`。
   下一步只做锁定alpha0.20的正式test，不在test调参。
 
+## 2026-09-03：实现validation锁定的双视图正式test
+
+- 从`5dce5ca`创建`exp/emotic-dual-view-formal-test`。runner将score export用途显式区分为
+  `validation_search`与`fixed_test_fusion`；test score只有声明后者时才允许，并写入`test_scores/`。
+- 新增固定test融合器：强制读取原validation选择记录并核验winner为probability alpha0.20且已批准
+  进入正式test；命令行不暴露alpha、mode或threshold，只运行`0.8*full_prob+0.2*person_prob`一次。
+- 新增两卡正式脚本：GPU0 full、GPU1 person letterbox；固定seed0完整8-task、30 epochs/task、
+  batch64、main LR0.0125、per-task cosine/no warmup、Image-token layer1/b32/LR4e-4、scale0.1/
+  ReLU/independent、main BCE + Adapter ASL9.8/0/0.05、CLIP normalization、AMP/TF32、无checkpoint。
+- 新增测试覆盖固定融合只产生一个结果且不含candidate网格，以及validation alpha漂移时拒绝正式融合。
+  本地Python静态编译、shell语法与diff检查通过；下一步提交推送并在服务器独立worktree完成全量测试。
+
 ## 2026-09-03：启动Image-token layer1冠军seed1/2确认
 
 - 先审计本地历史汇总与服务器165份已有config。MULTI-LANE注册baseline的seed0/1/2已于
