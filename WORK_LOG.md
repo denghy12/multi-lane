@@ -2903,3 +2903,11 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - 新增回归测试覆盖图像组切分、Full/Person一致性、compact state完整性、MLP初始0.20/输出边界、
   特征和validation lock。macOS系统Python缺numpy，仅完成py_compile/bash语法/diff静态检查；完整
   单测和真实数据/GPU smoke需提交后在服务器ddp环境执行。
+- 代码以`2e352e0`推送；Automatic Upload的10个同哈希文件已备份到
+  `/mnt/haoyuan/workspace/git-sync-backup-constrained-gated-fusion-eyRcCTx5/learned-reliability-gate`，
+  primary恢复clean，实验worktree ff-only到同一commit，test-only未触碰。
+- 服务器ddp环境97项单测全通过。真实EMOTIC task0--7 calibration比例为8.13%--10.11%，Full/Person
+  索引完全一致且没有图像组跨分区；真实两样本score dump为stored probability schema v2。
+- GPU0真实ViT-B/16 layer1/b32/Adapter-ASL AMP/TF32 smoke通过，trainable739,130、初始残差误差
+  `3.8147e-05`、无冻结塔梯度；compact恢复覆盖41个method tensors/1,089,002参数并排除87,281,642
+  总状态中的冻结视觉塔。8-task顺序门控合成smoke也通过。

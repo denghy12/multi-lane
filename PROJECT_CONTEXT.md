@@ -1280,3 +1280,6 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - runner新增calibration score和不含冻结CLIP视觉塔的per-task compact state；只有validation明确
   锁定赢家后，独立导出器才从compact state对test推理，并且最终只评估这一种门控。若无候选通过，
   launcher必须结束且不访问test。
+- 实现已提交为`2e352e0`并在服务器独立worktree ff-only同步；97项完整单测、真实EMOTIC同图分组
+  划分、真实calibration score dump、真实ViT-B/16 Adapter-ASL AMP/TF32、compact state恢复和
+  8-task顺序门控合成smoke全部通过。完整validation可安全启动。

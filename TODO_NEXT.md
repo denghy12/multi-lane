@@ -713,3 +713,5 @@ VOC 对照实验，不应在现阶段合并到 `main`。
     固定0.20 final mAP才可锁定。若不满足，记录拒绝并停止，test保持未访问。
 50. 若validation锁定赢家，使用per-task compact states对三个seed的Full/Person test各导出一次概率，
     只评估锁定赢家一次。同步JSON/NPZ/日志和compact states，不同步冻结CLIP或完整checkpoint。
+51. `2e352e0`的97项单测和全部预运行smoke已经通过。下一步提交推送本次验证记录并让实验worktree
+    ff-only更新，然后检查GPU0--5连续空闲两次，启动唯一一批learned reliability gate实验。
