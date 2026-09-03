@@ -2615,6 +2615,18 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - 用户确认提交并推送当前双视图分支，要求服务器创建独立worktree并依次运行完整单测、真实数据/
   score-dump smoke和Adapter GPU smoke；全部通过后在GPU0/1启动full/person两组完整validation并
   自动融合。用户同时授权以后对其已要求启动的实验不再重复审批；授权边界已写入`AGENTS.md`。
+- 实现与上下文以`6ab53c8 Add dual-view validation fusion diagnostics`提交并推送。Automatic Upload
+  写入服务器主工作树的4份文档已限定范围备份到
+  `/mnt/haoyuan/workspace/git-sync-backup-dual-view-authorization-X0hW0zB0`并恢复clean，未触碰test-only。
+- 新建clean服务器worktree`/mnt/haoyuan/workspace/multi-lane-main-dual-view@6ab53c8`。ddp环境完整
+  70项单元测试通过；真实EMOTIC val smoke确认full/person共2,397个完全对齐且唯一的sample ID，
+  两视图张量均为3x224x224且有限，NPZ score dump写入、ID重排和读回通过。
+- GPU0真实ViT-B/16 Image-token layer1/b32、fixed scale0.1、independent、main BCE + Adapter ASL、
+  AMP/TF32 smoke通过，trainable参数739,130、梯度有限。
+- batch`image_token_layer1_full_person_letterbox_val_seed0_20260903_134720`已在tmux
+  `multilane_dual_view_val_20260903_134720`启动。GPU0跑full anchor、GPU1跑person letterbox；两份
+  clean config逐字段核验通过。task0第1轮均84 steps/skipped0，每卡显存约2.4GB/2.0GB，错误扫描为空。
+  launcher将在两组完整8-task validation结束后自动执行alpha步长0.05的logit/probability融合。
 
 ## 2026-09-03：启动Image-token layer1冠军seed1/2确认
 

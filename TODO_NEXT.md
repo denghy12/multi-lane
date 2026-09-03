@@ -618,6 +618,12 @@ VOC 对照实验，不应在现阶段合并到 `main`。
 45. 自2026-09-03起，用户已明确要求开始的实验，其实验分支commit/push、服务器Git-only独立worktree
     同步、单测/smoke和已声明的非破坏性实验启动不再重复审批；main合并、删除数据、覆盖未提交改动或
     触碰test-only工作树仍必须单独确认。
+46. 双视图实现`6ab53c8`已推送；服务器独立worktree的70项单测、真实EMOTIC/score-dump smoke和
+    Adapter GPU smoke全部通过。batch`image_token_layer1_full_person_letterbox_val_seed0_20260903_134720`
+    已在GPU0/1正常启动，当前只需等待两组完成并由launcher自动融合，不要重复启动。
+47. 完成后核验两组均240 epochs、13,950 updates、skipped0、8份validation score dump、无checkpoint
+    和错误日志；同步JSON/NPZ/日志与`fusion_summary.json`到本地。只有validation融合final mAP严格超过
+    同批full anchor才进入正式test，否则停止当前双视图路线。
 44. Image-token冠军seed1/2已完成并与既有seed0汇总：final mAP `32.1562 ± 0.3701`，相对注册
     baseline平均提高`0.8567`且三个配对seed均为正。结果已同步、哈希核对并打包；本配置到此锁定，
     不再依据seed1/2调参。论文报告时同时给出三种子均值/标准差，并说明此前seed0 test探索的边界。

@@ -1136,6 +1136,13 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - 用户于2026-09-03授予后续实验执行的持续授权：用户已明确要求开始某项实验后，可直接完成实验分支
   commit/push、服务器Git-only独立worktree同步、单测/smoke及已声明的非破坏性实验启动，不再重复
   请求审批。合并main、删除产物、覆盖未提交改动、触碰test-only工作树等仍须单独确认。
+- 双视图实现已作为`6ab53c8`推送。服务器独立worktree
+  `/mnt/haoyuan/workspace/multi-lane-main-dual-view`保持clean并通过70项完整单测、2,397条真实val样本
+  的稳定ID/letterbox/score-dump smoke及真实ViT-B/16 Adapter-ASL GPU smoke。
+- validation batch`image_token_layer1_full_person_letterbox_val_seed0_20260903_134720`已在GPU0/1并行
+  启动；两份config均为clean`6ab53c8`、seed0完整8-task val-only、score dump开启、checkpoint关闭。
+  full与person的task0首轮均84 steps/skipped0，显存及数值状态正常；两run成功结束后launcher自动
+  搜索logit/probability全局alpha并生成`fusion_summary.json`。
 
 ## 2026-09-03 Image-token layer1冠军的seed1/2确认
 
