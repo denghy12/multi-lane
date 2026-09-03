@@ -1,6 +1,27 @@
 # 工作日志
 
-最后一次更新：2026-09-01。
+最后一次更新：2026-09-03。
+
+## 2026-09-03：恢复任务并同步锁定双视图正式test
+
+- 确认之前安全等待器已自动完成，tmux已退出，无需启动或补跑。两组同一clean`c9fa74c`，各240
+  epochs、13,950 updates、skipped0，3个退出码均0，无错误、无checkpoint。
+- 以原validation选择文件SHA锁定probability alpha0.20，重新计算固定test融合与自动JSON完全相同。
+  两组training_history除elapsed_seconds外，全部字段与对应validation历史逐epoch完全一致。
+- 同批full以`32.5365194`复现旧冠军；person为`28.7473550`，固定融合为`33.2672295`，超过full
+  `0.7307101`。融合average mAP/cF1/oF1=`40.0544613/32.9485639/49.5947888`，forgetting
+  `4.7477654`比full略差`0.0169168`。8个task mAP/F1全部提高，21/26最终类别AP提高。
+- task6 Sadness/Sensitivity/Suffering AP增益为`0.1103/0.1351/4.4223`；对应final task7增益为
+  `0.4832/0.1330/4.3098`，报告时区分引入task与最终task。
+- 34个原始文件通过scp同步本地；runs/control/logs聚合SHA-256分别为
+  `6fdfd37aa595975c5e070f69b732eab515597a116f7f4807db26f93a0aa14086`、
+  `1abab97b8bc8a2b2625184b8ca0a3472595e4202f20e3d9f425187c63baf3a8f`、
+  `487a6136c1ba892596df0225ee7f4d37ae6fc4496addc252b36a8fd0886367bc`，与服务器完全一致。
+- 详细分析位于`output/emotic_track_a_dual_view_formal_test/20260903_145816/analysis.md`。
+  本轮未新开训练；建议下一步锁定配置补seed1/2，不根据test继续改alpha/阈值/类别专用规则。
+- 3.2MB小结果包`output/emotic_track_a_dual_view_formal_test/dual_view_formal_test_seed0_20260903_145816_small_results.tar.gz`
+  已包含分析、JSON、16份test scores和日志，不含checkpoint；SHA-256为
+  `923092d7899029c4af4430c3f707eb228f6dbf3ea982db4e46297c45a0f794a0`。
 
 ## 2026-09-01：阶段一完成并启动阶段二ASL局部8组正式test
 
@@ -2658,8 +2679,8 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
   ddp环境72项完整单测通过。固定融合CLI无alpha/mode/threshold选项，原validation summary SHA-256
   `a03ff4da...b90f`核验通过；GPU2真实Image-token Adapter-ASL AMP/TF32 smoke通过。
 - 正式batch`image_token_layer1_full_person_letterbox_formal_test_seed0_20260903_145816`已在tmux
-  `multilane_dual_view_formal_20260903_145816`启动安全等待。GPU0/1当前各有外部约8GB任务，未满足
-  18GB空闲/低利用率连续门槛；launcher每30秒自动复查，满足后才并行启动full/person，不抢占现有任务。
+  `multilane_dual_view_formal_20260903_145816`启动安全等待。当时GPU0/1有外部约8GB任务，launcher
+  达到18GB空闲/低利用率连续门槛后才启动；后续已完整完成并同步，见本文顶部2026-09-03结果记录。
 
 ## 2026-09-03：启动Image-token layer1冠军seed1/2确认
 

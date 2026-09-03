@@ -1,8 +1,19 @@
 # 下一步任务
 
-最后一次更新：2026-09-01。
+最后一次更新：2026-09-03。
 
-## 当前最高优先级：等待阶段二ASL局部8组正式test完成
+## 当前最高优先级：锁定双视图新seed0最佳，准备多种子确认
+
+1. 锁定probability融合full0.80/person0.20已完成正式test：final mAP`33.2672`，超过同批full
+   `32.5365`共`0.7307`。8个task mAP/F1均提高，当前不需要重跑seed0。
+2. 结果、test scores、日志与固定融合摘要已同步本地，完整性和哈希核验通过；详见
+   `output/emotic_track_a_dual_view_formal_test/20260903_145816/analysis.md`。
+3. 后续优先固定现有结构、训练与融合规则补seed1/2配对确认，不再使用test调alpha/mode/threshold。
+   先查是否有可复用逐样本scores或checkpoint；单独summary/mAP不能用于融合。尚未启动新训练。
+4. 论文结论区分seed0最佳与三种子均值，计入双模型双视图计算成本。若做方法归因，考虑后续等计算量
+   full+full集成对照，不能把双视图收益全部归因于Adapter或letterbox。
+
+## 历史记录：阶段二ASL局部8组正式test（已完成）
 
 1. layer1已以正式seed0 final mAP`32.5365`超过layer8旧冠军`32.4193`，差值`+0.1172`；
    average mAP、cF1、oF1和forgetting也全部改善，8个task mAP均未下降。当前最优配置只把
@@ -621,17 +632,14 @@ VOC 对照实验，不应在现阶段合并到 `main`。
 46. 双视图validation已完成并同步：两组均240 epochs、13,950 updates、skipped0，score dump完整且
     对齐，无checkpoint/错误。probability alpha0.20的final mAP`43.3035`比full `42.3799`高`0.9236`，
     并在8个task上全部提高，因此通过进入正式test的预声明门槛。
-47. 下一步实现并运行锁定配置的seed0完整8-task held-out test：full/person训练配置不变，只应用
-    probability alpha0.20和threshold0.5。禁止在test搜索alpha、融合模式或阈值；只报告预锁定结果与
-    当前单视图正式冠军`32.5365`的差值。正式test若不超过冠军，则不再用test反复调整融合。
+47. 已完成锁定配置的seed0完整8-task held-out test：full/person训练配置不变，只应用probability
+    alpha0.20和threshold0.5。final mAP`33.2672`超过旧单视图冠军`32.5365`；不在test继续搜索参数。
 48. 固定test实现`c9fa74c`已推送；服务器新clean工作树的72项单测、固定选择SHA/无搜索CLI检查及
     真实Adapter GPU smoke全部通过。
-49. 正式batch`image_token_layer1_full_person_letterbox_formal_test_seed0_20260903_145816`已挂入tmux安全
-    等待。GPU0/1目前被外部任务占用；launcher保持18GB空闲显存和低利用率的连续检查并自动启动，禁止
-    抢占、停止现有进程或重复启动第二批。
-50. 自动开始后核验两份config均为clean`c9fa74c`、reporting=test、score purpose固定、无checkpoint，
-    首轮84 steps/skipped0且无错误。完成后只读取`fixed_test_fusion_summary.json`中的预锁定alpha0.20
-    结果，不执行任何test网格搜索。
+49. 正式batch`image_token_layer1_full_person_letterbox_formal_test_seed0_20260903_145816`已自动完成；
+    等待器正常退出，所有GPU现空闲。两组和固定融合产物齐全，不重跑、不再启动第二批seed0。
+50. 两份config均为clean`c9fa74c`、reporting=test、score purpose固定、无checkpoint；240 epochs/
+    13,950 updates/skipped0核验通过。固定规则复算与`fixed_test_fusion_summary.json`完全一致。
 44. Image-token冠军seed1/2已完成并与既有seed0汇总：final mAP `32.1562 ± 0.3701`，相对注册
     baseline平均提高`0.8567`且三个配对seed均为正。结果已同步、哈希核对并打包；本配置到此锁定，
     不再依据seed1/2调参。论文报告时同时给出三种子均值/标准差，并说明此前seed0 test探索的边界。

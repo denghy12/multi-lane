@@ -1,12 +1,11 @@
 # 项目上下文
 
-最后一次更新：2026-09-01；当前本地分支为
-`exp/emotic-image-token-asl-capacity-lr`。服务器独立实验worktree保持clean`94f3327`；
-Image-token Adapter-ASL层位置正式test已完成并同步，zero-based layer1以final mAP
-`32.5365`成为新的探索性冠军；首批layer1局部容量/LR、single7 FP32与归一化多层结构15组
-及追加5组每层b32多层容量上界正式test均已完成并同步；layer1 Adapter LR×scale阶段一
-8组已完成并同步，阶段二ASL局部8组正式test正在并行运行。额外
-test-only worktree保持原分支和原有未提交状态，未被本轮同步、分析或实验修改。
+最后一次更新：2026-09-03；当前本地分支为`exp/emotic-dual-view-formal-test`。
+服务器独立正式工作树使用clean实现提交`c9fa74c`。validation预先锁定的full0.80/person0.20
+probability融合已完成seed0完整8-task正式test：final mAP`33.2672`，超过同批单视图冠军
+`32.5365`共`0.7307`，8个task的mAP/cF1/oF1均提高。结果已同步本地并逐组核对哈希；
+未在test搜索融合参数，当前没有新训练。下一步优先锁定配置做seed1/2确认，而非继续test调参。
+test-only工作树保持原样，未被本轮同步、分析或实验修改。以下旧实验条目作为历史记录保留。
 
 ## 项目目标
 
@@ -25,8 +24,9 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - 服务器项目路径：`/mnt/haoyuan/workspace/multi-lane-main`。
 - 本地和服务器分别维护独立 `.git`，共同跟踪
   `git@github.com:denghy12/multi-lane.git`；Git 负责受控代码同步。
-- PyCharm Automatic Upload 已关闭；`.git/` 永远不得通过 SFTP 同步。
-- 服务器 conda 环境：`multilane`。
+- PyCharm Automatic Upload 按规则必须关闭；此前实际仍多次上传文档，不能仅凭默认配置认定已关闭。
+  `.git/` 永远不得通过 SFTP 同步。
+- 当前Track-A实验使用服务器`ddp`环境；历史实验曾使用`multilane`。
 - 数据集优先使用 `./datasets/`。
 - 实验日志写入 `./logs/`。
 - 实验输出写入 `./output/`。
@@ -1160,9 +1160,16 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - 实现提交`c9fa74c`已推送；服务器新建clean独立worktree
   `/mnt/haoyuan/workspace/multi-lane-main-dual-view-formal-test`并通过72项完整单测、固定validation
   selection SHA/无搜索CLI检查和真实ViT-B/16 Adapter-ASL GPU smoke。
-- 正式batch`image_token_layer1_full_person_letterbox_formal_test_seed0_20260903_145816`已挂入tmux
-  `multilane_dual_view_formal_20260903_145816`。GPU0/1当前被外部任务占用，launcher按连续两次每卡
-  至少18GB空闲且利用率不高于10%的门槛自动等待；不会抢占、重复启动或覆盖结果。
+- 正式batch`image_token_layer1_full_person_letterbox_formal_test_seed0_20260903_145816`已在等待GPU释放
+  后自动完成。两组均240 epochs/13,950 updates/skipped0，退出码全0，无checkpoint/错误；两组非计时
+  训练记录与对应validation run逐字段完全相同。固定融合重新计算与已保存结果完全一致。
+- full/person/fusion final mAP分别为`32.5365/28.7474/33.2672`；融合average mAP`40.0545`，
+  cF1`32.9486`，oF1`49.5948`，forgetting`4.7478`。相对full依次提高final/average/cF1/oF1
+  `0.7307/0.9100/0.3729/0.2121`，forgetting轻微恶化`0.0169`。
+- 8个task的mAP/cF1/oF1全部提高，final有21/26类AP提高。task6 Sadness/Sensitivity/Suffering
+  提高`0.1103/0.1351/4.4223`。新成绩是seed0双分支最佳，不是三种子均值，也不能将收益全归因于Adapter。
+- 34份原始结果/NPZ/状态/日志已同步到`output/emotic_track_a_dual_view_formal_test/20260903_145816/`；
+  同目录`analysis.md`记录完整审计、曲线与限制。本轮不重跑已完成实验，不使用test搜索新融合参数。
 
 ## 2026-09-03 Image-token layer1冠军的seed1/2确认
 
