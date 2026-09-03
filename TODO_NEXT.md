@@ -16,6 +16,13 @@
 - 新launcher不会搜索alpha、读取test或自动启动test；完成后生成固定对照ensemble_comparison.json。
 - 已补旧seed0 schema1缺少score-purpose元数据的受限兼容；首轮86项单测及三种子历史固定结果回归
   已通过，需在新增兼容回归测试后重跑全量检查并完成剩余smoke，再启动。
+- 最终87项单测、历史结果回归、seed0 val复现、真实data/schema2 score smoke与Adapter GPU smoke
+  全通过。clean`ebf49a2`上已启动batch`fixed_ensemble_control_val_seed12_20260903_191515`，
+  4组在GPU0--3并行；本地日志镜像位于`output/emotic_track_a_ensemble_control/20260903_191515/`。
+- 四份运行config已核对与seed0训练参数一致；初始task0均84 steps/skipped0且无OOM/数值异常。
+- 下一步等待四组完成及自动固定对照汇总；核验每组240 epochs/13950 updates/skipped0、schema2
+  probabilities与指标完全一致后同步。关注matched auxiliary person-minus-full的final/average mAP，
+  同时报告同seed生产方案，不把共享模型的循环配对当作独立种子显著性检验。不自动开启test。
 
 ## 已完成的三种子正式结果与本轮来源
 

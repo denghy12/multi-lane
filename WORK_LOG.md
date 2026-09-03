@@ -26,6 +26,25 @@
   未读取新test样本或运行新test推理。seed0旧validation来自6ab53c8，早于score-purpose字段，
   因而新增受限兼容：只允许reporting=val、实际为schema1且通过指标/ID审计的旧文件缺省该字段，
   配置比较只规范化这一元数据，不忽略训练参数；新增回归测试，仍拒绝test和schema2缺失用途。
+- 实现`5274d14`及兼容修正`ebf49a2`已提交推送，通过Git-only创建独立服务器工作树
+  `/mnt/haoyuan/workspace/multi-lane-main-ensemble-control`。Automatic Upload的完全一致文件
+  已逐项SHA校验、备份到`/mnt/haoyuan/workspace/git-sync-backup-ensemble-control-1CWO07Me`
+  （兼容修正位于legacy-compatibility子目录），恢复primary clean；test-only未修改。
+- 最终87项完整单测通过，实际历史seed0/1/2 fixed test的anchor及融合均精确复现上轮离线恢复结果；
+  seed0 validation的固定融合全部task/summary字段完全一致，final43.30347536439419。上述仅对已存
+  scores进行回归，没有新test样本读取、test训练/推理或test参数搜索。
+- GPU0 Adapter smoke通过：Image-token layer1/b32/independent/scale0.1、Adapter-ASL、AMP/TF32，
+  trainable739130、初始化差3.8147e-05。真实EMOTIC full/person各67条validation样本经batch64+3
+  完成GPU评估，schema2保存的概率读回后指标逐字段完全一致，sample ID对齐通过。
+- batch`fixed_ensemble_control_val_seed12_20260903_191515`及tmux
+  `multilane_ensemble_control_20260903_191515`已启动，训练固定clean`ebf49a2`；GPU0/1为seed1
+  full/person，GPU2/3为seed2 full/person。输出位于该工作树output/emotic_track_a_ensemble_control/
+  对应batch/runs，日志位于logs同名目录；四组完成后自动输出ensemble_comparison.json，不启动test。
+- 四份config逐字段核验通过，与对应seed0除seed/Git和旧用途元数据规范化外无差异；task0前几轮
+  全部84 steps/skipped0，GPU0--3约21.6--22.1GB空闲，无OOM/非有限值。完整preflight日志及真实
+  schema2 smoke产物已同步到本地`output/emotic_track_a_ensemble_control/20260903_191515/`。
+- 启动记录提交后不更新正在运行的实验worktree；Automatic Upload的同内容运行文档备份到上述
+  ensemble-control备份目录的launch-records子目录，再从primary自身HEAD恢复clean。
 
 ## 2026-09-03：同步双视图三种子并恢复离线融合分析
 

@@ -9,6 +9,17 @@
 不搜索融合参数，不启动新test。提交同步后先完整单测、历史数值回归、真实score dump和GPU smoke。
 旧seed0的schema1 validation缺少后增的score-purpose字段，仅在val/ID/指标全部审计通过后兼容，
 不改写旧文件、不把此例外应用到schema2或test，也不放宽训练配置一致性要求。
+实现`5274d14`及受限兼容`ebf49a2`已提交推送；独立服务器工作树为
+`/mnt/haoyuan/workspace/multi-lane-main-ensemble-control`，训练源码固定clean`ebf49a2`。
+完整87项单测通过；三种子历史固定test结果与上轮恢复结果完全一致，seed0 validation固定融合
+精确复现43.30347536439419；真实EMOTIC两视图各67样本、batch64+3的schema2保存/读回和ID对齐、
+真实Adapter GPU smoke均通过。batch`fixed_ensemble_control_val_seed12_20260903_191515`已启动，
+GPU0/1为seed1 full/person，GPU2/3为seed2 full/person；只运行validation，没有新test。
+四份config与对应seed0除seed/Git及规范化旧用途字段外一致；task0前几轮均84 steps/skipped0，
+无OOM/非有限值，GPU0--3仍余约21.6--22.1GB显存。
+全部完成后自动输出`output/emotic_track_a_ensemble_control/<batch>/ensemble_comparison.json`。
+Automatic Upload的逐文件一致副本已备份到`/mnt/haoyuan/workspace/git-sync-backup-ensemble-control-1CWO07Me`，
+primary已恢复clean，test-only保持不变；后续运行记录只提交本地文档，不更新活动训练工作树。
 服务器seed0独立正式工作树使用clean实现提交`c9fa74c`。validation预先锁定的full0.80/person0.20
 probability融合已完成seed0完整8-task正式test：final mAP`33.2672`，超过同批单视图冠军
 `32.5365`共`0.7307`，8个task的mAP/cF1/oF1均提高。结果已同步本地并逐组核对哈希；
