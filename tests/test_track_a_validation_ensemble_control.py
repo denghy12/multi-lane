@@ -46,6 +46,18 @@ class ValidationEnsembleTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'test is forbidden'):
                 compare_ensembles(full, person)
 
+    def test_accepts_audited_legacy_seed0_without_score_purpose_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            full, person = self.make_runs(Path(directory))
+            for run in (full[0], person[0]):
+                config = json.loads((run/'config.json').read_text())
+                del config['evaluation_score_purpose']
+                summary = json.loads((run/'seed_summary.json').read_text())
+                summary['config'] = config
+                (run/'config.json').write_text(json.dumps(config))
+                (run/'seed_summary.json').write_text(json.dumps(summary))
+            self.assertEqual(compare_ensembles(full, person)['evaluation_split'], 'val')
+
     def test_rejects_duplicate_seed(self):
         with tempfile.TemporaryDirectory() as directory:
             full, person = self.make_runs(Path(directory))

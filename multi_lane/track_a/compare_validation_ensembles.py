@@ -21,7 +21,9 @@ def audit_validation_run(run: Path, view: str):
     config = json.loads((run / 'config.json').read_text())
     summary = json.loads((run / 'seed_summary.json').read_text())
     history = json.loads((run / 'training_history.json').read_text())
-    if config.get('reporting_split') != 'val' or config.get('evaluation_score_purpose') != 'validation_search':
+    if (config.get('reporting_split') != 'val'
+            or config.get('evaluation_score_purpose') not in (None, 'validation_search')
+            or config.get('save_evaluation_scores') is not True):
         raise ValueError('Only validation score runs are allowed; test is forbidden')
     if (config.get('input_mode') != view or config.get('seed') not in (0, 1, 2)
             or config.get('threshold') != 0.5 or config.get('save_checkpoints') is not False):
@@ -38,6 +40,12 @@ def audit_validation_run(run: Path, view: str):
     if any(e['skipped_optimizer_steps'] != 0 for rows in history.values() for e in rows):
         raise ValueError('Skipped optimizer updates')
     dumps, rows = validated_run_scores(run, 'val')
+    # The original seed0 validation predates score-purpose metadata. Accept it
+    # only as audited schema1 validation; do not extend this exception to v2.
+    if config.get('evaluation_score_purpose') is None and any(
+        not dump.probability_source.startswith('legacy_cpu_sigmoid_batch') for dump in dumps
+    ):
+        raise ValueError('Missing score purpose is only supported for legacy validation dumps')
     if any(not str(sample_id).startswith('val:') for dump in dumps for sample_id in dump.sample_ids):
         raise ValueError('Non-validation sample ID')
     return config, dumps, rows
@@ -72,6 +80,7 @@ def compare_ensembles(full_runs, person_runs):
             if key in indexed:
                 raise ValueError('Duplicate seed/view input')
             comparable = {k: v for k, v in config.items() if k not in ('seed', 'git')}
+            comparable['evaluation_score_purpose'] = 'validation_search'
             if reference is not None and comparable != reference:
                 raise ValueError(f'Per-view configuration drift for {view}')
             reference = comparable

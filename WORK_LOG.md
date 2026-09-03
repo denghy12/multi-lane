@@ -22,6 +22,10 @@
   letterbox/jitter0.10@0.20。数据与ViT-B/16权重沿用原路径，结果与日志在独立worktree的output/logs。
 - 本地静态编译、shell语法与diff检查通过；准备提交并通过Git创建独立工作树，先全量单测及smoke，
   再启动四组完整8-task validation。不会新开正式test或改变融合权重。
+- 首次服务器86项单测通过；三种子已有固定test scores的修复后anchor与融合均精确复现离线恢复结果，
+  未读取新test样本或运行新test推理。seed0旧validation来自6ab53c8，早于score-purpose字段，
+  因而新增受限兼容：只允许reporting=val、实际为schema1且通过指标/ID审计的旧文件缺省该字段，
+  配置比较只规范化这一元数据，不忽略训练参数；新增回归测试，仍拒绝test和schema2缺失用途。
 
 ## 2026-09-03：同步双视图三种子并恢复离线融合分析
 

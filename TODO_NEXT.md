@@ -14,6 +14,8 @@
 - 配置不变：30 epochs/task、batch64/main LR0.0125、cosine/min0/no warmup、Image-token
   layer1/b32/LR4e-4/scale0.1/ReLU/independent、BCE+Adapter ASL9.8/0/0.05、AMP/TF32 on。
 - 新launcher不会搜索alpha、读取test或自动启动test；完成后生成固定对照ensemble_comparison.json。
+- 已补旧seed0 schema1缺少score-purpose元数据的受限兼容；首轮86项单测及三种子历史固定结果回归
+  已通过，需在新增兼容回归测试后重跑全量检查并完成剩余smoke，再启动。
 
 ## 已完成的三种子正式结果与本轮来源
 

@@ -7,6 +7,8 @@
 新增full/full与full/person配对validation分析：固定0.8/0.2、threshold0.5，主seed0/1/2对应
 辅助seed1/2/0；另报告同seed双视图。复用seed0两视图val，计划GPU0--3补seed1/2四个run。
 不搜索融合参数，不启动新test。提交同步后先完整单测、历史数值回归、真实score dump和GPU smoke。
+旧seed0的schema1 validation缺少后增的score-purpose字段，仅在val/ID/指标全部审计通过后兼容，
+不改写旧文件、不把此例外应用到schema2或test，也不放宽训练配置一致性要求。
 服务器seed0独立正式工作树使用clean实现提交`c9fa74c`。validation预先锁定的full0.80/person0.20
 probability融合已完成seed0完整8-task正式test：final mAP`33.2672`，超过同批单视图冠军
 `32.5365`共`0.7307`，8个task的mAP/cF1/oF1均提高。结果已同步本地并逐组核对哈希；
