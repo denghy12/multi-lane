@@ -38,6 +38,12 @@
   bbox面积/长宽比/单多人固定分层、三seed一致类别/质量方向和9个小delta组合。下一步提交推送后在
   新服务器worktree运行完整单测；再执行一次validation选择，先落盘不可变选择JSON，然后只计算该
   锁定规则的一次三种子test。输出不得包含test候选表或权重搜索。
+- 本阶段已完成：全局validation赢家为Person0.25；受限门控base0.20/class+0.05/quality±0.025
+  进一步通过三seed门槛。锁定test为`32.8380 ± 0.4002`，仅比固定0.20高`0.0117`，不再细搜
+  静态权重或bbox阈值。
+- 下一阶段建议实现train/calibration监督的共享样本级可靠性MLP：输入bbox几何、两视图置信度/熵/
+  disagreement，输出一个限制在0.10--0.35的Person权重并正则到0.20。禁止按test或未来task定规则，
+  三种子validation锁定正则后只做一次test；若仍无实质增益，再转Person token辅助selector结构。
 
 ## 已完成的三种子正式结果与本轮来源
 

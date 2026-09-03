@@ -91,6 +91,23 @@
 - 首次服务器执行在validation选择前因launcher误把config中的内部`data_root`当作EMOTIC构造器根目录
   而退出；实际应传其父目录`.../datasets`。该次没有生成selection、没有加载test，已保留失败日志并
   修正默认路径；使用新batch目录重试，确保test单规则评估仍只发生一次。
+- 修复`baf2263`推送并在独立服务器worktree ff-only同步；91项完整单测再次通过。成功batch为
+  `constrained_gated_fusion_seed012_20260904_014055`，selection写入后才读取test，test候选数严格为1。
+- 全局alpha validation搜索得到Person0.25，final/average mAP`43.3060/50.4747`；各seed独立峰值
+  0.24/0.25/0.32。相对固定0.20，统一0.25的final均值仅提高0.0275，属于宽平台。
+- bbox cell诊断显示大框+常规长宽比+多人最可靠，固定0.20融合增益`+1.6183`；小框+极端长宽比+
+  多人仅`+0.2396`且seed2为负。大框+常规+单人仍提高0.5631，但三seed均低于总体融合增益。
+- 15类在三个seed上均有至少+0.05 AP，未发现三seed一致负类。9个强约束门控中，base0.20、
+  class delta0.05、quality delta0.025以validation final`43.3420 ± 0.3906`胜出，逐seed均高于0.25。
+- 锁定规则唯一test得到final mAP`33.2696/32.7651/32.4793`，均值`32.8380 ± 0.4002`；相对旧
+  固定0.20分别`+0.0024/+0.0323/+0.0005`，均值仅`+0.0117`。average mAP/cF1/oF1提高
+  `0.0508/0.0159/0.0422`，forgetting恶化0.0129。
+- validation类别方向只部分迁移到test：Anger/Suffering提高，Fear/Sadness下降。停止继续静态权重
+  微调；下一步若继续，使用train/calibration监督的共享样本级可靠性门控，再无效则做Person token
+  辅助selector结构。
+- 成功output与全部日志已同步本地`output/emotic_track_a_constrained_gated_fusion/20260904_014055/`；
+  聚合SHA-256分别为`881375876478ba886e0d617c7ae22580d42f20bdc875d907fb591d1d812a944b`
+  与`5d1c24cd8dcfe53a78c6c02c602b0b91a672c1dd90e15e94f922ee9342603ed5`。
 
 ## 2026-09-03：同步双视图三种子并恢复离线融合分析
 

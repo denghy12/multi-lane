@@ -8,6 +8,13 @@
 门控以0.20为base，类别与质量方向需三seed一致且幅度至少0.05 AP/mAP，只搜索
 `class_delta,quality_delta ∈ {0,0.025,0.05}`。门控必须逐seed不低于全局权重赢家才可进入一次test。
 几何分层固定面积占比`<0.10/0.10--0.30/>=0.30`、绝对长宽比`<=2/>2`和单人/多人，不从test拟合。
+实现`69cff55`及数据根目录修复`baf2263`已提交推送；服务器新独立worktree通过91项完整单测。
+首次路径失败发生在validation selection前且未加载test；修复后新batch先锁定validation规则，再对
+test只评估一个候选。全局validation最佳为Full0.75/Person0.25，final mAP`43.3060 ± 0.3732`；
+受限门控以base0.20、class delta0.05、quality delta0.025达到`43.3420 ± 0.3906`并逐seed超过
+全局赢家，因此锁定进入test。唯一test结果为`32.8380 ± 0.4002`，比固定0.20提高`0.0117`；
+三个seed均为正但效应极小。当前静态score-level门控视为基本饱和，下一步优先从train/calibration
+学习共享样本级可靠性门控，仍无效再转Person token辅助selector结构。
 用户已要求执行统计流程修复和固定权重的等计算量validation对照。本分支在已有三种子结果基础上，
 新增schema2 score dump（实际probabilities、batch长度及数值来源），兼容schema1按原batch重建；
 离线anchor逐字段/逐类AP核验，不放宽容差。runner只增加预测保存元数据，不改变优化或前向算法。
