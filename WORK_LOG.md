@@ -88,6 +88,9 @@
   `search_performed_on_test=false`。
 - 新增固定服务器路径launcher和回归测试；本地静态编译、shell语法与diff检查通过。本地系统Python
   缺少NumPy，完整测试将在服务器ddp环境执行。通过后按持续授权直接运行，不需再次审批。
+- 首次服务器执行在validation选择前因launcher误把config中的内部`data_root`当作EMOTIC构造器根目录
+  而退出；实际应传其父目录`.../datasets`。该次没有生成selection、没有加载test，已保留失败日志并
+  修正默认路径；使用新batch目录重试，确保test单规则评估仍只发生一次。
 
 ## 2026-09-03：同步双视图三种子并恢复离线融合分析
 

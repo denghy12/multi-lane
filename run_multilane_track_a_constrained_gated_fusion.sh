@@ -2,7 +2,7 @@
 set -euo pipefail
 
 PYTHON_BIN="${PYTHON_BIN:-/opt/conda/envs/ddp/bin/python}"
-DATA_ROOT="${DATA_ROOT:-/mnt/haoyuan/workspace/multi-lane-main/datasets/EMOTIC}"
+DATA_ROOT="${DATA_ROOT:-/mnt/haoyuan/workspace/multi-lane-main/datasets}"
 BATCH_ID="${BATCH_ID:-constrained_gated_fusion_seed012_$(date +%Y%m%d_%H%M%S)}"
 OUTPUT_DIR="./output/emotic_track_a_constrained_gated_fusion/${BATCH_ID}"
 LOG_DIR="./logs/emotic_track_a_constrained_gated_fusion"
