@@ -624,11 +624,14 @@ VOC 对照实验，不应在现阶段合并到 `main`。
 47. 下一步实现并运行锁定配置的seed0完整8-task held-out test：full/person训练配置不变，只应用
     probability alpha0.20和threshold0.5。禁止在test搜索alpha、融合模式或阈值；只报告预锁定结果与
     当前单视图正式冠军`32.5365`的差值。正式test若不超过冠军，则不再用test反复调整融合。
-48. 固定test入口和两卡launcher已实现。下一步直接提交推送`exp/emotic-dual-view-formal-test`，服务器
-    创建新的clean独立worktree，运行完整单测、固定融合synthetic smoke和真实Adapter GPU smoke。
-49. 门禁通过后在GPU0/1启动正式batch；若GPU正在被其他任务使用，launcher保持18GB空闲显存和低利用率
-    的连续检查并自动等待，禁止抢占或停止现有进程。启动后核验两份config、test score用途、首轮
-    steps/skipped和无错误；完成时只执行一次锁定probability alpha0.20融合。
+48. 固定test实现`c9fa74c`已推送；服务器新clean工作树的72项单测、固定选择SHA/无搜索CLI检查及
+    真实Adapter GPU smoke全部通过。
+49. 正式batch`image_token_layer1_full_person_letterbox_formal_test_seed0_20260903_145816`已挂入tmux安全
+    等待。GPU0/1目前被外部任务占用；launcher保持18GB空闲显存和低利用率的连续检查并自动启动，禁止
+    抢占、停止现有进程或重复启动第二批。
+50. 自动开始后核验两份config均为clean`c9fa74c`、reporting=test、score purpose固定、无checkpoint，
+    首轮84 steps/skipped0且无错误。完成后只读取`fixed_test_fusion_summary.json`中的预锁定alpha0.20
+    结果，不执行任何test网格搜索。
 44. Image-token冠军seed1/2已完成并与既有seed0汇总：final mAP `32.1562 ± 0.3701`，相对注册
     baseline平均提高`0.8567`且三个配对seed均为正。结果已同步、哈希核对并打包；本配置到此锁定，
     不再依据seed1/2调参。论文报告时同时给出三种子均值/标准差，并说明此前seed0 test探索的边界。

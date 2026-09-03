@@ -2651,6 +2651,15 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
   ReLU/independent、main BCE + Adapter ASL9.8/0/0.05、CLIP normalization、AMP/TF32、无checkpoint。
 - 新增测试覆盖固定融合只产生一个结果且不含candidate网格，以及validation alpha漂移时拒绝正式融合。
   本地Python静态编译、shell语法与diff检查通过；下一步提交推送并在服务器独立worktree完成全量测试。
+- 实现以`c9fa74c Add locked dual-view formal test`提交并推送。Automatic Upload写入服务器primary的
+  3份文档和4个新增文件已备份到`/mnt/haoyuan/workspace/git-sync-backup-dual-view-formal-18b3EdUp`
+  并恢复primary clean，未触碰test-only。
+- 新建服务器clean工作树`/mnt/haoyuan/workspace/multi-lane-main-dual-view-formal-test@c9fa74c`；
+  ddp环境72项完整单测通过。固定融合CLI无alpha/mode/threshold选项，原validation summary SHA-256
+  `a03ff4da...b90f`核验通过；GPU2真实Image-token Adapter-ASL AMP/TF32 smoke通过。
+- 正式batch`image_token_layer1_full_person_letterbox_formal_test_seed0_20260903_145816`已在tmux
+  `multilane_dual_view_formal_20260903_145816`启动安全等待。GPU0/1当前各有外部约8GB任务，未满足
+  18GB空闲/低利用率连续门槛；launcher每30秒自动复查，满足后才并行启动full/person，不抢占现有任务。
 
 ## 2026-09-03：启动Image-token layer1冠军seed1/2确认
 

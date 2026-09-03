@@ -1157,6 +1157,12 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - runner新增显式`evaluation_score_purpose=fixed_test_fusion`门禁，只有该用途才允许held-out test
   score export；输出到独立`test_scores/`。正式脚本固定seed0、8 tasks、冠军训练协议、person
   letterbox、AMP/TF32和no-checkpoint，完成后只计算一次锁定融合并比较`32.53651921448899`冠军。
+- 实现提交`c9fa74c`已推送；服务器新建clean独立worktree
+  `/mnt/haoyuan/workspace/multi-lane-main-dual-view-formal-test`并通过72项完整单测、固定validation
+  selection SHA/无搜索CLI检查和真实ViT-B/16 Adapter-ASL GPU smoke。
+- 正式batch`image_token_layer1_full_person_letterbox_formal_test_seed0_20260903_145816`已挂入tmux
+  `multilane_dual_view_formal_20260903_145816`。GPU0/1当前被外部任务占用，launcher按连续两次每卡
+  至少18GB空闲且利用率不高于10%的门槛自动等待；不会抢占、重复启动或覆盖结果。
 
 ## 2026-09-03 Image-token layer1冠军的seed1/2确认
 
