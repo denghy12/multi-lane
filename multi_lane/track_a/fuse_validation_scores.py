@@ -147,10 +147,17 @@ def validated_run_scores(run: Path, split: str):
         raise ValueError('Score/config reporting provenance mismatch')
     if summary.get('status') != 'complete' or len(summary.get('task_metrics', [])) != len(TASK_SIZES):
         raise ValueError('Incomplete score run')
-    folder = 'validation_scores' if split == 'val' else 'test_scores'
+    if split == 'val':
+        candidates = [run / name for name in ('val_scores', 'validation_scores')]
+        found = [path for path in candidates if path.is_dir()]
+        if len(found) != 1:
+            raise ValueError('Expected exactly one val_scores/validation_scores directory')
+        score_root = found[0]
+    else:
+        score_root = run / 'test_scores'
     dumps, rows = [], []
     for task in range(len(TASK_SIZES)):
-        dump = load_evaluation_scores(run / folder / f'task{task}.npz', config.get('eval_batch_size'))
+        dump = load_evaluation_scores(score_root / f'task{task}.npz', config.get('eval_batch_size'))
         if dump.task_id != task or dump.logits.shape[1] != sum(TASK_SIZES[:task+1]):
             raise ValueError('Unexpected task/class score layout')
         row = compute_metrics(task, torch.from_numpy(dump.probabilities), torch.from_numpy(dump.targets), config['threshold'])

@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 import test_track_a_dual_view_fusion as fixtures
-from multi_lane.track_a.compare_validation_ensembles import compare_ensembles
+from multi_lane.track_a.compare_validation_ensembles import audit_validation_run, compare_ensembles
 
 
 class ValidationEnsembleTest(unittest.TestCase):
@@ -45,6 +45,13 @@ class ValidationEnsembleTest(unittest.TestCase):
             (full[1]/'config.json').write_text(json.dumps(config))
             with self.assertRaisesRegex(ValueError, 'test is forbidden'):
                 compare_ensembles(full, person)
+
+    def test_accepts_runner_val_scores_folder_name(self):
+        with tempfile.TemporaryDirectory() as directory:
+            full, _ = self.make_runs(Path(directory))
+            (full[0]/'validation_scores').rename(full[0]/'val_scores')
+            _, dumps, _ = audit_validation_run(full[0], 'full')
+            self.assertEqual(len(dumps), 8)
 
     def test_accepts_audited_legacy_seed0_without_score_purpose_metadata(self):
         with tempfile.TemporaryDirectory() as directory:

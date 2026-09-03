@@ -43,6 +43,10 @@
 - 四份config逐字段核验通过，与对应seed0除seed/Git和旧用途元数据规范化外无差异；task0前几轮
   全部84 steps/skipped0，GPU0--3约21.6--22.1GB空闲，无OOM/非有限值。完整preflight日志及真实
   schema2 smoke产物已同步到本地`output/emotic_track_a_ensemble_control/20260903_191515/`。
+- 四组最终均训练exit0、240 epochs/13950 updates/skipped0，日志无OOM/非有限值，每组8份schema2
+  scores齐全。总launcher exit1且未生成comparison：新runner按`val_scores/`命名，分析器误沿用旧
+  `validation_scores/`。已修改为显式兼容两者且只能出现一个，补目录名回归测试；不重训或调参，
+  修复推送后仅对已有scores重新运行固定汇总，保留原失败状态用于审计。
 - 启动记录提交后不更新正在运行的实验worktree；Automatic Upload的同内容运行文档备份到上述
   ensemble-control备份目录的launch-records子目录，再从primary自身HEAD恢复clean。
 

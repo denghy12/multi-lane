@@ -18,6 +18,9 @@ GPU0/1为seed1 full/person，GPU2/3为seed2 full/person；只运行validation，
 四份config与对应seed0除seed/Git及规范化旧用途字段外一致；task0前几轮均84 steps/skipped0，
 无OOM/非有限值，GPU0--3仍余约21.6--22.1GB显存。
 全部完成后自动输出`output/emotic_track_a_ensemble_control/<batch>/ensemble_comparison.json`。
+四组训练已完整exit0/240 epochs/13950 updates/skipped0且新schema2 scores齐全；初次汇总因新runner
+写入`val_scores/`而汇总器沿用旧`validation_scores/`路径失败，原launcher exit1保留。当前修复
+显式兼容两种目录且要求只能存在一种，并增加回归测试；将直接使用现有scores汇总，不重跑训练。
 Automatic Upload的逐文件一致副本已备份到`/mnt/haoyuan/workspace/git-sync-backup-ensemble-control-1CWO07Me`，
 primary已恢复clean，test-only保持不变；后续运行记录只提交本地文档，不更新活动训练工作树。
 服务器seed0独立正式工作树使用clean实现提交`c9fa74c`。validation预先锁定的full0.80/person0.20

@@ -23,6 +23,9 @@
 - 下一步等待四组完成及自动固定对照汇总；核验每组240 epochs/13950 updates/skipped0、schema2
   probabilities与指标完全一致后同步。关注matched auxiliary person-minus-full的final/average mAP，
   同时报告同seed生产方案，不把共享模型的循环配对当作独立种子显著性检验。不自动开启test。
+- 四组训练已成功但初次汇总路径失败：新runner保存`val_scores/`、汇总器读取旧
+  `validation_scores/`。修复需同时支持新旧且拒绝二义目录，补测试后直接重跑现有scores汇总，
+  不重训、不改权重；原launcher exit1必须保留并单独记录恢复汇总。
 
 ## 已完成的三种子正式结果与本轮来源
 
