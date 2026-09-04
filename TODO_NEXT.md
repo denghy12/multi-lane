@@ -8,6 +8,10 @@
 - 完成后自动汇总0.8/0.2同seed Full+Full并对照旧Full+Person，审计概率差异及除耗时外的训练轨迹。
 - 同seed同视图可能退化为重复模型；需要按实际结果报告，不承诺集成增益。此前循环seed对照仍保留。
 - 不搜索test权重、配对或新参数，不启动Person条件Selector。
+- 批次`same_seed_full_full_test_20260904_122941`已在GPU0/1/2运行，tmux
+  `multilane_same_seed_full_full_122941`。110项单测及两版GPU smoke通过，config与原Full完全相同。
+- 下一步等待三组完整结束；检查240epochs/13950updates/skipped0和自动`ensemble_comparison.json`，
+  同步结果分析。若同seed两Full相同，应明确报告退化为重复模型，不能作为独立随机集成的反证。
 
 ## 当前执行：Full+Full固定正式test对照（2026-09-04）
 

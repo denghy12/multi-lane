@@ -8,6 +8,14 @@
 - 远程GPU0--7均空闲；计划GPU0/1/2。原seed0 c9fa74c及seed1/2 d2442ee工作树clean，
   直接复用其未经修改的正式训练入口；test-only仅只读检查，原改动保留。
 - 先推送调度分支、独立worktree完整单测、source审计与两版GPU smoke，通过后启动并自动汇总。
+- `20dae80`已推送并创建独立调度工作树`multi-lane-main-same-seed-full-full`，完整110项单测、
+  原六组test source审计、原c9fa74c/d2442ee GPU Adapter-ASL smoke全通过。
+- 批次`same_seed_full_full_test_20260904_122941`在tmux `multilane_same_seed_full_full_122941`
+  启动；GPU0/1/2跑seed0/1/2，三份config与对应历史Full完全相同（含commit/branch/tree/dirty）。
+  task0首轮均84steps/skipped0，loss分别0.61478711/0.61898424/0.61532042，无OOM/非有限异常。
+- Automatic Upload再次上传6份文件，逐文件SHA一致后备份到
+  `/mnt/haoyuan/workspace/git-sync-backup-same-seed-full-full-uD5CDy`并恢复primary clean；test-only未改。
+- 运行中不更新训练源或调度worktree；只提交本地运行记录。最终结果尚未产生，不进行完成宣称。
 
 ## 2026-09-04：补固定Full+Full正式test对照
 

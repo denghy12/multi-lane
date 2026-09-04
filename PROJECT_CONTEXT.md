@@ -12,6 +12,14 @@ BCE+Adapter ASL9.8/0/0.05、AMP/TF32 on、Full crop0.05、无checkpoint。先完
 调度结果写入`output/emotic_track_a_same_seed_full_full/`、日志写入`logs/`；完成后自动比较原同seed
 Full+Person、记录两次Full逐task logits/probability差异及训练轨迹。不运行新Person或其他候选。
 
+实现`20dae80`已推送，独立调度工作树`/mnt/haoyuan/workspace/multi-lane-main-same-seed-full-full`
+通过110项完整单测、六组历史score审计及c9fa74c/d2442ee两版Adapter GPU smoke。批次
+`same_seed_full_full_test_20260904_122941`、tmux `multilane_same_seed_full_full_122941`已启动，
+GPU0/1/2分别为seed0/1/2。三份新config与对应原Full逐字段（含Git元数据）完全相同，
+task0首轮均84 steps/skipped0、loss有限；目前训练中，尚无最终test对照结果。
+Automatic Upload匹配副本已校验备份至`/mnt/haoyuan/workspace/git-sync-backup-same-seed-full-full-uD5CDy`，
+primary恢复clean；运行中的原source及调度工作树不更新提交，test-only未改动。
+
 ## 最新状态：2026-09-04 Full+Full固定正式test对照
 
 用户要求补齐此前仅validation的Full+Full正式test。新分支`codex/full-full-locked-test`，
