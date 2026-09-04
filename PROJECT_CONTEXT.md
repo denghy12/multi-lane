@@ -1,5 +1,17 @@
 # 项目上下文
 
+## 最新执行：严格同seed Full+Full正式test重复对照（2026-09-04）
+
+用户要求对标同seed Full+Person的32.8263±0.4025。新分支`codex/same-seed-full-full-test`，
+分别真实重训第二个Full_seed0/1/2，与原同seed Full按0.8/0.2融合，不将同一预测复制作为新实验。
+保持完全相同的全局seed、训练参数及source提交：seed0使用clean c9fa74c，seed1/2使用clean d2442ee。
+这属于严格重复性对照，两次Full可能相同/极接近；不是独立随机初始化集成，不改变seed制造多样性。
+新增3卡调度器、独立同seed汇总器和3项回归。GPU0/1/2各一组，完整8-task/30epochs、batch64、
+main LR0.0125、cosine/min0/no warmup、Image-token layer1/b32/LR4e-4/scale0.1/ReLU/independent、
+BCE+Adapter ASL9.8/0/0.05、AMP/TF32 on、Full crop0.05、无checkpoint。先完整单测及两版source GPU smoke。
+调度结果写入`output/emotic_track_a_same_seed_full_full/`、日志写入`logs/`；完成后自动比较原同seed
+Full+Person、记录两次Full逐task logits/probability差异及训练轨迹。不运行新Person或其他候选。
+
 ## 最新状态：2026-09-04 Full+Full固定正式test对照
 
 用户要求补齐此前仅validation的Full+Full正式test。新分支`codex/full-full-locked-test`，

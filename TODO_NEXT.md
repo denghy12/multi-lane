@@ -1,5 +1,14 @@
 # 下一步任务
 
+## 当前执行：严格同seed Full第二次训练（2026-09-04）
+
+- 用户已要求对标同seed双视图32.8263±0.4025；真实重训Full seed0/1/2，各自与原Full同global seed、
+  同参数、同source提交。不能直接复制同一预测，也不擅自引入不同初始化/增强seed。
+- 完整单测和原source Adapter GPU smoke后，在GPU0/1/2启动三组完整8-task正式test。
+- 完成后自动汇总0.8/0.2同seed Full+Full并对照旧Full+Person，审计概率差异及除耗时外的训练轨迹。
+- 同seed同视图可能退化为重复模型；需要按实际结果报告，不承诺集成增益。此前循环seed对照仍保留。
+- 不搜索test权重、配对或新参数，不启动Person条件Selector。
+
 ## 当前执行：Full+Full固定正式test对照（2026-09-04）
 
 - 用户已要求执行。复用三种子完整test scores，新增独立入口；完整单测通过后仅CPU离线评估。

@@ -1,5 +1,14 @@
 # 工作日志
 
+## 2026-09-04：启动严格同seed Full+Full重复对照开发
+
+- 从5da49fd创建`codex/same-seed-full-full-test`。用户要求对标原同seed Full+Person正式结果；
+  已说明两个Full使用同global seed可能训练成相同模型，仍按请求真实重训三组，不用复制预测代替。
+- 新增同seed比较入口、3卡调度脚本及3项回归；配置及原source提交完全匹配，计算预测/训练轨迹差异。
+- 远程GPU0--7均空闲；计划GPU0/1/2。原seed0 c9fa74c及seed1/2 d2442ee工作树clean，
+  直接复用其未经修改的正式训练入口；test-only仅只读检查，原改动保留。
+- 先推送调度分支、独立worktree完整单测、source审计与两版GPU smoke，通过后启动并自动汇总。
+
 ## 2026-09-04：补固定Full+Full正式test对照
 
 - 用户要求将此前validation的等预算Full+Full对照补成test；从clean f1f1308创建
