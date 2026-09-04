@@ -1299,3 +1299,12 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   门控参数的测试。额外记录权重分布和分split的current BCE/mAP诊断，但不改变任何参数或选优门槛。
 - 补跑脚本只读取既有六组source scores和compact states，使用新输出目录；不重训基础模型、不覆盖
   失败目录，三种子validation通过后才有条件执行一次锁定test。
+- 修复后102项完整测试、真实train/val全部ID覆盖、GPU smoke及保存的Full/Person task7首批64样本
+  compact-state恢复概率精确一致检查通过。补跑`learned_gate_split_fix_20260904_113753`在clean
+  `2ee06fb`完成原定8候选×3seed×8task，192份gate state与selection哈希通过，原180个source文件不变。
+- 无候选合格且所有final val mAP均值均低固定0.20的43.107346；最高h16/prior1.0为43.106145，
+  差-0.001201。程序正常跳过test。task6强prior3权重均值近0.20（std0.00041--0.00131）；弱prior0.1
+  学到变化但三类AP未稳定迁移。24组task6 calibration BCE均降低，却有17组validation三类mAP下降。
+- 新结果202文件同步并逐文件SHA-256一致，报告位于
+  `output/emotic_track_a_learned_reliability_gate/20260904_113753/analysis.md`。本轮结束，保留固定融合，
+  不扩MLP/新比例、不放宽门槛、不运行test。

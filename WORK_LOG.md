@@ -2940,3 +2940,17 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - 新增resume脚本只复用20260904_021636六组已完成source runs。hidden8/16、prior0.1/0.3/1/3、
   80 epochs/task、batch64、AdamW1e-3/WD1e-4、范围0.10--0.35及0.20先验、三seed选优规则均不变。
 - 本地静态编译/shell语法/diff检查通过；下一步Git-only新worktree验证与补跑。
+- 实现146145b已推送，新建独立worktree`/mnt/haoyuan/workspace/multi-lane-main-learned-gate-routing-fix`。
+  首轮测试仅新合成夹具遗漏source config导致失败；补全提交2ee06fb后102项完整测试通过。
+- 真实train16,001/val2,397 geometry与三seed全部scores ID覆盖通过，未读test；GPU smoke通过。
+  对原保存的seed0 Full/Person task7 compact states恢复，val首批64样本的概率逐元素完全等于原dump。
+- batch`learned_gate_split_fix_20260904_113753`在tmux`multilane_gate_resume_20260904_113753`完成。
+  仅训练8种原定门控、每种3seed/8task，六个source不重训且180原文件哈希完全不变。
+- 8候选均不合格，均值最高h16/prior1.0 final val mAP43.106145±0.840327，低固定对照
+  43.107346±0.831960约0.001201；所有候选均值下降0.0012--0.0116。程序正常test_skipped，无test导出。
+- task6共24候选/seed均改善calibration BCE，但15组validation BCE恶化、17组三类validation mAP下降；
+  seed1/2所有候选的三类val mAP均下降。强prior3的6组task6里5组std<0.001，近似固定0.20。
+- task7均值最高候选新3类AP平均提高0.0064、旧23类下降0.0022，提示共享gate当前类监督与旧类排序
+  的耦合；只作机制诊断，不改选优规则，不宣称极小差值具有统计显著性。
+- control196/logs2/preflight4共202文件同步本地并逐文件SHA匹配，192个gate states与selection记录
+  哈希一致。完整报告/审计JSON位于`output/emotic_track_a_learned_reliability_gate/20260904_113753/`。
