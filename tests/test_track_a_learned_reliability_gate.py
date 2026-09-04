@@ -102,6 +102,14 @@ class LearnedReliabilityGateTest(unittest.TestCase):
              patch.object(module, "GATE_EPOCHS_PER_TASK", 1), \
              patch.object(module, "GATE_HIDDEN_DIMS", (8,)), \
              patch.object(module, "PRIOR_STRENGTHS", (.1,)):
+            for seed, pair in pairs.items():
+                for view in ("full", "person"):
+                    source = Path(directory) / f"seed{seed}_{view}"
+                    source.mkdir()
+                    (source / "config.json").write_text(
+                        json.dumps({"seed": seed, "view": view}), encoding="utf-8"
+                    )
+                    setattr(pair, view + "_run", source)
             result = module.select_gate(pairs, train, val, Path(directory))
         self.assertFalse(result["test_accessed"])
         self.assertEqual(result["geometry_splits"], {"calibration": "train", "validation": "val"})
