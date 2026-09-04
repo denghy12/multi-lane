@@ -1,5 +1,13 @@
 # 工作日志
 
+## 2026-09-04：补固定Full+Full正式test对照
+
+- 用户要求将此前validation的等预算Full+Full对照补成test；从clean f1f1308创建
+  `codex/full-full-locked-test`。只复用已有六组正式预测，保持0.8/0.2、threshold0.5和循环seed配对。
+- 提取固定比较共用逻辑，新增独立test审计/入口及5项回归；validation入口仍禁止test。
+- 来源必须完整240epochs/13950updates/skipped0、clean commit，逐task重建原指标并核对split IDs。
+- 计划Git-only推送后创建独立服务器worktree，完整单测通过再离线评估，无训练/GPU推理需求。
+
 最后一次更新：2026-09-04。
 
 ## 2026-09-03：开发统计一致性修复与等计算量validation对照

@@ -69,18 +69,24 @@ def _stats(values):
 
 
 def compare_ensembles(full_runs, person_runs):
+    return _compare_ensembles(full_runs, person_runs, audit_validation_run, 'val')
+
+
+def _compare_ensembles(full_runs, person_runs, audit_run, split):
+    """Shared fixed arithmetic; public entry points enforce split-specific audits."""
     if len(full_runs) != 3 or len(person_runs) != 3:
-        raise ValueError('Exactly three full and three person validation runs are required')
+        raise ValueError('Exactly three full and three person runs are required')
     indexed, configs, sources = {}, {}, []
     for view, paths in (('full', full_runs), ('person_crop', person_runs)):
         reference = None
         for run in paths:
-            config, dumps, rows = audit_validation_run(run, view)
+            config, dumps, rows = audit_run(run, view)
             key = (view, config['seed'])
             if key in indexed:
                 raise ValueError('Duplicate seed/view input')
             comparable = {k: v for k, v in config.items() if k not in ('seed', 'git')}
-            comparable['evaluation_score_purpose'] = 'validation_search'
+            if split == 'val':
+                comparable['evaluation_score_purpose'] = 'validation_search'
             if reference is not None and comparable != reference:
                 raise ValueError(f'Per-view configuration drift for {view}')
             reference = comparable
@@ -113,7 +119,7 @@ def compare_ensembles(full_runs, person_runs):
         paired[label] = {metric: _stats([a['metrics'][metric]-b['metrics'][metric]
                                         for a, b in zip(groups[treatment], groups[control])]) for metric in METRICS}
     return {
-        'schema_version': 1, 'evaluation_split': 'val', 'search_performed': False,
+        'schema_version': 1, 'evaluation_split': split, 'search_performed': False,
         'rule': {'mode': 'probability', 'primary_weight': 0.8, 'auxiliary_weight': 0.2, 'threshold': 0.5},
         'seeds': [0, 1, 2], 'auxiliary_seed_mapping': [[0, 1], [1, 2], [2, 0]], 'std_ddof': 1,
         'sources': sources, 'groups': groups,

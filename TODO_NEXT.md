@@ -1,5 +1,14 @@
 # 下一步任务
 
+## 当前执行：Full+Full固定正式test对照（2026-09-04）
+
+- 用户已要求执行。复用三种子完整test scores，新增独立入口；完整单测通过后仅CPU离线评估。
+- Full_s+Full_next与Full_s+Person_next使用相同next=(1,2,0)、固定0.8/0.2和阈值0.5。
+- 核对原Full、Person、同seed融合锚点，报告final/average mAP、8-task曲线、F1、forgetting和来源哈希。
+- 不重训、不搜索test、不启动Person-guided Selector；循环配对不视为独立重复显著性检验。
+- 输出与日志：`output/emotic_track_a_ensemble_control_test/`及`logs/`；结果同步后分析。
+- 以下旧任务描述按历史记录阅读，不代表仍待执行。
+
 最后一次更新：2026-09-04。
 
 ## 当前最高优先级：实现统计修复并启动固定权重validation归因对照

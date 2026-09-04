@@ -1,5 +1,14 @@
 # 项目上下文
 
+## 最新状态：2026-09-04 Full+Full固定正式test对照
+
+用户要求补齐此前仅validation的Full+Full正式test。新分支`codex/full-full-locked-test`，
+复用原seed0/1/2已保存的Full和Person test预测，不重训或新增推理。固定probability 0.8/0.2、
+threshold0.5、循环辅助seed映射0→1/1→2/2→0；同步报告matched Full+Person及同seed旧融合锚点。
+新增独立test入口及回归，validation入口仍拒绝test。不搜索权重、配对、阈值或挑选test赢家。
+先完整单测，再服务器独立worktree离线评估；source逐task指标/类别AP和ID审计、记录SHA-256。
+下方原顶部及后续条目保留历史时间线；本节为当前执行状态。
+
 最后一次更新：2026-09-04；当前本地分支为`exp/emotic-constrained-gated-fusion`。
 用户已要求在三种子validation上搜索Full/Person全局概率权重、完成bbox可靠性分层，并尝试跨三个seed
 方向一致的强约束类别/几何门控；validation锁定后只允许一次正式test评估。当前从`343ddca`创建
