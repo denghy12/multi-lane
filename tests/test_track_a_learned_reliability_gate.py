@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 import numpy as np
@@ -24,6 +25,7 @@ from multi_lane.track_a.learned_reliability_gate import (
 from multi_lane.track_a.runner import (
     compact_model_state_dict,
     fit_calibration_indices,
+    TASK_SIZES,
 )
 from multi_lane.track_a.search_constrained_gated_fusion import Geometry
 
@@ -46,6 +48,89 @@ class TinyRestorableModel(nn.Module):
 
 
 class LearnedReliabilityGateTest(unittest.TestCase):
+    def test_original_parameter_grid_is_unchanged(self):
+        import multi_lane.track_a.learned_reliability_gate as module
+        self.assertEqual(module.GATE_HIDDEN_DIMS, (8, 16))
+        self.assertEqual(module.PRIOR_STRENGTHS, (.1, .3, 1.0, 3.0))
+        self.assertEqual((module.GATE_EPOCHS_PER_TASK, module.GATE_BATCH_SIZE), (80, 64))
+        self.assertEqual((module.GATE_LEARNING_RATE, module.GATE_WEIGHT_DECAY), (1e-3, 1e-4))
+        self.assertEqual((MIN_PERSON_WEIGHT, MAX_PERSON_WEIGHT, ANCHOR_PERSON_WEIGHT), (.1, .35, .2))
+
+    @staticmethod
+    def synthetic_pair(seed=0):
+        from multi_lane.track_a.learned_reliability_gate import EndpointPair
+        tasks = {"train": [], "val": []}
+        geometry = {"train": {}, "val": {}}
+        rng = np.random.RandomState(17 + seed)
+        for split in tasks:
+            for task in range(8):
+                width = sum(TASK_SIZES[:task + 1])
+                ids = np.asarray([f"{split}:image{task}_{i}#person=0" for i in range(12)])
+                targets = np.asarray([[(i+j) % 3 == 0 for j in range(width)]
+                                      for i in range(12)], dtype=np.float32)
+                full = rng.uniform(.1, .9, targets.shape).astype(np.float32)
+                person = rng.uniform(.1, .9, targets.shape).astype(np.float32)
+                tasks[split].append((ids, targets, full, person))
+                geometry[split].update({str(i): Geometry(.2, 1.5, 2, "unused") for i in ids})
+        return EndpointPair(seed, Path("full"), Path("person"), tasks["val"],
+                            tasks["train"], []), geometry["train"], geometry["val"]
+
+    def test_selection_metadata_loads_train_and_val_but_never_test(self):
+        import multi_lane.track_a.learned_reliability_gate as module
+        with patch.object(module, "resolve_dataset_parent", return_value=Path("data")), \
+             patch.object(module, "load_geometry", side_effect=[{"train": 1}, {"val": 2}]) as load:
+            train, val = module.load_selection_geometry(Path("data/EMOTIC"))
+        self.assertEqual(train, {"train": 1})
+        self.assertEqual(val, {"val": 2})
+        self.assertEqual([call.args[1] for call in load.call_args_list], ["train", "val"])
+
+    def test_missing_validation_geometry_fails_before_any_gate_training(self):
+        import multi_lane.track_a.learned_reliability_gate as module
+        pair, train, val = self.synthetic_pair()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with self.assertRaisesRegex(ValueError, "Missing geometry for val:"):
+                module.select_gate({0: pair}, train, {}, root)
+            self.assertFalse((root / "gate_states").exists())
+
+    def test_eight_task_selection_with_disjoint_split_ids(self):
+        import multi_lane.track_a.learned_reliability_gate as module
+        pairs = {}
+        for seed in range(3):
+            pairs[seed], train, val = self.synthetic_pair(seed)
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(module, "GATE_EPOCHS_PER_TASK", 1), \
+             patch.object(module, "GATE_HIDDEN_DIMS", (8,)), \
+             patch.object(module, "PRIOR_STRENGTHS", (.1,)):
+            result = module.select_gate(pairs, train, val, Path(directory))
+        self.assertFalse(result["test_accessed"])
+        self.assertEqual(result["geometry_splits"], {"calibration": "train", "validation": "val"})
+        self.assertFalse(result["diagnostics_affect_selection"])
+        candidate = result["candidates"][0]
+        self.assertEqual([len(row["task_metrics"]) for row in candidate["seeds"]], [8, 8, 8])
+        expected = all(row["metrics"]["final_mAP"] >= anchor["metrics"]["final_mAP"]
+                       for row, anchor in zip(candidate["seeds"], result["fixed_0.20_anchor"]["seeds"]))
+        self.assertEqual(candidate["eligible_each_seed_vs_fixed_0.20"], expected)
+        diagnostics = candidate["seeds"][0]["training"][6]["diagnostics"]
+        self.assertIn("weight_std", diagnostics["validation"])
+        self.assertEqual(len(diagnostics["calibration"]["current_positive_support"]), 3)
+
+    def test_validation_labels_never_change_trained_gate_states(self):
+        import multi_lane.track_a.learned_reliability_gate as module
+        pair, train, val = self.synthetic_pair()
+        with tempfile.TemporaryDirectory() as directory, patch.object(module, "GATE_EPOCHS_PER_TASK", 1):
+            roots = [Path(directory)/name/"gate_states" for name in ("a", "b")]
+            for root in roots:
+                root.mkdir(parents=True)
+            first = module._train_one_seed_candidate(pair, train, val, 8, .1, roots[0])
+            pair.validation_tasks = [(ids, 1-targets, full, person)
+                                     for ids, targets, full, person in pair.validation_tasks]
+            second = module._train_one_seed_candidate(pair, train, val, 8, .1, roots[1])
+            for a, b in zip(first["training"], second["training"]):
+                state_a = torch.load(roots[0].parent/a["state_path"], map_location="cpu")["model"]
+                state_b = torch.load(roots[1].parent/b["state_path"], map_location="cpu")["model"]
+                self.assertTrue(all(torch.equal(state_a[key], state_b[key]) for key in state_a))
+
     def test_calibration_partition_is_stable_disjoint_and_view_independent(self):
         ids = [
             f"train/image{index}.jpg#person={person}"

@@ -1287,3 +1287,15 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   `multilane_learned_gate_20260904_021636`启动，GPU0--5分别运行3 seeds×Full/Person。6份config
   均为clean`65d3ca4`且协议审计通过；task0首轮均76 steps、skipped0，显存安全、无错误。launcher
   将在validation结束后自动执行门控选择，只有通过三种子硬门槛才导出一次锁定test。
+- 结果同步后确认：六组基础训练已完成（各240 epochs/12,660 updates/skipped0），但门控入口仅加载
+  train geometry，第一次val评估因缺少val sample ID中断。只有h8/prior0.1/seed0/task0状态，没有
+  selection或test；不能判断学习型门控有效性。197个原始产物（含48份compact states）已同步并逐文件
+  SHA-256匹配，详见`output/emotic_track_a_learned_reliability_gate/20260904_021636/analysis.md`。
+- 同批固定0.20融合final validation mAP为42.4101/44.0283/42.8836，均值43.1073±0.8320；相对Full
+  配对提高0.7971/0.6679/0.7239。下一步只修train/val元数据路由与集成测试，复用已完成基础模型补跑
+  门控；本次分析未启动新训练/test，也未改业务代码。
+- 用户随后授权修复并补跑，创建`codex/fix-learned-gate-split-routing`。选择入口显式分离train/val
+  geometry并在训练前检查所有ID覆盖；新增不同split的8-task回归测试及validation标签改变不影响
+  门控参数的测试。额外记录权重分布和分split的current BCE/mAP诊断，但不改变任何参数或选优门槛。
+- 补跑脚本只读取既有六组source scores和compact states，使用新输出目录；不重训基础模型、不覆盖
+  失败目录，三种子validation通过后才有条件执行一次锁定test。

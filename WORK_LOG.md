@@ -2917,3 +2917,26 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - 6份config全部记录clean`65d3ca4`，seed0/1/2×full/person_crop无缺失；图像组calibration0.10、
   validation_search、compact state开启、完整checkpoint关闭及冠军模型参数均正确。task0 cycle1全部
   76 steps、skipped0，显存约2.0--2.5GB，错误扫描为空。当前继续运行，不启动重复batch。
+
+## 2026-09-04：同步learned gate基础结果并诊断中断
+
+- 六个source run全部complete，240 epochs/12,660 updates/skipped0，val/calibration概率重算和两视图
+  ID/target对齐通过。197个原始文件（sources180/control9/logs8）同步本地，逐文件SHA-256一致。
+- 门控select入口只载入train geometry，首个候选h8_prior0p1在seed0/task0的val特征提取时报Missing
+  geometry；只有一份task0门控状态，未形成完整候选或selection，未触发test。这是前次实现的集成缺陷。
+- 本次只复算固定Full0.8/Person0.2，不搜索新权重。final validation均值Full42.3777±0.8938、
+  Person37.6004±0.2742、固定融合43.1073±0.8320；配对平均提高0.7296，8个task平均增益均正。
+- task6 calibration仅51样本，三类正例22/24/17；应保留强正则，补跑后再判断门控是否学到可靠性。
+- 报告及原始产物位于`output/emotic_track_a_learned_reliability_gate/20260904_021636/`。
+  本次未修业务代码或启动补跑；下一步建议分离train/val geometry、增加不同split ID的集成测试，
+  复用全部source scores/compact states，仅补原定门控阶段，保留失败输出，不重训六组模型。
+
+## 2026-09-04：修复learned gate train/val metadata路由
+
+- 用户授权后创建`codex/fix-learned-gate-split-routing`，保留并一并纳入上轮结果分析文档。
+- calibration/validation geometry分开传递；选择前验证train/val sample ID前缀与覆盖，不读取test几何。
+- 新增回归：不同split ID的8-task选择、缺val元数据提前失败、只加载train/val、改val标签不改变任一
+  task gate state、原参数网格不变。补充每task两split权重均值/std/分位数和current BCE/mAP对照诊断。
+- 新增resume脚本只复用20260904_021636六组已完成source runs。hidden8/16、prior0.1/0.3/1/3、
+  80 epochs/task、batch64、AdamW1e-3/WD1e-4、范围0.10--0.35及0.20先验、三seed选优规则均不变。
+- 本地静态编译/shell语法/diff检查通过；下一步Git-only新worktree验证与补跑。

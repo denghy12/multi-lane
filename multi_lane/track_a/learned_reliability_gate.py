@@ -23,6 +23,7 @@ from .runner import (
     TASK_SIZES,
     TaskMetrics,
     compute_metrics,
+    average_precision,
     resolve_dataset_parent,
     summarize_tasks,
     task_indices,
@@ -323,7 +324,8 @@ def _fused_metrics(
 
 def _train_one_seed_candidate(
     pair: EndpointPair,
-    geometry: Mapping[str, Geometry],
+    calibration_geometry: Mapping[str, Geometry],
+    validation_geometry: Mapping[str, Geometry],
     hidden_dim: int,
     prior_strength: float,
     state_root: Path,
@@ -338,7 +340,7 @@ def _train_one_seed_candidate(
     for task_id in range(len(TASK_SIZES)):
         sample_ids, targets, full_probs, person_probs = pair.calibration_tasks[task_id]
         features = torch.from_numpy(
-            gate_features(sample_ids, full_probs, person_probs, geometry)
+            gate_features(sample_ids, full_probs, person_probs, calibration_geometry)
         )
         full_tensor = torch.from_numpy(full_probs)
         person_tensor = torch.from_numpy(person_probs)
@@ -367,6 +369,8 @@ def _train_one_seed_candidate(
                     ((weights - ANCHOR_PERSON_WEIGHT) / (MAX_PERSON_WEIGHT - MIN_PERSON_WEIGHT)) ** 2
                 )
                 loss = data_loss + float(prior_strength) * prior_loss
+                if not torch.isfinite(loss):
+                    raise FloatingPointError("Non-finite reliability gate objective")
                 optimizer.zero_grad(set_to_none=True)
                 loss.backward()
                 optimizer.step()
@@ -386,7 +390,7 @@ def _train_one_seed_candidate(
         )
         val_ids, val_targets, val_full, val_person = pair.validation_tasks[task_id]
         val_features = torch.from_numpy(
-            gate_features(val_ids, val_full, val_person, geometry)
+            gate_features(val_ids, val_full, val_person, validation_geometry)
         )
         with torch.no_grad():
             val_weights = gate(val_features).numpy()
@@ -405,6 +409,14 @@ def _train_one_seed_candidate(
                 "calibration_weight_std": float(calibration_weights.std()),
                 "calibration_weight_min": float(calibration_weights.min()),
                 "calibration_weight_max": float(calibration_weights.max()),
+                "diagnostics": {
+                    "calibration": gate_diagnostics(
+                        targets, full_probs, person_probs, calibration_weights, current
+                    ),
+                    "validation": gate_diagnostics(
+                        val_targets, val_full, val_person, val_weights, current
+                    ),
+                },
                 "state_path": str(state_path.relative_to(state_root.parent)),
                 "state_sha256": _sha256(state_path),
             }
@@ -429,11 +441,65 @@ def _fixed_anchor(pair: EndpointPair) -> Dict[str, Any]:
     }
 
 
+def gate_diagnostics(targets, full, person, weights, current):
+    """Reporting only: these values never influence optimization or selection."""
+    fused = (1.0 - weights[:, None]) * full + weights[:, None] * person
+    anchor = (1.0 - ANCHOR_PERSON_WEIGHT) * full + ANCHOR_PERSON_WEIGHT * person
+    target = targets[:, current]
+    def metrics(probabilities):
+        selected = probabilities[:, current]
+        clipped = np.clip(selected, 1e-6, 1.0 - 1e-6)
+        return {
+            "current_BCE": float(np.mean(-target * np.log(clipped)
+                                         - (1.0 - target) * np.log(1.0 - clipped))),
+            "current_mAP": float(np.mean([
+                100.0 * average_precision(selected[:, j], target[:, j])
+                for j in range(len(current))
+            ])),
+        }
+    return {
+        "samples": len(targets),
+        "current_positive_support": target.sum(axis=0).tolist(),
+        "weight_mean": float(weights.mean()),
+        "weight_std": float(weights.std()),
+        "weight_min": float(weights.min()),
+        "weight_max": float(weights.max()),
+        "weight_quantiles_05_50_95": np.quantile(weights, [0.05, 0.50, 0.95]).tolist(),
+        "near_constant_std_lt_0.001": bool(weights.std() < 0.001),
+        "mean_absolute_distance_from_0.20": float(np.abs(weights - ANCHOR_PERSON_WEIGHT).mean()),
+        "gate": metrics(fused),
+        "fixed_0.20": metrics(anchor),
+    }
+
+
+def load_selection_geometry(data_root: Path):
+    """Load feature metadata only for the two explicitly allowed selection splits."""
+    parent = resolve_dataset_parent(data_root)
+    return load_geometry(parent, "train"), load_geometry(parent, "val")
+
+
+def validate_geometry_coverage(pairs, calibration_geometry, validation_geometry):
+    for pair in pairs.values():
+        for split, tasks, geometry in (
+            ("train", pair.calibration_tasks, calibration_geometry),
+            ("val", pair.validation_tasks, validation_geometry),
+        ):
+            if len(tasks) != len(TASK_SIZES):
+                raise ValueError(f"Incomplete {split} task scores")
+            for ids, targets, full, person in tasks:
+                if any(not str(sample_id).startswith(split + ":") for sample_id in ids):
+                    raise ValueError(f"Unexpected sample split in {split} scores")
+                # Check all IDs and finite features before creating any gate states.
+                gate_features(ids, full, person, geometry)
+
+
 def select_gate(
     pairs: Mapping[int, EndpointPair],
-    geometry: Mapping[str, Geometry],
+    calibration_geometry: Mapping[str, Geometry],
+    validation_geometry: Mapping[str, Geometry],
     output_dir: Path,
 ) -> Dict[str, Any]:
+    validate_geometry_coverage(pairs, calibration_geometry, validation_geometry)
     state_root = output_dir / "gate_states"
     state_root.mkdir(parents=True, exist_ok=False)
     anchors = [_fixed_anchor(pairs[seed]) for seed in range(3)]
@@ -445,7 +511,8 @@ def select_gate(
         for prior_strength in PRIOR_STRENGTHS:
             seed_rows = [
                 _train_one_seed_candidate(
-                    pairs[seed], geometry, hidden_dim, prior_strength, state_root
+                    pairs[seed], calibration_geometry, validation_geometry,
+                    hidden_dim, prior_strength, state_root
                 )
                 for seed in range(3)
             ]
@@ -462,6 +529,13 @@ def select_gate(
                     "seeds": seed_rows,
                     "aggregate": _aggregate(seed_rows),
                 }
+            )
+            print(
+                "GATE_CANDIDATE_COMPLETE",
+                _candidate_id(hidden_dim, prior_strength),
+                [row["metrics"]["final_mAP"] for row in seed_rows],
+                f"eligible={eligible}",
+                flush=True,
             )
     eligible = [
         candidate
@@ -484,6 +558,8 @@ def select_gate(
         "schema_version": 1,
         "selection_split": "val",
         "test_accessed": False,
+        "geometry_splits": {"calibration": "train", "validation": "val"},
+        "diagnostics_affect_selection": False,
         "method": "shared_sample_level_full_person_reliability_gate",
         "feature_names": list(FEATURE_NAMES),
         "person_weight_bounds": [MIN_PERSON_WEIGHT, MAX_PERSON_WEIGHT],
@@ -685,8 +761,8 @@ def main() -> None:
             raise FileExistsError(args.output_dir)
         args.output_dir.mkdir(parents=True)
         pairs = load_endpoint_pairs(args.full_runs, args.person_runs)
-        geometry = load_geometry(resolve_dataset_parent(args.data_root), "train")
-        result = select_gate(pairs, geometry, args.output_dir)
+        calibration_geometry, validation_geometry = load_selection_geometry(args.data_root)
+        result = select_gate(pairs, calibration_geometry, validation_geometry, args.output_dir)
         output = args.output_dir / "validation_selection.json"
         with output.open("x", encoding="utf-8") as handle:
             json.dump(result, handle, indent=2, ensure_ascii=False)

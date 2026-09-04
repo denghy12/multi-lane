@@ -718,3 +718,11 @@ VOC 对照实验，不应在现阶段合并到 `main`。
 52. batch`learned_reliability_gate_seed012_20260904_021636`已正常启动且6份config/首轮通过审计。
     当前只等待，不重复启动、不修改运行worktree。完成后先核验6×240 epochs、每task calibration/
     val score与compact state、skipped0和错误日志，再读取validation selection；未通过门槛不得test。
+53. 已结束但非全流程成功：六组source训练完整，门控因train-only geometry缺少val ID中断，test未执行。
+    原始产物已同步且哈希一致；固定融合final val均值43.1073，比同批Full高0.7296。不要重训基础模型。
+54. 待修：显式分离train/val几何输入，预检ID覆盖；增加不同split ID且禁止test访问的端到端测试。
+    然后用新目录补原定8候选×3 seeds门控validation。当前仅完成结果分析，业务修复/补跑尚未执行。
+55. 用户已授权补跑，修复分支`codex/fix-learned-gate-split-routing`已实现分split几何路由与5项回归
+    检查。先提交推送、服务器新建clean独立worktree并跑完整测试，再用resume脚本只补门控阶段。
+56. 补跑后报告8候选三seed完整曲线；尤其task6/7校准与validation的相对固定0.20增益，以及权重std/
+    分位数/锚点距离。近常数标记仅作诊断，不新增否决门槛；通过既有规则才执行锁定test。
