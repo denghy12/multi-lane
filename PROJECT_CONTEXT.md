@@ -9,6 +9,16 @@ threshold0.5、循环辅助seed映射0→1/1→2/2→0；同步报告matched Ful
 先完整单测，再服务器独立worktree离线评估；source逐task指标/类别AP和ID审计、记录SHA-256。
 下方原顶部及后续条目保留历史时间线；本节为当前执行状态。
 
+已完成：clean实现`c54e330`通过107项完整单测，服务器独立`multi-lane-main-full-full-test`仅CPU离线
+计算。Full+Full test为`32.6551 ± 0.2622`（32.9567/32.5271/32.4815）；匹配辅助seed的Full+Person
+为`32.7957 ± 0.2378`，配对净增益`+0.1110/+0.1656/+0.1453`，平均`+0.1406`，24个task配对均正。
+同seed旧融合`32.8263 ± 0.4025`逐字段精确复现；不能把其与Full+Full的差0.1712当作匹配辅助归因。
+Full+Full相对单Full平均增加0.4989，人物视图仍有额外收益但小于validation的0.3281；forgetting
+相对Full+Full平均恶化0.0421。结果/日志已同步，JSON SHA一致，source66个文件哈希记录完整。
+详见`output/emotic_track_a_ensemble_control_test/full_full_locked_test_20260904/analysis.md`。
+无新训练/推理/test搜索。Automatic Upload匹配副本备份到`git-sync-backup-full-full-test-S0yRpG`；
+primary恢复clean，test-only保持不变。Person条件Selector仍未启动。
+
 最后一次更新：2026-09-04；当前本地分支为`exp/emotic-constrained-gated-fusion`。
 用户已要求在三种子validation上搜索Full/Person全局概率权重、完成bbox可靠性分层，并尝试跨三个seed
 方向一致的强约束类别/几何门控；validation锁定后只允许一次正式test评估。当前从`343ddca`创建

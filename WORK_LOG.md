@@ -7,6 +7,15 @@
 - 提取固定比较共用逻辑，新增独立test审计/入口及5项回归；validation入口仍禁止test。
 - 来源必须完整240epochs/13950updates/skipped0、clean commit，逐task重建原指标并核对split IDs。
 - 计划Git-only推送后创建独立服务器worktree，完整单测通过再离线评估，无训练/GPU推理需求。
+- 实现`c54e330`已推送，独立`multi-lane-main-full-full-test`全套107项单测通过；六组48份真实score
+  审计通过，离线固定test评估成功。Full+Full为32.6551±0.2622；匹配辅助Full+Person为
+  32.7957±0.2378，平均净增益0.1406，三个配对和24个task均为正；forgetting平均恶化0.0421。
+- 原同seed Full+Person的全部task和summary指标与历史结果逐字段相同，未重训或改写source。
+- 本地同步JSON及两份日志，结果JSON SHA-256为
+  `c0ab17c2ee9ec21ca675f8f532b2eeda85fc021b5f2de6db6e7c32a44d4e0a25`。详细分析保存于
+  `output/emotic_track_a_ensemble_control_test/full_full_locked_test_20260904/analysis.md`。
+- Automatic Upload写入6份本轮文件；逐项SHA一致后，备份到
+  `/mnt/haoyuan/workspace/git-sync-backup-full-full-test-S0yRpG`并恢复primary clean；test-only未修改。
 
 最后一次更新：2026-09-04。
 
