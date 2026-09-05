@@ -11,8 +11,9 @@
 - 固定实验：EMOTIC/seed0/100%train/8 tasks/30ep/task/batch64/main LR0.0125/cosine；Image-token
   layer1/b32/LR4e-4/scale0.1/ReLU/independent；主BCE+Adapter ASL9.8/0/0.05；AMP/TF32；无checkpoint。
 - 因val/test训练耗时相同，用户要求直接test。本轮是结构探索，不依据test继续搜索crop/条件层/MLP参数。
-- 本地127项全测与静态检查已通过。下一步提交推送，服务器新独立worktree执行全测、真实EMOTIC
-  transform smoke及`disabled/person_patches` Adapter GPU smoke；通过后在4张空闲GPU并行启动。
+- 本地与服务器127项全测、服务器真实EMOTIC transform smoke已通过；代码第一提交`5166a54`。
+  服务器GPU当前全忙，下一步由安全等待脚本在4张GPU同时空闲后自动执行disabled/person_patches
+  Adapter GPU smoke，通过后立即4卡并行启动，不与当前未知训练叠加。
 - 完成后比较四组final/average/task5--7 mAP和逐task曲线，分离target-aware主效应、patch主效应与交互；
   只有person_patches超过同crop disabled且最好结果超过32.5365，才补seed1/2。
 

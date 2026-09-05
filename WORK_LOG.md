@@ -11,7 +11,13 @@
   legacy/target-aware × disabled/person_patches。固定冠军训练协议，seed0、完整8-task、直接test、无checkpoint。
 - 新测试覆盖target-aware目标保留、padding mask、selector-specific差异/屏蔽不变性、冻结Person路径；
   本地完整127项单测、Python编译、Shell语法、CLI参数解析及diff检查通过。
-- 尚未提交、服务器同步或启动实验；服务器GPU在本地实现开始时均被其他任务高负载占用。
+- 实现提交`5166a54`并推送。Automatic Upload写入的13个文件逐SHA与本地一致，已备份到
+  `/mnt/haoyuan/workspace/git-sync-backup-selector-specific-person-patches-20260906-preworktree`并
+  恢复服务器primary clean；新独立worktree固定同一commit，test-only未改。
+- 服务器127项全测通过。真实EMOTIC batch smoke中legacy条件有效率93.75%、target-aware为100%，
+  Person有效patch平均74.11%，形状/有限值检查通过。8张GPU仍各有约12.6--13.8GB未知任务占用。
+- 新增安全等待脚本：检测到任意4张卡显存占用<=2GB且利用率<=10%后，先跑disabled与
+  person_patches GPU smoke，通过才自动4卡启动2×2；避免当前叠加造成OOM。
 
 ## 2026-09-05：Person-conditioned Full Selector第一版
 

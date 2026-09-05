@@ -12,8 +12,9 @@ scale0.1的零输出MLP产生不同查询增量。原Full Selector、Drop & Repl
 BCE/Adapter-ASL路由不变。新增单组参数与4卡2×2启动入口；因val/test完整训练成本相同，按用户
 要求本轮直接seed0完整8-task test，明确标记为结构探索，不在test搜索结构内参数。
 本地新增4项针对性回归，完整127项CPU单测、Python编译、Shell语法、CLI解析和diff检查通过。
-下一步提交推送，服务器独立worktree完成真实数据与GPU smoke后启动四组；若GPU仍被其他任务占用，
-仅在检测到4张空闲卡后自动启动，避免与未知任务争抢显存。
+服务器独立worktree已通过真实数据与127项全测；新增安全等待入口，仅在检测到4张卡同时满足
+显存占用不超过2GB且利用率不超过10%后运行disabled/person_patches GPU smoke并启动四组，避免与
+未知任务争抢显存。GPU目前仍全部忙，等待入口提交同步后放入tmux后台。
 
 ## 当前开发：Person-conditioned Full Selector（2026-09-05）
 
