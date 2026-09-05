@@ -14,11 +14,18 @@ letterbox并共享flip，框映射到实际Full裁剪，完全不可见/无效�
 paired训练、val/test评估与score dump及compact模型重建已接入。提供val-only单组脚本，
 支持四模式，固定原100%train/seed0完整8-task/30ep/batch64/main LR0.0125/AMP+TF32。
 用户随后授权Git-only服务器同步及四组seed0运行；因val/test训练耗时相同，明确要求直接test。
-阶段为本地实现与验证，尚未提交推送、服务器同步或启动真实实验；完整服务器单测及
-真实数据/CLIP GPU smoke待Git-only同步后进行。此前Automatic Upload异常仍需同步前核查。
+实现提交`51b94a8`及GPU smoke容差修复`a8a759f`已推送。服务器主工作树两轮Automatic
+Upload文件逐项SHA一致、分别备份后恢复clean；备份为
+`git-sync-backup-person-conditioned-selector-20260905-preworktree`与
+`git-sync-backup-person-conditioned-selector-20260905-smoke-fix`。独立worktree为
+`/mnt/haoyuan/workspace/multi-lane-main-person-conditioned-selector`，test-only未改。
 本地123项CPU回归（其中新增13项）、Python3.9编译、Shell语法及命令参数解析已通过。
-服务器完整123项与真实EMOTIC paired数据smoke通过；首次GPU smoke仅因AMP重复Full前向
-未逐bit相同而停在初始等价检查，现改用原Adapter smoke同级容差并记录最大差，待重跑。
+服务器完整123项与真实EMOTIC paired数据smoke通过；三条件GPU smoke修复后通过，AMP
+最大初始差bbox/person/bbox_person为3.05e-5/6.10e-5/4.58e-5，均低于1e-4。
+四组seed0完整8-task test已在GPU0--3启动，tmux
+`multilane_person_conditioned_test_20260905`，批次`person_conditioned_selector_test_20260905`。
+disabled/bbox/person/bbox_person均进入task0，初始显存约2.0--2.1GB，无OOM；源码固定`a8a759f`。
+输出写独立worktree的`output/emotic_track_a_person_conditioned_selector/`，日志写`logs/`。
 方案与边界详见`docs/person_conditioned_selector.md`；实验四模式disabled/bbox/person/bbox_person，
 GPU0--3并行，test只作为结构探索结果；保留独立Full及固定0.8/0.2融合两种报告。
 

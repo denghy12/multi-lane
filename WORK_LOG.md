@@ -21,6 +21,14 @@
 - 初次服务器完整123项单测和真实EMOTIC paired数据smoke通过。三种条件GPU smoke在零初始化
   `torch.equal`处失败；CPU逐bit一致，GPU AMP额外Person前向后相同Full有浮点重算差异。
   改为与原Adapter smoke一致的AMP1e-4/FP321e-6 allclose并打印最大差，需重新提交验证。
+- `a8a759f`推送、服务器worktree ff-only后，bbox/person/bbox_person三组GPU smoke通过；最大
+  初始差3.05e-5/6.10e-5/4.58e-5，条件与Adapter梯度、冻结CLIP检查均通过。
+- Automatic Upload两轮文件都先与本地SHA逐项核验，再备份到
+  `/mnt/haoyuan/workspace/git-sync-backup-person-conditioned-selector-20260905-preworktree`和
+  `...-smoke-fix`，服务器primary恢复clean；实验只用独立person-conditioned-selector worktree。
+- 按用户要求因val/test训练耗时相同直接启动四组seed0 test；tmux
+  `multilane_person_conditioned_test_20260905`、batch同名，GPU0--3分别disabled/bbox/person/
+  bbox_person。四组进入task0，显存约2.0--2.1GB，无OOM，源码`a8a759f`，不保存checkpoint。
 
 ## 2026-09-04：同seed Full+Full完成、同步与分析
 

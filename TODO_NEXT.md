@@ -7,10 +7,11 @@
   冻结CLIP Person CLS、每任务独立查询MLP，原Image-token Adapter主模型BCE+ASL路由保持。
 - 已添加成对输入/框坐标和可见性、零初始化与RNG隔离、旧任务冻结、优化器与score通路测试。
 - 本地完整123项CPU回归通过，新增13项；Python编译、Shell语法与入口参数解析通过。
-- 服务器123项及真实数据smoke通过；三条件GPU smoke首次因AMP逐bit等价断言失败，已改用
-  既有AMP1e-4/FP321e-6容差并输出最大差，下一步重新提交推送、worktree ff-only后重跑。
-- 实验入口为`scripts/emotic/run_multilane_track_a_person_conditioned_val.sh`；用户已授权后续
-  Git-only独立服务器worktree、完整单测、真实配对数据和GPU smoke。
+- 服务器123项、真实数据和三条件GPU smoke通过；代码固定`a8a759f`。四组seed0完整8-task
+  test已在GPU0--3启动，tmux`multilane_person_conditioned_test_20260905`，批次
+  `person_conditioned_selector_test_20260905`；均已进入task0、无OOM。等待自然完成后同步分析。
+- 实验入口为`scripts/emotic/run_multilane_track_a_person_conditioned_val.sh`；Git-only独立
+  worktree、完整单测、真实配对数据和GPU smoke已经完成。
 - 因val/test完整训练耗时基本相同，按用户明确要求，检查后GPU0--3并行四组seed0完整8-task test；
   对照条件化Full独立表现及原0.8/0.2 probability融合。该test标记为结构探索。
   fixed layer1/b32/LR4e-4、30ep、原100%train；不混入90%fit门控协议。
