@@ -18,6 +18,13 @@
   Person有效patch平均74.11%，形状/有限值检查通过。8张GPU仍各有约12.6--13.8GB未知任务占用。
 - 新增安全等待脚本：检测到任意4张卡显存占用<=2GB且利用率<=10%后，先跑disabled与
   person_patches GPU smoke，通过才自动4卡启动2×2；避免当前叠加造成OOM。
+- 用户确认现有显卡余量允许叠加，故不再等待空闲。第二提交`f1ada22`已推送并ff-only同步实验
+  worktree；本轮4个Automatic Upload文件逐SHA一致，备份于
+  `/mnt/haoyuan/workspace/git-sync-backup-selector-specific-person-patches-20260906-scheduler`，primary clean。
+- GPU0上disabled/person_patches两种真实CLIP smoke通过，trainable参数739130/789082，条件零初始化
+  最大差0/9.9182e-5，Adapter最大差均4.5776e-5；AMP容差、梯度路由和冻结检查全部通过。
+- tmux`multilane_selector_patch_2x2_test_20260906`已在GPU0--3启动四组seed0 test。四份config齐全，
+  每组task0 cycle1为84 updates/skipped0；显存总占用约14.7--15.2GB/24GB，无早期OOM或非有限错误。
 
 ## 2026-09-05：Person-conditioned Full Selector第一版
 
