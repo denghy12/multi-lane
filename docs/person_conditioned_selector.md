@@ -98,3 +98,5 @@ ASL9.8/0/0.05，AMP/TF32 on，CLIP normalization，Full crop0.05–1.0。
 梯度路由、冻结视觉、优化器参数覆盖、独立新任务与旧任务冻结、compact state重建、
 训练/val/score dump 成对输入、Full像素及RNG等价、框裁剪翻转、人物crop完整性、
 同图多人稳定ID和标签配对。真实CLIP/CUDA及真实EMOTIC数据 smoke 仍需Linux服务器。
+GPU AMP初检发现额外冻结Person前向会使重复Full计算不再逐bit相同；smoke沿用项目既有
+AMP 1e-4/FP32 1e-6容差并报告最大差值，超过容差仍直接失败。

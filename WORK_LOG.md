@@ -18,6 +18,9 @@
   已知Automatic Upload异常应在下一次Git-only同步前核对，test-only工作树未操作。
 - 用户随后要求Git-only同步、服务器检查后运行四组seed0；因两种split训练时间相同，授权直接test。
   脚本已支持REPORTING_SPLIT并自动设置score purpose，待提交推送后执行。
+- 初次服务器完整123项单测和真实EMOTIC paired数据smoke通过。三种条件GPU smoke在零初始化
+  `torch.equal`处失败；CPU逐bit一致，GPU AMP额外Person前向后相同Full有浮点重算差异。
+  改为与原Adapter smoke一致的AMP1e-4/FP321e-6 allclose并打印最大差，需重新提交验证。
 
 ## 2026-09-04：同seed Full+Full完成、同步与分析
 

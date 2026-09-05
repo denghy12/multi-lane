@@ -108,8 +108,21 @@ def main() -> None:
             model.set_selector_conditioning_runtime_enabled(False)
             unconditioned = model.current_all_logits(images)
             model.set_selector_conditioning_runtime_enabled(True)
-        if not torch.equal(conditional, unconditioned):
-            raise RuntimeError("Zero-initialized conditioning changed baseline logits")
+        selector_condition_max_initial_difference = float(
+            (conditional - unconditioned).abs().max().cpu()
+        )
+        selector_tolerance = 1e-4 if amp else 1e-6
+        if not torch.allclose(
+            conditional, unconditioned,
+            atol=selector_tolerance, rtol=selector_tolerance,
+        ):
+            raise RuntimeError(
+                "Zero-initialized conditioning changed baseline logits beyond "
+                f"{'AMP' if amp else 'FP32'} tolerance: "
+                f"max_difference={selector_condition_max_initial_difference}"
+            )
+    else:
+        selector_condition_max_initial_difference = 0.0
     if model.adapter_bank is not None:
         for layer_index in args.adapter_layer_indices:
             if args.adapter_mode == "image_token":
@@ -234,6 +247,7 @@ def main() -> None:
         f"tf32={'on' if tf32 else 'off'} "
         f"adapter_layers={','.join(map(str, args.adapter_layer_indices))} "
         f"trainable_parameters={trainable} "
+        f"selector_condition_max_initial_difference={selector_condition_max_initial_difference} "
         f"max_initial_difference={max_initial_difference if model.adapter_bank is not None else 0.0}"
     )
 

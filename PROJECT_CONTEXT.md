@@ -17,6 +17,8 @@ paired训练、val/test评估与score dump及compact模型重建已接入。提�
 阶段为本地实现与验证，尚未提交推送、服务器同步或启动真实实验；完整服务器单测及
 真实数据/CLIP GPU smoke待Git-only同步后进行。此前Automatic Upload异常仍需同步前核查。
 本地123项CPU回归（其中新增13项）、Python3.9编译、Shell语法及命令参数解析已通过。
+服务器完整123项与真实EMOTIC paired数据smoke通过；首次GPU smoke仅因AMP重复Full前向
+未逐bit相同而停在初始等价检查，现改用原Adapter smoke同级容差并记录最大差，待重跑。
 方案与边界详见`docs/person_conditioned_selector.md`；实验四模式disabled/bbox/person/bbox_person，
 GPU0--3并行，test只作为结构探索结果；保留独立Full及固定0.8/0.2融合两种报告。
 
