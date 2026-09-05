@@ -29,6 +29,19 @@
 - 按用户要求因val/test训练耗时相同直接启动四组seed0 test；tmux
   `multilane_person_conditioned_test_20260905`、batch同名，GPU0--3分别disabled/bbox/person/
   bbox_person。四组进入task0，显存约2.0--2.1GB，无OOM，源码`a8a759f`，不保存checkpoint。
+- 四组最终均exit0，240 epochs/13,950 successful updates/0 skipped、32份task scores齐全。
+  52个输出/日志已scp同步并用相对路径树SHA复核；本地/服务器均为
+  `edb5458b783f1ae319d4910885e8ea4516c0a98973697d4778b47361bead6b1b`。
+- final mAP：disabled32.5365、bbox32.0791、person31.1695、bbox_person31.3557；三种条件
+  average mAP和forgetting也都差于disabled。disabled与20260903原Full八task logits最大差0。
+- 用原seed0 Person固定probability0.8/0.2离线复核：33.2672/32.6246/31.9731/32.0676，
+  条件化仍无收益。没有搜索alpha、mode或threshold。
+- Person条件训练BCE全任务低于disabled但test明显下降；bbox退化最小。训练有效条件88.31%、
+  平均目标可见54.89%。分析认为共享查询增量压缩selector多样性、final CLS与layer1深度失配、
+  完整Person与随机Full crop失配及任务小数据过拟合共同导致退化；其中因果需新消融确认。
+- 分析写入`output/emotic_track_a_person_conditioned_selector/person_conditioned_selector_test_20260905/analysis.md`。
+  建议停止当前shared-delta调参，下一轮先target-aware Full crop控制，再selector-specific Person
+  patch summary交互，使用validation；不因本轮test继续调整当前结构。
 
 ## 2026-09-04：同seed Full+Full完成、同步与分析
 

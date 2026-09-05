@@ -26,6 +26,16 @@ Upload文件逐项SHA一致、分别备份后恢复clean；备份为
 `multilane_person_conditioned_test_20260905`，批次`person_conditioned_selector_test_20260905`。
 disabled/bbox/person/bbox_person均进入task0，初始显存约2.0--2.1GB，无OOM；源码固定`a8a759f`。
 输出写独立worktree的`output/emotic_track_a_person_conditioned_selector/`，日志写`logs/`。
+四组现均完整结束：各240 epochs/13,950 successful updates/0 skipped，8份test scores齐全。
+52个结果/日志文件已同步，本地与服务器聚合SHA均为`edb5458b783f1ae319d4910885e8ea4516c0a98973697d4778b47361bead6b1b`。
+disabled/bbox/person/bbox_person final mAP分别为32.5365/32.0791/31.1695/31.3557；
+average mAP为39.1445/38.8454/37.8552/38.0583。三条件均未超过disabled，forgetting也均恶化。
+disabled与历史Full seed0所有task logits逐元素相同，证明paired数据路径保持基线。
+固定0.8/0.2融合历史Person后final mAP为33.2672/32.6246/31.9731/32.0676，仍无条件化收益。
+Person两组训练BCE更低而test更差；训练目标条件有效率88.31%、平均人物可见面积54.89%，
+支持共享条件过拟合以及Full随机crop/Person完整crop失配的解释。详细分析见本批次`analysis.md`。
+下一步建议停止本版shared-delta参数搜索，先做target-aware Full crop同批disabled锚点，再将
+Person有效patch summaries以selector-specific查询交互；回到validation，失败则结束该路线。
 方案与边界详见`docs/person_conditioned_selector.md`；实验四模式disabled/bbox/person/bbox_person，
 GPU0--3并行，test只作为结构探索结果；保留独立Full及固定0.8/0.2融合两种报告。
 
