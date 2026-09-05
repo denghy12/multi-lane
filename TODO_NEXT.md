@@ -1,6 +1,21 @@
 # 下一步任务
 
-## 当前执行：严格同seed Full第二次训练（2026-09-04）
+## 当前：Person-conditioned Selector代码实现（2026-09-05）
+
+- 已按用户要求创建`codex/person-conditioned-selector`并实现第一版。
+- 四模式disabled/bbox/person/bbox_person，条件hidden32/scale0.1/LR4e-4，仅layer1；
+  冻结CLIP Person CLS、每任务独立查询MLP，原Image-token Adapter主模型BCE+ASL路由保持。
+- 已添加成对输入/框坐标和可见性、零初始化与RNG隔离、旧任务冻结、优化器与score通路测试。
+- 本地完整123项CPU回归通过，新增13项；Python编译、Shell语法与入口参数解析通过。
+- 实验入口为`scripts/emotic/run_multilane_track_a_person_conditioned_val.sh`；用户已授权后续
+  Git-only独立服务器worktree、完整单测、真实配对数据和GPU smoke。
+- 因val/test完整训练耗时基本相同，按用户明确要求，检查后GPU0--3并行四组seed0完整8-task test；
+  对照条件化Full独立表现及原0.8/0.2 probability融合。该test标记为结构探索。
+  fixed layer1/b32/LR4e-4、30ep、原100%train；不混入90%fit门控协议。
+- 选择final val mAP优先，其次average/task5–7；逐类/F1/forgetting作解释，不恢复旧否决门槛。
+  有效候选再补seed1/2。以下2026-09-04段落保留为历史结果。
+
+## 已完成：严格同seed Full第二次训练（2026-09-04）
 
 - 用户已要求对标同seed双视图32.8263±0.4025；真实重训Full seed0/1/2，各自与原Full同global seed、
   同参数、同source提交。不能直接复制同一预测，也不擅自引入不同初始化/增强seed。
@@ -10,8 +25,12 @@
 - 不搜索test权重、配对或新参数，不启动Person条件Selector。
 - 批次`same_seed_full_full_test_20260904_122941`已在GPU0/1/2运行，tmux
   `multilane_same_seed_full_full_122941`。110项单测及两版GPU smoke通过，config与原Full完全相同。
-- 下一步等待三组完整结束；检查240epochs/13950updates/skipped0和自动`ensemble_comparison.json`，
-  同步结果分析。若同seed两Full相同，应明确报告退化为重复模型，不能作为独立随机集成的反证。
+- 三组已完整结束且自动汇总成功；240epochs/13950updates/skipped0、99项source哈希均通过。
+  结果及日志已同步：同seed Full+Full32.1562±0.3701，全部task预测及训练轨迹（除耗时）精确重复。
+  同seed Full+Person32.8263±0.4025；本轮仅验证重复性，不能作为独立随机集成无效的反证。
+- 下一阶段建议（未启动）：停止重复Full与权重网格；最小Person条件Selector，seed0完整8-task val，
+  比较原固定融合、bbox条件和Person内容条件；固定原100%训练数据/Adapter/ASL/优化协议及输出权重。
+  有效候选再补seed1/2，锁定后一次test。报告成本，检验零初始化等价与旧task条件模块冻结。
 
 ## 当前执行：Full+Full固定正式test对照（2026-09-04）
 

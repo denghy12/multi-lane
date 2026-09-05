@@ -30,6 +30,8 @@ from torchvision.transforms import functional as transform_functional
 from multi_lane.continual_datasets.continual_datasets import EMOTIC
 
 from .model import MultiLaneModel
+from .paired_transforms import PairedFullPersonTransform, move_model_inputs
+from .selector_conditioning import TaskSelectorConditioner
 from .openai_clip_loader import OPENAI_VIT_B16_SHA256, load_openai_clip_visual
 
 
@@ -586,7 +588,7 @@ def evaluate(
                 images, target, batch_sample_ids = batch
             else:
                 raise ValueError("Evaluation batches must have two or three fields")
-            images = images.to(device, non_blocking=True).float()
+            images = move_model_inputs(images, device)
             with torch.cuda.amp.autocast(enabled=amp):
                 logits = model.seen_logits(images)
             logits_cpu = logits.float().cpu()
@@ -618,7 +620,7 @@ def current_validation_map(
     targets: List[torch.Tensor] = []
     with torch.no_grad():
         for images, target in loader:
-            images = images.to(device, non_blocking=True).float()
+            images = move_model_inputs(images, device)
             with torch.cuda.amp.autocast(enabled=amp):
                 logits = model.current_logits(images)
             scores.append(torch.sigmoid(logits.float()).cpu())
@@ -636,6 +638,7 @@ def build_optimizer_groups(
     weight_decay: float,
     adapter_learning_rate: Optional[float] = None,
     adapter_weight_decay: Optional[float] = None,
+    selector_condition_learning_rate: float = 4e-4,
 ) -> Tuple[List[nn.Parameter], List[nn.Parameter], List[Dict[str, object]]]:
     if weight_decay < 0:
         raise ValueError("Weight decay must be non-negative")
@@ -647,6 +650,13 @@ def build_optimizer_groups(
         },
         {"params": list(model.head.parameters()), "weight_decay": 0.0},
     ]
+    condition_parameters = list(model.conditioning_optimizer_parameters())
+    if condition_parameters:
+        if not math.isfinite(selector_condition_learning_rate) or selector_condition_learning_rate <= 0:
+            raise ValueError("Selector condition learning rate must be finite and positive")
+        optimizer_groups.append({"params": condition_parameters,
+                                 "weight_decay": weight_decay,
+                                 "lr": selector_condition_learning_rate})
     adapter_parameters = list(model.adapter_optimizer_parameters())
     if adapter_parameters:
         if adapter_learning_rate is None or adapter_learning_rate <= 0:
@@ -821,6 +831,7 @@ def train_task(
     scheduler_warmup_ratio: float = 0.0,
     scheduler_multistep_milestone_fractions: Sequence[float] = (0.6, 0.85),
     scheduler_multistep_gamma: float = 0.1,
+    selector_condition_learning_rate: float = 4e-4,
 ) -> List[Dict[str, float]]:
     if loss_routing not in {
         "joint_bce", "model_asl", "adapter_asl", "both_asl"
@@ -843,6 +854,7 @@ def train_task(
         weight_decay=weight_decay,
         adapter_learning_rate=adapter_learning_rate,
         adapter_weight_decay=adapter_weight_decay,
+        selector_condition_learning_rate=selector_condition_learning_rate,
     )
     if loss_routing in {"adapter_asl", "both_asl"} and not adapter_parameters:
         raise ValueError("Adapter ASL routing requires an enabled Adapter")
@@ -888,13 +900,24 @@ def train_task(
             if adapter_parameters else None
         )
         epoch_start = time.time()
+        condition_samples = 0
+        condition_valid_total = 0.0
+        condition_visible_total = 0.0
+        epoch_condition_lr = (
+            float(optimizer.param_groups[2]["lr"])
+            if model.selector_conditioner is not None else None
+        )
         for images, current_targets in loader:
             if (
                 optimizer_updates_per_task is not None
                 and completed_task_updates >= optimizer_updates_per_task
             ):
                 break
-            images = images.to(device, non_blocking=True).float()
+            if isinstance(images, dict):
+                condition_samples += len(images["condition_valid"])
+                condition_valid_total += float(images["condition_valid"].sum())
+                condition_visible_total += float(images["bbox"][:, 4].sum())
+            images = move_model_inputs(images, device)
             current_targets = current_targets.to(device, non_blocking=True).float()
             optimizer.zero_grad(set_to_none=True)
             with torch.cuda.amp.autocast(enabled=amp):
@@ -1024,6 +1047,12 @@ def train_task(
             row["next_adapter_learning_rate"] = float(
                 optimizer.param_groups[-1]["lr"]
             )
+        if condition_samples:
+            row["selector_condition_valid_fraction"] = condition_valid_total / condition_samples
+            row["selector_condition_visible_fraction"] = condition_visible_total / condition_samples
+        if epoch_condition_lr is not None:
+            row["selector_condition_learning_rate"] = epoch_condition_lr
+            row["next_selector_condition_learning_rate"] = float(optimizer.param_groups[2]["lr"])
         history.append(row)
         print(
             f"task={task_id} cycle={epoch + 1} "
@@ -1150,6 +1179,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-amp", action="store_true")
     parser.add_argument("--no-tf32", action="store_true")
     parser.add_argument("--input-mode", choices=("full", "person_crop"), default="full")
+    parser.add_argument("--selector-conditioning", choices=TaskSelectorConditioner.MODES,
+                        default="disabled")
+    parser.add_argument("--selector-condition-layers", type=int, nargs="+", default=(1,))
+    parser.add_argument("--selector-condition-hidden-dim", type=int, default=32)
+    parser.add_argument("--selector-condition-scale", type=float, default=0.1)
+    parser.add_argument("--selector-condition-learning-rate", type=float, default=4e-4)
+    parser.add_argument("--paired-full-person", action="store_true",
+                        help="Also permit a paired-input, conditioning-disabled control.")
     parser.add_argument(
         "--person-crop-margin",
         type=float,
@@ -1271,6 +1308,13 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    paired_inputs = args.paired_full_person or args.selector_conditioning != "disabled"
+    if paired_inputs and args.input_mode != "full":
+        raise ValueError("Selector conditioning/paired inputs require input-mode full")
+    if paired_inputs and args.person_transform_mode != "letterbox":
+        raise ValueError("Paired Person inputs require person-transform-mode letterbox")
+    if not math.isfinite(args.selector_condition_learning_rate) or args.selector_condition_learning_rate <= 0:
+        raise ValueError("Selector condition learning rate must be finite and positive")
     if args.train_batch_size != 64:
         raise ValueError("Frozen Track-A protocol requires train batch size 64")
     if args.threshold != 0.5:
@@ -1402,6 +1446,10 @@ def main() -> None:
         adapter_bottleneck_dims_per_task=args.adapter_bottleneck_dims_per_task,
         adapter_residual_gate_mode=args.adapter_residual_gate_mode,
         adapter_auxiliary_metric_mode=args.adapter_regularization,
+        selector_conditioning=args.selector_conditioning,
+        selector_condition_layers=args.selector_condition_layers,
+        selector_condition_hidden_dim=args.selector_condition_hidden_dim,
+        selector_condition_scale=args.selector_condition_scale,
     ).float().to(device)
     model.visual_encoder.requires_grad_(False)
     model.assert_visual_frozen()
@@ -1419,11 +1467,16 @@ def main() -> None:
         list(model.adapter_bank.per_task_parameter_counts())
         if model.adapter_bank is not None else []
     )
+    condition_parameters_per_task = (
+        sum(p.numel() for p in model.selector_conditioner.task_modules[0].parameters())
+        if model.selector_conditioner is not None else 0
+    )
     print(
-        f"trainable_parameters={lane_parameters + classifier_parameters + adapter_parameters_per_task} "
+        f"trainable_parameters={lane_parameters + classifier_parameters + adapter_parameters_per_task + condition_parameters_per_task} "
         f"task_lane={lane_parameters} classifier={classifier_parameters} "
         f"adapter_total={adapter_parameters} "
-        f"adapter_per_task={adapter_parameter_counts_per_task}",
+        f"adapter_per_task={adapter_parameter_counts_per_task} "
+        f"selector_condition_per_task={condition_parameters_per_task}",
         flush=True,
     )
 
@@ -1436,15 +1489,27 @@ def main() -> None:
         person_color_jitter_probability=args.person_color_jitter_probability,
     )
     dataset_parent = resolve_dataset_parent(args.data_root)
+    paired_train = paired_eval = None
+    if paired_inputs:
+        paired_options = dict(
+            normalization=args.input_normalization, crop_scale=args.train_crop_scale,
+            margin=args.person_crop_margin,
+            jitter_strength=args.person_color_jitter_strength,
+            jitter_probability=args.person_color_jitter_probability,
+        )
+        paired_train = PairedFullPersonTransform(train=True, **paired_options)
+        paired_eval = PairedFullPersonTransform(train=False, **paired_options)
     train_source = EMOTIC(
         str(dataset_parent), train=True, transform=train_transform,
         input_mode=args.input_mode, person_crop_margin=args.person_crop_margin,
+        paired_transform=paired_train,
     )
     calibration_source = (
         EMOTIC(
             str(dataset_parent), train=True, transform=eval_transform,
             input_mode=args.input_mode,
             person_crop_margin=args.person_crop_margin,
+            paired_transform=paired_eval,
         )
         if args.calibration_fraction > 0
         else None
@@ -1453,12 +1518,14 @@ def main() -> None:
         str(dataset_parent), train=False, transform=eval_transform,
         eval_splits=("val",), input_mode=args.input_mode,
         person_crop_margin=args.person_crop_margin,
+        paired_transform=paired_eval,
     )
     if args.reporting_split == "test":
         reporting_source = EMOTIC(
             str(dataset_parent), train=False, transform=eval_transform,
             eval_splits=("test",), input_mode=args.input_mode,
             person_crop_margin=args.person_crop_margin,
+            paired_transform=paired_eval,
         )
         validate_classes(train_source, val_source, reporting_source)
     else:
@@ -1559,13 +1626,32 @@ def main() -> None:
         "weight_decay": args.weight_decay,
         "temperature": args.temperature,
         "input_mode": args.input_mode,
+        "paired_full_person": paired_inputs,
+        "selector_conditioning": args.selector_conditioning,
+        "selector_condition_layers": list(args.selector_condition_layers),
+        "selector_condition_hidden_dim": args.selector_condition_hidden_dim,
+        "selector_condition_scale": args.selector_condition_scale,
+        "selector_condition_learning_rate": args.selector_condition_learning_rate,
+        "selector_condition_parameters_per_task": condition_parameters_per_task,
+        "selector_condition_source": (
+            "frozen_clip_post_ln_pre_proj_cls"
+            if "person" in args.selector_conditioning
+            else "bbox_geometry" if args.selector_conditioning == "bbox" else None
+        ),
+        "selector_condition_task_initialization": "independent_zero_output",
+        "selector_condition_query_scope": "shared_delta_over_selectors",
+        "selector_condition_geometry": "full_crop_xyxy_visible_fraction_valid_v1" if paired_inputs else None,
+        "selector_condition_total_parameters": (
+            sum(p.numel() for p in model.selector_conditioner.parameters())
+            if model.selector_conditioner is not None else 0
+        ),
         "person_crop_margin": args.person_crop_margin,
         "person_transform_mode": args.person_transform_mode,
         "person_color_jitter_strength": args.person_color_jitter_strength,
         "person_color_jitter_probability": args.person_color_jitter_probability,
         "person_letterbox_fill": (
             [int(round(value * 255)) for value in CLIP_IMAGE_MEAN]
-            if args.input_mode == "person_crop"
+            if (args.input_mode == "person_crop" or paired_inputs)
             and args.person_transform_mode == "letterbox"
             and args.input_normalization == "clip"
             else None
@@ -1660,9 +1746,11 @@ def main() -> None:
         "cuda_version": torch.version.cuda,
         "trainable_parameters": (
             lane_parameters + classifier_parameters + adapter_parameters_per_task
+            + condition_parameters_per_task
         ),
         "total_method_parameters": (
             lane_parameters + classifier_parameters + adapter_parameters
+            + condition_parameters_per_task * model.num_tasks
         ),
         "task_lane_parameters": lane_parameters,
         "classifier_parameters": classifier_parameters,
@@ -1733,6 +1821,7 @@ def main() -> None:
             args.temperature, amp,
             adapter_learning_rate=args.adapter_learning_rate,
             adapter_weight_decay=args.adapter_weight_decay,
+            selector_condition_learning_rate=args.selector_condition_learning_rate,
             loss_mode=args.training_loss_mode,
             loss_routing=args.loss_routing,
             asl_gamma_neg=args.asl_gamma_neg,

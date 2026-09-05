@@ -1,5 +1,37 @@
 # 工作日志
 
+## 2026-09-05：Person-conditioned Full Selector第一版
+
+- 用户要求开始方向一代码修改并新开分支；创建`codex/person-conditioned-selector`，基于
+  `3f8327a`，原3份未提交实验完成记录原样保留。
+- 新增任务隔离Selector条件MLP与成对Full/Person transform；改动EMOTIC、模型、runner、
+  compact模型重建和GPU smoke。条件只改查询，保持原Drop & Replace残差语义。
+- 四模式disabled/bbox/person/bbox_person；仅layer1、hidden32、scale0.1；新增参数BCE/LR4e-4，
+  Adapter继续ASL；Person最终CLS来自冻结CLIP，无额外监督模型。每任务独立零输出初始化。
+- 配对保留稳定人物ID，框跟随Full裁剪/resize/翻转，Person完整letterbox并共享flip；
+  全不可见/无效目标关闭增量，人物jitter隔离RNG。训练历史增加目标可见比例和条件LR。
+- 新增13项回归，首轮定位并修复lane block参数接入问题后全部通过；完整123项CPU回归通过。
+  本地原环境无torch，因此在临时隔离venv安装torch/torchvision验证合成数据，不修改项目依赖。
+  最终123项CPU回归全部通过（torch2.14/torchvision0.29）；Python3.9编译、Shell语法、
+  runner/smoke参数解析与git diff检查通过。真实CLIP/GPU/EMOTIC验证仍待服务器，未启动真实实验。
+- 新增val-only脚本及`docs/person_conditioned_selector.md`。本轮未提交推送或服务器同步；
+  已知Automatic Upload异常应在下一次Git-only同步前核对，test-only工作树未操作。
+- 用户随后要求Git-only同步、服务器检查后运行四组seed0；因两种split训练时间相同，授权直接test。
+  脚本已支持REPORTING_SPLIT并自动设置score purpose，待提交推送后执行。
+
+## 2026-09-04：同seed Full+Full完成、同步与分析
+
+- 用户要求同步分析并提出下一步，未要求启动新实验。批次`same_seed_full_full_test_20260904_122941`
+  状态complete、三退出码0，三组各240epochs/13950updates/skipped0，24份test score及日志齐全。
+- 全部24个seed×task的重复Full logits/概率差值为0；训练记录除elapsed_seconds外完全相同。
+  同seed Full+Full所有task/summary指标均与单Full相同，final32.1562±0.3701；Full+Person旧结果
+  32.8263±0.4025精确复现，平均差0.6701。这是重复性结果，不反驳循环seed Full+Full的真实集成收益。
+- 新三组输出、scores与日志已通过scp同步（远端无rsync）。本地/远端99个source哈希均匹配，结果JSON
+  SHA为f7847c4ebfa158d307c05a650fbdd83f435ed57ab32e44a303accdbc5c76590c；三份训练日志无异常。
+- 完整分析位于`output/emotic_track_a_same_seed_full_full/same_seed_full_full_test_20260904_122941/analysis.md`。
+- 建议停止重复Full/输出权重搜索，后续转最小Person条件Selector的seed0完整val机制对照，再三seed确认。
+  保持原100%训练数据，不混用门控90%fit。没有执行该新计划，未改业务代码；本轮文档只本地更新。
+
 ## 2026-09-04：启动严格同seed Full+Full重复对照开发
 
 - 从5da49fd创建`codex/same-seed-full-full-test`。用户要求对标原同seed Full+Person正式结果；

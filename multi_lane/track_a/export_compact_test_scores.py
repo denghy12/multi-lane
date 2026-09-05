@@ -19,6 +19,7 @@ from torch.utils.data import DataLoader
 from multi_lane.continual_datasets.continual_datasets import EMOTIC
 
 from .model import MultiLaneModel
+from .paired_transforms import PairedFullPersonTransform
 from .openai_clip_loader import OPENAI_VIT_B16_SHA256, load_openai_clip_visual
 from .runner import (
     CLASS_ORDER,
@@ -111,6 +112,10 @@ def build_model(config: Mapping[str, Any], visual: torch.nn.Module) -> MultiLane
         ),
         adapter_residual_gate_mode=str(config["adapter_residual_gate_mode"]),
         adapter_auxiliary_metric_mode=str(config["adapter_regularization"]),
+        selector_conditioning=str(config.get("selector_conditioning", "disabled")),
+        selector_condition_layers=tuple(config.get("selector_condition_layers", (1,))),
+        selector_condition_hidden_dim=int(config.get("selector_condition_hidden_dim", 32)),
+        selector_condition_scale=float(config.get("selector_condition_scale", 0.1)),
     )
 
 
@@ -180,6 +185,15 @@ def export_scores(
         eval_splits=("test",),
         input_mode=source_config["input_mode"],
         person_crop_margin=float(source_config["person_crop_margin"]),
+        paired_transform=(
+            PairedFullPersonTransform(
+                train=False, normalization=source_config["input_normalization"],
+                crop_scale=source_config["train_crop_scale"],
+                margin=float(source_config["person_crop_margin"]),
+                jitter_strength=float(source_config["person_color_jitter_strength"]),
+                jitter_probability=float(source_config["person_color_jitter_probability"]),
+            ) if source_config.get("paired_full_person", False) else None
+        ),
     )
     validate_classes(test_source)
 

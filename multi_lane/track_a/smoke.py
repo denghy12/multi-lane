@@ -18,6 +18,9 @@ from .runner import (
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--clip-checkpoint", required=True)
+    parser.add_argument("--selector-conditioning", default="disabled",
+                        choices=("disabled", "bbox", "person", "bbox_person"))
+    parser.add_argument("--selector-condition-layers", type=int, nargs="+", default=(1,))
     parser.add_argument(
         "--adapter-mode",
         choices=("disabled", "task_lane", "image_token"),
@@ -90,9 +93,23 @@ def main() -> None:
         adapter_bottleneck_dims_per_task=args.adapter_bottleneck_dims_per_task,
         adapter_residual_gate_mode=args.adapter_residual_gate_mode,
         adapter_auxiliary_metric_mode=args.adapter_regularization,
+        selector_conditioning=args.selector_conditioning,
+        selector_condition_layers=args.selector_condition_layers,
     ).float().cuda()
     model.activate_task(0)
     images = torch.randn(2, 3, 224, 224, device="cuda")
+    if model.selector_conditioner is not None:
+        images = {"full": images, "person": torch.flip(images, dims=(-1,)),
+                  "bbox": torch.tensor([[.1, .1, .8, .9, 1, 1]], device="cuda").repeat(2, 1),
+                  "condition_valid": torch.ones(2, device="cuda")}
+        model.eval()
+        with torch.no_grad(), torch.cuda.amp.autocast(enabled=amp):
+            conditional = model.current_all_logits(images)
+            model.set_selector_conditioning_runtime_enabled(False)
+            unconditioned = model.current_all_logits(images)
+            model.set_selector_conditioning_runtime_enabled(True)
+        if not torch.equal(conditional, unconditioned):
+            raise RuntimeError("Zero-initialized conditioning changed baseline logits")
     if model.adapter_bank is not None:
         for layer_index in args.adapter_layer_indices:
             if args.adapter_mode == "image_token":
@@ -187,6 +204,12 @@ def main() -> None:
         raise RuntimeError("Adapter gradient smoke failed")
     if any(parameter.grad is not None for parameter in model.visual_encoder.parameters()):
         raise RuntimeError("Frozen visual tower received gradients")
+    condition_parameters = list(model.conditioning_optimizer_parameters())
+    if condition_parameters and (
+        any(p.grad is None or not torch.isfinite(p.grad).all() for p in condition_parameters)
+        or not any(torch.count_nonzero(p.grad).item() for p in condition_parameters)
+    ):
+        raise RuntimeError("Selector conditioning gradient smoke failed")
     model.eval()
     with torch.no_grad(), torch.cuda.amp.autocast(enabled=amp):
         seen = model.seen_logits(images)
@@ -195,13 +218,14 @@ def main() -> None:
     expected = 689178 + (
         model.adapter_bank.per_task_parameter_count()
         if model.adapter_bank is not None else 0
-    )
+    ) + sum(p.numel() for p in condition_parameters)
     trainable = sum(p.numel() for p in model.optimizer_parameters())
     if trainable != expected:
         raise RuntimeError(f"Expected {expected} trainable parameters, got {trainable}")
     print(
         "MULTI_LANE_TRACK_A_SMOKE_OK "
         f"adapter_mode={args.adapter_mode} task_init={args.adapter_task_init} "
+        f"selector_conditioning={args.selector_conditioning} "
         f"gate_mode={args.adapter_residual_gate_mode} "
         f"regularization={args.adapter_regularization}:"
         f"{args.adapter_regularization_fraction} "

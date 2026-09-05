@@ -921,9 +921,13 @@ class EMOTIC(torch.utils.data.Dataset):
         eval_splits=('val', 'test'),
         input_mode='full',
         person_crop_margin=0.0,
+        paired_transform=None,
     ):
         self.root = os.path.expanduser(root)
         self.transform = transform
+        self.paired_transform = paired_transform
+        if paired_transform is not None and input_mode != 'full':
+            raise ValueError('Paired EMOTIC inputs require input_mode=full.')
         self.train = train
         self.splits = ['train'] if self.train else list(eval_splits)
         self.path = os.path.join(self.root, 'EMOTIC')
@@ -994,12 +998,14 @@ class EMOTIC(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         img_path = self.file_paths[idx]
         img = Image.open(img_path).convert("RGB")
-        if self.input_mode == 'person_crop':
-            img = self._crop_person(img, self.body_bboxes[idx])
-        if self.transform is not None:
-            img = self.transform(img)
+        if getattr(self, 'paired_transform', None) is not None:
+            img = self.paired_transform(img, self.body_bboxes[idx])
         else:
-            raise NotImplementedError
+            if self.input_mode == 'person_crop':
+                img = self._crop_person(img, self.body_bboxes[idx])
+            if self.transform is None:
+                raise NotImplementedError
+            img = self.transform(img)
         target = torch.nn.functional.one_hot(
             torch.tensor(self.targets[idx]),
             num_classes=len(self.classes)
@@ -1014,6 +1020,11 @@ class EMOTIC(torch.utils.data.Dataset):
         return f'{split}:{relative_path}#person={int(person_index)}'
 
     def _crop_person(self, img, bbox):
+        return self.crop_person(img, bbox, self.person_crop_margin)
+
+    @staticmethod
+    def crop_person(img, bbox, margin):
+        """Shared crop implementation for single-view and paired inputs."""
         try:
             bbox = np.asarray(bbox, dtype=np.float32).ravel()
         except (TypeError, ValueError):
@@ -1029,8 +1040,8 @@ class EMOTIC(torch.utils.data.Dataset):
         box_height = float(y2 - y1)
         if box_width <= 0.0 or box_height <= 0.0:
             return img
-        margin_x = box_width * self.person_crop_margin
-        margin_y = box_height * self.person_crop_margin
+        margin_x = box_width * margin
+        margin_y = box_height * margin
         x1 -= margin_x
         y1 -= margin_y
         x2 += margin_x

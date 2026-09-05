@@ -8,13 +8,16 @@ copying, shared classifier, and concat inference remain method-specific.
 
 from __future__ import annotations
 
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 import torch
 import torch.nn.functional as F
 from torch import nn
 
 from .adapter import TaskImageTokenAdapterBank, TaskLaneTransformerAdapterBank
+from .selector_conditioning import TaskSelectorConditioner
+
+ModelInputs = Union[torch.Tensor, Dict[str, torch.Tensor]]
 
 
 class MultiLaneModel(nn.Module):
@@ -37,6 +40,10 @@ class MultiLaneModel(nn.Module):
         adapter_bottleneck_dims_per_task: Optional[Sequence[int]] = None,
         adapter_residual_gate_mode: str = "fixed",
         adapter_auxiliary_metric_mode: str = "none",
+        selector_conditioning: str = "disabled",
+        selector_condition_layers: Sequence[int] = (1,),
+        selector_condition_hidden_dim: int = 32,
+        selector_condition_scale: float = 0.1,
     ) -> None:
         super().__init__()
         if not task_sizes or any(int(size) <= 0 for size in task_sizes):
@@ -69,6 +76,13 @@ class MultiLaneModel(nn.Module):
         blocks = list(visual_encoder.transformer.resblocks)
         if not blocks:
             raise ValueError("CLIP visual transformer has no residual blocks")
+        if selector_conditioning not in TaskSelectorConditioner.MODES:
+            raise ValueError("Invalid selector conditioning mode")
+        if selector_conditioning != "disabled" and (
+            not selector_condition_layers
+            or any(i < 0 or i >= len(blocks) for i in selector_condition_layers)
+        ):
+            raise ValueError("Selector conditioning layer is outside the visual transformer")
         if not 0 <= num_prompt_layers <= len(blocks):
             raise ValueError("MULTI-LANE prompt-layer count is invalid")
         adapter_layers = tuple(int(index) for index in adapter_layer_indices)
@@ -163,6 +177,17 @@ class MultiLaneModel(nn.Module):
                 )
             self.adapter_bank = adapter_bank
 
+        self.selector_conditioning = selector_conditioning
+        self.selector_conditioning_runtime_enabled = selector_conditioning != "disabled"
+        self.selector_conditioner = None
+        if selector_conditioning != "disabled":
+            with torch.random.fork_rng(devices=[]):
+                self.selector_conditioner = TaskSelectorConditioner(
+                    len(self._task_sizes), self.width, selector_conditioning,
+                    selector_condition_layers, selector_condition_hidden_dim,
+                    selector_condition_scale,
+                )
+
     @property
     def task_sizes(self) -> Tuple[int, ...]:
         return self._task_sizes
@@ -201,6 +226,8 @@ class MultiLaneModel(nn.Module):
                     prompt[:, task_id].copy_(prompt[:, task_id - 1])
         if self.adapter_bank is not None:
             self.adapter_bank.activate_task(task_id)
+        if self.selector_conditioner is not None:
+            self.selector_conditioner.restore_task(task_id)
         self._current_task_id = int(task_id)
 
     def restore_task(self, task_id: int) -> None:
@@ -208,12 +235,19 @@ class MultiLaneModel(nn.Module):
             raise ValueError("MULTI-LANE restored task id is invalid")
         if self.adapter_bank is not None:
             self.adapter_bank.restore_task(task_id)
+        if self.selector_conditioner is not None:
+            self.selector_conditioner.restore_task(task_id)
         self._current_task_id = int(task_id)
 
     def set_adapter_runtime_enabled(self, enabled: bool) -> None:
         if enabled and self.adapter_bank is None:
             raise RuntimeError("Cannot enable an adapter that was not configured")
         self.adapter_runtime_enabled = bool(enabled)
+
+    def set_selector_conditioning_runtime_enabled(self, enabled: bool) -> None:
+        if enabled and self.selector_conditioner is None:
+            raise RuntimeError("Cannot enable unconfigured selector conditioning")
+        self.selector_conditioning_runtime_enabled = bool(enabled)
 
     def _visual_tokens(self, images: torch.Tensor) -> torch.Tensor:
         visual = self.visual_encoder
@@ -297,6 +331,7 @@ class MultiLaneModel(nn.Module):
         lane_tokens: torch.Tensor,
         lane_ids: Sequence[int],
         layer_id: int,
+        query_delta: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         # The released block applies its first LayerNorm before both selector
         # aggregation and prompt attention.  Keep the residual stream itself
@@ -305,12 +340,15 @@ class MultiLaneModel(nn.Module):
         normalized_lane = block.ln_1(lane_tokens)
         task_cls = normalized_lane[:, :, :1]
         selectors = normalized_lane[:, :, 1:]
+        # Condition only the query used to read image tokens. Drop-and-replace
+        # must still restore the ORIGINAL selectors, not the modified queries.
+        queries = selectors if query_delta is None else selectors + query_delta.to(selectors.dtype)
         if self.adapter_mode == "image_token" and self.adapter_runtime_enabled:
             selector_image_tokens = self.adapter_bank.adapted_tokens_for_layer(
                 layer_id, frozen_normalized_image, lane_ids
             )
             similarity = torch.einsum(
-                "tbsc,tbnc->tbsn", selectors, selector_image_tokens
+                "tbsc,tbnc->tbsn", queries, selector_image_tokens
             ) * (self.width**-0.5)
             selected = torch.einsum(
                 "tbnc,tbsn->tbsc",
@@ -321,7 +359,7 @@ class MultiLaneModel(nn.Module):
             # Preserve the historical contraction path exactly for disabled
             # and task-lane modes.
             similarity = torch.einsum(
-                "tbsc,bnc->tbsn", selectors, frozen_normalized_image
+                "tbsc,bnc->tbsn", queries, frozen_normalized_image
             ) * (self.width**-0.5)
             selected = torch.einsum(
                 "bnc,tbsn->tbsc",
@@ -348,20 +386,50 @@ class MultiLaneModel(nn.Module):
         return lane_tokens
 
     def encode_lanes(
-        self, images: torch.Tensor, all_seen_lanes: bool
+        self, images: ModelInputs, all_seen_lanes: bool
     ) -> torch.Tensor:
         lane_ids = self._lane_ids(all_seen_lanes)
+        person_descriptor = None
+        condition_enabled = (self.selector_conditioner is not None
+                             and self.selector_conditioning_runtime_enabled)
+        paired = images if isinstance(images, dict) else None
+        if paired is not None:
+            images = paired["full"]
+        if condition_enabled:
+            if paired is None or not {"person", "bbox", "condition_valid"} <= paired.keys():
+                raise ValueError("Enabled selector conditioning requires paired Full/Person inputs")
+            batch_size = images.shape[0]
+            if (paired["person"].shape != images.shape
+                    or paired["bbox"].shape != (batch_size, 6)
+                    or paired["condition_valid"].shape != (batch_size,)):
+                raise ValueError("Invalid paired Full/Person batch shapes")
+            if "person" in self.selector_conditioning:
+                # Full frozen CLIP CLS (post-ln, pre-projection), without task
+                # adapters or a Person classifier. No future-task supervision.
+                with torch.no_grad():
+                    person_tokens = self._visual_tokens(paired["person"])
+                    for block in self.visual_encoder.transformer.resblocks:
+                        person_tokens = block(person_tokens.permute(1, 0, 2)).permute(1, 0, 2)
+                    person_descriptor = self.visual_encoder.ln_post(person_tokens[:, 0]).float()
         if self.adapter_bank is not None:
             self.adapter_bank.reset_auxiliary_metrics()
         image_tokens = self._visual_tokens(images)
         lane_tokens = self._initial_lane_tokens(images.shape[0], lane_ids)
         for layer_id, block in enumerate(self.visual_encoder.transformer.resblocks):
+            query_delta = None
+            if (condition_enabled
+                    and layer_id in self.selector_conditioner.layer_indices):
+                query_delta = self.selector_conditioner.query_delta(
+                    layer_id, lane_ids, person_descriptor,
+                    paired["bbox"], paired["condition_valid"],
+                )
             lane_tokens = self._lane_block(
                 block,
                 image_tokens,
                 lane_tokens,
                 lane_ids,
                 layer_id,
+                query_delta,
             )
             with torch.no_grad():
                 image_tokens = block(image_tokens.permute(1, 0, 2)).permute(
@@ -383,20 +451,20 @@ class MultiLaneModel(nn.Module):
         return self.adapter_bank.auxiliary_metric(mode)
 
     def lane_logits(
-        self, images: torch.Tensor, all_seen_lanes: bool
+        self, images: ModelInputs, all_seen_lanes: bool
     ) -> torch.Tensor:
         return self.head(self.encode_lanes(images, all_seen_lanes))
 
-    def current_logits(self, images: torch.Tensor) -> torch.Tensor:
+    def current_logits(self, images: ModelInputs) -> torch.Tensor:
         logits = self.current_all_logits(images)
         start = sum(self._task_sizes[: self._current_task_id])
         stop = start + self._task_sizes[self._current_task_id]
         return logits[:, start:stop]
 
-    def current_all_logits(self, images: torch.Tensor) -> torch.Tensor:
+    def current_all_logits(self, images: ModelInputs) -> torch.Tensor:
         return self.lane_logits(images, all_seen_lanes=False)[:, 0]
 
-    def seen_logits(self, images: torch.Tensor) -> torch.Tensor:
+    def seen_logits(self, images: ModelInputs) -> torch.Tensor:
         lane_ids = self._lane_ids(all_seen_lanes=True)
         logits = self.lane_logits(images, all_seen_lanes=True)
         masks = self.task_class_mask[lane_ids].to(dtype=logits.dtype)
@@ -411,6 +479,11 @@ class MultiLaneModel(nn.Module):
         yield self.selectors
         yield from self.prompts
         yield from self.head.parameters()
+        yield from self.conditioning_optimizer_parameters()
+
+    def conditioning_optimizer_parameters(self) -> Iterable[nn.Parameter]:
+        if self.selector_conditioner is not None:
+            yield from self.selector_conditioner.active_parameters()
 
     def adapter_optimizer_parameters(self) -> Iterable[nn.Parameter]:
         if self.adapter_bank is not None:
@@ -420,6 +493,12 @@ class MultiLaneModel(nn.Module):
         names = ["selectors"]
         names.extend(f"prompts.{index}" for index in range(len(self.prompts)))
         names.extend(("head.weight", "head.bias"))
+        if self.selector_conditioner is not None:
+            names.extend(
+                f"selector_conditioner.{name}"
+                for name, parameter in self.selector_conditioner.named_parameters()
+                if parameter.requires_grad
+            )
         if self.adapter_bank is not None:
             names.extend(
                 f"adapter_bank.{name}"

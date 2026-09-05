@@ -1,6 +1,26 @@
 # 项目上下文
 
-## 最新执行：严格同seed Full+Full正式test重复对照（2026-09-04）
+## 当前开发：Person-conditioned Full Selector（2026-09-05）
+
+用户要求开始方向一代码修改并创建新分支。从`3f8327a`创建
+`codex/person-conditioned-selector`，保留先前3份上下文文档的未提交结果记录。
+实现disabled/bbox/person/bbox_person对照，默认只在zero-based layer1把条件增量加到
+Selector查询；Drop & Replace仍恢复原Selector，不写回frozen image tokens。
+Person内容来自共用冻结CLIP的最终ln_post CLS（投影前），不加载Person分类器或Adapter。
+每task/layer独立hidden32/ReLU/scale0.1 MLP，末层零初始化，初始化RNG隔离；
+新增参数走主模型BCE，独立LR4e-4，Adapter保留ASL9.8/0/0.05；旧task条件模块冻结。
+数据返回同标注full/person/框/有效性；Full增强像素与RNG保持原路径，Person采用margin0.15
+letterbox并共享flip，框映射到实际Full裁剪，完全不可见/无效目标关闭条件增量。
+paired训练、val/test评估与score dump及compact模型重建已接入。提供val-only单组脚本，
+支持四模式，固定原100%train/seed0完整8-task/30ep/batch64/main LR0.0125/AMP+TF32。
+用户随后授权Git-only服务器同步及四组seed0运行；因val/test训练耗时相同，明确要求直接test。
+阶段为本地实现与验证，尚未提交推送、服务器同步或启动真实实验；完整服务器单测及
+真实数据/CLIP GPU smoke待Git-only同步后进行。此前Automatic Upload异常仍需同步前核查。
+本地123项CPU回归（其中新增13项）、Python3.9编译、Shell语法及命令参数解析已通过。
+方案与边界详见`docs/person_conditioned_selector.md`；实验四模式disabled/bbox/person/bbox_person，
+GPU0--3并行，test只作为结构探索结果；保留独立Full及固定0.8/0.2融合两种报告。
+
+## 最新结果：严格同seed Full+Full正式test重复对照已完成（2026-09-04）
 
 用户要求对标同seed Full+Person的32.8263±0.4025。新分支`codex/same-seed-full-full-test`，
 分别真实重训第二个Full_seed0/1/2，与原同seed Full按0.8/0.2融合，不将同一预测复制作为新实验。
@@ -16,9 +36,21 @@ Full+Person、记录两次Full逐task logits/probability差异及训练轨迹。
 通过110项完整单测、六组历史score审计及c9fa74c/d2442ee两版Adapter GPU smoke。批次
 `same_seed_full_full_test_20260904_122941`、tmux `multilane_same_seed_full_full_122941`已启动，
 GPU0/1/2分别为seed0/1/2。三份新config与对应原Full逐字段（含Git元数据）完全相同，
-task0首轮均84 steps/skipped0、loss有限；目前训练中，尚无最终test对照结果。
+task0首轮均84 steps/skipped0、loss有限；以下为本轮完成后核验结果。
 Automatic Upload匹配副本已校验备份至`/mnt/haoyuan/workspace/git-sync-backup-same-seed-full-full-uD5CDy`，
 primary恢复clean；运行中的原source及调度工作树不更新提交，test-only未改动。
+
+三组现均exit0、完整240epochs/13950updates/skipped0、24份test scores齐全；训练/汇总成功。
+三seed全部task的重复Full logits/probabilities逐元素相同，训练历史除耗时外相同；同seed Full+Full
+全部指标与单Full相同，final test为32.1562±0.3701。原同seed Full+Person为32.8263±0.4025，
+逐task/summary精确复现，配对增益0.6701±0.0670。这是重复性对照，不是独立随机集成无效的证据。
+已有循环seed对照仍显示Full+Full32.6551、匹配Full+Person32.7957，额外人物贡献0.1406。
+新输出及日志已同步，本地/远端99项source哈希一致；结果JSON SHA为
+f7847c4ebfa158d307c05a650fbdd83f435ed57ab32e44a303accdbc5c76590c。
+详见`output/emotic_track_a_same_seed_full_full/same_seed_full_full_test_20260904_122941/analysis.md`。
+不再重复相同Full或搜索输出权重；建议下一阶段为最小Person条件Selector/bbox条件对照，先seed0
+完整8-task val，再候选seed1/2、锁定后test。保持原100%训练数据协议，不混入门控90%fit协议。
+本轮未实现或启动新结构；仅本地更新完成记录，不提交推送或改变实验source。
 
 ## 最新状态：2026-09-04 Full+Full固定正式test对照
 
