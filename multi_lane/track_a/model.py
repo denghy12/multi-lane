@@ -332,6 +332,9 @@ class MultiLaneModel(nn.Module):
         lane_ids: Sequence[int],
         layer_id: int,
         query_delta: Optional[torch.Tensor] = None,
+        person_tokens: Optional[torch.Tensor] = None,
+        person_patch_mask: Optional[torch.Tensor] = None,
+        condition_valid: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         # The released block applies its first LayerNorm before both selector
         # aggregation and prompt attention.  Keep the residual stream itself
@@ -340,6 +343,17 @@ class MultiLaneModel(nn.Module):
         normalized_lane = block.ln_1(lane_tokens)
         task_cls = normalized_lane[:, :, :1]
         selectors = normalized_lane[:, :, 1:]
+        if (self.selector_conditioning == "person_patches"
+                and self.selector_conditioning_runtime_enabled
+                and layer_id in self.selector_conditioner.layer_indices):
+            if (person_tokens is None or person_patch_mask is None
+                    or condition_valid is None):
+                raise ValueError("Person-patch conditioning inputs are missing")
+            normalized_person_patches = block.ln_1(person_tokens)[:, 1:].detach()
+            query_delta = self.selector_conditioner.patch_query_delta(
+                layer_id, lane_ids, selectors, normalized_person_patches,
+                person_patch_mask, condition_valid,
+            )
         # Condition only the query used to read image tokens. Drop-and-replace
         # must still restore the ORIGINAL selectors, not the modified queries.
         queries = selectors if query_delta is None else selectors + query_delta.to(selectors.dtype)
@@ -390,20 +404,28 @@ class MultiLaneModel(nn.Module):
     ) -> torch.Tensor:
         lane_ids = self._lane_ids(all_seen_lanes)
         person_descriptor = None
+        person_tokens = None
         condition_enabled = (self.selector_conditioner is not None
                              and self.selector_conditioning_runtime_enabled)
         paired = images if isinstance(images, dict) else None
         if paired is not None:
             images = paired["full"]
         if condition_enabled:
-            if paired is None or not {"person", "bbox", "condition_valid"} <= paired.keys():
+            required = {"person", "bbox", "condition_valid"}
+            if self.selector_conditioning == "person_patches":
+                required.add("person_patch_mask")
+            if paired is None or not required <= paired.keys():
                 raise ValueError("Enabled selector conditioning requires paired Full/Person inputs")
             batch_size = images.shape[0]
             if (paired["person"].shape != images.shape
                     or paired["bbox"].shape != (batch_size, 6)
                     or paired["condition_valid"].shape != (batch_size,)):
                 raise ValueError("Invalid paired Full/Person batch shapes")
-            if "person" in self.selector_conditioning:
+            if self.selector_conditioning == "person_patches":
+                person_tokens = self._visual_tokens(paired["person"])
+                if paired["person_patch_mask"].shape != person_tokens[:, 1:].shape[:2]:
+                    raise ValueError("Person patch mask does not match CLIP patch tokens")
+            elif "person" in self.selector_conditioning:
                 # Full frozen CLIP CLS (post-ln, pre-projection), without task
                 # adapters or a Person classifier. No future-task supervision.
                 with torch.no_grad():
@@ -418,6 +440,7 @@ class MultiLaneModel(nn.Module):
         for layer_id, block in enumerate(self.visual_encoder.transformer.resblocks):
             query_delta = None
             if (condition_enabled
+                    and self.selector_conditioning != "person_patches"
                     and layer_id in self.selector_conditioner.layer_indices):
                 query_delta = self.selector_conditioner.query_delta(
                     layer_id, lane_ids, person_descriptor,
@@ -430,11 +453,19 @@ class MultiLaneModel(nn.Module):
                 lane_ids,
                 layer_id,
                 query_delta,
+                person_tokens,
+                paired["person_patch_mask"] if person_tokens is not None else None,
+                paired["condition_valid"] if person_tokens is not None else None,
             )
             with torch.no_grad():
                 image_tokens = block(image_tokens.permute(1, 0, 2)).permute(
                     1, 0, 2
                 )
+                if (person_tokens is not None
+                        and layer_id < max(self.selector_conditioner.layer_indices)):
+                    person_tokens = block(
+                        person_tokens.permute(1, 0, 2)
+                    ).permute(1, 0, 2)
         lane_tokens = self.visual_encoder.ln_post(lane_tokens)
         if self.visual_encoder.proj is not None:
             lane_tokens = lane_tokens @ self.visual_encoder.proj

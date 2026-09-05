@@ -1,5 +1,18 @@
 # 工作日志
 
+## 2026-09-06：target-aware crop × selector-specific Person patches 2×2
+
+- 从结果已提交的`455617a`创建`codex/selector-specific-person-patches`，未修改main。
+- Full新增target-aware train/eval裁剪：有效目标可容纳时完整保留bbox并随机保留场景；无法容纳时
+  使用最大保留策略。legacy路径的像素和外部PyTorch RNG轨迹保持不变。
+- Person letterbox新增14×14内容mask；新`person_patches`条件在layer1读取同深度冻结patch tokens，
+  每个Selector单独注意Person内容，再由每task独立零输出MLP产生query residual。padding不进入softmax。
+- runner/config/compact score重建/GPU smoke接入新模式与裁剪元数据；脚本支持四组并行：
+  legacy/target-aware × disabled/person_patches。固定冠军训练协议，seed0、完整8-task、直接test、无checkpoint。
+- 新测试覆盖target-aware目标保留、padding mask、selector-specific差异/屏蔽不变性、冻结Person路径；
+  本地完整127项单测、Python编译、Shell语法、CLI参数解析及diff检查通过。
+- 尚未提交、服务器同步或启动实验；服务器GPU在本地实现开始时均被其他任务高负载占用。
+
 ## 2026-09-05：Person-conditioned Full Selector第一版
 
 - 用户要求开始方向一代码修改并新开分支；创建`codex/person-conditioned-selector`，基于

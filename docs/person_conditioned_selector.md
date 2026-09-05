@@ -1,4 +1,27 @@
-# Person-conditioned Full Selector：第一版实现
+# Person-conditioned Full Selector：第一版与patch交互版
+
+## 第二版：selector-specific Person patches
+
+第一版实验表明共享Person CLS增量降低test mAP，因此第二版不再让所有Selector共享同一个
+Person向量。新增`person_patches`模式，在指定Full block（当前固定zero-based layer1）的输入深度，
+取同一冻结CLIP Person支路的patch tokens。每个normalized Selector分别作为query，对有效Person
+patches做scaled dot-product attention，得到各自不同的Person summary；summary再经过当前task独立的
+`Linear(768,32) -> ReLU -> Linear(32,768)`并乘scale0.1，作为该Selector的query residual。
+末层weight/bias为零，因此初始输出严格退化为原Full Selector通路；Person视觉支路全冻结，旧task
+条件模块继续冻结。条件只影响Full token汇总query，Drop & Replace仍恢复原Selector。
+
+Person依旧采用bbox+margin0.15后letterbox到224。转换器同时生成14×14 patch mask，仅patch中心落在
+原Person内容区的token可参与softmax，padding颜色不会成为伪人物证据。水平翻转与Person像素同步应用
+到mask。Person只推进到条件层需要的深度，不运行无用的后续block或Person分类头。
+
+Full新增`--full-crop-mode legacy|target_aware`。target-aware训练仍从0.05--1.0面积和3/4--4/3
+长宽比随机采样，但只接受完整包含目标bbox的裁剪；采样约束不可行时回退完整场景。评估先按短边256
+resize，再把中心裁剪平移到能完整包含目标的位置；如果目标本身大于224，则以目标中心作最大保留。
+无效bbox沿用legacy随机/中心裁剪并关闭条件。这样可独立比较裁剪主效应与Person patch交互。
+
+2×2入口为`launch_multilane_track_a_selector_patch_2x2.sh`，组合是legacy/target-aware ×
+disabled/person_patches。其余训练配置保持当前Full冠军不变。val与test需要相同完整训练预算；本轮依
+用户要求直接seed0 test，但须作为结构探索报告，不能再用其反复搜索内部超参数。
 
 ## 结构与边界
 

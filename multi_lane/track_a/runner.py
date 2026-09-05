@@ -1188,6 +1188,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--paired-full-person", action="store_true",
                         help="Also permit a paired-input, conditioning-disabled control.")
     parser.add_argument(
+        "--full-crop-mode", choices=("legacy", "target_aware"), default="legacy",
+        help="Full-image crop policy for paired inputs.",
+    )
+    parser.add_argument(
         "--person-crop-margin",
         type=float,
         default=0.0,
@@ -1308,7 +1312,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    paired_inputs = args.paired_full_person or args.selector_conditioning != "disabled"
+    paired_inputs = (
+        args.paired_full_person
+        or args.selector_conditioning != "disabled"
+        or args.full_crop_mode == "target_aware"
+    )
     if paired_inputs and args.input_mode != "full":
         raise ValueError("Selector conditioning/paired inputs require input-mode full")
     if paired_inputs and args.person_transform_mode != "letterbox":
@@ -1496,6 +1504,7 @@ def main() -> None:
             margin=args.person_crop_margin,
             jitter_strength=args.person_color_jitter_strength,
             jitter_probability=args.person_color_jitter_probability,
+            full_crop_mode=args.full_crop_mode,
         )
         paired_train = PairedFullPersonTransform(train=True, **paired_options)
         paired_eval = PairedFullPersonTransform(train=False, **paired_options)
@@ -1627,6 +1636,7 @@ def main() -> None:
         "temperature": args.temperature,
         "input_mode": args.input_mode,
         "paired_full_person": paired_inputs,
+        "full_crop_mode": args.full_crop_mode,
         "selector_conditioning": args.selector_conditioning,
         "selector_condition_layers": list(args.selector_condition_layers),
         "selector_condition_hidden_dim": args.selector_condition_hidden_dim,
@@ -1634,12 +1644,23 @@ def main() -> None:
         "selector_condition_learning_rate": args.selector_condition_learning_rate,
         "selector_condition_parameters_per_task": condition_parameters_per_task,
         "selector_condition_source": (
-            "frozen_clip_post_ln_pre_proj_cls"
+            "same_depth_frozen_clip_person_patch_tokens"
+            if args.selector_conditioning == "person_patches"
+            else "frozen_clip_post_ln_pre_proj_cls"
             if "person" in args.selector_conditioning
             else "bbox_geometry" if args.selector_conditioning == "bbox" else None
         ),
         "selector_condition_task_initialization": "independent_zero_output",
-        "selector_condition_query_scope": "shared_delta_over_selectors",
+        "selector_condition_query_scope": (
+            "selector_specific_cross_attention_delta"
+            if args.selector_conditioning == "person_patches"
+            else "shared_delta_over_selectors"
+        ),
+        "person_patch_grid_size": 14 if paired_inputs else None,
+        "person_patch_padding_mask": (
+            "patch_center_inside_letterbox_content"
+            if paired_inputs else None
+        ),
         "selector_condition_geometry": "full_crop_xyxy_visible_fraction_valid_v1" if paired_inputs else None,
         "selector_condition_total_parameters": (
             sum(p.numel() for p in model.selector_conditioner.parameters())

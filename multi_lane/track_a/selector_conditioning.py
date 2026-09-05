@@ -10,14 +10,15 @@ from torch import nn
 
 
 class TaskSelectorConditioner(nn.Module):
-    """One shared query delta per sample/layer, broadcast over selectors.
+    """Task-isolated residual query conditioning for Full selectors.
 
-    Person descriptors come from the frozen visual tower; only these MLPs are
-    trained. Each new task starts independently with zero output. Old task
-    modules retain their values and are excluded from subsequent optimizers.
+    Global descriptor modes broadcast one delta over selectors. Person-patch
+    mode produces one delta per selector from same-depth frozen tokens. Only
+    the MLPs are trained. Each new task starts independently with zero output;
+    old task modules are excluded from subsequent optimizers.
     """
 
-    MODES = ("disabled", "bbox", "person", "bbox_person")
+    MODES = ("disabled", "bbox", "person", "bbox_person", "person_patches")
 
     def __init__(self, num_tasks: int, width: int, mode: str,
                  layer_indices: Sequence[int], hidden_dim: int = 32,
@@ -35,7 +36,10 @@ class TaskSelectorConditioner(nn.Module):
         self.layer_indices = tuple(sorted(layers))
         self.residual_scale = float(residual_scale)
         self.current_task_id = -1
-        input_dim = (width if "person" in mode else 0) + (6 if "bbox" in mode else 0)
+        input_dim = (
+            width if mode == "person_patches"
+            else (width if "person" in mode else 0) + (6 if "bbox" in mode else 0)
+        )
         self.task_modules = nn.ModuleList()
         for _ in range(num_tasks):
             modules = nn.ModuleDict()
@@ -68,6 +72,8 @@ class TaskSelectorConditioner(nn.Module):
     def query_delta(self, layer_id: int, lane_ids: Sequence[int],
                     person: torch.Tensor | None, bbox: torch.Tensor,
                     valid: torch.Tensor) -> torch.Tensor:
+        if self.mode == "person_patches":
+            raise RuntimeError("Person-patch conditioning requires selector queries")
         parts = []
         if "person" in self.mode:
             if person is None:
@@ -82,3 +88,47 @@ class TaskSelectorConditioner(nn.Module):
         # Missing/fully invisible target: exactly the original query pathway.
         return (deltas * valid.to(deltas.dtype)[None, :, None]
                 * self.residual_scale).unsqueeze(2)
+
+    def patch_query_delta(
+        self,
+        layer_id: int,
+        lane_ids: Sequence[int],
+        selectors: torch.Tensor,
+        person_patches: torch.Tensor,
+        patch_mask: torch.Tensor,
+        valid: torch.Tensor,
+    ) -> torch.Tensor:
+        """Produce one residual per Selector from same-depth Person patches.
+
+        ``selectors`` is [tasks,batch,selectors,width], while frozen Person
+        patches are [batch,patches,width]. Padding is excluded before softmax.
+        The task-specific zero-output MLP preserves the original query path at
+        initialization and is the only trainable part of this interaction.
+        """
+        if self.mode != "person_patches":
+            raise RuntimeError("Patch query deltas require person_patches mode")
+        if (selectors.ndim != 4 or person_patches.ndim != 3
+                or patch_mask.shape != person_patches.shape[:2]
+                or valid.shape != person_patches.shape[:1]
+                or selectors.shape[1] != person_patches.shape[0]
+                or selectors.shape[-1] != person_patches.shape[-1]):
+            raise ValueError("Invalid selector/Person patch conditioning shapes")
+        mask = patch_mask.to(device=person_patches.device, dtype=torch.bool)
+        # Fail closed for a malformed all-padding row, then mask that sample's
+        # output with `valid` below.
+        safe_mask = mask | (~mask.any(dim=1, keepdim=True))
+        similarity = torch.einsum(
+            "tbsd,bnd->tbsn", selectors, person_patches.detach()
+        ) * (selectors.shape[-1] ** -0.5)
+        similarity = similarity.masked_fill(~safe_mask[None, :, None, :], -torch.inf)
+        summaries = torch.einsum(
+            "bnd,tbsn->tbsd",
+            person_patches.detach(),
+            torch.softmax(similarity, dim=-1),
+        )
+        deltas = torch.stack([
+            self.task_modules[task_id][str(layer_id)](summaries[index])
+            for index, task_id in enumerate(lane_ids)
+        ])
+        return (deltas * valid.to(deltas.dtype)[None, :, None, None]
+                * self.residual_scale)

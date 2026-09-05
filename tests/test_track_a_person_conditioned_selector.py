@@ -15,6 +15,7 @@ from test_track_a_reproduction import FakeVisual
 from multi_lane.continual_datasets.continual_datasets import EMOTIC
 from multi_lane.track_a.model import MultiLaneModel
 from multi_lane.track_a.paired_transforms import PairedFullPersonTransform
+from multi_lane.track_a.selector_conditioning import TaskSelectorConditioner
 from multi_lane.track_a.runner import (
     LabelView, backward_routed_training_losses, build_optimizer_groups,
     build_transforms, compact_model_state_dict, compute_asymmetric_training_loss,
@@ -37,6 +38,7 @@ def paired_batch():
     return {"full": torch.randn(3, 3, 4, 4),
             "person": torch.randn(3, 3, 4, 4),
             "bbox": torch.tensor([[.1, .2, .8, .9, 1, 1]]).repeat(3, 1),
+            "person_patch_mask": torch.ones(3, 4),
             "condition_valid": torch.ones(3)}
 
 
@@ -48,7 +50,7 @@ class PersonConditionedSelectorTest(unittest.TestCase):
         inputs = paired_batch()
         with torch.no_grad():
             expected = baseline.current_all_logits(inputs["full"])
-        for mode in ("bbox", "person", "bbox_person"):
+        for mode in ("bbox", "person", "bbox_person", "person_patches"):
             with self.subTest(mode=mode):
                 model = tiny_model(mode)
                 self.assertTrue(torch.equal(state, torch.get_rng_state()))
@@ -58,6 +60,37 @@ class PersonConditionedSelectorTest(unittest.TestCase):
                 with torch.no_grad():
                     actual = model.current_all_logits(inputs)
                 self.assertTrue(torch.equal(expected, actual))
+
+    def test_person_patch_attention_is_selector_specific_and_masks_padding(self):
+        conditioner = TaskSelectorConditioner(
+            1, 8, "person_patches", (0,), hidden_dim=4, residual_scale=1
+        )
+        conditioner.restore_task(0)
+        mlp = conditioner.task_modules[0]["0"]
+        with torch.no_grad():
+            mlp[0].weight.zero_()
+            mlp[0].bias.zero_()
+            mlp[2].weight.zero_()
+            mlp[2].bias.zero_()
+            mlp[0].weight[:, :4] = torch.eye(4)
+            mlp[2].weight[:4] = torch.eye(4)
+        selectors = torch.zeros(1, 1, 2, 8)
+        selectors[0, 0, 0, 0] = 8
+        selectors[0, 0, 1, 1] = 8
+        patches = torch.zeros(1, 3, 8)
+        patches[0, 0, 0] = 8
+        patches[0, 1, 1] = 8
+        patches[0, 2] = 1_000
+        mask = torch.tensor([[True, True, False]])
+        expected = conditioner.patch_query_delta(
+            0, (0,), selectors, patches, mask, torch.ones(1)
+        )
+        patches[0, 2] = -1_000
+        actual = conditioner.patch_query_delta(
+            0, (0,), selectors, patches, mask, torch.ones(1)
+        )
+        self.assertTrue(torch.equal(expected, actual))
+        self.assertFalse(torch.equal(actual[0, 0, 0], actual[0, 0, 1]))
 
     def test_condition_queries_do_not_replace_persistent_selectors(self):
         model = tiny_model()
@@ -92,6 +125,20 @@ class PersonConditionedSelectorTest(unittest.TestCase):
         actual = model.current_all_logits(inputs)
         model.set_selector_conditioning_runtime_enabled(False)
         self.assertTrue(torch.equal(actual, model.current_all_logits(inputs["full"])))
+
+    def test_person_patch_mode_uses_frozen_same_depth_tokens(self):
+        model = tiny_model("person_patches")
+        model.activate_task(0)
+        with torch.no_grad():
+            model.selector_conditioner.task_modules[0]["0"][2].weight.normal_(0, .2)
+        inputs = paired_batch()
+        inputs["person"].requires_grad_(True)
+        first = model.current_all_logits(inputs)
+        inputs["person"] = torch.randn_like(inputs["person"])
+        second = model.current_all_logits(inputs)
+        self.assertFalse(torch.equal(first, second))
+        self.assertIsNone(inputs["person"].grad)
+        self.assertTrue(all(p.grad is None for p in model.visual_encoder.parameters()))
 
     def test_bce_routes_to_conditioner_asl_to_adapter_and_frozen_person(self):
         model = tiny_model("bbox_person")
@@ -219,6 +266,39 @@ class PairedFullPersonInputTest(unittest.TestCase):
         actual = PairedFullPersonTransform(False)(image, box)
         self.assertTrue(torch.equal(actual["full"], full_eval(image)))
         self.assertTrue(torch.equal(actual["person"], person_eval(cropper._crop_person(image, box))))
+
+    def test_target_aware_train_and_eval_retain_valid_target(self):
+        image = self.image()
+        box = [100, 20, 200, 175]
+        train = PairedFullPersonTransform(
+            True, full_crop_mode="target_aware", jitter_probability=0
+        )
+        for seed in range(20):
+            torch.manual_seed(seed)
+            pair = train(image, box)
+            self.assertEqual(pair["bbox"][4].item(), 1)
+            self.assertEqual(pair["condition_valid"].item(), 1)
+        evaluate = PairedFullPersonTransform(
+            False, full_crop_mode="target_aware", jitter_probability=0
+        )
+        pair = evaluate(image, box)
+        self.assertEqual(pair["bbox"][4].item(), 1)
+        self.assertEqual(pair["condition_valid"].item(), 1)
+
+    def test_person_patch_mask_excludes_letterbox_padding(self):
+        transform = PairedFullPersonTransform(
+            True, normalization="none", margin=0, jitter_probability=0
+        )
+        image = Image.new("RGB", (100, 200), (128, 128, 128))
+        with patch("torchvision.transforms.RandomResizedCrop.get_params",
+                   return_value=(0, 0, 200, 100)), patch(
+                       "torch.rand", return_value=torch.tensor([1.0])):
+            pair = transform(image, [40, 0, 60, 200])
+        mask = pair["person_patch_mask"].reshape(14, 14)
+        self.assertTrue(mask.any())
+        self.assertFalse(mask[:, 0].any())
+        self.assertFalse(mask[:, -1].any())
+        self.assertTrue(mask[:, 6:8].all())
 
     def test_geometry_partial_crop_and_flip(self):
         box, crop = (20, 10, 80, 90), (0, 50, 100, 50)

@@ -19,7 +19,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--clip-checkpoint", required=True)
     parser.add_argument("--selector-conditioning", default="disabled",
-                        choices=("disabled", "bbox", "person", "bbox_person"))
+                        choices=("disabled", "bbox", "person", "bbox_person",
+                                 "person_patches"))
     parser.add_argument("--selector-condition-layers", type=int, nargs="+", default=(1,))
     parser.add_argument(
         "--adapter-mode",
@@ -101,6 +102,7 @@ def main() -> None:
     if model.selector_conditioner is not None:
         images = {"full": images, "person": torch.flip(images, dims=(-1,)),
                   "bbox": torch.tensor([[.1, .1, .8, .9, 1, 1]], device="cuda").repeat(2, 1),
+                  "person_patch_mask": torch.ones(2, 196, device="cuda"),
                   "condition_valid": torch.ones(2, device="cuda")}
         model.eval()
         with torch.no_grad(), torch.cuda.amp.autocast(enabled=amp):

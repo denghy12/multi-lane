@@ -5,7 +5,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${ROOT}"
 
 GPU="${GPU:?GPU is required}"
-MODE="${MODE:?MODE must be disabled, bbox, person, or bbox_person}"
+MODE="${MODE:?MODE must be disabled, bbox, person, bbox_person, or person_patches}"
+FULL_CROP_MODE="${FULL_CROP_MODE:-legacy}"
 SEED="${SEED:-0}"
 RUN_ID="${RUN_ID:?RUN_ID is required}"
 REPORTING_SPLIT="${REPORTING_SPLIT:-val}"
@@ -15,7 +16,8 @@ CLIP_CHECKPOINT="${CLIP_CHECKPOINT:?Set the existing OpenAI ViT-B-16.pt path}"
 OUTPUT_BASE="${OUTPUT_BASE:-./output/emotic_track_a_person_conditioned_selector}"
 LOG_DIR="${LOG_DIR:-./logs/emotic_track_a_person_conditioned_selector}"
 
-case "${MODE}" in disabled|bbox|person|bbox_person) ;; *) echo "Invalid MODE" >&2; exit 2 ;; esac
+case "${MODE}" in disabled|bbox|person|bbox_person|person_patches) ;; *) echo "Invalid MODE" >&2; exit 2 ;; esac
+case "${FULL_CROP_MODE}" in legacy|target_aware) ;; *) echo "Invalid FULL_CROP_MODE" >&2; exit 2 ;; esac
 case "${REPORTING_SPLIT}" in val) score_purpose=validation_search ;; test) score_purpose=fixed_test_fusion ;; *) echo "Invalid REPORTING_SPLIT" >&2; exit 2 ;; esac
 [[ "${SEED}" =~ ^[012]$ ]] || { echo "Invalid SEED" >&2; exit 2; }
 [[ "${RUN_ID}" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]] || { echo "Invalid RUN_ID" >&2; exit 2; }
@@ -28,7 +30,7 @@ LOG_PATH="${LOG_DIR}/${RUN_ID}.log"
 [[ -z "$(git status --porcelain)" ]] || { echo "Requires a clean Git worktree" >&2; exit 2; }
 mkdir -p "${OUTPUT_BASE}" "${LOG_DIR}"
 
-echo "Person-conditioned Selector run: mode=${MODE} gpu=${GPU} seed=${SEED} dataset=EMOTIC input=${DATA_ROOT} checkpoint=${CLIP_CHECKPOINT} output=${RUN_ROOT} log=${LOG_PATH} tasks=8 epochs=30 batch=64 optimizer=Adam main_lr=0.0125 adapter_lr=0.0004 condition_lr=0.0004 scheduler=cosine min_lr=0 warmup=0 adapter=image_token/layer1/b32/scale0.1/ReLU/independent condition=layer1/hidden32/scale0.1/ReLU/independent_zero_output person_source=frozen_clip_cls full_crop=0.05-1.0 person_margin=0.15 person_letterbox=224 shared_flip=yes person_jitter=0.1@0.2 normalization=clip model_loss=BCE adapter_loss=ASL9.8/0/0.05 AMP=on TF32=on report=${REPORTING_SPLIT} scores=on checkpoint_save=off calibration_fraction=0"
+echo "Person-conditioned Selector run: mode=${MODE} full_crop_mode=${FULL_CROP_MODE} gpu=${GPU} seed=${SEED} dataset=EMOTIC input=${DATA_ROOT} checkpoint=${CLIP_CHECKPOINT} output=${RUN_ROOT} log=${LOG_PATH} tasks=8 epochs=30 batch=64 optimizer=Adam main_lr=0.0125 adapter_lr=0.0004 condition_lr=0.0004 scheduler=cosine min_lr=0 warmup=0 adapter=image_token/layer1/b32/scale0.1/ReLU/independent condition=layer1/hidden32/scale0.1/ReLU/independent_zero_output person_source=same_depth_frozen_clip_patches_if_enabled full_crop=0.05-1.0 person_margin=0.15 person_letterbox=224 person_padding_mask=patch_center shared_flip=yes person_jitter=0.1@0.2 normalization=clip model_loss=BCE adapter_loss=ASL9.8/0/0.05 AMP=on TF32=on report=${REPORTING_SPLIT} scores=on checkpoint_save=off calibration_fraction=0"
 
 CUDA_VISIBLE_DEVICES="${GPU}" "${PYTHON}" -m multi_lane.track_a.runner \
   --seed "${SEED}" --data-root "${DATA_ROOT}" --clip-checkpoint "${CLIP_CHECKPOINT}" \
@@ -39,6 +41,7 @@ CUDA_VISIBLE_DEVICES="${GPU}" "${PYTHON}" -m multi_lane.track_a.runner \
   --training-loss-mode legacy_full_zero --loss-routing adapter_asl \
   --asl-gamma-neg 9.8 --asl-gamma-pos 0 --asl-clip 0.05 --asl-eps 1e-8 \
   --input-mode full --input-normalization clip --train-crop-scale 0.05 1.0 \
+  --full-crop-mode "${FULL_CROP_MODE}" \
   --paired-full-person --person-crop-margin 0.15 --person-transform-mode letterbox \
   --person-color-jitter-strength 0.1 --person-color-jitter-probability 0.2 \
   --selector-conditioning "${MODE}" --selector-condition-layers 1 \

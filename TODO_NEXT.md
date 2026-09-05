@@ -1,5 +1,21 @@
 # 下一步任务
 
+## 当前：selector-specific Person patches 2×2（2026-09-06）
+
+- 新分支`codex/selector-specific-person-patches`已完成代码：`legacy/target_aware Full crop ×
+  disabled/person_patches`四组，Person patch条件固定zero-based layer1。
+- Person有效内容由14×14 mask定义，letterbox padding在attention softmax前屏蔽；每个Selector
+  单独读取同深度冻结Person patches，task独立末层零初始化MLP只修改查询，不写回Full tokens。
+- target-aware train在可行时保证bbox完整并随机取场景范围；eval在Resize256后选择包含目标的224区域，
+  超大目标使用最大保留裁剪。legacy Full路径保持原像素/RNG。
+- 固定实验：EMOTIC/seed0/100%train/8 tasks/30ep/task/batch64/main LR0.0125/cosine；Image-token
+  layer1/b32/LR4e-4/scale0.1/ReLU/independent；主BCE+Adapter ASL9.8/0/0.05；AMP/TF32；无checkpoint。
+- 因val/test训练耗时相同，用户要求直接test。本轮是结构探索，不依据test继续搜索crop/条件层/MLP参数。
+- 本地127项全测与静态检查已通过。下一步提交推送，服务器新独立worktree执行全测、真实EMOTIC
+  transform smoke及`disabled/person_patches` Adapter GPU smoke；通过后在4张空闲GPU并行启动。
+- 完成后比较四组final/average/task5--7 mAP和逐task曲线，分离target-aware主效应、patch主效应与交互；
+  只有person_patches超过同crop disabled且最好结果超过32.5365，才补seed1/2。
+
 ## 当前：Person-conditioned Selector代码实现（2026-09-05）
 
 - 已按用户要求创建`codex/person-conditioned-selector`并实现第一版。

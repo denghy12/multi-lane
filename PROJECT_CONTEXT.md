@@ -1,5 +1,20 @@
 # 项目上下文
 
+## 当前开发：target-aware crop × selector-specific Person patches（2026-09-06）
+
+用户要求在第一版shared Person CLS条件失败后执行干净2×2。已从`455617a`创建
+`codex/selector-specific-person-patches`：Full新增`legacy/target_aware`裁剪；target-aware
+训练随机采样包含完整目标bbox的场景范围，评估在Resize256后选择尽量包含完整bbox的224裁剪。
+Person继续bbox+margin0.15、letterbox224及共享flip，并新增14×14有效patch mask，softmax前屏蔽
+letterbox padding。新`person_patches`模式在zero-based layer1使用与Full相同深度的冻结Person
+patch tokens；每个Selector以自身query分别汇总Person patches，再经过当前task独立hidden32/ReLU/
+scale0.1的零输出MLP产生不同查询增量。原Full Selector、Drop & Replace、Image-token Adapter及
+BCE/Adapter-ASL路由不变。新增单组参数与4卡2×2启动入口；因val/test完整训练成本相同，按用户
+要求本轮直接seed0完整8-task test，明确标记为结构探索，不在test搜索结构内参数。
+本地新增4项针对性回归，完整127项CPU单测、Python编译、Shell语法、CLI解析和diff检查通过。
+下一步提交推送，服务器独立worktree完成真实数据与GPU smoke后启动四组；若GPU仍被其他任务占用，
+仅在检测到4张空闲卡后自动启动，避免与未知任务争抢显存。
+
 ## 当前开发：Person-conditioned Full Selector（2026-09-05）
 
 用户要求开始方向一代码修改并创建新分支。从`3f8327a`创建

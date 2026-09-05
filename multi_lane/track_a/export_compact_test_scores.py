@@ -192,6 +192,7 @@ def export_scores(
                 margin=float(source_config["person_crop_margin"]),
                 jitter_strength=float(source_config["person_color_jitter_strength"]),
                 jitter_probability=float(source_config["person_color_jitter_probability"]),
+                full_crop_mode=str(source_config.get("full_crop_mode", "legacy")),
             ) if source_config.get("paired_full_person", False) else None
         ),
     )
