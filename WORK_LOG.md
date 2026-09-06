@@ -2531,3 +2531,16 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - 非warmup六组task0 cycle1完全复现锚点loss`0.61478711`、Adapter loss`0.02839343`、LR0.0125；
   warmup5%/10%首轮LR分别为0.00625/0.00416667，loss相应为0.62027323/0.62566431。八组均84
   steps、skipped0；每卡约2.0GB，日志无OOM/non-finite/RuntimeError/Traceback，当前继续运行。
+
+## 2026-09-06：实现VOC B0-C4 Image-token Adapter配对实验
+
+- 从包含当前Image-token冠军训练机制的`d7e9434`创建独立worktree和分支
+  `exp/voc-image-token-adapter`，没有修改用户当前dirty工作树，也没有接触服务器test-only worktree。
+- 扩展原论文VOC入口而不另写模型：仅在selector匹配/patch聚合时支持每lane独立的adapted image
+  tokens，冻结ViT主干残差流保持原样；Adapter为每task独立bank，切task时冻结旧任务并激活新任务。
+- VOC参数新增Adapter layer/bottleneck/LR/scale/activation/init及ASL参数；优化器把Adapter放入专属
+  LR/WD组，训练将主模型BCE与Adapter ASL梯度严格路由到互斥参数组，并做非有限值检查。
+- 新增5项单元测试以及原始control/candidate正式runner、GPU选择launcher、严格配对汇总器。
+  Python编译、shell语法和`git diff --check`已通过；本机缺PyTorch，完整测试转到服务器执行。
+- 服务器现有8卡均被其他进程占用约12GB，但每卡仍余约11--12GB；历史batch256原始VOC正式运行
+  峰值约5.2GB。用户明确允许利用剩余显存并行，仍先完成代码提交、服务器测试和正式batch smoke。

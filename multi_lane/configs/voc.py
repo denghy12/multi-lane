@@ -24,6 +24,24 @@ def get_args_parser(subparsers: argparse.ArgumentParser):
     subparsers.add_argument('--temperature', type=float, default=1.0)
     subparsers.add_argument('--head_mode', type=str, choices=['concat', 'task'], default='concat')
     subparsers.add_argument('--accumulate_grad_batches', type=int, default=1)
+    subparsers.add_argument('--adapter_mode', type=str, default='disabled',
+                            choices=['disabled', 'image_token'])
+    subparsers.add_argument('--adapter_bottleneck_dim', type=int, default=32)
+    subparsers.add_argument('--adapter_layer_indices', type=int, nargs='+', default=[1],
+                            help='Zero-based ViT block indices used by Image-token Adapters')
+    subparsers.add_argument('--adapter_residual_scale', type=float, default=0.1)
+    subparsers.add_argument('--adapter_activation', type=str, default='relu',
+                            choices=['relu', 'gelu'])
+    subparsers.add_argument('--adapter_learning_rate', type=float, default=4e-4)
+    subparsers.add_argument('--adapter_weight_decay', type=float, default=0.0)
+    subparsers.add_argument('--adapter_task_init', type=str, default='independent',
+                            choices=['independent', 'copy_previous'])
+    subparsers.add_argument('--loss_routing', type=str, default='joint_bce',
+                            choices=['joint_bce', 'adapter_asl'])
+    subparsers.add_argument('--asl_gamma_neg', type=float, default=9.8)
+    subparsers.add_argument('--asl_gamma_pos', type=float, default=0.0)
+    subparsers.add_argument('--asl_clip', type=float, default=0.05)
+    subparsers.add_argument('--asl_eps', type=float, default=1e-8)
     subparsers.add_argument('--store_model', action='store_true', help='Store the model')
     subparsers.add_argument('--wandb', action='store_true', help='Enable Weights and Biases')
     subparsers.add_argument('--project', default='multi-lane')

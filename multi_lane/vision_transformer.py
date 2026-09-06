@@ -38,6 +38,7 @@ from timm.models.registry import register_model
 
 from multi_lane.blocks import *
 from multi_lane import utils
+from multi_lane.track_a.adapter import TaskImageTokenAdapterBank
 
 _logger = logging.getLogger(__name__)
 
@@ -358,8 +359,20 @@ class VisionTransformer(nn.Module):
             cls_token = self.cls_token.clone().repeat(task_tokens.size(0), x.size(0), 1, 1)
             task_tokens = torch.cat((cls_token, task_tokens), dim=2)
 
+            lane_ids = [self.t] if self.training else list(range(self.t + 1))
             for i, block in enumerate(self.blocks):
-                x, task_tokens = block(x, task_tokens=task_tokens)
+                selector_image_tokens = None
+                if self.adapter_bank is not None:
+                    selector_image_tokens = self.adapter_bank.adapted_tokens_for_layer(
+                        layer_id=i,
+                        frozen_image_tokens=block.norm1(x).detach(),
+                        lane_ids=lane_ids,
+                    )
+                x, task_tokens = block(
+                    x,
+                    task_tokens=task_tokens,
+                    selector_image_tokens=selector_image_tokens,
+                )
        
         x = self.norm(x)
         task_tokens = self.norm(task_tokens)
@@ -437,8 +450,40 @@ class VisionTransformer(nn.Module):
         for i, block in enumerate(self.blocks):
             block.init(args)
 
+        self.adapter_mode = getattr(args, 'adapter_mode', 'disabled')
+        if self.adapter_mode == 'disabled':
+            self.adapter_bank = None
+        elif self.adapter_mode == 'image_token':
+            rng_state = torch.get_rng_state()
+            try:
+                self.adapter_bank = TaskImageTokenAdapterBank(
+                    num_tasks=args.num_tasks,
+                    hidden_dim=self.embed_dim,
+                    bottleneck_dim=args.adapter_bottleneck_dim,
+                    layer_indices=args.adapter_layer_indices,
+                    residual_scale=args.adapter_residual_scale,
+                    activation=args.adapter_activation,
+                    task_initialization=args.adapter_task_init,
+                )
+            finally:
+                # Adapter construction must not shift the data-loader or any
+                # other experiment RNG trajectory relative to the control.
+                torch.set_rng_state(rng_state)
+        else:
+            raise ValueError('Adapter mode must be disabled or image_token')
+
+    def activate_adapter_task(self, task_id: int):
+        if self.adapter_bank is not None:
+            self.adapter_bank.activate_task(task_id)
+
+    def active_adapter_parameters(self):
+        if self.adapter_bank is None:
+            return tuple()
+        return tuple(self.adapter_bank.active_parameters())
+
     def next_task(self):
         self.t += 1
+        self.activate_adapter_task(self.t)
         for block in self.blocks:
             block.next_task()
 

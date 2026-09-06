@@ -9,7 +9,10 @@
 import sys
 import argparse
 import datetime
+import json
+import os
 import random
+import subprocess
 import numpy as np
 import time
 import torch
@@ -41,6 +44,28 @@ def as_bool(value):
 
 def main(args):
     utils.init_distributed_mode(args)
+
+    adapter_mode = getattr(args, 'adapter_mode', 'disabled')
+    loss_routing = getattr(args, 'loss_routing', 'joint_bce')
+    if loss_routing == 'adapter_asl' and adapter_mode == 'disabled':
+        raise ValueError('Adapter ASL routing requires an enabled Adapter')
+    if loss_routing == 'adapter_asl' and args.accumulate_grad_batches != 1:
+        raise ValueError('Mixed Adapter ASL routing currently requires gradient accumulation = 1')
+    if adapter_mode != 'disabled':
+        if args.adapter_bottleneck_dim <= 0:
+            raise ValueError('Adapter bottleneck dimension must be positive')
+        if args.adapter_learning_rate <= 0:
+            raise ValueError('Adapter learning rate must be positive')
+        if args.adapter_weight_decay < 0:
+            raise ValueError('Adapter weight decay must be non-negative')
+        if not args.adapter_layer_indices or len(set(args.adapter_layer_indices)) != len(args.adapter_layer_indices):
+            raise ValueError('Adapter layer indices must be non-empty and unique')
+        if min(args.adapter_layer_indices) < 0 or max(args.adapter_layer_indices) >= 12:
+            raise ValueError('ViT-B/16 Adapter layer indices must be between 0 and 11')
+    if args.asl_gamma_neg < 0 or args.asl_gamma_pos < 0:
+        raise ValueError('ASL gamma values must be non-negative')
+    if not 0 <= args.asl_clip < 1 or args.asl_eps <= 0:
+        raise ValueError('ASL clip/epsilon are outside their valid ranges')
 
     device = torch.device(args.device)
 
@@ -74,6 +99,17 @@ def main(args):
             learnable_params.append((n, p))
         else:
             p.requires_grad = False
+
+    # The generic freeze pass above intentionally does not recognize Adapter
+    # names. Activate only task 0 after it, then let next_task() freeze/activate
+    # the appropriate task-specific Adapter before each new optimizer is built.
+    if hasattr(model, 'activate_adapter_task'):
+        model.activate_adapter_task(0)
+    learnable_params = [
+        (name, parameter)
+        for name, parameter in model.named_parameters()
+        if parameter.requires_grad
+    ]
         
     n_parameters = sum(p.numel() for _, p in learnable_params)
     print(f'Name: {args.name}')
@@ -95,6 +131,30 @@ def main(args):
     else:
         global_batch_size = args.batch_size * args.world_size
     args.lr = args.lr * global_batch_size / 256.0 * args.accumulate_grad_batches
+
+    if args.output_dir and utils.is_main_process():
+        git_commit = subprocess.run(
+            ['git', 'rev-parse', 'HEAD'], capture_output=True, text=True, check=True
+        ).stdout.strip()
+        git_dirty = bool(subprocess.run(
+            ['git', 'status', '--porcelain'], capture_output=True, text=True, check=True
+        ).stdout.strip())
+        config = dict(vars(args))
+        config.update({
+            'effective_learning_rate': args.lr,
+            'git': {'commit': git_commit, 'dirty': git_dirty},
+            'class_mask': class_mask,
+            'trainable_parameters': sum(
+                parameter.numel() for _, parameter in learnable_params
+            ),
+            'adapter_parameters_per_task': (
+                model_without_ddp.adapter_bank.per_task_parameter_count()
+                if getattr(model_without_ddp, 'adapter_bank', None) is not None
+                else 0
+            ),
+        })
+        with open(os.path.join(args.output_dir, 'run_config.json'), 'w', encoding='utf-8') as fp:
+            json.dump(config, fp, indent=2, ensure_ascii=False)
 
     if args.opt == 'sgd':
         args.opt_betas = None

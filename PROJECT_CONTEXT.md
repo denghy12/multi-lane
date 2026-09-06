@@ -1090,3 +1090,15 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - 8份config均记录clean`7337f96`、30 epochs、冠军固定协议和正确scheduler字段。非warmup六组
   task0 cycle1的loss/Adapter loss均为`0.61478711/0.02839343`且LR0.0125；warmup5%/10%首轮
   LR为`0.00625/0.00416667`。八组均84 steps、skipped0，每卡约2GB，无错误，继续运行。
+
+## 2026-09-06 VOC2007 B0-C4迁移检查
+
+- 目标是在论文原始VOC2007 B0-C4协议上，做seed0同提交配对实验：原始MULTI-LANE
+  Adapter-disabled/BCE对照，与Image-token Adapter layer1/b32/LR4e-4/scale0.1/ReLU/independent、
+  主模型BCE+Adapter ASL9.8/0/0.05候选。
+- 固定ViT-B/16 ImageNet-1k预训练、5 tasks×4 classes、batch256、30 epochs/task、Adam主LR0.05、
+  per-task cosine、crop0.05、10 selectors/10 prompts/前5层prompt、seed0、FP32，不保存checkpoint。
+- 新分支`exp/voc-image-token-adapter`在独立本地worktree实现VOC Image-token selector输入、任务独立
+  Adapter生命周期、Adapter专属优化器组、BCE/ASL参数组loss路由、完整配置记录、测试及配对运行/汇总脚本。
+- 论文报告MULTI-LANE B0-C4 average/final mAP为`93.5/88.8`，只作外部复现参照；是否提升以同批
+  control与candidate的final/average mAP差值判断，不跨EMOTIC/VOC比较绝对分数。

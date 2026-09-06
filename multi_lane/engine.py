@@ -36,6 +36,61 @@ DETAIL_METRICS = [
 ]
 
 
+def compute_asymmetric_loss(logits: torch.Tensor, targets: torch.Tensor,
+                            temperature: float, gamma_neg: float = 9.8,
+                            gamma_pos: float = 0.0, clip: float = 0.05,
+                            eps: float = 1e-8) -> torch.Tensor:
+    """Numerically stable ASL on the same masked view used by VOC BCE."""
+    if temperature <= 0:
+        raise ValueError('Training temperature must be positive')
+    if gamma_neg < 0 or gamma_pos < 0:
+        raise ValueError('ASL gamma values must be non-negative')
+    if not 0 <= clip < 1 or eps <= 0:
+        raise ValueError('ASL clip/epsilon are outside their valid ranges')
+    if not torch.isfinite(logits).all() or not torch.isfinite(targets).all():
+        raise FloatingPointError('ASL received non-finite inputs')
+    probabilities = torch.sigmoid(logits.float() / temperature)
+    negative_probabilities = 1.0 - probabilities
+    if clip > 0:
+        negative_probabilities = (negative_probabilities + clip).clamp(max=1.0)
+    targets = targets.float()
+    anti_targets = 1.0 - targets
+    positive_loss = targets * torch.log(probabilities.clamp_min(eps))
+    negative_loss = anti_targets * torch.log(negative_probabilities.clamp_min(eps))
+    focal_weight = (
+        targets * (1.0 - probabilities).pow(gamma_pos)
+        + anti_targets * (1.0 - negative_probabilities).pow(gamma_neg)
+    ).detach()
+    loss = (-(positive_loss + negative_loss) * focal_weight).mean()
+    if not torch.isfinite(loss):
+        raise FloatingPointError('ASL produced a non-finite loss')
+    return loss
+
+
+def backward_routed_losses(model_loss: torch.Tensor, adapter_loss: torch.Tensor,
+                           model_parameters, adapter_parameters) -> None:
+    """Backpropagate BCE to MULTI-LANE and ASL only to Adapter parameters."""
+    model_parameters = tuple(model_parameters)
+    adapter_parameters = tuple(adapter_parameters)
+    if not adapter_parameters:
+        model_loss.backward()
+        return
+    if {id(p) for p in model_parameters}.intersection(id(p) for p in adapter_parameters):
+        raise ValueError('Model and Adapter parameter groups must be disjoint')
+    model_gradients = torch.autograd.grad(
+        model_loss, model_parameters, retain_graph=True, allow_unused=True
+    )
+    adapter_gradients = torch.autograd.grad(
+        adapter_loss, adapter_parameters, allow_unused=True
+    )
+    for parameter, gradient in zip(model_parameters, model_gradients):
+        if gradient is not None:
+            parameter.grad = gradient
+    for parameter, gradient in zip(adapter_parameters, adapter_gradients):
+        if gradient is not None:
+            parameter.grad = gradient
+
+
 def _safe_divide(numerator, denominator):
     return numerator / denominator if denominator > 0 else 0.0
 
@@ -499,12 +554,24 @@ def train_one_epoch(model: nn.Module, criterion, data_loader: Iterable, optimize
             target = utils.mask_logits(target, class_mask, args.num_classes, [task_id], fill_value=0)
 
         if type(criterion) == torch.nn.CrossEntropyLoss:
-            loss = criterion(logits / args.temperature, target)
+            model_loss = criterion(logits / args.temperature, target)
         else:
-            loss = criterion(logits / args.temperature, target.float())
+            model_loss = criterion(logits / args.temperature, target.float())
+
+        adapter_loss = model_loss
+        if getattr(args, 'loss_routing', 'joint_bce') == 'adapter_asl':
+            adapter_loss = compute_asymmetric_loss(
+                logits=logits,
+                targets=target.float(),
+                temperature=args.temperature,
+                gamma_neg=args.asl_gamma_neg,
+                gamma_pos=args.asl_gamma_pos,
+                clip=args.asl_clip,
+                eps=args.asl_eps,
+            )
         
         if args.head_mode  == 'task':
-            loss -= sim
+            model_loss -= sim
 
         if type(criterion) == torch.nn.CrossEntropyLoss:
             acc1, acc5 = accuracy(logits, target, topk=(1, 5))
@@ -515,11 +582,28 @@ def train_one_epoch(model: nn.Module, criterion, data_loader: Iterable, optimize
             of1 = utils.f1_score_overall(clean_logits, clean_target)
             cf1, _ = utils.f1_score_per_class(clean_logits, clean_target)
 
-        if not math.isfinite(loss.item()):
-            print("Loss is {}, stopping training".format(loss.item()))
+        if not math.isfinite(model_loss.item()) or not math.isfinite(adapter_loss.item()):
+            print("Loss is non-finite, stopping training")
             sys.exit(1)
         
-        loss.backward()
+        if getattr(args, 'loss_routing', 'joint_bce') == 'adapter_asl':
+            named_trainable = [
+                (name, parameter) for name, parameter in model.named_parameters()
+                if parameter.requires_grad
+            ]
+            adapter_parameters = [
+                parameter for name, parameter in named_trainable
+                if 'adapter_bank' in name
+            ]
+            model_parameters = [
+                parameter for name, parameter in named_trainable
+                if 'adapter_bank' not in name
+            ]
+            backward_routed_losses(
+                model_loss, adapter_loss, model_parameters, adapter_parameters
+            )
+        else:
+            model_loss.backward()
         if i % args.accumulate_grad_batches == 0:
             optimizer.step()
             optimizer.zero_grad()
@@ -527,7 +611,11 @@ def train_one_epoch(model: nn.Module, criterion, data_loader: Iterable, optimize
         torch.cuda.synchronize()
         # metric_logger.update(Loss=loss.item())
         metric_logger.update(Lr=optimizer.param_groups[0]["lr"])
-        metric_logger.meters['Loss'].update(loss.item(), n=input.shape[0])
+        metric_logger.meters['Loss'].update(model_loss.item(), n=input.shape[0])
+        if getattr(args, 'loss_routing', 'joint_bce') == 'adapter_asl':
+            metric_logger.meters['AdapterLoss'].update(
+                adapter_loss.item(), n=input.shape[0]
+            )
         if type(criterion) == torch.nn.CrossEntropyLoss:
             metric_logger.meters['Acc@1'].update(acc1.item(), n=input.shape[0])
             metric_logger.meters['Acc@5'].update(acc5.item(), n=input.shape[0])

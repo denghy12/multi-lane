@@ -68,7 +68,7 @@ class PreT_Attention(nn.Module):
         prompts = prompts.permute(0, 1, 2, 4, 3, 5)
         return prompts
 
-    def forward(self, x, tokens):
+    def forward(self, x, tokens, selector_image_tokens=None):
         # Batch, Num. patches, Embedding dim
         B, N, C = x.shape
 
@@ -83,13 +83,37 @@ class PreT_Attention(nn.Module):
                 
             # compute softmax similarity between global selectors and patches
             T, B, G, C = g_selectors.shape
-            # [T, B, S, C] X [B, N, C] -> [T, B, S, N]
-            g_patch_attn = torch.einsum('tbsc, bnc -> tbsn', g_selectors, x.detach()) * self.token_scale
+            if selector_image_tokens is None:
+                selector_image_tokens = x.detach()
+            if selector_image_tokens.ndim == 3:
+                # Historical path: one frozen image stream shared by all lanes.
+                # [T, B, S, C] X [B, N, C] -> [T, B, S, N]
+                g_patch_attn = torch.einsum(
+                    'tbsc, bnc -> tbsn', g_selectors, selector_image_tokens
+                ) * self.token_scale
+            elif selector_image_tokens.ndim == 4:
+                if selector_image_tokens.shape[:2] != (T, B):
+                    raise ValueError('Task-specific image tokens do not match task/batch dimensions')
+                if selector_image_tokens.shape[-1] != C:
+                    raise ValueError('Task-specific image-token width differs from selectors')
+                # Image-token Adapter path: each lane reads its own adapted
+                # view while the frozen backbone stream remains unchanged.
+                g_patch_attn = torch.einsum(
+                    'tbsc, tbnc -> tbsn', g_selectors, selector_image_tokens
+                ) * self.token_scale
+            else:
+                raise ValueError('Selector image tokens must be rank 3 or 4')
             g_soft_patches = g_patch_attn.softmax(dim=-1)
 
             # aggregate patches according to softmax similarity
-            # [B, N, C] X [T, B, S, N, 1] -> [T, B, S, C]
-            g_task_patches = torch.einsum('bnc, tbsn -> tbsc', x.detach(), g_soft_patches)
+            if selector_image_tokens.ndim == 3:
+                g_task_patches = torch.einsum(
+                    'bnc, tbsn -> tbsc', selector_image_tokens, g_soft_patches
+                )
+            else:
+                g_task_patches = torch.einsum(
+                    'tbnc, tbsn -> tbsc', selector_image_tokens, g_soft_patches
+                )
 
             # compute softmax similarity between local selectors and patches
             task_patches = g_task_patches
@@ -239,7 +263,11 @@ class Block(nn.Module):
         else:
             assert 'task_tokens' in kwargs.keys(), 'tokens must be provided when prompts is True'
             tokens = kwargs['task_tokens']
-            x_inter, tokens_inter = self.attn(self.norm1(x), self.norm1(tokens))
+            x_inter, tokens_inter = self.attn(
+                self.norm1(x),
+                self.norm1(tokens),
+                selector_image_tokens=kwargs.get('selector_image_tokens'),
+            )
             
             x = x + self.drop_path1(self.ls1(x_inter))
             tokens = tokens + self.drop_path1(self.ls1(tokens_inter))
@@ -356,4 +384,3 @@ class TaskIdentifier(nn.Module):
 
     def next_task(self):
         self.t += 1
-

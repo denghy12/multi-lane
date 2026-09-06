@@ -597,3 +597,11 @@ VOC 对照实验，不应在现阶段合并到 `main`。
 38. 正式batch`..._20260902_185259`已一组一卡启动；8份clean config、首轮LR/loss/84 steps/
     skipped0和显存均核验通过。当前只等待完成，不重复启动；结束后严格核验240 epochs、13950 updates、
     全LR轨迹和错误日志，再打包同步JSON/日志且不含checkpoint。
+39. 完成`exp/voc-image-token-adapter`代码审查后提交推送；服务器再次审计全部worktree并创建新的clean
+    独立VOC worktree，不修改primary和`multi-lane-main-test-only`。
+40. 在服务器PyTorch环境运行新增VOC单测及现有相关测试；用真实ViT-B/16检查zero-init输出、任务切换冻结、
+    主模型BCE/Adapter ASL梯度有限性，以及batch256单步峰值显存。
+41. 测试通过后，在两张不同GPU上并行运行seed0完整B0-C4 control与candidate。允许与现有任务共享GPU，
+    但启动时要求预计新增约5--7GB后仍有余量；出现OOM则停止并诊断，不静默改变协议。
+42. 完成后核验两个run同一clean commit且除Adapter/loss处理外协议一致，生成`comparison_summary.json`；
+    重点报告final mAP、5-task average mAP及task0--4逐步差值，并与论文93.5/88.8区分为内部/外部对照。

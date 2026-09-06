@@ -355,12 +355,29 @@ def is_trainable(args, name: str) -> bool:
 
 
 def get_optimizer(args, model):
-    backbone_params = [param for name, param in model.named_parameters() if 'head' not in name and param.requires_grad]
-    head_params = [param for name, param in model.named_parameters() if 'head' in name and param.requires_grad]
-    params = [
-        {'params': backbone_params, 'weight_decay': args.weight_decay},
-        {'params': head_params, 'weight_decay': 0},
+    adapter_params = [
+        param for name, param in model.named_parameters()
+        if 'adapter_bank' in name and param.requires_grad
     ]
+    backbone_params = [
+        param for name, param in model.named_parameters()
+        if 'head' not in name and 'adapter_bank' not in name and param.requires_grad
+    ]
+    head_params = [
+        param for name, param in model.named_parameters()
+        if 'head' in name and 'adapter_bank' not in name and param.requires_grad
+    ]
+    params = [
+        {'params': backbone_params, 'weight_decay': args.weight_decay, 'group_name': 'model'},
+        {'params': head_params, 'weight_decay': 0, 'group_name': 'head'},
+    ]
+    if adapter_params:
+        params.append({
+            'params': adapter_params,
+            'lr': args.adapter_learning_rate,
+            'weight_decay': args.adapter_weight_decay,
+            'group_name': 'adapter',
+        })
     return create_optimizer(args, params)
     
 
