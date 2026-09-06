@@ -1104,3 +1104,10 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   control与candidate的final/average mAP差值判断，不跨EMOTIC/VOC比较绝对分数。
 - 实现已推送为`fd238aa`；服务器独立worktree完整65项单测通过，candidate真实batch256、5-task
   1-epoch smoke通过，峰值5.62GB且梯度/loss有限。正式seed0配对batch已在GPU1/5并行启动。
+- 正式pair已完成：control average/final mAP为`92.8460/88.2499`，Image-token Adapter为
+  `92.8296/88.2187`，差值`-0.0164/-0.0312`，未提升。task0--4差值依次为
+  `-0.0008/-0.0178/+0.0039/-0.0362/-0.0312`，没有随增量过程形成稳定收益。
+- 最终20类AP中10升10降，平均绝对变化仅`0.126`个百分点、最大`0.428`个百分点；candidate最终
+  oF1/cF1提高`0.090/0.052`，BCE loss下降`0.00210`，但mAP略降，属于阈值校准/局部排序交换。
+- 结论：EMOTIC上选出的Image-token layer1/b32/LR4e-4 + ASL9.8/0/0.05不能直接迁移为VOC收益。
+  单seed差异接近数值噪声，不能宣称负效应，但足以否定“该固定配置已在VOC上带来提升”。

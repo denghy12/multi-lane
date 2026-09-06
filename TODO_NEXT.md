@@ -607,3 +607,8 @@ VOC 对照实验，不应在现阶段合并到 `main`。
     重点报告final mAP、5-task average mAP及task0--4逐步差值，并与论文93.5/88.8区分为内部/外部对照。
 43. 上述测试和smoke已通过，正式batch`..._20260906_142350`正在GPU1/5运行。当前不要重复启动；完成后
     自动汇总，随后只同步run_config、detail JSON/HTML、summary与日志，不同步任何checkpoint。
+44. VOC seed0 pair已完成并同步，candidate final/average mAP均未超过同批control；停止直接把EMOTIC
+    ASL/Adapter超参数当作VOC冠军，不补seed1/2，不把`-0.0312`解释为显著退化。
+45. 若研究目标是验证方法跨数据集泛化，下一步应先拆分结构与loss两项因素：运行VOC
+    Image-token Adapter+BCE作为结构消融，再对VOC仅使用validation搜索较温和ASL；若只追求当前
+    EMOTIC mAP，则无需继续VOC调参。

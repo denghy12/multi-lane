@@ -68,6 +68,6 @@ if (( status != 0 )); then
   exit "${status}"
 fi
 
-python scripts/voc/summarize_voc_b0c4_image_token_pair.py \
+"${PYTHON_BIN:-python}" scripts/voc/summarize_voc_b0c4_image_token_pair.py \
   --batch-root "${ROOT_DIR}/output/voc_b0c4_image_token/${BATCH_ID}"
 echo "VOC paired run complete: ${BATCH_ID}"

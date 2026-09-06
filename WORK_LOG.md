@@ -2552,3 +2552,12 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
   `voc_b0c4_pair_20260906_142350`启动，control用GPU1、candidate用GPU5，与已有任务共享显存；启动后
   两卡各余约5.2GB。两份配置均为clean`fd238aa`、seed0、batch256、30 epochs、B0-C4；task0训练
   control逐项复现历史轨迹，candidate初始轨迹对齐，日志无错误。
+- 两组均完整运行150个task-epochs，control/candidate用时`12:46/13:09`，峰值显存
+  `5.20/5.62GB`，无OOM、non-finite或Traceback；两份detail JSON/HTML和run config完整。
+- launcher训练成功后因非交互shell没有裸`python`命令而未自动执行汇总；已用明确的multilane Python
+  手动运行严格汇总并成功生成`comparison_summary.json`，同时修复launcher继承`PYTHON_BIN`。
+- 结果已同步本地`output/voc_b0c4_image_token/voc_b0c4_image_token_pair_seed0_20260906_142350/`
+  和对应`logs/`；summary SHA-256为
+  `de34af766831079c65b71c01277fd185acf18f15180d9cfb8ca726675ce71643`。
+- control average/final mAP`92.8460/88.2499`；candidate `92.8296/88.2187`，分别低
+  `0.0164/0.0312`。candidate仅task2微升`0.0039`，其余四个task均微降；不进入VOC多seed确认。
