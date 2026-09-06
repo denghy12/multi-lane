@@ -7,6 +7,8 @@ GPU_ID="${GPU_ID:?Set GPU_ID to one CUDA device index}"
 BATCH_ID="${BATCH_ID:?Set BATCH_ID for the paired run}"
 DATA_ROOT="${DATA_ROOT:-${ROOT_DIR}/datasets}"
 NUM_WORKERS="${NUM_WORKERS:-4}"
+EPOCHS="${EPOCHS:-30}"
+PYTHON_BIN="${PYTHON_BIN:-python}"
 
 if [[ "${VARIANT}" != "control" && "${VARIANT}" != "adapter" ]]; then
   echo "VARIANT must be control or adapter" >&2
@@ -29,7 +31,7 @@ COMMON_ARGS=(
   --num_tasks 5
   --base_classes 4
   --batch_size 256
-  --epochs 30
+  --epochs "${EPOCHS}"
   --opt adam
   --lr 0.05
   --weight_decay 0
@@ -68,6 +70,6 @@ fi
 export CUDA_VISIBLE_DEVICES="${GPU_ID}"
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-4}"
 cd "${ROOT_DIR}"
-python main.py \
+"${PYTHON_BIN}" main.py \
   "${COMMON_ARGS[@]}" "${ROUTING_ARGS[@]}" \
   2>&1 | tee "${LOG_DIR}/${VARIANT}.log"
