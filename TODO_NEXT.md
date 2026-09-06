@@ -605,3 +605,5 @@ VOC 对照实验，不应在现阶段合并到 `main`。
     但启动时要求预计新增约5--7GB后仍有余量；出现OOM则停止并诊断，不静默改变协议。
 42. 完成后核验两个run同一clean commit且除Adapter/loss处理外协议一致，生成`comparison_summary.json`；
     重点报告final mAP、5-task average mAP及task0--4逐步差值，并与论文93.5/88.8区分为内部/外部对照。
+43. 上述测试和smoke已通过，正式batch`..._20260906_142350`正在GPU1/5运行。当前不要重复启动；完成后
+    自动汇总，随后只同步run_config、detail JSON/HTML、summary与日志，不同步任何checkpoint。

@@ -1102,3 +1102,5 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   Adapter生命周期、Adapter专属优化器组、BCE/ASL参数组loss路由、完整配置记录、测试及配对运行/汇总脚本。
 - 论文报告MULTI-LANE B0-C4 average/final mAP为`93.5/88.8`，只作外部复现参照；是否提升以同批
   control与candidate的final/average mAP差值判断，不跨EMOTIC/VOC比较绝对分数。
+- 实现已推送为`fd238aa`；服务器独立worktree完整65项单测通过，candidate真实batch256、5-task
+  1-epoch smoke通过，峰值5.62GB且梯度/loss有限。正式seed0配对batch已在GPU1/5并行启动。

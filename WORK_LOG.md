@@ -2544,3 +2544,11 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
   Python编译、shell语法和`git diff --check`已通过；本机缺PyTorch，完整测试转到服务器执行。
 - 服务器现有8卡均被其他进程占用约12GB，但每卡仍余约11--12GB；历史batch256原始VOC正式运行
   峰值约5.2GB。用户明确允许利用剩余显存并行，仍先完成代码提交、服务器测试和正式batch smoke。
+- 实现提交`2f26585`及smoke入口补充`fd238aa`均已推送；服务器新建clean独立worktree
+  `/mnt/haoyuan/workspace/multi-lane-main-voc-image-token`，primary和test-only均未修改。
+- 服务器`multilane`环境完整65项测试全部通过。GPU5以真实VOC、batch256完成candidate全5-task
+  1-epoch smoke，峰值5.62GB，无OOM/non-finite/Traceback，task切换及detail产物正常。
+- 正式batch`voc_b0c4_image_token_pair_seed0_20260906_142350`已在tmux
+  `voc_b0c4_pair_20260906_142350`启动，control用GPU1、candidate用GPU5，与已有任务共享显存；启动后
+  两卡各余约5.2GB。两份配置均为clean`fd238aa`、seed0、batch256、30 epochs、B0-C4；task0训练
+  control逐项复现历史轨迹，candidate初始轨迹对齐，日志无错误。
