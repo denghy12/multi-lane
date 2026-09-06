@@ -12,6 +12,15 @@
 - 新增单GPU训练后自动融合launcher及2项回归。macOS系统Python缺numpy，已完成Python编译、Shell
   语法和diff静态检查；完整单测、真实数据与GPU smoke待服务器执行，尚未启动训练。
 
+## 2026-09-07：初始Person对照服务器预检
+
+- commit `44ad8ed`已在独立服务器worktree运行129项完整单测，全部通过；
+  Automatic Upload的同哈希文件已备份，primary恢复clean，test-only未修改。
+- 真实EMOTIC train/test分别检16,001/5,368条，旧版Person流程实际为`bbox+0.15 margin`后
+  train `RandomResizedCrop(224, 0.70--1.0)`、test `Resize256+CenterCrop224`；抽样张量尺寸与数值均正常。
+- 当时8张GPU均有20--22GB显存占用，不叠加训练。新增单卡安全等待器，要求连续两次
+  显存占用不高于2GB、利用率不高于10%，随后先GPU smoke再启动正式test。
+
 ## 2026-09-06：同步并分析selector patch 2×2
 
 - 服务器四组均完整结束：各240 epochs/13,950 successful updates/0 skipped，task0--7与日志完成标记

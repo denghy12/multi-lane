@@ -1,6 +1,6 @@
 # 项目上下文
 
-## 2026-09-07：Full + 初始Person crop固定融合对照（待服务器运行）
+## 2026-09-07：Full + 初始Person crop固定融合对照（待GPU空闲自动运行）
 
 用户要求补齐此前缺失的`Full + initial Person-only`对照。新分支
 `exp/emotic-initial-person-fusion-control`只重训seed0初始Person分支并保存task0--7 test scores；
@@ -9,7 +9,9 @@ margin0.15、legacy RandomResizedCrop scale0.70--1.0、评估Resize256+CenterCro
 模型仍为Image-token layer1/b32/LR4e-4/scale0.1/ReLU/independent、主BCE+Adapter ASL9.8/0/0.05、
 30 epochs/task、AMP/TF32。融合固定转移原letterbox validation锁定规则：probability Full0.80/
 Person0.20、threshold0.5，test不搜索。新增严格来源审计、单一规则融合入口、单GPU训练/融合脚本和
-回归测试；不保存checkpoint。下一步提交推送并在服务器独立worktree跑完整单测与GPU smoke后启动。
+回归测试；不保存checkpoint。commit `44ad8ed`已在服务器独立worktree通过129项完整单测和
+真实EMOTIC train/test样本检查。8张GPU当前均高负载占用，等待器将在单卡连续两次满足
+used<=2GB、util<=10%时，先做Adapter GPU smoke，通过后自动启动正式test。
 
 ## 2026-09-06：selector-specific Person patches 2×2完成
 

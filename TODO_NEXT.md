@@ -4,8 +4,9 @@
 
 1. 提交推送`exp/emotic-initial-person-fusion-control`的固定对照入口；服务器审计全部worktree并创建
    新clean独立worktree，禁止触碰`multi-lane-main-test-only`。
-2. 在服务器ddp环境运行完整单测、初始legacy Person transform真实数据检查和Image-token Adapter
-   GPU smoke；确认score dump可按原batch路径精确重建指标。
+2. 服务器ddp环境的完整单测和真实EMOTIC legacy Person transform检查已通过。
+   GPU当前繁忙；等待一张卡连续两次满足used<=2GB且util<=10%后自动运行Adapter GPU
+   smoke，任一失败则不启动正式test。
 3. 只训练seed0初始Person分支：8 tasks×30 epochs、13,950 updates目标、skipped0、无checkpoint。
    复用已有Full scores，固定probability 0.80/0.20一次，不在test搜索权重或阈值。
 4. 完成后同步config/task metrics/history/summary、8份test scores、融合JSON和日志；比较初始Person
