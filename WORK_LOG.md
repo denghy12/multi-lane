@@ -1,5 +1,44 @@
 # 工作日志
 
+## 2026-09-07：实现初始Person固定融合复测入口
+
+- 创建`exp/emotic-initial-person-fusion-control`。目标是补齐初始Person-only因未保存scores/checkpoint
+  而无法与Full融合的历史缺口，不改动已锁定的融合规则。
+- 新增初始Person正式score脚本：legacy crop、margin0.15、train crop0.70--1.0、eval
+  Resize256+CenterCrop224、无ColorJitter；其余训练配置与现有Full/letterbox Person冠军一致。
+- 新增专用固定融合器：强制验证初始Person transform和完整test来源，读取原validation锁定文件，
+  只评估probability Full0.80/Person0.20一次；允许复用不同历史clean commit的Full source但逐项核对
+  全部共同协议字段，并记录两端commit。
+- 新增单GPU训练后自动融合launcher及2项回归。macOS系统Python缺numpy，已完成Python编译、Shell
+  语法和diff静态检查；完整单测、真实数据与GPU smoke待服务器执行，尚未启动训练。
+
+## 2026-09-06：同步并分析selector patch 2×2
+
+- 服务器四组均完整结束：各240 epochs/13,950 successful updates/0 skipped，task0--7与日志完成标记
+  齐全，无OOM/non-finite/训练中断。
+- 同步四组JSON、8-task NPZ scores和日志共52文件；本地/服务器逐文件SHA一致，manifest aggregate
+  `0cc78d2b1f78ada2d59b3403daf630cc128fce82668f4215b00dbfc9286b4670`。
+- final mAP：legacy-disabled32.5365、legacy-patches31.6826、target-disabled30.5018、
+  target-patches30.2505。patch在legacy/target下分别下降0.8540/0.2513；target-aware在
+  disabled/patch下分别下降2.0348/1.4321。
+- legacy patch只有task0略升，task1--7全降；最终5类升21类降，task6 Suffering下降4.8180。
+  固定外部0.8/0.2 Person融合也无法挽救新端点，原LD+Person仍以33.2672保持seed0双视图最佳。
+- 数据审计：target-aware将test bbox可见率0.8032→0.9778但改变71.89%裁剪位置；train有9.87%
+  full-image fallback。它训练loss更低但test更差，当前判断为上下文/构图或分布泛化问题。
+- 真实16,001条train记录的Person有效patch最少28、空mask0；已知空mask bug仍需修复但不是本轮原因。
+- 更新结果报告、方案文档和三份上下文文档；本轮只同步/分析，没有修改业务代码、提交或启动新实验。
+
+## 2026-09-06：审计下一阶段方向（未启动新实验）
+
+- 读取当前模型/transform/loss、历史实验结果及CocoER本地源码；服务器快照四组约task0 epoch14--15。
+- 合成复核：旧head梯度与一步更新均0；all-false patch mask在非零bias下错误产生0.1条件残差，
+  极细长crop可能生成空mask。未修改正在训练的实现，真实触发率仍待统计。
+- 历史disabled预测对齐：task0同ID到task7 mAP只差-0.0291；样本池3142→5368后五类AP下降
+  16.4204。修正“共享head持续更新导致遗忘”的过度推断；固定ID对照与标准指标都应保留。
+- 新增方案文档：先完成2×2和必要修复，再4组val比较Full/query/Person value residual/深层特征
+  residual。后续只给赢家补ROI、辅助监督、合法同task蒸馏及多seed。没有承诺特定mAP收益。
+- 三份上下文文档同步更新；本轮未提交推送，也未改动运行中的服务器独立worktree。
+
 ## 2026-09-06：target-aware crop × selector-specific Person patches 2×2
 
 - 从结果已提交的`455617a`创建`codex/selector-specific-person-patches`，未修改main。

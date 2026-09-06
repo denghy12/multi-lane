@@ -1,5 +1,39 @@
 # 下一步任务
 
+## 2026-09-07：补Full + 初始Person crop
+
+1. 提交推送`exp/emotic-initial-person-fusion-control`的固定对照入口；服务器审计全部worktree并创建
+   新clean独立worktree，禁止触碰`multi-lane-main-test-only`。
+2. 在服务器ddp环境运行完整单测、初始legacy Person transform真实数据检查和Image-token Adapter
+   GPU smoke；确认score dump可按原batch路径精确重建指标。
+3. 只训练seed0初始Person分支：8 tasks×30 epochs、13,950 updates目标、skipped0、无checkpoint。
+   复用已有Full scores，固定probability 0.80/0.20一次，不在test搜索权重或阈值。
+4. 完成后同步config/task metrics/history/summary、8份test scores、融合JSON和日志；比较初始Person
+   与letterbox Person的独立指标，以及两者分别与同一Full融合的final/average mAP、cF1/oF1。
+
+## 2026-09-06 2×2完成后的执行优先级
+
+1. 当前2×2已完成并同步：`32.5365/31.6826/30.5018/30.2505`。不补seed1/2，不继续搜索
+   target-aware crop或query-only Person patches的层数、hidden、scale、LR。
+2. 下次业务修改先修空Person mask fail-closed并补回归；真实train频率为0，因此只作正确性修复。
+   同时记录有效patch数、Person残差范数及不同Selector注意力相似性，防止融合退化为共享常数偏移。
+3. 固定legacy crop与冠军Image-token Adapter，运行fresh disabled、layer1 Person value residual、
+   frozen deep Person CLS residual、task-adapted deep Person lane residual四组seed0完整8-task validation。
+4. 按final mAP优先、average及task5--7辅助，不恢复逐类别硬门槛。只有超过同批disabled的赢家才进入
+   下一步；不要以2×2的正交互`+0.6027`作为成功依据，因为绝对指标四组均未改善。
+5. 对赢家再做当前task Person辅助BCE、等计算量ROI/Full内容残差对照；随后补seed1/2 validation，
+   结构和参数锁定后仅做一次test。若三种内容写入均不胜，保留外部0.8/0.2固定融合并结束统一融合路线。
+
+## 2026-09-06分析后的优先级（方案，未执行）
+
+1. 等待当前2×2完整结果；01:52约task0 epoch14--15，不能提前定赢家。
+2. 下一次修改优先修复空Person patch mask输出未归零，统计padding/裁剪回退；补固定ID旧类预测
+   漂移评估。旧head在当前loss/Adam/WD0下并非持续被新任务梯度改变。
+3. 先4组seed0完整val：Full锚点、修正query-only、同层Person summary value残差、深层Person
+   特征残差。保持冠军Adapter，默认legacy crop；target-aware需val复核后才能替换。
+4. 赢家再补ROI等预算对照及当前任务辅助监督/蒸馏，之后seed1/2与锁定test。
+5. 详细参数、证据和协议边界见`docs/person_fusion_next_experiments_20260906.md`。以下为历史状态。
+
 ## 当前：selector-specific Person patches 2×2（2026-09-06）
 
 - 新分支`codex/selector-specific-person-patches`已完成代码：`legacy/target_aware Full crop ×

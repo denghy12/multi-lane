@@ -1,5 +1,42 @@
 # 项目上下文
 
+## 2026-09-07：Full + 初始Person crop固定融合对照（待服务器运行）
+
+用户要求补齐此前缺失的`Full + initial Person-only`对照。新分支
+`exp/emotic-initial-person-fusion-control`只重训seed0初始Person分支并保存task0--7 test scores；
+Full直接复用已核验的seed0 `32.5365`逐样本scores，不重复训练。Person严格复现初版：bbox
+margin0.15、legacy RandomResizedCrop scale0.70--1.0、评估Resize256+CenterCrop224、无ColorJitter；
+模型仍为Image-token layer1/b32/LR4e-4/scale0.1/ReLU/independent、主BCE+Adapter ASL9.8/0/0.05、
+30 epochs/task、AMP/TF32。融合固定转移原letterbox validation锁定规则：probability Full0.80/
+Person0.20、threshold0.5，test不搜索。新增严格来源审计、单一规则融合入口、单GPU训练/融合脚本和
+回归测试；不保存checkpoint。下一步提交推送并在服务器独立worktree跑完整单测与GPU smoke后启动。
+
+## 2026-09-06：selector-specific Person patches 2×2完成
+
+四组seed0完整8-task test均在`f1ada22`完成，各240 epochs/13,950 updates/skipped0，结果、
+task0--7 test scores及日志52文件已同步并逐SHA匹配，manifest aggregate为
+`0cc78d2b1f78ada2d59b3403daf630cc128fce82668f4215b00dbfc9286b4670`。
+legacy-disabled / legacy-patches / target-disabled / target-patches final mAP依次为
+`32.5365/31.6826/30.5018/30.2505`。legacy下patch下降`0.8540`，只在task0略升，task1--7
+均下降；target-aware无论是否加patch都显著更差。target-aware虽将test bbox可见率从0.8032提高到
+0.9778，训练loss也更低，但test mAP下降1.43--2.03，指向上下文/中心构图或裁剪分布泛化问题。
+真实train无空Person mask，因此已知空mask bug不是本轮退化主因。
+当前query-only与target-aware路线停止，不补seed1/2或调其参数。下一轮固定legacy crop，比较
+每Selector Person value residual、frozen deep Person CLS residual、task-adapted deep Person lane
+residual与fresh disabled；先seed0完整validation，赢家再做aux/等算力对照、多seed与锁定test。
+完整报告见`output/emotic_track_a_person_conditioned_selector/selector_patch_2x2_test_20260906_analysis/analysis.md`。
+
+## 2026-09-06：下一阶段分析与历史解释修正
+
+本轮仅审计与制定方案，未改业务代码或启动新实验。01:52远端快照四组2×2约在task0 epoch14--15。
+代码发现Person只改query，不直接注入value；padding未在Person前序self-attention屏蔽；空patch
+mask会被safe_mask放开且输出未归零（合成用例已复现，真实频率未知）。下一步优先比较Person
+summary残差与深层特征残差，暂不重复Adapter大网格。完整方案见
+`docs/person_fusion_next_experiments_20260906.md`。
+纠正旧说明：非当前logits置零切断旧head梯度、Adam逐task重建且head WD0，不能仅凭共享head
+认定旧类持续被改坏。历史disabled task0五类AP为52.7473，task7相同ID为52.7182，扩展样本池为
+36.3269；至少此部分下降主要来自评估池扩张。原forgetting仍报告，但需新增固定ID漂移诊断。
+
 ## 当前开发：target-aware crop × selector-specific Person patches（2026-09-06）
 
 用户要求在第一版shared Person CLS条件失败后执行干净2×2。已从`455617a`创建
