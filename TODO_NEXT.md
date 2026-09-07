@@ -12,6 +12,10 @@
 4. 完成后同步config/task metrics/history/summary、8份test scores、融合JSON和日志；比较初始Person
    与letterbox Person的独立指标，以及两者分别与同一Full融合的final/average mAP、cF1/oF1。
 
+以上全部完成。结论是保留letterbox Person：初始Person固定融合`33.1429`虽比Full高
+`0.6064`，但低于letterbox融合`33.2672`，且后者在8个task均领先。不在test上为初始
+Person重新调alpha。下一个结构实验优先使用letterbox Person value/deep-feature residual。
+
 ## 2026-09-06 2×2完成后的执行优先级
 
 1. 当前2×2已完成并同步：`32.5365/31.6826/30.5018/30.2505`。不补seed1/2，不继续搜索

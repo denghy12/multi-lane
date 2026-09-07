@@ -21,6 +21,19 @@
 - 当时8张GPU均有20--22GB显存占用，不叠加训练。新增单卡安全等待器，要求连续两次
   显存占用不高于2GB、利用率不高于10%，随后先GPU smoke再启动正式test。
 
+## 2026-09-07：同步并分析Full + 初始Person固定融合
+
+- 等待器在GPU0空闲后完成Adapter-ASL smoke和唯一seed0完整8-task test；后台退出码0。
+- 初始Person训练240 epochs/13,950 updates/skipped0，clean commit `825f058`，无checkpoint、
+  OOM、非有限loss或中断。8份test scores完整并被融合器反算验证。
+- initial Person-only final/average mAP为`28.7815/35.2444`，历史final结果精确复现；
+  Full+initial Person固定probability0.8/0.2为`33.1429/39.7620`，相对Full提高`0.6064/0.6175`。
+- letterbox融合仍为`33.2672/40.0545`，在8个task均超过initial融合，final/average分别高
+  `0.1243/0.2925`。initial Person独立final虽高`0.0341`，但average低`0.9803`，说明融合取决于
+  与Full的误差互补和概率标定，不是Person-only单一final mAP。
+- 已同步融合JSON、训练JSON、8份NPZ和4份日志，本地/服务器逐文件SHA一致，无checkpoint。
+  3.5MB小结果包SHA-256为`284c52896c77983070725cfce6df32c2fe45fcaacccc722878e3889ef5a814ba`。
+
 ## 2026-09-06：同步并分析selector patch 2×2
 
 - 服务器四组均完整结束：各240 epochs/13,950 successful updates/0 skipped，task0--7与日志完成标记

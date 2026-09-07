@@ -1,6 +1,6 @@
 # 项目上下文
 
-## 2026-09-07：Full + 初始Person crop固定融合对照（待GPU空闲自动运行）
+## 2026-09-07：Full + 初始Person crop固定融合对照（已完成）
 
 用户要求补齐此前缺失的`Full + initial Person-only`对照。新分支
 `exp/emotic-initial-person-fusion-control`只重训seed0初始Person分支并保存task0--7 test scores；
@@ -12,6 +12,12 @@ Person0.20、threshold0.5，test不搜索。新增严格来源审计、单一规
 回归测试；不保存checkpoint。commit `44ad8ed`已在服务器独立worktree通过129项完整单测和
 真实EMOTIC train/test样本检查。8张GPU当前均高负载占用，等待器将在单卡连续两次满足
 used<=2GB、util<=10%时，先做Adapter GPU smoke，通过后自动启动正式test。
+
+实验已在GPU0完成：240 epochs、13,950 updates、skipped0，无OOM/非有限值异常，8份test
+scores完整。初始Person-only精确复现final mAP `28.7815`；固定Full0.80/Person0.20融合为
+`33.1429`，比Full `32.5365`高`0.6064`，但8个task均低于letterbox融合，后者仍以`33.2672`
+保持seed0冠军。小结果和日志已同步本地且逐文件SHA-256一致，详细分析见
+`output/emotic_track_a_initial_person_fusion/20260907_0145/analysis.md`。
 
 ## 2026-09-06：selector-specific Person patches 2×2完成
 
