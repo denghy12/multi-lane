@@ -21,6 +21,14 @@ RUN_ID=face_manifest_v1 \
 
 真实数据 smoke 可增加 `MAX_IMAGES=8 VISUAL_SAMPLES=8`。完整运行支持相同 `RUN_ID` 断点续跑，检测缓存按图像逐行刷新。
 
+完整审计结束后，可运行以下安全等待器验证真实Face crop经过letterbox、CLIP normalization和冻结
+ViT-B/16 GPU forward后形状/数值有限。它要求任一卡至少6GB空闲且利用率不高于10%，连续两次满足
+才启动；只做4个样本的前向，不训练：
+
+```bash
+RUN_ID=face_manifest_v1 bash scripts/emotic/wait_and_run_face_manifest_gpu_smoke.sh
+```
+
 ## 产物
 
 所有结果位于 `output/emotic_face_manifest/<RUN_ID>/`：

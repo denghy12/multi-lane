@@ -11,6 +11,8 @@
   固定抽样200个train目标，优先覆盖歧义、多人、失败和小脸。无脸严格标记无效，不以整图回退。
 - macOS系统Python缺Pillow，Python语法、shell语法和diff检查通过；完整单测及真实数据smoke转到服务器
   专用环境执行。本阶段不读test、不训练模型。
+- 新增真实manifest Face crop到冻结CLIP的GPU smoke及安全等待器；要求任一卡连续两次满足空闲显存
+  `>=6GB`、利用率`<=10%`才做4样本前向，输出有限性与形状审计，不进行反向或训练。
 
 ## 2026-09-08：制定Full–Person–Face动态路由实施计划
 
