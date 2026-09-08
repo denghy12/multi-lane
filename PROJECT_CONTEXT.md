@@ -1,5 +1,18 @@
 # 项目上下文
 
+## 2026-09-08：Full–Person–Face动态路由路线（计划）
+
+根据组会方向，停止共享Person CLS引导Selector及当前query-only扩展，暂缓此前四组Person residual
+计划。新主线为Face离线检测/匹配审计→Face互补性→同协议三路软/稀疏路由→任务独立统一特征融合
+→三seed validation与锁定test。固定legacy Full、letterbox Person及冠军Image-token Adapter。
+详细工作包、矩阵、预算、缺失脸规则和停止条件见
+`docs/full_person_face_dynamic_routing_plan_20260908.md`。
+阶段0已在`codex/face-manifest`实现离线Face manifest与审计入口，尚未启动完整训练。任务独立router按lane输出三路权重，不宣称全26类共用一组权重；
+90%fit/calibration诊断不能混用100%train锚点。新路线优先解决Face质量及旧router持续更新风险。
+阶段0固定InsightFace SCRFD `det_10g.onnx`、640输入、阈值0.5、CPU provider，只读取train/val。
+同图检测复用缓存；目标人体与脸做一对一全局分配，并记录候选歧义而不把它误称为真实错配率。
+产物包含逐样本稳定ID/脸框/原始尺寸/有效mask、每task当前类有效正例和200个train目标可视化抽检。
+
 ## 2026-09-07：Full + 初始Person crop固定融合对照（已完成）
 
 用户要求补齐此前缺失的`Full + initial Person-only`对照。新分支

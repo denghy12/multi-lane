@@ -1,5 +1,18 @@
 # 下一步任务
 
+## 当前优先：2026-09-08三视图动态路由计划
+
+本节覆盖以下历史“下一步”条目。详细计划：`docs/full_person_face_dynamic_routing_plan_20260908.md`。
+
+1. `codex/face-manifest`的train/val人脸检测、全局一对一目标匹配、manifest和审计代码已实现；先提交
+   推送并在服务器独立worktree运行完整单测与8图真实smoke，不启动训练。
+2. smoke通过后断点续跑完整train/val审计；同步summary/manifest/日志/200个train抽检图，人工检查
+   多人歧义，并按各task当前类有效正例决定Face数据是否合格。
+3. 只有Face数据合格，才做seed0完整8-task validation端点和FP/FPH对照，验证新增信息。
+4. 再做同协议固定三路、统计软路由、语义软路由；胜出后追加稀疏路由。保留calibration小样本限制。
+5. 证据支持后统一task独立三路特征融合，完成辅助监督/Face消融、多seed及一次锁定test。
+6. 停止共享Person CLS/query-only方向；原四组Person residual不自动启动。阶段0不读取test、不训练模型。
+
 ## 2026-09-07：补Full + 初始Person crop
 
 1. 提交推送`exp/emotic-initial-person-fusion-control`的固定对照入口；服务器审计全部worktree并创建
