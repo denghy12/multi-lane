@@ -4,11 +4,12 @@
 
 本节覆盖以下历史“下一步”条目。详细计划：`docs/full_person_face_dynamic_routing_plan_20260908.md`。
 
-1. `codex/face-manifest`的train/val人脸检测、全局一对一目标匹配、manifest和审计代码已实现；先提交
-   推送并在服务器独立worktree运行完整单测与8图真实smoke，不启动训练。
-2. smoke通过后断点续跑完整train/val审计；同步summary/manifest/日志/200个train抽检图，人工检查
-   多人歧义，并按各task当前类有效正例决定Face数据是否合格。
-3. 只有Face数据合格，才做seed0完整8-task validation端点和FP/FPH对照，验证新增信息。
+1. 阶段0已完成并判定Face数据可进入validation：train/val覆盖率84.98%/86.32%，全部task/类别正例
+   非零；完整产物和200张train抽检已同步。GPU crop→CLIP smoke正在安全等待空闲卡，禁止抢占。
+2. GPU smoke通过后新建`codex/face-endpoint-validation`：训练时只用有效且非歧义Face，Face loss mask；
+   短边>=24且分数>=0.6才参与初始融合，其余完整回退既有Full0.8/Person0.2。
+3. seed0完整8-task validation比较FP锚点与FPH beta `{0,0.05,0.10,0.20}`，不读取test、不搜索Face
+   层数；只有完整样本池final validation mAP超过FP才进入动态三路路由。
 4. 再做同协议固定三路、统计软路由、语义软路由；胜出后追加稀疏路由。保留calibration小样本限制。
 5. 证据支持后统一task独立三路特征融合，完成辅助监督/Face消融、多seed及一次锁定test。
 6. 停止共享Person CLS/query-only方向；原四组Person residual不自动启动。阶段0不读取test、不训练模型。
