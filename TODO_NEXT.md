@@ -4,14 +4,16 @@
 
 1. Face endpoint阶段已通过：固定beta0.20在完整seed0 val将FP final mAP从43.3035提高到43.5812，
    8个task均改善；当前不运行test，也不继续搜索静态比例。
-2. `codex/three-view-router-validation`代码已实现，待提交并Git-only同步。统一90% fit/10%
-   image-group calibration；复用已有20260904 seed0 Full/Person source，只补同协议Face source。
+2. `codex/three-view-router-validation`已实现、提交并Git-only同步；服务器146项完整单测、真实数据
+   对齐、冻结CLIP描述符GPU smoke和Face source GPU smoke均通过。统一90% fit/10% image-group
+   calibration；复用已有20260904 seed0 Full/Person source，只补同协议Face source。
 3. 同一批专家比较R0固定FP、R1固定Face beta0.20、R2质量/三路预测统计软路由、R3加入低维视觉
    描述；R2/R3各只比较prior `{0,0.1,1}`，task独立hidden16、masked softmax、无效Face权重0。
 4. task6 calibration只有51条：禁止扩大router、类别独立权重或直接用validation标签训练。报告
    calibration/validation gap、权重分布、逐task及质量分组。
 5. 只有R3同时超过R1与R2才宣称动态视觉路由有效；再补seed1/2 validation，锁定后一次test。
-6. 同步后先完整单测、真实三路ID/分桶/描述符smoke和GPU smoke；全部通过才启动两GPU批次。
+6. 验收已经完成。下一步直接启动两GPU seed0完整validation：GPU0补训Face source，GPU1并行导出
+   描述符，随后CPU比较R0/R1/R2/R3；全程不运行正式test。
 
 ## 已完成：Face endpoint seed0 validation（2026-09-09）
 

@@ -9,7 +9,14 @@
 - 新增seed0三路Router：R0固定FP、R1可靠Face beta0.20、R2质量/预测统计、R3追加3维视觉余弦；
   task独立hidden16、masked softmax、Face无效权重0、prior仅0/0.1/1，calibration当前类BCE。
 - 新增两GPU安全等待批次入口，可并行补训Face 90/10 source和导出描述符，随后CPU完成6个Router
-  候选。当前只完成本地静态检查，尚未提交、服务器测试或启动完整实验。
+  候选。实现`906ac10`及断言形状修正`ada5bf1`已推送，服务器独立worktree同步clean。
+- 服务器ddp环境146项完整单测通过。真实train/val Full/Person/Face稳定ID和target逐条对齐；稳定
+  image-group 90/10索引可复现。GPU0冻结CLIP描述符smoke覆盖2条可靠、2条不可靠Face，三个余弦
+  全部有限，后两条Face相关余弦严格为0。
+- Face source task0两步GPU smoke完成，2 updates/0 skipped。5,353条eligible中499条隔离为
+  calibration，fit侧1,152条无效/歧义Face在DataLoader前剔除，3,702条参与loss；完整val与
+  calibration probability v2、compact task state均成功写出。首次自定义smoke的tee目录未预建，
+  只导致临时日志tee返回非零，训练产物完整且复核通过；正式launcher会预建日志目录，不受影响。
 
 ## 2026-09-09：同步并分析Face endpoint validation
 

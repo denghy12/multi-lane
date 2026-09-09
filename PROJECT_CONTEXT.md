@@ -1,13 +1,17 @@
 # 项目上下文
 
-## 2026-09-09：三视图样本级Router实现中
+## 2026-09-09：三视图样本级Router实现与验收完成
 
 已从Face endpoint结果提交创建`codex/three-view-router-validation`。新增90/10 Face source支持，
 复用已有seed0 Full/Person source；新增R0固定FP、R1固定Face beta0.20、R2质量/预测统计Router、
 R3再加三个冻结CLIP跨视图余弦的validation-only选择。Router逐task独立、hidden16、masked softmax，
 无效Face权重严格为0；R2/R3各只比较prior 0/0.1/1。视觉描述只覆盖train calibration与val，
-不触及test。当前本地语法/Shell/diff检查通过；服务器完整单测、真实数据和GPU smoke通过前不启动
-完整实验。详细协议见`docs/three_view_router_validation.md`。
+不触及test。实现提交`906ac10`、测试断言修正`ada5bf1`均已推送并Git-only同步至服务器独立
+worktree。服务器146项完整单测通过；真实train/val三视图ID、target与稳定分桶对齐通过。冻结CLIP
+GPU smoke同时覆盖可靠/不可靠Face，三项余弦有限且不可靠Face相关值精确为0。Face source task0
+两步GPU smoke完成且0 skipped；5,353条eligible中499条只用于calibration，fit侧另剔除1,152条
+无效/歧义Face，3,702条实际参与loss，val/calibration scores及compact checkpoint均完整。
+现已具备启动seed0完整validation条件。详细协议见`docs/three_view_router_validation.md`。
 
 ## 2026-09-09：Face endpoint validation完成
 

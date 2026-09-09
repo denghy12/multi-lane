@@ -1,5 +1,13 @@
 # Three-view sample-wise router validation
 
+## 实现验收（2026-09-09）
+
+分支`codex/three-view-router-validation`已完成Git-only服务器同步。服务器ddp环境146项完整单测、
+真实train/val三视图ID与target对齐、稳定90/10分桶、冻结CLIP描述符GPU smoke以及Face source
+task0两步GPU smoke均通过。Face smoke确认calibration在专家fit之外，且fit侧无效/歧义Face在
+DataLoader前过滤；概率文件和compact task state成功写出。当前允许启动seed0完整validation，
+仍禁止访问或运行test。
+
 ## 问题与实验边界
 
 阶段1已证明可靠Face能将seed0 Full+Person完整validation final mAP从43.3035提高到43.5812，
