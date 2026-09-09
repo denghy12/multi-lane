@@ -1,5 +1,19 @@
 # 工作日志
 
+## 2026-09-09：完成R1中心Router公平性修正
+
+- `5675a3b`把valid prior严格对齐固定R1`[0.64,0.16,0.20]`，invalid prior不变；测试显式锁定
+  两个向量。Automatic Upload文件逐哈希备份后服务器主树恢复clean，实验worktree ff-only同步；
+  147项完整单测通过。
+- 复用`three_view_router_seed0_20260909_163655`的三专家scores/descriptors，仅CPU重跑6候选；
+  新输出`router_selection_r1_centered`，exit0、无test。52个新增状态/结果/日志已同步，组合
+  SHA-256 `67edc6d...ee2e1`两端一致。
+- 修正后R1/R2/R3 final val mAP为`42.7974/42.6804/42.6322`；R2/R3仍由prior1胜出，R3
+  低R1 `0.1652`且低R2 `0.0482`。R2/R3可靠Face权重已约0.20，故失败不再能归因于prior中心。
+- 按停止规则结束当前per-task calibration Router：不运行动态Router seed1/2或test，不扩hidden、
+  类别独立权重或prior网格。若继续动态方向，必须先以image-group cross-fitting增加out-of-fold
+  训练样本；若优先mAP，可将R1固定三路作为独立候选补seed1/2 validation。
+
 ## 2026-09-09：同步并分析三视图Router validation
 
 - Face 90/10 source完整完成240 epochs、9,930 updates、0 skipped、耗时1,509.7秒；来源

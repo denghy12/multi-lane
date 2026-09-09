@@ -1,17 +1,15 @@
 # 下一步任务
 
-## 当前优先：校正Router的固定赢家中心（2026-09-09）
+## 当前优先：结束当前Router，验证固定R1稳定性（2026-09-09）
 
-1. 当前seed0三视图结果不满足advance：R1固定Face0.20 final val mAP`42.7974`，最佳R2/R3为
-   `42.6674/42.6707`；不补seed1/2，不运行test。
-2. 现Router有效Face初值/正则中心是`[0.72,0.18,0.10]`，与R1赢家
-   `[0.64,0.16,0.20]`不一致；最强prior胜出并系统性压低Face权重，需先消除该公平性漏洞。
-3. 下一批只修改valid prior为R1，invalid prior保持`[0.8,0.2,0]`；hidden16、每task独立、masked
-   softmax、R2/R3特征、80 epochs、prior `{0,0.1,1}`和选择规则全部不变。复用现有三专家scores和
-   描述符，只跑CPU Router，不重训专家。
-4. 若校正后R3仍未同时超过R1和最佳R2，停止per-task calibration Router，不扩大hidden、不增加
-   类别权重。动态路线只有在构造image-group out-of-fold预测、显著增加无泄漏训练样本后才重启；
-   追求mAP则保留R1，另行完成多seed validation后再考虑锁定test。
+1. R1中心公平性修正已完成：固定R1、最佳R2、最佳R3 final val mAP为
+   `42.7974/42.6804/42.6322`；动态Router正式停止，不补R2/R3 seed1/2、不运行Router test。
+2. 不再扩大hidden、增加类别独立权重或搜索prior。动态路线只有在构造image-group cross-fitting的
+   out-of-fold专家预测、显著增加无泄漏训练样本后才允许重启。
+3. 若当前目标优先追求mAP，下一批应把R1作为固定三路候选：复用20260904已有seed1/2 Full/Person
+   90/10 sources，只补seed1/2 Face 90/10 sources；锁定可靠Face权重0.20，不训练Router、不搜索权重。
+4. 只有R1相对同seed R0在seed0/1/2方向一致，才进入100% fit的锁定三种子正式test准备；否则保留
+   Full+Person，不继续Face静态融合。
 
 ## 已完成：三视图样本级Router validation（2026-09-09）
 

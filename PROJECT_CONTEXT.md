@@ -1,5 +1,16 @@
 # 项目上下文
 
+## 2026-09-09：R1中心Router公平性修正完成，动态Router停止
+
+提交`5675a3b`只将可靠Face初值/正则中心从`[0.72,0.18,0.10]`校正为固定R1赢家
+`[0.64,0.16,0.20]`，无效Face仍严格`[0.8,0.2,0]`；服务器147项完整单测通过。复用原三专家
+scores和描述符只重跑CPU Router，未重训、未使用GPU或test。修正后R1/最佳R2/最佳R3 final val
+mAP为`42.7974/42.6804/42.6322`；R3同时低于R1 `0.1652`和R2 `0.0482`，不进入动态Router
+seed1/2或test。可靠Face平均权重已对齐约0.20但仍失败，排除prior中心偏低作为主因；弱prior继续
+显著过拟合，确认主要限制是per-task calibration样本量和当前类监督对旧类权重的冲突。本路线正式
+停止，不扩大hidden或类别权重。校正结果52个文件已同步并通过组合SHA-256核验，详见本批
+`analysis.md`。
+
 ## 2026-09-09：三视图Router seed0 validation完成
 
 batch`three_view_router_seed0_20260909_163655`的90/10 Face source完成240 epochs、9,930
