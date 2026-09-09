@@ -1582,3 +1582,10 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - 按用户明确要求，对validation定义的R1/R2/R3同时计算已有三seed test；test标记exploratory且不参与
   候选选择。只需GPU导出一次无标签的test冻结CLIP描述符，随后CPU完成全部重组。
 - 实验协议见`docs/taskwise_three_view_router_evaluation.md`。
+- 实现`9ab41a7`已推送；服务器独立worktree通过152项全测和真实保存state重组smoke。唯一批次
+  `taskwise_three_view_router_20260909_233435`已完成并同步，描述符与CPU评估退出码均为0。
+- 修正后validation：R1/R2/R3=`42.7974/42.8372/42.7639`。R2比旧语义提高`0.1568`并略超R1，
+  证明lane覆盖确有损失；R3仍未超过R1/R2，既定advance条件失败。
+- 三种子探索性test：R1/R2/R3=`33.0119/33.0029/32.9758`。R2比R1低`0.0090`，R3三个seed
+  均下降。停止当前离线小样本Router路线，固定R1继续保持正式冠军；下一步进入端到端taskwise
+  三视图特征融合validation。

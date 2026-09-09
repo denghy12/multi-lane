@@ -3291,3 +3291,9 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
   导出器和单GPU安全launcher；旧task lane权重变化不能影响其他task类别，并新增对应回归测试。
 - 本批不训练专家或Router。validation重新评估已有R2/R3各3个prior；按用户要求，validation选定的
   R1/R2/R3还会在已有seed0/1/2 test端点上同时做探索性评估，明确禁止test参与选择。
+- `9ab41a7`已Git-only同步服务器新worktree；152项完整单测、真实Router state及task0等价性smoke
+  通过。批次`taskwise_three_view_router_20260909_233435`完成，test描述符5,368样本/3,261可靠Face。
+- validation R2由42.6804恢复到42.8372并略高R1 42.7974；R3由42.6322恢复到42.7639但仍低于
+  两者，未通过既定条件。test三种子R1/R2/R3为33.0119/33.0029/32.9758，R1保持正式冠军。
+- 9个结果文件约460KB已同步，result/control/logs组合SHA与服务器一致。结论是语义修正有效，但
+  calibration小样本和低维全局描述仍限制泛化；结束当前Router路线，转端到端特征融合。

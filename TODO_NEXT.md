@@ -30,6 +30,14 @@
 reassembly smoke和test descriptor GPU smoke；通过后运行唯一完整批次。结果必须分别标注validation
 决策与test诊断，test不能改变validation候选选择。
 
+本阶段已完成。taskwise语义使R2 validation略超R1，但R3仍低于R1/R2；探索性test中R1仍以
+`33.0119`第一。按既定规则停止离线小样本Router，不补其seed1/2 validation，不增加hidden、prior或
+描述符维度。
+
+下一步新建端到端taskwise三视图特征融合分支。先实现并在seed0完整8-task validation比较：J0固定
+三视图特征融合+辅助监督、J1样本级软路由+辅助监督、J3 Full+Person软路由+辅助监督。固定冠军
+Adapter、30 epochs/task和相同训练预算；每个task融合lane训练后冻结。J1必须同时超过J0和J3才继续。
+
 
 ## 当前优先：结束当前Router，验证固定R1稳定性（2026-09-09）
 
