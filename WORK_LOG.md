@@ -1,5 +1,16 @@
 # 工作日志
 
+## 2026-09-09：实现三视图样本级Router validation
+
+- 创建`codex/three-view-router-validation`；Face runner允许锁定的0或0.10 calibration fraction，
+  90/10训练仍在DataLoader前过滤无效/歧义Face，calibration保留完整ID池用于三路对齐。
+- 新增冻结CLIP低维视觉描述导出：仅train calibration和val，输出Full–Person、Full–Face、
+  Person–Face三个余弦；无效Face相关值归零并记录mask，不导出test。
+- 新增seed0三路Router：R0固定FP、R1可靠Face beta0.20、R2质量/预测统计、R3追加3维视觉余弦；
+  task独立hidden16、masked softmax、Face无效权重0、prior仅0/0.1/1，calibration当前类BCE。
+- 新增两GPU安全等待批次入口，可并行补训Face 90/10 source和导出描述符，随后CPU完成6个Router
+  候选。当前只完成本地静态检查，尚未提交、服务器测试或启动完整实验。
+
 ## 2026-09-09：同步并分析Face endpoint validation
 
 - seed0 Face expert完成8 tasks×30 epochs、10,980 updates、0 skipped，用时1,637秒；运行来源

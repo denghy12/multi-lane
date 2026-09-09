@@ -1428,8 +1428,11 @@ def main() -> None:
             raise ValueError("face_crop input requires --face-manifest-root")
         if args.reporting_split != "val" or not args.save_evaluation_scores:
             raise ValueError("Stage-1 Face endpoint is validation-only with score dumps")
-        if args.calibration_fraction != 0:
-            raise ValueError("Stage-1 Face endpoint uses the full filtered train split")
+        if args.calibration_fraction not in (0.0, 0.1):
+            raise ValueError(
+                "Face endpoint supports only full-train validation or the locked "
+                "90/10 router-source split"
+            )
     elif args.face_manifest_root is not None:
         raise ValueError("--face-manifest-root is only valid with face_crop input")
     if args.save_evaluation_scores:

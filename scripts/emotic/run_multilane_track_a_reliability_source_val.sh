@@ -6,17 +6,19 @@ cd "${ROOT}"
 
 GPU="${GPU:?GPU is required}"
 SEED="${SEED:?SEED is required}"
-VIEW="${VIEW:?VIEW must be full or person}"
+VIEW="${VIEW:?VIEW must be full, person, or face}"
 RUN_ID="${RUN_ID:?RUN_ID is required}"
 OUTPUT_BASE="${OUTPUT_BASE:?OUTPUT_BASE is required}"
 PYTHON="${PYTHON:-/opt/conda/envs/ddp/bin/python}"
 DATA_ROOT="${DATA_ROOT:-/mnt/haoyuan/workspace/multi-lane-main/datasets/EMOTIC}"
 CLIP_CHECKPOINT="${CLIP_CHECKPOINT:-/mnt/haoyuan/workspace/CODE_DDP-benchmark/pretrained/clip/ViT-B-16.pt}"
+FACE_MANIFEST_ROOT="${FACE_MANIFEST_ROOT:-/mnt/haoyuan/workspace/multi-lane-main-face-manifest/output/emotic_face_manifest/face_manifest_audit_v1_20260908}"
 LOG_DIR="${LOG_DIR:-${ROOT}/logs/emotic_track_a_learned_reliability_gate}"
 RUN_ROOT="${OUTPUT_BASE}/${RUN_ID}"
 LOG_PATH="${LOG_DIR}/${RUN_ID}.log"
 
 [[ "${SEED}" =~ ^[012]$ ]] || { echo "SEED must be 0, 1, or 2" >&2; exit 2; }
+face_args=()
 case "${VIEW}" in
   full)
     input_mode=full
@@ -33,9 +35,19 @@ case "${VIEW}" in
     person_jitter_strength=0.10
     person_jitter_probability=0.20
     crop_min=0.70
+    face_args=()
+    ;;
+  face)
+    input_mode=face_crop
+    person_margin=0
+    person_transform=legacy_crop
+    person_jitter_strength=0
+    person_jitter_probability=0
+    crop_min=0.05
+    face_args=(--face-manifest-root "${FACE_MANIFEST_ROOT}")
     ;;
   *)
-    echo "VIEW must be full or person, got ${VIEW}" >&2
+    echo "VIEW must be full, person, or face, got ${VIEW}" >&2
     exit 2
     ;;
 esac
@@ -43,10 +55,13 @@ esac
 [[ ! -e "${RUN_ROOT}" ]] || { echo "Run root already exists: ${RUN_ROOT}" >&2; exit 2; }
 [[ -f "${CLIP_CHECKPOINT}" ]] || { echo "Missing CLIP checkpoint: ${CLIP_CHECKPOINT}" >&2; exit 2; }
 [[ -f "${DATA_ROOT}/CVPR17_Annotations.mat" ]] || { echo "Missing EMOTIC annotations: ${DATA_ROOT}" >&2; exit 2; }
+if [[ "${VIEW}" == face ]]; then
+  [[ -f "${FACE_MANIFEST_ROOT}/audit_summary.json" ]] || { echo "Missing Face audit: ${FACE_MANIFEST_ROOT}" >&2; exit 2; }
+fi
 [[ -z "$(git status --porcelain)" ]] || { echo "Source run requires a clean Git worktree" >&2; exit 2; }
 mkdir -p "${LOG_DIR}" "${OUTPUT_BASE}"
 
-echo "Learned-gate source: run_id=${RUN_ID} view=${VIEW} seed=${SEED} gpu=${GPU} dataset=EMOTIC fit=stable90% calibration=stable10% tasks=8 epochs=30 batch=64 scheduler=cosine eta_min=0 warmup=0 main_lr=0.0125 image_token_layer=1 bottleneck=32 adapter_lr=0.0004 scale=0.1 activation=relu init=independent main_loss=bce adapter_loss=asl9.8/0/0.05 normalization=clip amp=on tf32=on reporting=val val_scores=on calibration_scores=on compact_states=on full_checkpoints=off"
+echo "Learned-gate source: run_id=${RUN_ID} view=${VIEW} seed=${SEED} gpu=${GPU} dataset=EMOTIC fit=stable90% calibration=stable10% face_loss_mask=valid_nonambiguous tasks=8 epochs=30 batch=64 scheduler=cosine eta_min=0 warmup=0 main_lr=0.0125 image_token_layer=1 bottleneck=32 adapter_lr=0.0004 scale=0.1 activation=relu init=independent main_loss=bce adapter_loss=asl9.8/0/0.05 normalization=clip amp=on tf32=on reporting=val val_scores=on calibration_scores=on compact_states=on full_checkpoints=off test=forbidden"
 CUDA_VISIBLE_DEVICES="${GPU}" "${PYTHON}" -m multi_lane.track_a.runner \
   --seed "${SEED}" \
   --data-root "${DATA_ROOT}" \
@@ -72,6 +87,7 @@ CUDA_VISIBLE_DEVICES="${GPU}" "${PYTHON}" -m multi_lane.track_a.runner \
   --asl-eps 1e-8 \
   --no-save-checkpoints \
   --input-mode "${input_mode}" \
+  "${face_args[@]}" \
   --person-crop-margin "${person_margin}" \
   --person-transform-mode "${person_transform}" \
   --person-color-jitter-strength "${person_jitter_strength}" \
