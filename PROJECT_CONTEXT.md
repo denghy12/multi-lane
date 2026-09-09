@@ -1,6 +1,17 @@
 # 项目上下文
 
-## 2026-09-09：Face endpoint validation实现中
+## 2026-09-09：Face endpoint validation完成
+
+批次`face_endpoint_val_seed0_20260909_1320`在clean commit `285f3e1`完成240 epochs、10,980
+updates、0 skipped，无checkpoint且未读取test。18个小产物已同步本地并逐文件SHA-256一致。
+固定FP=`0.8F+0.2P`的final/average val mAP为`43.3035/50.4283`；可靠Face beta
+`0.05/0.10/0.20`的final分别为`43.4777/43.5468/43.5812`，预声明赢家beta0.20提高
+`+0.2777`，8个task mAP均提高。可靠子集FP到赢家为`44.7192→45.2443`，不可靠子集指标完全
+相等，排除占位Face污染。Face-only全量/可靠子集仅`33.3521/36.3096`，说明收益来自弱专家错误
+互补而非Face替代主路。代价是final cF1 `-0.7834`、oF1 `-0.0796`、forgetting `+0.0048`。
+阶段1满足进入样本级三路Router的条件，但不直接test、不继续扩静态beta。详见本批`analysis.md`。
+
+## 2026-09-09：Face endpoint validation实现与验收
 
 已从阶段0提交创建`codex/face-endpoint-validation`。新增严格manifest驱动的`face_crop`输入：Face
 expert训练和内部validation只包含`valid_face && !ambiguous_match`，过滤在DataLoader之前完成，
@@ -10,11 +21,11 @@ beta `{0,0.05,0.10,0.20}`；其余样本逐元素精确回退锚点。新增来�
 分组诊断、单GPU安全等待入口与回归测试。本阶段seed0、完整8-task、validation-only、无checkpoint，
 不读取test。服务器142项完整单测、真实manifest数据检查和task0 1-epoch GPU/score-dump smoke均通过：
 64 updates、0 skipped；2,285个完整task0 val样本中1,382个可靠Face可参与融合，903个不可靠样本
-已验证逐元素精确回退FP。现可启动完整训练。协议详见`docs/face_endpoint_validation.md`。
-完整seed0 validation已在服务器独立worktree以clean HEAD `285f3e1`启动，tmux为
+已验证逐元素精确回退FP。协议详见`docs/face_endpoint_validation.md`。
+完整seed0 validation随后在服务器独立worktree以clean HEAD `285f3e1`运行，tmux为
 `multilane_face_endpoint_val_seed0_20260909`，批次`face_endpoint_val_seed0_20260909_1320`，GPU0。
-启动检查显示task0已进入训练、每epoch 64 updates且skipped0；其余GPU空闲。本批完成后launcher会
-自动审计既有Full/Person端点并执行固定beta融合，不会读取test。
+启动检查显示task0每epoch 64 updates且skipped0；launcher在完整训练后已自动审计既有
+Full/Person端点并执行固定beta融合，结果见上节，全程未读取test。
 
 ## 2026-09-08：Full–Person–Face动态路由路线（计划）
 

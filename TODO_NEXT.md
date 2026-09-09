@@ -1,14 +1,25 @@
 # 下一步任务
 
-## 当前执行：Face endpoint seed0 validation（2026-09-09）
+## 当前优先：三视图样本级Router validation（2026-09-09）
+
+1. Face endpoint阶段已通过：固定beta0.20在完整seed0 val将FP final mAP从43.3035提高到43.5812，
+   8个task均改善；当前不运行test，也不继续搜索静态比例。
+2. 新建`codex/three-view-router-validation`，统一90% fit/10% image-group calibration。复用已有
+   20260904 seed0 Full/Person source scores与compact checkpoints，只补同协议Face source。
+3. 同一批专家比较R0固定FP、R1固定Face beta0.20、R2质量/三路预测统计软路由、R3加入低维视觉
+   描述；R2/R3各只比较prior `{0,0.1,1}`，task独立hidden16、masked softmax、无效Face权重0。
+4. task6 calibration只有51条：禁止扩大router、类别独立权重或直接用validation标签训练。报告
+   calibration/validation gap、权重分布、逐task及质量分组。
+5. 只有R3同时超过R1与R2才宣称动态视觉路由有效；再补seed1/2 validation，锁定后一次test。
+
+## 已完成：Face endpoint seed0 validation（2026-09-09）
 
 1. `codex/face-endpoint-validation`已实现并Git-only同步服务器独立worktree；142项完整单测、真实
    manifest/transform/score-dump检查与task0 GPU smoke全部通过。
-2. Face expert已在GPU0运行：seed0、8 tasks、30 epochs/task、batch64、
+2. Face expert已在GPU0完成：seed0、8 tasks、30 epochs/task、batch64、
    layer1/b32/LR4e-4/scale0.1/ReLU/independent、main BCE+Adapter ASL9.8/0/0.05、AMP/TF32。
-3. 完成后复用既有Full/Person validation scores，比较固定FP与可靠Face beta
-   `{0,0.05,0.10,0.20}`；
-   不读取test。只有完整池final validation mAP严格提高才进入动态三路Router。
+3. 已复用既有Full/Person validation scores完成固定FP与可靠Face beta
+   `{0,0.05,0.10,0.20}`比较；beta0.20胜出并允许进入动态三路Router，全程未读取test。
 
 ## 当前优先：2026-09-08三视图动态路由计划
 

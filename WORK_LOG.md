@@ -1,5 +1,19 @@
 # 工作日志
 
+## 2026-09-09：同步并分析Face endpoint validation
+
+- seed0 Face expert完成8 tasks×30 epochs、10,980 updates、0 skipped，用时1,637秒；运行来源
+  `285f3e1`、dirty=false、validation-only、无checkpoint。
+- launcher自动完成8-task来源/概率/ID/target审计。beta0/0.05/0.10/0.20 final mAP依次为
+  `43.3035/43.4777/43.5468/43.5812`；beta0.20相对FP提高0.2777，average提高0.3226，
+  但cF1/oF1分别下降0.7834/0.0796，forgetting恶化0.0048。
+- task0--7 mAP全部改善；最终26类18升8降。task6 Sadness/Suffering分别+0.2465/+0.4792，
+  Sensitivity -0.0877。可靠Face覆盖最终val 1,460/2,397=60.91%。
+- 可靠子集mAP提高0.5250，不可靠子集前后完全相等；Face-only明显弱于FP，结论为Face提供互补
+  排序信号。18个JSON/NPZ/log/状态产物已同步本地，SHA-256逐项一致，无checkpoint。
+- 下一步进入`codex/three-view-router-validation`。复用已有90/10 seed0 Full/Person source，补训
+  同分桶Face source，再比较R0/R1/R2/R3；不扩静态beta、不读test。
+
 ## 2026-09-09：实现Face endpoint validation
 
 - 在新分支`codex/face-endpoint-validation`增加Face manifest输入、完整人体之外的Face letterbox
