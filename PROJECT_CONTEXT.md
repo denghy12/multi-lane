@@ -17,6 +17,8 @@
 `229/274/161`、val有效`106/99/91`。稳定ID、合法框和一对一无复用检查通过，19个同步产物哈希一致。
 结论是允许进入Face endpoint的seed0 validation，但必须mask歧义，并将短边/检测分作为质量条件；
 不允许直接正式test或让低质量Face无条件主导。详细见阶段输出`analysis.md`。
+排队的真实Face crop→letterbox/CLIP normalization→冻结ViT-B/16 GPU smoke随后在GPU0通过；
+4个样本覆盖短边4.74--994.21px，输入`[4,3,224,224]`与输出`[4,512]`均有限。阶段0现已完整结束。
 
 ## 2026-09-07：Full + 初始Person crop固定融合对照（已完成）
 

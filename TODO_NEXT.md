@@ -4,9 +4,9 @@
 
 本节覆盖以下历史“下一步”条目。详细计划：`docs/full_person_face_dynamic_routing_plan_20260908.md`。
 
-1. 阶段0已完成并判定Face数据可进入validation：train/val覆盖率84.98%/86.32%，全部task/类别正例
-   非零；完整产物和200张train抽检已同步。GPU crop→CLIP smoke正在安全等待空闲卡，禁止抢占。
-2. GPU smoke通过后新建`codex/face-endpoint-validation`：训练时只用有效且非歧义Face，Face loss mask；
+1. 阶段0已全部完成：train/val覆盖率84.98%/86.32%，全部task/类别正例非零；完整产物、200张
+   train抽检和真实Face→冻结CLIP GPU smoke均通过并同步。
+2. 下一步新建`codex/face-endpoint-validation`：训练时只用有效且非歧义Face，Face loss mask；
    短边>=24且分数>=0.6才参与初始融合，其余完整回退既有Full0.8/Person0.2。
 3. seed0完整8-task validation比较FP锚点与FPH beta `{0,0.05,0.10,0.20}`，不读取test、不搜索Face
    层数；只有完整样本池final validation mAP超过FP才进入动态三路路由。
