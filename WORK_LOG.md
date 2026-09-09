@@ -17,6 +17,11 @@
   calibration，fit侧1,152条无效/歧义Face在DataLoader前剔除，3,702条参与loss；完整val与
   calibration probability v2、compact task state均成功写出。首次自定义smoke的tee目录未预建，
   只导致临时日志tee返回非零，训练产物完整且复核通过；正式launcher会预建日志目录，不受影响。
+- 验收记录以`9b5d08c`推送并ff-only同步。正式batch
+  `three_view_router_seed0_20260909_163655`已在tmux
+  `multilane_three_view_router_seed0_20260909`启动：GPU0补训Face 90/10 source，GPU1并行导出
+  三视图描述符。安全门控等待两次连续空闲后启动；task0前三轮各58 updates、skipped0，GPU显存
+  充足且日志无错误。两个子进程均成功后才允许CPU Router选择；本批禁止test。
 
 ## 2026-09-09：同步并分析Face endpoint validation
 

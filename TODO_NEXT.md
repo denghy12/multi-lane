@@ -12,8 +12,10 @@
 4. task6 calibration只有51条：禁止扩大router、类别独立权重或直接用validation标签训练。报告
    calibration/validation gap、权重分布、逐task及质量分组。
 5. 只有R3同时超过R1与R2才宣称动态视觉路由有效；再补seed1/2 validation，锁定后一次test。
-6. 验收已经完成。下一步直接启动两GPU seed0完整validation：GPU0补训Face source，GPU1并行导出
-   描述符，随后CPU比较R0/R1/R2/R3；全程不运行正式test。
+6. 验收已经完成；两GPU seed0完整validation批次`three_view_router_seed0_20260909_163655`正在运行：
+   GPU0补训Face source，GPU1并行导出描述符，随后CPU比较R0/R1/R2/R3；全程不运行正式test。
+7. 完成后同步Face source小结果、三视图描述符、Router states/diagnostics/selection和日志；检查R3是否
+   同时超过R1与最佳R2。未通过则停止扩大Router；通过才补seed1/2 validation。
 
 ## 已完成：Face endpoint seed0 validation（2026-09-09）
 

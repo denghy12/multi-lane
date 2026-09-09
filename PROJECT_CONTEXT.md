@@ -12,6 +12,10 @@ GPU smoke同时覆盖可靠/不可靠Face，三项余弦有限且不可靠Face�
 两步GPU smoke完成且0 skipped；5,353条eligible中499条只用于calibration，fit侧另剔除1,152条
 无效/歧义Face，3,702条实际参与loss，val/calibration scores及compact checkpoint均完整。
 现已具备启动seed0完整validation条件。详细协议见`docs/three_view_router_validation.md`。
+正式batch`three_view_router_seed0_20260909_163655`已在服务器clean HEAD `9b5d08c`启动，tmux为
+`multilane_three_view_router_seed0_20260909`。GPU0训练90/10 Face source，GPU1并行导出三视图
+描述符；启动后task0前三轮均58 updates、0 skipped，显存有余且错误扫描为空。两路成功后launcher
+才会在CPU运行R0/R1/R2/R3选择，并写明`test_accessed=false`。
 
 ## 2026-09-09：Face endpoint validation完成
 
