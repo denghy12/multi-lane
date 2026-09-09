@@ -9,12 +9,25 @@ from multi_lane.track_a.face_manifest import (
     letterbox_square,
     match_faces_to_people,
     person_face_score,
+    parse_args,
     select_visual_records,
     summarize_records,
 )
 
 
 class FaceManifestTest(unittest.TestCase):
+    def test_cli_accepts_test_without_changing_default_splits(self) -> None:
+        base = [
+            "--data-root", "/tmp/data",
+            "--detector-checkpoint", "/tmp/detector.onnx",
+            "--output-root", "/tmp/output",
+        ]
+        self.assertEqual(tuple(parse_args(base).splits), ("train", "val"))
+        self.assertEqual(
+            parse_args(base + ["--splits", "train", "val", "test"]).splits,
+            ["train", "val", "test"],
+        )
+
     def test_global_matching_never_reuses_a_face(self) -> None:
         bodies = [[0, 0, 100, 200], [80, 0, 180, 200]]
         faces = [

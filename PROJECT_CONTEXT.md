@@ -1552,3 +1552,13 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - 新结果202文件同步并逐文件SHA-256一致，报告位于
   `output/emotic_track_a_learned_reliability_gate/20260904_113753/analysis.md`。本轮结束，保留固定融合，
   不扩MLP/新比例、不放宽门槛、不运行test。
+# 2026-09-09 固定三视图三种子正式test
+
+- 用户将上一阶段seed1/2 validation计划改为直接运行seed0/1/2 held-out test。规则严格锁定为：
+  可靠Face使用Full/Person/Face=`0.64/0.16/0.20`，否则精确回退`0.80/0.20/0`，threshold0.5。
+- 不训练Router，不在test搜索权重、阈值或Face质量门槛。复用已有同seed Full/Person正式test
+  probability dumps，只补三个seed的100% train Face expert。
+- Face test源固定冠军协议：8 tasks×30 epochs、batch64、main LR0.0125、layer1/b32/Adapter LR4e-4/
+  scale0.1/ReLU/independent、main BCE+Adapter ASL9.8/0/0.05、AMP/TF32、无checkpoint。
+- 本分支新增test Face manifest、固定三视图审计融合器及三GPU launcher。完整说明见
+  `docs/fixed_three_view_seed012_test.md`。

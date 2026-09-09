@@ -1,5 +1,15 @@
 # 下一步任务
 
+## 当前执行：固定R1三种子正式test（2026-09-09）
+
+1. 提交推送当前分支；安全处理Automatic Upload后，在服务器新建独立worktree，不触碰test-only。
+2. 在服务器ddp环境运行完整单测；生成独立train/val/test Face manifest，确认test完整且无重复匹配。
+3. 运行真实Face test dataset/score-dump smoke和Image-token Adapter GPU smoke。
+4. smoke通过后用三张空闲GPU并行seed0/1/2 Face正式test；复用已有同seed Full/Person test dumps。
+5. 三组完成后自动只计算一次锁定R1。最终报告三种子final mAP mean±sample std、逐seed相对同seed
+   Full+Person差值及方向一致性；禁止根据test结果改变权重或质量门槛。
+
+
 ## 当前优先：结束当前Router，验证固定R1稳定性（2026-09-09）
 
 1. R1中心公平性修正已完成：固定R1、最佳R2、最佳R3 final val mAP为

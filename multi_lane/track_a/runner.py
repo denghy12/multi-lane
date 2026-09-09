@@ -472,11 +472,15 @@ def load_face_manifest_provenance(root: Path) -> Dict[str, object]:
         "val_manifest": root / "manifests" / "val.jsonl",
         "detector_config": root / "detector_config.json",
     }
+    audited_splits = audit.get("splits", {})
+    if "test" in audited_splits:
+        files["test_manifest"] = root / "manifests" / "test.jsonl"
     for label, path in files.items():
         if not path.is_file():
             raise FileNotFoundError(f"Missing Face manifest artifact {label}: {path}")
-    for split in ("train", "val"):
-        summary = audit.get("splits", {}).get(split, {})
+    splits = ("train", "val", "test") if "test" in audited_splits else ("train", "val")
+    for split in splits:
+        summary = audited_splits.get(split, {})
         if summary.get("partial") is not False:
             raise ValueError(f"Face {split} manifest is partial")
         if summary.get("duplicate_face_assignments") != 0:
@@ -1426,12 +1430,14 @@ def main() -> None:
     if args.input_mode == "face_crop":
         if args.face_manifest_root is None:
             raise ValueError("face_crop input requires --face-manifest-root")
-        if args.reporting_split != "val" or not args.save_evaluation_scores:
-            raise ValueError("Stage-1 Face endpoint is validation-only with score dumps")
+        if not args.save_evaluation_scores:
+            raise ValueError("Face endpoint requires evaluation score dumps")
+        if args.reporting_split == "test" and args.calibration_fraction != 0.0:
+            raise ValueError("Locked Face test source must train on the complete fit split")
         if args.calibration_fraction not in (0.0, 0.1):
             raise ValueError(
-                "Face endpoint supports only full-train validation or the locked "
-                "90/10 router-source split"
+                "Face endpoint supports only complete-fit validation/test or the "
+                "locked 90/10 validation source split"
             )
     elif args.face_manifest_root is not None:
         raise ValueError("--face-manifest-root is only valid with face_crop input")

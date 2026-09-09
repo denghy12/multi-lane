@@ -582,7 +582,12 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--data-root", type=Path, required=True)
     parser.add_argument("--detector-checkpoint", type=Path, required=True)
     parser.add_argument("--output-root", type=Path, required=True)
-    parser.add_argument("--splits", nargs="+", choices=("train", "val"), default=("train", "val"))
+    parser.add_argument(
+        "--splits",
+        nargs="+",
+        choices=("train", "val", "test"),
+        default=("train", "val"),
+    )
     parser.add_argument("--det-size", type=int, default=640)
     parser.add_argument("--det-threshold", type=float, default=0.5)
     parser.add_argument("--face-margin", type=float, default=0.15)

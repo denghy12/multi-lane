@@ -3260,3 +3260,15 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
   的耦合；只作机制诊断，不改选优规则，不宣称极小差值具有统计显著性。
 - control196/logs2/preflight4共202文件同步本地并逐文件SHA匹配，192个gate states与selection记录
   哈希一致。完整报告/审计JSON位于`output/emotic_track_a_learned_reliability_gate/20260904_113753/`。
+# 2026-09-09：实现固定R1三种子正式test
+
+- 新建`codex/fixed-three-view-seed12-validation`，按用户最新要求跳过seed1/2 validation，直接准备
+  seed0/1/2一次锁定正式test。
+- Face manifest入口向后兼容地增加test split；provenance仅在审计文件声明test时强制验证并哈希
+  test manifest。Face runner允许完整train的test score source，仍禁止test calibration。
+- 新增固定融合器：验证既有validation selection的固定SHA，要求恰好seed0/1/2，逐seed复算专家
+  metrics，可靠Face应用`0.64/0.16/0.20`，不可靠Face应用`0.80/0.20/0`，汇总mean/std与配对差。
+- 新增test manifest缓存复用脚本、单Face正式test入口和三GPU安全launcher。launcher没有权重参数，
+  三个Face source全部成功后才执行一次固定融合。
+- 本地Python语法、shell语法和diff检查通过；macOS系统Python缺Pillow/numpy，完整测试将在服务器
+  ddp环境执行。

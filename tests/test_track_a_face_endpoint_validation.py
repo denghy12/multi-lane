@@ -68,7 +68,7 @@ class FaceEndpointInputTest(unittest.TestCase):
 
 class FaceEndpointFusionTest(unittest.TestCase):
     @staticmethod
-    def _manifest_root(root: Path) -> Path:
+    def _manifest_root(root: Path, include_test: bool = False) -> Path:
         detector = {
             "provider": "CPUExecutionProvider",
             "det_size": [640, 640],
@@ -102,6 +102,26 @@ class FaceEndpointFusionTest(unittest.TestCase):
         (root / "manifests" / "val.jsonl").write_text(
             "".join(json.dumps(row) + "\n" for row in val_rows), encoding="utf-8"
         )
+        if include_test:
+            audit["splits"]["test"] = {
+                "partial": False,
+                "duplicate_face_assignments": 0,
+            }
+            (root / "audit_summary.json").write_text(
+                json.dumps(audit), encoding="utf-8"
+            )
+            test_rows = [
+                {"sample_id": "test:a#person=0", "valid_face": True,
+                 "ambiguous_match": False, "face_short_side": 30.0,
+                 "face_detection_score": 0.8},
+                {"sample_id": "test:b#person=0", "valid_face": False,
+                 "ambiguous_match": False, "face_short_side": None,
+                 "face_detection_score": None},
+            ]
+            (root / "manifests" / "test.jsonl").write_text(
+                "".join(json.dumps(row) + "\n" for row in test_rows),
+                encoding="utf-8",
+            )
         return root
 
     def test_provenance_and_reliability_are_locked(self) -> None:
@@ -115,6 +135,18 @@ class FaceEndpointFusionTest(unittest.TestCase):
                 "val:b#person=0": False,
                 "val:c#person=0": False,
             })
+
+    def test_test_manifest_is_hashed_and_reliability_is_split_specific(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._manifest_root(Path(directory), include_test=True)
+            provenance = load_face_manifest_provenance(root)
+            self.assertIn("test_manifest", provenance["artifact_sha256"])
+            self.assertEqual(load_face_reliability(root, "test"), {
+                "test:a#person=0": True,
+                "test:b#person=0": False,
+            })
+            with self.assertRaises(ValueError):
+                load_face_reliability(root, "train")
 
     def test_masked_fusion_exactly_falls_back_to_full_person(self) -> None:
         full = np.asarray([[0.8, 0.2], [0.6, 0.4]], dtype=np.float32)

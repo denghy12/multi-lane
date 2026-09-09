@@ -34,18 +34,24 @@ MIN_FACE_SHORT_SIDE = 24.0
 MIN_FACE_SCORE = 0.6
 
 
-def load_face_reliability(manifest_root: Path) -> Dict[str, bool]:
+def load_face_reliability(
+    manifest_root: Path, split: str = "val"
+) -> Dict[str, bool]:
+    if split not in ("val", "test"):
+        raise ValueError("Face fusion reliability is restricted to val or test")
     provenance = load_face_manifest_provenance(manifest_root)
     records: Dict[str, bool] = {}
-    path = Path(provenance["root"]) / "manifests" / "val.jsonl"
+    path = Path(provenance["root"]) / "manifests" / f"{split}.jsonl"
     with path.open("r", encoding="utf-8") as handle:
         for line_number, line in enumerate(handle, 1):
             if not line.strip():
                 continue
             record = json.loads(line)
             sample_id = str(record.get("sample_id", ""))
-            if not sample_id.startswith("val:") or sample_id in records:
-                raise ValueError(f"Invalid val Face manifest ID at line {line_number}")
+            if not sample_id.startswith(f"{split}:") or sample_id in records:
+                raise ValueError(
+                    f"Invalid {split} Face manifest ID at line {line_number}"
+                )
             reliable = (
                 bool(record.get("valid_face"))
                 and not bool(record.get("ambiguous_match"))
