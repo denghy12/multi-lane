@@ -1571,3 +1571,14 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - Face新增收益主要体现在Anger、Aversion和Suffering；Fear、Confidence和Sensitivity下降。
   forgetting仅恶化`0.0144`。完整分析位于
   `output/emotic_track_a_fixed_three_view_test/20260909_213052/analysis.md`。
+
+## 2026-09-09 taskwise三视图Router语义修正
+
+- 用户要求开始修正Router增量语义，并同时计算R1/R2/R3的validation与探索性test。
+- 新实现令Router k只融合task k引入的类别；Router特征也只读取其训练时已见的类别前缀。评估task t
+  时分别运行冻结Router0...t并拼接类别lane，避免新Router覆盖旧类。
+- 复用已有90/10专家scores、6组Router states和validation descriptors；不重训专家或Router。
+  validation在原prior `{0,0.1,1}`中重新选择修正后的R2/R3，R3仍须同时超过R1/R2。
+- 按用户明确要求，对validation定义的R1/R2/R3同时计算已有三seed test；test标记exploratory且不参与
+  候选选择。只需GPU导出一次无标签的test冻结CLIP描述符，随后CPU完成全部重组。
+- 实验协议见`docs/taskwise_three_view_router_evaluation.md`。

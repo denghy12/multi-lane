@@ -125,8 +125,8 @@ def _read_json(path: Path) -> Dict[str, Any]:
 
 def load_face_metadata(manifest_root: Path, split: str) -> Dict[str, FaceMetadata]:
     load_face_manifest_provenance(manifest_root)
-    if split not in ("train", "val"):
-        raise ValueError("Router metadata is restricted to train and val")
+    if split not in ("train", "val", "test"):
+        raise ValueError("Router metadata is restricted to train, val, or test")
     records: Dict[str, FaceMetadata] = {}
     manifest = manifest_root / "manifests" / f"{split}.jsonl"
     with manifest.open("r", encoding="utf-8") as handle:

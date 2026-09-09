@@ -25,6 +25,11 @@
    J3 Full+Person软路由；保持task独立冻结、分支辅助监督和现有冠军Adapter配置。
 5. J1必须超过J0且J3，才补seed1/2并锁定一次新test。不得使用本轮test类别差值选择新权重。
 
+当前已开始第1--3项实现，用户额外要求同时计算三种子探索性test。下一步提交推送
+`codex/taskwise-three-view-router`，服务器新建独立worktree并运行完整单测、真实state/validation
+reassembly smoke和test descriptor GPU smoke；通过后运行唯一完整批次。结果必须分别标注validation
+决策与test诊断，test不能改变validation候选选择。
+
 
 ## 当前优先：结束当前Router，验证固定R1稳定性（2026-09-09）
 

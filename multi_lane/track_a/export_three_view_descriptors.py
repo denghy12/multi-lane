@@ -105,10 +105,10 @@ def _build_sources(
     common = {"root": str(dataset_parent), "download": False}
     if split == "train":
         split_args = {"train": True}
-    elif split == "val":
-        split_args = {"train": False, "eval_splits": ("val",)}
+    elif split in ("val", "test"):
+        split_args = {"train": False, "eval_splits": (split,)}
     else:
-        raise ValueError("Descriptor export is restricted to train calibration and val")
+        raise ValueError("Descriptor export split must be train, val, or test")
     full = EMOTIC(**common, **split_args, transform=full_transform, input_mode="full")
     person = EMOTIC(
         **common,

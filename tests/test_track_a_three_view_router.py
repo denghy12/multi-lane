@@ -21,9 +21,28 @@ from multi_lane.track_a.three_view_router import (
     _standardize_fit_apply,
     load_face_metadata,
 )
+from multi_lane.track_a.evaluate_taskwise_three_view_router import assemble_task_lanes
 
 
 class ThreeViewRouterTest(unittest.TestCase):
+    def test_task_lane_weights_cannot_modify_other_task_classes(self) -> None:
+        full = np.asarray([[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]], dtype=np.float32)
+        person = 1.0 - full
+        face = np.full_like(full, 0.25)
+        lane0 = np.asarray([[0.8, 0.2, 0.0]], dtype=np.float32)
+        lane1_a = np.asarray([[0.6, 0.2, 0.2]], dtype=np.float32)
+        lane1_b = np.asarray([[0.2, 0.6, 0.2]], dtype=np.float32)
+        first = assemble_task_lanes((full, person, face), (lane0, lane1_a))
+        second = assemble_task_lanes((full, person, face), (lane0, lane1_b))
+        np.testing.assert_array_equal(first[:, :5], second[:, :5])
+        self.assertFalse(np.array_equal(first[:, 5:8], second[:, 5:8]))
+
+    def test_task_lane_partition_requires_complete_seen_classes(self) -> None:
+        views = tuple(np.zeros((2, 7), dtype=np.float32) for _ in range(3))
+        weights = (np.tile([0.8, 0.2, 0.0], (2, 1)),)
+        with self.assertRaises(ValueError):
+            assemble_task_lanes(views, weights)
+
     def test_face_metadata_treats_null_detection_fields_as_unreliable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

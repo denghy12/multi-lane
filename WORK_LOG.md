@@ -3287,3 +3287,7 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - Face sources/control/logs共46文件约9.4MB已同步本地，三部分组合SHA与服务器一致；无checkpoint。
   task0--7的三种子平均增益全部为正。下一步优先用既有validation产物核查并修正taskwise Router
   只作用于自身类别lane的增量语义，再决定是否进入端到端三视图特征融合。
+- 创建`codex/taskwise-three-view-router`开始上述修正。新增task-lane重组评估器、test冻结CLIP描述符
+  导出器和单GPU安全launcher；旧task lane权重变化不能影响其他task类别，并新增对应回归测试。
+- 本批不训练专家或Router。validation重新评估已有R2/R3各3个prior；按用户要求，validation选定的
+  R1/R2/R3还会在已有seed0/1/2 test端点上同时做探索性评估，明确禁止test参与选择。
