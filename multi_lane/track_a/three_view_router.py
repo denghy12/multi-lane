@@ -32,7 +32,7 @@ BATCH_SIZE = 64
 LEARNING_RATE = 1e-3
 WEIGHT_DECAY = 1e-4
 THRESHOLD = 0.5
-VALID_PRIOR = np.asarray((0.72, 0.18, 0.10), dtype=np.float32)
+VALID_PRIOR = np.asarray((0.64, 0.16, 0.20), dtype=np.float32)
 INVALID_PRIOR = np.asarray((0.80, 0.20, 0.00), dtype=np.float32)
 R2_FEATURE_NAMES = (
     "bbox_log_area",

@@ -41,7 +41,9 @@ Face无效时相关余弦归零并由独立mask强制Face权重为0。冻结CLIP
 - 每个task独立参数与标准化统计；共享的只有架构。
 - 单隐藏层GELU，hidden16，输出每样本一个三路权重，task内类别共享。
 - masked softmax；Face不可靠时其权重严格为0，至少Full/Person始终可用。
-- 有效Face初值`[0.72,0.18,0.10]`；无效Face初值`[0.80,0.20,0]`。
+- 初始批次有效Face初值为`[0.72,0.18,0.10]`，但它与固定R1赢家不一致。公平性修正严格使用
+  R1的`[0.64,0.16,0.20]`；无效Face始终使用`[0.80,0.20,0]`。除正则中心外的网络、训练与
+  选择规则全部不变，修正批次复用已有scores/descriptors且不重训专家。
 - 当前task calibration类别BCE；AdamW LR1e-3、WD1e-4、batch64、80 epochs/task。
 - R2/R3各只比较prior强度`{0,0.1,1}`；prior为输出权重到相应初值的平方距离。
 - 特征均值/标准差只在当前task calibration拟合，随后冻结并应用于validation。

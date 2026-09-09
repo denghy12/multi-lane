@@ -59,6 +59,8 @@ class ThreeViewRouterTest(unittest.TestCase):
         )
 
     def test_initial_weights_match_priors_and_invalid_face_is_exact_zero(self) -> None:
+        np.testing.assert_allclose(VALID_PRIOR, [0.64, 0.16, 0.20], atol=1e-7)
+        np.testing.assert_allclose(INVALID_PRIOR, [0.80, 0.20, 0.00], atol=1e-7)
         router = ThreeViewRouter(feature_dim=5, initialization_seed=7)
         features = torch.randn(4, 5)
         reliable = torch.tensor([True, False, True, False])
