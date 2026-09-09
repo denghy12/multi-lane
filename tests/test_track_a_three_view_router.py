@@ -24,8 +24,12 @@ class ThreeViewRouterTest(unittest.TestCase):
         features = torch.randn(4, 5)
         reliable = torch.tensor([True, False, True, False])
         weights = router(features, reliable).detach().numpy()
-        np.testing.assert_allclose(weights[reliable.numpy()], VALID_PRIOR[None], atol=1e-7)
-        np.testing.assert_allclose(weights[~reliable.numpy()], INVALID_PRIOR[None], atol=1e-7)
+        np.testing.assert_allclose(
+            weights[reliable.numpy()], np.tile(VALID_PRIOR, (2, 1)), atol=1e-7
+        )
+        np.testing.assert_allclose(
+            weights[~reliable.numpy()], np.tile(INVALID_PRIOR, (2, 1)), atol=1e-7
+        )
         self.assertTrue(np.array_equal(weights[~reliable.numpy(), 2], np.zeros(2)))
         np.testing.assert_allclose(weights.sum(axis=1), 1.0, atol=1e-7)
 
