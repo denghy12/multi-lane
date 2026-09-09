@@ -1,5 +1,15 @@
 # 项目上下文
 
+## 2026-09-09：Face endpoint validation实现中
+
+已从阶段0提交创建`codex/face-endpoint-validation`。新增严格manifest驱动的`face_crop`输入：Face
+expert训练和内部validation只包含`valid_face && !ambiguous_match`，过滤在DataLoader之前完成，
+无脸/歧义样本不会进入BCE或ASL loss。最终validation score仍覆盖完整原始样本池。
+融合固定既有`0.8 Full + 0.2 Person`，只对短边>=24px且检测分>=0.6的可靠Face尝试
+beta `{0,0.05,0.10,0.20}`；其余样本逐元素精确回退锚点。新增来源/hash/ID/target/指标重算审计、
+分组诊断、单GPU安全等待入口与回归测试。本阶段seed0、完整8-task、validation-only、无checkpoint，
+不读取test；服务器完整测试与GPU smoke通过前不启动训练。协议详见`docs/face_endpoint_validation.md`。
+
 ## 2026-09-08：Full–Person–Face动态路由路线（计划）
 
 根据组会方向，停止共享Person CLS引导Selector及当前query-only扩展，暂缓此前四组Person residual

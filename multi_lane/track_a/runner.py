@@ -145,6 +145,17 @@ def fit_calibration_indices(
     return fit, calibration
 
 
+def filter_face_training_indices(source: EMOTIC, indices: Sequence[int]) -> List[int]:
+    """Keep only manifest-approved Face samples for loss-bearing views."""
+    validity = getattr(source, "face_training_valid", None)
+    if validity is None or len(validity) != len(source):
+        raise ValueError("Face training validity mask is missing or misaligned")
+    selected = [int(index) for index in indices if bool(validity[int(index)])]
+    if not selected:
+        raise RuntimeError("Face loss view contains no valid non-ambiguous samples")
+    return selected
+
+
 def compact_model_state_dict(model: nn.Module) -> Dict[str, torch.Tensor]:
     """Save method state while omitting the reconstructable frozen CLIP tower."""
     state = {
@@ -195,8 +206,8 @@ def build_transforms(
     crop_scale = tuple(float(value) for value in train_crop_scale)
     if not 0 < crop_scale[0] <= crop_scale[1] <= 1:
         raise ValueError("Train crop scale must satisfy 0 < min <= max <= 1")
-    if input_mode not in {"full", "person_crop"}:
-        raise ValueError("Input mode must be full or person_crop")
+    if input_mode not in {"full", "person_crop", "face_crop"}:
+        raise ValueError("Input mode must be full, person_crop, or face_crop")
     if person_transform_mode not in {"legacy_crop", "letterbox"}:
         raise ValueError("Person transform mode must be legacy_crop or letterbox")
     if not 0 <= person_color_jitter_strength <= 0.5:
@@ -207,13 +218,19 @@ def build_transforms(
         [transforms.Normalize(CLIP_IMAGE_MEAN, CLIP_IMAGE_STD)]
         if input_normalization == "clip" else []
     )
-    if input_mode == "person_crop" and person_transform_mode == "letterbox":
+    if input_mode == "face_crop" or (
+        input_mode == "person_crop" and person_transform_mode == "letterbox"
+    ):
         fill = (
             tuple(int(round(value * 255)) for value in CLIP_IMAGE_MEAN)
             if input_normalization == "clip" else 0
         )
         color_jitter = []
-        if person_color_jitter_strength and person_color_jitter_probability:
+        if (
+            input_mode == "person_crop"
+            and person_color_jitter_strength
+            and person_color_jitter_probability
+        ):
             strength = float(person_color_jitter_strength)
             color_jitter = [
                 transforms.RandomApply(
@@ -418,6 +435,67 @@ def resolve_dataset_parent(path: Path) -> Path:
     raise FileNotFoundError(
         "Expected CVPR17_Annotations.mat under DATA_ROOT/EMOTIC or DATA_ROOT"
     )
+
+
+def _sha256_path(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def load_face_manifest_provenance(root: Path) -> Dict[str, object]:
+    root = root.expanduser().resolve()
+    audit_path = root / "audit_summary.json"
+    if not audit_path.is_file():
+        raise FileNotFoundError(f"Missing Face audit summary: {audit_path}")
+    audit = json.loads(audit_path.read_text(encoding="utf-8"))
+    if audit.get("protocol") != "emotic-face-manifest-v1":
+        raise ValueError("Unsupported Face manifest protocol")
+    if audit.get("training_started") is not False:
+        raise ValueError("Face manifest provenance must come from a data-only audit")
+    detector = audit.get("detector_config", {})
+    expected_detector = {
+        "provider": "CPUExecutionProvider",
+        "det_size": [640, 640],
+        "det_threshold": 0.5,
+        "face_margin": 0.15,
+        "ambiguity_gap": 0.08,
+    }
+    for key, expected in expected_detector.items():
+        if detector.get(key) != expected:
+            raise ValueError(f"Face detector protocol drift for {key}")
+    files = {
+        "audit_summary": audit_path,
+        "train_manifest": root / "manifests" / "train.jsonl",
+        "val_manifest": root / "manifests" / "val.jsonl",
+        "detector_config": root / "detector_config.json",
+    }
+    for label, path in files.items():
+        if not path.is_file():
+            raise FileNotFoundError(f"Missing Face manifest artifact {label}: {path}")
+    for split in ("train", "val"):
+        summary = audit.get("splits", {}).get(split, {})
+        if summary.get("partial") is not False:
+            raise ValueError(f"Face {split} manifest is partial")
+        if summary.get("duplicate_face_assignments") != 0:
+            raise ValueError(f"Face {split} manifest reuses a detected face")
+    return {
+        "root": str(root),
+        "protocol": audit["protocol"],
+        "checkpoint_sha256": detector.get("checkpoint_sha256"),
+        "artifact_sha256": {
+            label: _sha256_path(path) for label, path in files.items()
+        },
+        "training_policy": "valid_face_and_not_ambiguous",
+        "fusion_reliability_policy": {
+            "valid_face": True,
+            "ambiguous_match": False,
+            "minimum_face_short_side": 24.0,
+            "minimum_detection_score": 0.6,
+        },
+    }
 
 
 def validate_classes(*datasets: EMOTIC) -> None:
@@ -1178,7 +1256,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--no-amp", action="store_true")
     parser.add_argument("--no-tf32", action="store_true")
-    parser.add_argument("--input-mode", choices=("full", "person_crop"), default="full")
+    parser.add_argument(
+        "--input-mode", choices=("full", "person_crop", "face_crop"), default="full"
+    )
+    parser.add_argument(
+        "--face-manifest-root",
+        type=Path,
+        default=None,
+        help="Completed train/val Face audit root required by face_crop input.",
+    )
     parser.add_argument("--selector-conditioning", choices=TaskSelectorConditioner.MODES,
                         default="disabled")
     parser.add_argument("--selector-condition-layers", type=int, nargs="+", default=(1,))
@@ -1337,6 +1423,15 @@ def main() -> None:
         raise ValueError("person-color-jitter-strength must be in [0, 0.5]")
     if not 0 <= args.person_color_jitter_probability <= 1:
         raise ValueError("person-color-jitter-probability must be in [0, 1]")
+    if args.input_mode == "face_crop":
+        if args.face_manifest_root is None:
+            raise ValueError("face_crop input requires --face-manifest-root")
+        if args.reporting_split != "val" or not args.save_evaluation_scores:
+            raise ValueError("Stage-1 Face endpoint is validation-only with score dumps")
+        if args.calibration_fraction != 0:
+            raise ValueError("Stage-1 Face endpoint uses the full filtered train split")
+    elif args.face_manifest_root is not None:
+        raise ValueError("--face-manifest-root is only valid with face_crop input")
     if args.save_evaluation_scores:
         expected_purpose = (
             "validation_search"
@@ -1512,6 +1607,7 @@ def main() -> None:
         str(dataset_parent), train=True, transform=train_transform,
         input_mode=args.input_mode, person_crop_margin=args.person_crop_margin,
         paired_transform=paired_train,
+        face_manifest_root=args.face_manifest_root,
     )
     calibration_source = (
         EMOTIC(
@@ -1519,6 +1615,7 @@ def main() -> None:
             input_mode=args.input_mode,
             person_crop_margin=args.person_crop_margin,
             paired_transform=paired_eval,
+            face_manifest_root=args.face_manifest_root,
         )
         if args.calibration_fraction > 0
         else None
@@ -1528,6 +1625,7 @@ def main() -> None:
         eval_splits=("val",), input_mode=args.input_mode,
         person_crop_margin=args.person_crop_margin,
         paired_transform=paired_eval,
+        face_manifest_root=args.face_manifest_root,
     )
     if args.reporting_split == "test":
         reporting_source = EMOTIC(
@@ -1535,6 +1633,7 @@ def main() -> None:
             eval_splits=("test",), input_mode=args.input_mode,
             person_crop_margin=args.person_crop_margin,
             paired_transform=paired_eval,
+            face_manifest_root=args.face_manifest_root,
         )
         validate_classes(train_source, val_source, reporting_source)
     else:
@@ -1542,6 +1641,40 @@ def main() -> None:
         validate_classes(train_source, val_source)
     if calibration_source is not None:
         validate_classes(train_source, calibration_source)
+
+    face_manifest_provenance = (
+        load_face_manifest_provenance(args.face_manifest_root)
+        if args.input_mode == "face_crop" else None
+    )
+    face_counts = None
+    if args.input_mode == "face_crop":
+        face_counts = {}
+        for task_id in range(len(TASK_SIZES)):
+            current = task_indices(task_id)
+            train_eligible = [
+                index for index, target in enumerate(train_source.targets)
+                if _intersects(target, current)
+            ]
+            val_eligible = [
+                index for index, target in enumerate(val_source.targets)
+                if _intersects(target, current)
+            ]
+            face_counts[str(task_id)] = {
+                "train_eligible": len(train_eligible),
+                "train_valid_nonambiguous": sum(
+                    bool(train_source.face_training_valid[index])
+                    for index in train_eligible
+                ),
+                "val_eligible": len(val_eligible),
+                "val_valid_nonambiguous": sum(
+                    bool(val_source.face_training_valid[index])
+                    for index in val_eligible
+                ),
+                "val_fusion_reliable": sum(
+                    bool(val_source.face_reliable[index])
+                    for index in val_eligible
+                ),
+            }
 
     learning_rate = args.source_learning_rate * (
         args.train_batch_size / args.source_reference_batch_size
@@ -1635,6 +1768,16 @@ def main() -> None:
         "weight_decay": args.weight_decay,
         "temperature": args.temperature,
         "input_mode": args.input_mode,
+        "face_manifest": face_manifest_provenance,
+        "face_counts_by_task": face_counts,
+        "face_invalid_placeholder": (
+            "clip_mean_rgb_masked_from_loss_and_fusion"
+            if args.input_mode == "face_crop" else None
+        ),
+        "face_transform": (
+            "manifest_margin15_pad_square_resize224_horizontal_flip_train_only"
+            if args.input_mode == "face_crop" else None
+        ),
         "paired_full_person": paired_inputs,
         "full_crop_mode": args.full_crop_mode,
         "selector_conditioning": args.selector_conditioning,
@@ -1674,6 +1817,12 @@ def main() -> None:
             [int(round(value * 255)) for value in CLIP_IMAGE_MEAN]
             if (args.input_mode == "person_crop" or paired_inputs)
             and args.person_transform_mode == "letterbox"
+            and args.input_normalization == "clip"
+            else None
+        ),
+        "face_letterbox_fill": (
+            [int(round(value * 255)) for value in CLIP_IMAGE_MEAN]
+            if args.input_mode == "face_crop"
             and args.input_normalization == "clip"
             else None
         ),
@@ -1794,8 +1943,25 @@ def main() -> None:
         fit_indices, calibration_indices = fit_calibration_indices(
             train_source, task_indices(task_id), args.calibration_fraction
         )
+        unfiltered_fit_count = len(fit_indices)
+        if args.input_mode == "face_crop":
+            fit_indices = filter_face_training_indices(train_source, fit_indices)
         train_view = LabelView(train_source, fit_indices, task_indices(task_id))
-        val_view = dataset_view(val_source, task_indices(task_id))
+        if args.input_mode == "face_crop":
+            face_val_indices = [
+                index for index, target in enumerate(val_source.targets)
+                if _intersects(target, task_indices(task_id))
+                and val_source.face_training_valid[index]
+            ]
+            if not face_val_indices:
+                raise RuntimeError(
+                    f"Task {task_id} has no valid non-ambiguous Face validation samples"
+                )
+            val_view = LabelView(
+                val_source, face_val_indices, task_indices(task_id)
+            )
+        else:
+            val_view = dataset_view(val_source, task_indices(task_id))
         reporting_view = dataset_view(
             reporting_source,
             seen_indices(task_id),
@@ -1832,9 +1998,10 @@ def main() -> None:
                 drop_last=False,
             )
         calibration_counts[str(task_id)] = {
-            "eligible": len(fit_indices) + len(calibration_indices),
+            "eligible": unfiltered_fit_count + len(calibration_indices),
             "fit": len(fit_indices),
             "calibration": len(calibration_indices),
+            "face_filter_removed": unfiltered_fit_count - len(fit_indices),
         }
         history = train_task(
             model, train_loader, val_loader, device, task_id,

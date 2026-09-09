@@ -922,6 +922,7 @@ class EMOTIC(torch.utils.data.Dataset):
         input_mode='full',
         person_crop_margin=0.0,
         paired_transform=None,
+        face_manifest_root=None,
     ):
         self.root = os.path.expanduser(root)
         self.transform = transform
@@ -932,9 +933,20 @@ class EMOTIC(torch.utils.data.Dataset):
         self.splits = ['train'] if self.train else list(eval_splits)
         self.path = os.path.join(self.root, 'EMOTIC')
         self.download = download
-        if input_mode not in ('full', 'person_crop'):
-            raise ValueError(f"Invalid EMOTIC input_mode '{input_mode}'. Expected 'full' or 'person_crop'.")
+        if input_mode not in ('full', 'person_crop', 'face_crop'):
+            raise ValueError(
+                f"Invalid EMOTIC input_mode '{input_mode}'. "
+                "Expected 'full', 'person_crop', or 'face_crop'."
+            )
         self.input_mode = input_mode
+        self.face_manifest_root = (
+            Path(face_manifest_root).expanduser().resolve()
+            if face_manifest_root is not None else None
+        )
+        if self.input_mode == 'face_crop' and self.face_manifest_root is None:
+            raise ValueError('EMOTIC face_crop input requires face_manifest_root.')
+        if self.input_mode != 'face_crop' and self.face_manifest_root is not None:
+            raise ValueError('face_manifest_root is only valid for face_crop input.')
         self.person_crop_margin = float(person_crop_margin)
         if not np.isfinite(self.person_crop_margin) or not 0.0 <= self.person_crop_margin <= 1.0:
             raise ValueError('EMOTIC person_crop_margin must be finite and in [0, 1].')
@@ -992,6 +1004,48 @@ class EMOTIC(torch.utils.data.Dataset):
                     self._sample_id(split, item.folder, item.filename, person_index)
                 )
 
+        self.face_records = None
+        self.face_training_valid = None
+        self.face_reliable = None
+        if self.input_mode == 'face_crop':
+            records = {}
+            for split in self.splits:
+                manifest_path = self.face_manifest_root / 'manifests' / f'{split}.jsonl'
+                if not manifest_path.is_file():
+                    raise RuntimeError(f'Face manifest not found at {manifest_path}')
+                with manifest_path.open('r', encoding='utf-8') as handle:
+                    for line_number, line in enumerate(handle, 1):
+                        if not line.strip():
+                            continue
+                        record = json.loads(line)
+                        sample_id = str(record.get('sample_id', ''))
+                        if not sample_id.startswith(f'{split}:'):
+                            raise RuntimeError(
+                                f'Face manifest split mismatch at {manifest_path}:{line_number}'
+                            )
+                        if sample_id in records:
+                            raise RuntimeError(f'Duplicate Face manifest sample ID: {sample_id}')
+                        records[sample_id] = record
+            expected = set(self.sample_ids)
+            actual = set(records)
+            if expected != actual:
+                missing = sorted(expected - actual)[:3]
+                extra = sorted(actual - expected)[:3]
+                raise RuntimeError(
+                    f'Face manifest/sample IDs differ: missing={missing}, extra={extra}'
+                )
+            self.face_records = [records[sample_id] for sample_id in self.sample_ids]
+            self.face_training_valid = [
+                bool(record.get('valid_face')) and not bool(record.get('ambiguous_match'))
+                for record in self.face_records
+            ]
+            self.face_reliable = [
+                valid
+                and float(record.get('face_short_side', 0.0)) >= 24.0
+                and float(record.get('face_detection_score', 0.0)) >= 0.6
+                for valid, record in zip(self.face_training_valid, self.face_records)
+            ]
+
     def __len__(self):
         return len(self.file_paths)
     
@@ -1003,6 +1057,8 @@ class EMOTIC(torch.utils.data.Dataset):
         else:
             if self.input_mode == 'person_crop':
                 img = self._crop_person(img, self.body_bboxes[idx])
+            elif self.input_mode == 'face_crop':
+                img = self._crop_face(img, idx)
             if self.transform is None:
                 raise NotImplementedError
             img = self.transform(img)
@@ -1021,6 +1077,26 @@ class EMOTIC(torch.utils.data.Dataset):
 
     def _crop_person(self, img, bbox):
         return self.crop_person(img, bbox, self.person_crop_margin)
+
+    def _crop_face(self, img, index):
+        record = self.face_records[index]
+        if not self.face_training_valid[index]:
+            # A CLIP-mean placeholder keeps batching deterministic.  It is never
+            # used for Face loss or fusion because both paths apply the mask.
+            return Image.new('RGB', (1, 1), color=(123, 117, 104))
+        bbox = record.get('face_crop_bbox')
+        try:
+            bbox = np.asarray(bbox, dtype=np.float32).ravel()
+        except (TypeError, ValueError):
+            bbox = np.asarray([], dtype=np.float32)
+        if bbox.size != 4 or not np.isfinite(bbox).all():
+            raise RuntimeError(f'Invalid Face crop bbox for {self.sample_ids[index]}')
+        width, height = img.size
+        x1, y1, x2, y2 = bbox.tolist()
+        if not (0 <= x1 < x2 <= width and 0 <= y1 < y2 <= height):
+            raise RuntimeError(f'Out-of-bounds Face crop bbox for {self.sample_ids[index]}')
+        return img.crop((int(np.floor(x1)), int(np.floor(y1)),
+                         int(np.ceil(x2)), int(np.ceil(y2))))
 
     @staticmethod
     def crop_person(img, bbox, margin):

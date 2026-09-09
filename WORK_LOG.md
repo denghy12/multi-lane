@@ -1,5 +1,16 @@
 # 工作日志
 
+## 2026-09-09：实现Face endpoint validation
+
+- 在新分支`codex/face-endpoint-validation`增加Face manifest输入、完整人体之外的Face letterbox
+  transform及Face expert训练入口。
+- loss-bearing train view严格过滤为有效且非歧义Face；内部val同样过滤，最终score dump保留完整
+  validation池并使用稳定ID。无效Face占位输入不能参与loss或最终融合。
+- 离线融合锁定FP=`0.8F+0.2P`与beta `{0,0.05,0.10,0.20}`；只有可靠Face才改变FP，其他样本
+  精确回退。增加manifest SHA、来源配置、8-task score复现和ID/target对齐检查及可靠子集诊断。
+- 新增单GPU安全排队脚本。当前仅完成本地语法/diff检查；macOS Python缺PyTorch，完整单测、
+  真实数据和GPU smoke将在Git-only同步后的服务器独立worktree执行，通过后才启动seed0 validation。
+
 ## 2026-09-09：完成阶段0 Face GPU smoke
 
 - 安全等待器在GPU0连续两次达到空闲条件后执行，退出码0，tmux正常结束；未抢占繁忙GPU。
