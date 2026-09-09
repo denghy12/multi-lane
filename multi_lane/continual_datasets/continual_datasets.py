@@ -922,13 +922,19 @@ class EMOTIC(torch.utils.data.Dataset):
         input_mode='full',
         person_crop_margin=0.0,
         paired_transform=None,
+        multi_view_transform=None,
         face_manifest_root=None,
     ):
         self.root = os.path.expanduser(root)
         self.transform = transform
         self.paired_transform = paired_transform
+        self.multi_view_transform = multi_view_transform
+        if paired_transform is not None and multi_view_transform is not None:
+            raise ValueError('EMOTIC paired and multi-view transforms are mutually exclusive.')
         if paired_transform is not None and input_mode != 'full':
             raise ValueError('Paired EMOTIC inputs require input_mode=full.')
+        if multi_view_transform is not None and input_mode != 'full':
+            raise ValueError('Multi-view EMOTIC inputs require input_mode=full.')
         self.train = train
         self.splits = ['train'] if self.train else list(eval_splits)
         self.path = os.path.join(self.root, 'EMOTIC')
@@ -943,10 +949,13 @@ class EMOTIC(torch.utils.data.Dataset):
             Path(face_manifest_root).expanduser().resolve()
             if face_manifest_root is not None else None
         )
-        if self.input_mode == 'face_crop' and self.face_manifest_root is None:
-            raise ValueError('EMOTIC face_crop input requires face_manifest_root.')
-        if self.input_mode != 'face_crop' and self.face_manifest_root is not None:
-            raise ValueError('face_manifest_root is only valid for face_crop input.')
+        needs_face_manifest = (
+            self.input_mode == 'face_crop' or self.multi_view_transform is not None
+        )
+        if needs_face_manifest and self.face_manifest_root is None:
+            raise ValueError('EMOTIC Face inputs require face_manifest_root.')
+        if not needs_face_manifest and self.face_manifest_root is not None:
+            raise ValueError('face_manifest_root requires Face or multi-view input.')
         self.person_crop_margin = float(person_crop_margin)
         if not np.isfinite(self.person_crop_margin) or not 0.0 <= self.person_crop_margin <= 1.0:
             raise ValueError('EMOTIC person_crop_margin must be finite and in [0, 1].')
@@ -1007,7 +1016,7 @@ class EMOTIC(torch.utils.data.Dataset):
         self.face_records = None
         self.face_training_valid = None
         self.face_reliable = None
-        if self.input_mode == 'face_crop':
+        if needs_face_manifest:
             records = {}
             for split in self.splits:
                 manifest_path = self.face_manifest_root / 'manifests' / f'{split}.jsonl'
@@ -1052,7 +1061,15 @@ class EMOTIC(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         img_path = self.file_paths[idx]
         img = Image.open(img_path).convert("RGB")
-        if getattr(self, 'paired_transform', None) is not None:
+        if getattr(self, 'multi_view_transform', None) is not None:
+            img = self.multi_view_transform(
+                img,
+                self.body_bboxes[idx],
+                self.face_records[idx],
+                self.face_training_valid[idx],
+                self.face_reliable[idx],
+            )
+        elif getattr(self, 'paired_transform', None) is not None:
             img = self.paired_transform(img, self.body_bboxes[idx])
         else:
             if self.input_mode == 'person_crop':

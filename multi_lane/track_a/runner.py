@@ -30,7 +30,11 @@ from torchvision.transforms import functional as transform_functional
 from multi_lane.continual_datasets.continual_datasets import EMOTIC
 
 from .model import MultiLaneModel
-from .paired_transforms import PairedFullPersonTransform, move_model_inputs
+from .paired_transforms import (
+    PairedFullPersonTransform,
+    ThreeViewTransform,
+    move_model_inputs,
+)
 from .selector_conditioning import TaskSelectorConditioner
 from .openai_clip_loader import OPENAI_VIT_B16_SHA256, load_openai_clip_visual
 
@@ -389,6 +393,65 @@ def compute_asymmetric_training_loss(
     return loss
 
 
+def add_view_auxiliary_loss(
+    primary_loss: torch.Tensor,
+    view_logits: Dict[str, torch.Tensor],
+    images: object,
+    current_targets: torch.Tensor,
+    current_class_indices: Sequence[int],
+    temperature: float,
+    loss_mode: str,
+    weight: float,
+    objective: str,
+    gamma_neg: float = 9.8,
+    gamma_pos: float = 0.0,
+    clip: float = 0.05,
+    eps: float = 1e-8,
+) -> torch.Tensor:
+    """Add equal-weight valid-view supervision to the fused objective."""
+    if not math.isfinite(weight) or not 0 <= weight <= 1:
+        raise ValueError("View auxiliary loss weight must be in [0, 1]")
+    if objective not in {"bce", "asl"}:
+        raise ValueError("View auxiliary objective must be BCE or ASL")
+    if not view_logits or weight == 0:
+        return primary_loss
+    losses = []
+    for name, logits in view_logits.items():
+        mask = None
+        if name == "face":
+            if not isinstance(images, dict) or "face_reliable" not in images:
+                raise ValueError("Face auxiliary loss requires a reliability mask")
+            mask = images["face_reliable"].to(dtype=torch.bool)
+            if not bool(mask.any()):
+                continue
+        selected_logits = logits if mask is None else logits[mask]
+        selected_targets = current_targets if mask is None else current_targets[mask]
+        if objective == "bce":
+            loss = compute_training_loss(
+                selected_logits,
+                selected_targets,
+                current_class_indices,
+                temperature,
+                loss_mode,
+            )
+        else:
+            loss = compute_asymmetric_training_loss(
+                selected_logits,
+                selected_targets,
+                current_class_indices,
+                temperature,
+                loss_mode,
+                gamma_neg,
+                gamma_pos,
+                clip,
+                eps,
+            )
+        losses.append(loss)
+    if not losses:
+        return primary_loss
+    return primary_loss + float(weight) * torch.stack(losses).mean()
+
+
 def backward_routed_training_losses(
     model_loss: torch.Tensor,
     adapter_loss: torch.Tensor,
@@ -721,6 +784,7 @@ def build_optimizer_groups(
     adapter_learning_rate: Optional[float] = None,
     adapter_weight_decay: Optional[float] = None,
     selector_condition_learning_rate: float = 4e-4,
+    view_fusion_learning_rate: float = 4e-4,
 ) -> Tuple[List[nn.Parameter], List[nn.Parameter], List[Dict[str, object]]]:
     if weight_decay < 0:
         raise ValueError("Weight decay must be non-negative")
@@ -739,6 +803,15 @@ def build_optimizer_groups(
         optimizer_groups.append({"params": condition_parameters,
                                  "weight_decay": weight_decay,
                                  "lr": selector_condition_learning_rate})
+    fusion_parameters = list(model.fusion_optimizer_parameters())
+    if fusion_parameters:
+        if not math.isfinite(view_fusion_learning_rate) or view_fusion_learning_rate <= 0:
+            raise ValueError("View-fusion learning rate must be finite and positive")
+        optimizer_groups.append({
+            "params": fusion_parameters,
+            "weight_decay": weight_decay,
+            "lr": view_fusion_learning_rate,
+        })
     adapter_parameters = list(model.adapter_optimizer_parameters())
     if adapter_parameters:
         if adapter_learning_rate is None or adapter_learning_rate <= 0:
@@ -914,6 +987,8 @@ def train_task(
     scheduler_multistep_milestone_fractions: Sequence[float] = (0.6, 0.85),
     scheduler_multistep_gamma: float = 0.1,
     selector_condition_learning_rate: float = 4e-4,
+    view_fusion_learning_rate: float = 4e-4,
+    view_auxiliary_loss_weight: float = 0.0,
 ) -> List[Dict[str, float]]:
     if loss_routing not in {
         "joint_bce", "model_asl", "adapter_asl", "both_asl"
@@ -931,12 +1006,17 @@ def train_task(
         raise ValueError("Enabled Adapter regularization requires fraction in (0, 1]")
     if adapter_regularization_calibration_updates <= 0:
         raise ValueError("Adapter regularization calibration updates must be positive")
+    if not math.isfinite(view_auxiliary_loss_weight) or not 0 <= view_auxiliary_loss_weight <= 1:
+        raise ValueError("View auxiliary loss weight must be in [0, 1]")
+    if model.view_fusion == "disabled" and view_auxiliary_loss_weight != 0:
+        raise ValueError("View auxiliary supervision requires enabled view fusion")
     model_parameters, adapter_parameters, optimizer_groups = build_optimizer_groups(
         model=model,
         weight_decay=weight_decay,
         adapter_learning_rate=adapter_learning_rate,
         adapter_weight_decay=adapter_weight_decay,
         selector_condition_learning_rate=selector_condition_learning_rate,
+        view_fusion_learning_rate=view_fusion_learning_rate,
     )
     if loss_routing in {"adapter_asl", "both_asl"} and not adapter_parameters:
         raise ValueError("Adapter ASL routing requires an enabled Adapter")
@@ -985,6 +1065,8 @@ def train_task(
         condition_samples = 0
         condition_valid_total = 0.0
         condition_visible_total = 0.0
+        fusion_weight_totals = None
+        fusion_weight_batches = 0
         epoch_condition_lr = (
             float(optimizer.param_groups[2]["lr"])
             if model.selector_conditioner is not None else None
@@ -1003,13 +1085,24 @@ def train_task(
             current_targets = current_targets.to(device, non_blocking=True).float()
             optimizer.zero_grad(set_to_none=True)
             with torch.cuda.amp.autocast(enabled=amp):
-                logits = model.current_all_logits(images)
+                logits, view_logits = model.current_all_logits_with_views(images)
                 bce_loss = compute_training_loss(
                     logits,
                     current_targets,
                     current,
                     temperature,
                     loss_mode,
+                )
+                bce_loss = add_view_auxiliary_loss(
+                    bce_loss,
+                    view_logits,
+                    images,
+                    current_targets,
+                    current,
+                    temperature,
+                    loss_mode,
+                    view_auxiliary_loss_weight,
+                    "bce",
                 )
                 asl_loss = None
                 if loss_routing != "joint_bce":
@@ -1023,6 +1116,21 @@ def train_task(
                         gamma_pos=asl_gamma_pos,
                         clip=asl_clip,
                         eps=asl_eps,
+                    )
+                    asl_loss = add_view_auxiliary_loss(
+                        asl_loss,
+                        view_logits,
+                        images,
+                        current_targets,
+                        current,
+                        temperature,
+                        loss_mode,
+                        view_auxiliary_loss_weight,
+                        "asl",
+                        asl_gamma_neg,
+                        asl_gamma_pos,
+                        asl_clip,
+                        asl_eps,
                     )
                 model_loss = (
                     asl_loss
@@ -1100,6 +1208,14 @@ def train_task(
                 regularization_metric.detach().cpu()
             )
             batches += 1
+            fusion_means = model.fusion_weight_means()
+            if fusion_means is not None:
+                values = np.asarray(fusion_means, dtype=np.float64)
+                fusion_weight_totals = (
+                    values if fusion_weight_totals is None
+                    else fusion_weight_totals + values
+                )
+                fusion_weight_batches += 1
         if not batches:
             raise RuntimeError("Training loader produced no batches")
         if optimizer_steps and optimizer_updates_per_task is None:
@@ -1135,6 +1251,10 @@ def train_task(
         if epoch_condition_lr is not None:
             row["selector_condition_learning_rate"] = epoch_condition_lr
             row["next_selector_condition_learning_rate"] = float(optimizer.param_groups[2]["lr"])
+        if fusion_weight_batches:
+            means = fusion_weight_totals / fusion_weight_batches
+            for name, value in zip(model.view_fusion_module.view_names, means):
+                row[f"fusion_weight_{name}"] = float(value)
         history.append(row)
         print(
             f"task={task_id} cycle={epoch + 1} "
@@ -1275,6 +1395,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--selector-condition-hidden-dim", type=int, default=32)
     parser.add_argument("--selector-condition-scale", type=float, default=0.1)
     parser.add_argument("--selector-condition-learning-rate", type=float, default=4e-4)
+    parser.add_argument(
+        "--view-fusion",
+        choices=(
+            "disabled", "fixed_three_view", "soft_three_view",
+            "soft_full_person",
+        ),
+        default="disabled",
+    )
+    parser.add_argument("--view-fusion-hidden-dim", type=int, default=16)
+    parser.add_argument("--view-fusion-learning-rate", type=float, default=4e-4)
+    parser.add_argument("--view-auxiliary-loss-weight", type=float, default=0.0)
     parser.add_argument("--paired-full-person", action="store_true",
                         help="Also permit a paired-input, conditioning-disabled control.")
     parser.add_argument(
@@ -1402,15 +1533,29 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    three_view_fusion = args.view_fusion in {
+        "fixed_three_view", "soft_three_view"
+    }
     paired_inputs = (
         args.paired_full_person
         or args.selector_conditioning != "disabled"
         or args.full_crop_mode == "target_aware"
+        or args.view_fusion != "disabled"
     )
     if paired_inputs and args.input_mode != "full":
         raise ValueError("Selector conditioning/paired inputs require input-mode full")
     if paired_inputs and args.person_transform_mode != "letterbox":
         raise ValueError("Paired Person inputs require person-transform-mode letterbox")
+    if args.view_fusion != "disabled" and args.selector_conditioning != "disabled":
+        raise ValueError("View fusion and Selector conditioning are mutually exclusive")
+    if args.view_fusion_hidden_dim <= 0:
+        raise ValueError("View-fusion hidden dimension must be positive")
+    if not math.isfinite(args.view_fusion_learning_rate) or args.view_fusion_learning_rate <= 0:
+        raise ValueError("View-fusion learning rate must be finite and positive")
+    if not math.isfinite(args.view_auxiliary_loss_weight) or not 0 <= args.view_auxiliary_loss_weight <= 1:
+        raise ValueError("View auxiliary loss weight must be in [0, 1]")
+    if args.view_fusion == "disabled" and args.view_auxiliary_loss_weight != 0:
+        raise ValueError("View auxiliary supervision requires view fusion")
     if not math.isfinite(args.selector_condition_learning_rate) or args.selector_condition_learning_rate <= 0:
         raise ValueError("Selector condition learning rate must be finite and positive")
     if args.train_batch_size != 64:
@@ -1439,8 +1584,13 @@ def main() -> None:
                 "Face endpoint supports only complete-fit validation/test or the "
                 "locked 90/10 validation source split"
             )
+    elif three_view_fusion:
+        if args.face_manifest_root is None:
+            raise ValueError("Three-view fusion requires --face-manifest-root")
     elif args.face_manifest_root is not None:
-        raise ValueError("--face-manifest-root is only valid with face_crop input")
+        raise ValueError(
+            "--face-manifest-root is only valid with Face or three-view input"
+        )
     if args.save_evaluation_scores:
         expected_purpose = (
             "validation_search"
@@ -1562,6 +1712,8 @@ def main() -> None:
         selector_condition_layers=args.selector_condition_layers,
         selector_condition_hidden_dim=args.selector_condition_hidden_dim,
         selector_condition_scale=args.selector_condition_scale,
+        view_fusion=args.view_fusion,
+        view_fusion_hidden_dim=args.view_fusion_hidden_dim,
     ).float().to(device)
     model.visual_encoder.requires_grad_(False)
     model.assert_visual_frozen()
@@ -1583,12 +1735,14 @@ def main() -> None:
         sum(p.numel() for p in model.selector_conditioner.task_modules[0].parameters())
         if model.selector_conditioner is not None else 0
     )
+    fusion_parameters_per_task = model.view_fusion_module.parameter_count_per_task()
     print(
-        f"trainable_parameters={lane_parameters + classifier_parameters + adapter_parameters_per_task + condition_parameters_per_task} "
+        f"trainable_parameters={lane_parameters + classifier_parameters + adapter_parameters_per_task + condition_parameters_per_task + fusion_parameters_per_task} "
         f"task_lane={lane_parameters} classifier={classifier_parameters} "
         f"adapter_total={adapter_parameters} "
         f"adapter_per_task={adapter_parameter_counts_per_task} "
-        f"selector_condition_per_task={condition_parameters_per_task}",
+        f"selector_condition_per_task={condition_parameters_per_task} "
+        f"view_fusion_per_task={fusion_parameters_per_task}",
         flush=True,
     )
 
@@ -1602,7 +1756,19 @@ def main() -> None:
     )
     dataset_parent = resolve_dataset_parent(args.data_root)
     paired_train = paired_eval = None
-    if paired_inputs:
+    multi_view_train = multi_view_eval = None
+    if three_view_fusion:
+        multi_view_options = dict(
+            normalization=args.input_normalization,
+            crop_scale=args.train_crop_scale,
+            margin=args.person_crop_margin,
+            jitter_strength=args.person_color_jitter_strength,
+            jitter_probability=args.person_color_jitter_probability,
+            full_crop_mode=args.full_crop_mode,
+        )
+        multi_view_train = ThreeViewTransform(train=True, **multi_view_options)
+        multi_view_eval = ThreeViewTransform(train=False, **multi_view_options)
+    elif paired_inputs:
         paired_options = dict(
             normalization=args.input_normalization, crop_scale=args.train_crop_scale,
             margin=args.person_crop_margin,
@@ -1616,6 +1782,7 @@ def main() -> None:
         str(dataset_parent), train=True, transform=train_transform,
         input_mode=args.input_mode, person_crop_margin=args.person_crop_margin,
         paired_transform=paired_train,
+        multi_view_transform=multi_view_train,
         face_manifest_root=args.face_manifest_root,
     )
     calibration_source = (
@@ -1624,6 +1791,7 @@ def main() -> None:
             input_mode=args.input_mode,
             person_crop_margin=args.person_crop_margin,
             paired_transform=paired_eval,
+            multi_view_transform=multi_view_eval,
             face_manifest_root=args.face_manifest_root,
         )
         if args.calibration_fraction > 0
@@ -1634,6 +1802,7 @@ def main() -> None:
         eval_splits=("val",), input_mode=args.input_mode,
         person_crop_margin=args.person_crop_margin,
         paired_transform=paired_eval,
+        multi_view_transform=multi_view_eval,
         face_manifest_root=args.face_manifest_root,
     )
     if args.reporting_split == "test":
@@ -1642,6 +1811,7 @@ def main() -> None:
             eval_splits=("test",), input_mode=args.input_mode,
             person_crop_margin=args.person_crop_margin,
             paired_transform=paired_eval,
+            multi_view_transform=multi_view_eval,
             face_manifest_root=args.face_manifest_root,
         )
         validate_classes(train_source, val_source, reporting_source)
@@ -1653,10 +1823,10 @@ def main() -> None:
 
     face_manifest_provenance = (
         load_face_manifest_provenance(args.face_manifest_root)
-        if args.input_mode == "face_crop" else None
+        if args.input_mode == "face_crop" or three_view_fusion else None
     )
     face_counts = None
-    if args.input_mode == "face_crop":
+    if args.input_mode == "face_crop" or three_view_fusion:
         face_counts = {}
         for task_id in range(len(TASK_SIZES)):
             current = task_indices(task_id)
@@ -1781,13 +1951,46 @@ def main() -> None:
         "face_counts_by_task": face_counts,
         "face_invalid_placeholder": (
             "clip_mean_rgb_masked_from_loss_and_fusion"
-            if args.input_mode == "face_crop" else None
+            if args.input_mode == "face_crop" or three_view_fusion else None
         ),
         "face_transform": (
             "manifest_margin15_pad_square_resize224_horizontal_flip_train_only"
-            if args.input_mode == "face_crop" else None
+            if args.input_mode == "face_crop" or three_view_fusion else None
         ),
         "paired_full_person": paired_inputs,
+        "view_fusion": args.view_fusion,
+        "view_fusion_level": (
+            "normalized_task_lane_cls_features"
+            if args.view_fusion != "disabled" else None
+        ),
+        "view_fusion_hidden_dim": (
+            args.view_fusion_hidden_dim
+            if args.view_fusion.startswith("soft_") else None
+        ),
+        "view_fusion_learning_rate": (
+            args.view_fusion_learning_rate
+            if args.view_fusion.startswith("soft_") else None
+        ),
+        "view_fusion_parameters_per_task": fusion_parameters_per_task,
+        "view_fusion_task_semantics": (
+            "router_k_only_fuses_task_k_lane_and_freezes_after_task"
+            if args.view_fusion.startswith("soft_")
+            else "fixed_per_sample_reliability_masked_weights"
+            if args.view_fusion == "fixed_three_view" else None
+        ),
+        "view_fusion_valid_face_prior": (
+            model.view_fusion_module.prior(True)
+            if args.view_fusion != "disabled" else None
+        ),
+        "view_fusion_invalid_face_prior": (
+            model.view_fusion_module.prior(False)
+            if three_view_fusion else None
+        ),
+        "view_auxiliary_loss_weight": args.view_auxiliary_loss_weight,
+        "view_auxiliary_loss_reduction": (
+            "mean_over_available_views_face_strictly_reliable"
+            if args.view_fusion != "disabled" else None
+        ),
         "full_crop_mode": args.full_crop_mode,
         "selector_conditioning": args.selector_conditioning,
         "selector_condition_layers": list(args.selector_condition_layers),
@@ -1925,11 +2128,12 @@ def main() -> None:
         "cuda_version": torch.version.cuda,
         "trainable_parameters": (
             lane_parameters + classifier_parameters + adapter_parameters_per_task
-            + condition_parameters_per_task
+            + condition_parameters_per_task + fusion_parameters_per_task
         ),
         "total_method_parameters": (
             lane_parameters + classifier_parameters + adapter_parameters
             + condition_parameters_per_task * model.num_tasks
+            + fusion_parameters_per_task * model.num_tasks
         ),
         "task_lane_parameters": lane_parameters,
         "classifier_parameters": classifier_parameters,
@@ -2019,6 +2223,8 @@ def main() -> None:
             adapter_learning_rate=args.adapter_learning_rate,
             adapter_weight_decay=args.adapter_weight_decay,
             selector_condition_learning_rate=args.selector_condition_learning_rate,
+            view_fusion_learning_rate=args.view_fusion_learning_rate,
+            view_auxiliary_loss_weight=args.view_auxiliary_loss_weight,
             loss_mode=args.training_loss_mode,
             loss_routing=args.loss_routing,
             asl_gamma_neg=args.asl_gamma_neg,

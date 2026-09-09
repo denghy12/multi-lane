@@ -16,6 +16,7 @@ from torch import nn
 
 from .adapter import TaskImageTokenAdapterBank, TaskLaneTransformerAdapterBank
 from .selector_conditioning import TaskSelectorConditioner
+from .view_fusion import TaskwiseViewFusion
 
 ModelInputs = Union[torch.Tensor, Dict[str, torch.Tensor]]
 
@@ -44,6 +45,8 @@ class MultiLaneModel(nn.Module):
         selector_condition_layers: Sequence[int] = (1,),
         selector_condition_hidden_dim: int = 32,
         selector_condition_scale: float = 0.1,
+        view_fusion: str = "disabled",
+        view_fusion_hidden_dim: int = 16,
     ) -> None:
         super().__init__()
         if not task_sizes or any(int(size) <= 0 for size in task_sizes):
@@ -78,6 +81,10 @@ class MultiLaneModel(nn.Module):
             raise ValueError("CLIP visual transformer has no residual blocks")
         if selector_conditioning not in TaskSelectorConditioner.MODES:
             raise ValueError("Invalid selector conditioning mode")
+        if view_fusion not in TaskwiseViewFusion.MODES:
+            raise ValueError("Invalid taskwise view-fusion mode")
+        if view_fusion != "disabled" and selector_conditioning != "disabled":
+            raise ValueError("View fusion and Selector conditioning are mutually exclusive")
         if selector_conditioning != "disabled" and (
             not selector_condition_layers
             or any(i < 0 or i >= len(blocks) for i in selector_condition_layers)
@@ -188,6 +195,14 @@ class MultiLaneModel(nn.Module):
                     selector_condition_scale,
                 )
 
+        self.view_fusion = view_fusion
+        with torch.random.fork_rng(devices=[]):
+            self.view_fusion_module = TaskwiseViewFusion(
+                len(self._task_sizes), self.output_dim, view_fusion,
+                hidden_dim=view_fusion_hidden_dim,
+            )
+        self._last_fusion_weights: Optional[torch.Tensor] = None
+
     @property
     def task_sizes(self) -> Tuple[int, ...]:
         return self._task_sizes
@@ -228,6 +243,7 @@ class MultiLaneModel(nn.Module):
             self.adapter_bank.activate_task(task_id)
         if self.selector_conditioner is not None:
             self.selector_conditioner.restore_task(task_id)
+        self.view_fusion_module.restore_task(task_id)
         self._current_task_id = int(task_id)
 
     def restore_task(self, task_id: int) -> None:
@@ -237,6 +253,7 @@ class MultiLaneModel(nn.Module):
             self.adapter_bank.restore_task(task_id)
         if self.selector_conditioner is not None:
             self.selector_conditioner.restore_task(task_id)
+        self.view_fusion_module.restore_task(task_id)
         self._current_task_id = int(task_id)
 
     def set_adapter_runtime_enabled(self, enabled: bool) -> None:
@@ -399,7 +416,7 @@ class MultiLaneModel(nn.Module):
             )
         return lane_tokens
 
-    def encode_lanes(
+    def _encode_single_lanes(
         self, images: ModelInputs, all_seen_lanes: bool
     ) -> torch.Tensor:
         lane_ids = self._lane_ids(all_seen_lanes)
@@ -474,6 +491,58 @@ class MultiLaneModel(nn.Module):
             lane_cls = F.normalize(lane_cls, dim=-1)
         return lane_cls
 
+    def encode_lanes_with_views(
+        self, images: ModelInputs, all_seen_lanes: bool
+    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+        """Return fused lane features and their supervised view features."""
+        if self.view_fusion == "disabled":
+            self._last_fusion_weights = None
+            return self._encode_single_lanes(images, all_seen_lanes), {}
+        if not isinstance(images, dict):
+            raise ValueError("Enabled view fusion requires dictionary inputs")
+        required = set(self.view_fusion_module.view_names)
+        if not required <= images.keys():
+            raise ValueError("Enabled view fusion is missing image views")
+        batch = images["full"].shape[0]
+        if any(images[name].shape != images["full"].shape for name in required):
+            raise ValueError("View-fusion images have inconsistent shapes")
+        face_reliable = None
+        if "face" in required:
+            face_reliable = images.get("face_reliable")
+            if face_reliable is None or face_reliable.shape != (batch,):
+                raise ValueError("Three-view fusion requires a valid Face mask")
+        features = {
+            name: self._encode_single_lanes(images[name], all_seen_lanes)
+            for name in self.view_fusion_module.view_names
+        }
+        lane_ids = self._lane_ids(all_seen_lanes)
+        fused, weights = self.view_fusion_module(
+            features, lane_ids, face_reliable
+        )
+        self._last_fusion_weights = weights.detach()
+        return fused, features
+
+    def encode_lanes(
+        self, images: ModelInputs, all_seen_lanes: bool
+    ) -> torch.Tensor:
+        fused, _ = self.encode_lanes_with_views(images, all_seen_lanes)
+        return fused
+
+    def current_all_logits_with_views(
+        self, images: ModelInputs
+    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+        fused, features = self.encode_lanes_with_views(images, all_seen_lanes=False)
+        return (
+            self.head(fused)[:, 0],
+            {name: self.head(value)[:, 0] for name, value in features.items()},
+        )
+
+    def fusion_weight_means(self) -> Optional[Tuple[float, ...]]:
+        if self._last_fusion_weights is None:
+            return None
+        values = self._last_fusion_weights.float().mean(dim=(0, 1)).cpu()
+        return tuple(float(value) for value in values)
+
     def adapter_auxiliary_metric(self, mode: str) -> torch.Tensor:
         if self.adapter_mode != "image_token" or self.adapter_bank is None:
             raise RuntimeError(
@@ -511,10 +580,14 @@ class MultiLaneModel(nn.Module):
         yield from self.prompts
         yield from self.head.parameters()
         yield from self.conditioning_optimizer_parameters()
+        yield from self.fusion_optimizer_parameters()
 
     def conditioning_optimizer_parameters(self) -> Iterable[nn.Parameter]:
         if self.selector_conditioner is not None:
             yield from self.selector_conditioner.active_parameters()
+
+    def fusion_optimizer_parameters(self) -> Iterable[nn.Parameter]:
+        yield from self.view_fusion_module.active_parameters()
 
     def adapter_optimizer_parameters(self) -> Iterable[nn.Parameter]:
         if self.adapter_bank is not None:
@@ -530,6 +603,11 @@ class MultiLaneModel(nn.Module):
                 for name, parameter in self.selector_conditioner.named_parameters()
                 if parameter.requires_grad
             )
+        names.extend(
+            f"view_fusion_module.{name}"
+            for name, parameter in self.view_fusion_module.named_parameters()
+            if parameter.requires_grad
+        )
         if self.adapter_bank is not None:
             names.extend(
                 f"adapter_bank.{name}"

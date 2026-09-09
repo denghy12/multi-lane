@@ -1589,3 +1589,16 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - 三种子探索性test：R1/R2/R3=`33.0119/33.0029/32.9758`。R2比R1低`0.0090`，R3三个seed
   均下降。停止当前离线小样本Router路线，固定R1继续保持正式冠军；下一步进入端到端taskwise
   三视图特征融合validation。
+
+## 2026-09-10 端到端taskwise多视图特征融合
+
+- 用户确认开始下一阶段，新建`codex/end-to-end-taskwise-three-view-fusion`。固定冠军Image-token
+  Adapter（zero-based layer1/b32/LR4e-4/scale0.1/ReLU/independent）、主模型BCE+Adapter
+  ASL9.8/0/0.05、30 epochs/task、seed0完整8-task validation，禁止test。
+- J0在归一化task-lane CLS特征层固定融合Full/Person/Face；J1使用每task独立hidden16 MLP输出
+  样本级三路masked-softmax；J3是相同机制的Full+Person控制。可靠Face先验为0.64/0.16/0.20，
+  不可靠Face严格为0并回退0.80/0.20；soft Router从对应先验初始化。
+- Router k只融合task k lane，task结束后冻结。三个视图共享冻结CLIP、selectors/prompts/head和当前
+  task Adapter；主融合目标外增加0.1倍有效分支平均辅助监督，Face辅助损失仅使用可靠样本。
+- 详细协议见`docs/end_to_end_taskwise_three_view_fusion.md`。下一步完整单测、真实数据和GPU smoke；
+  全部通过后并行J0/J1/J3。只有J1 final validation mAP同时超过J0/J3才补seed1/2。

@@ -38,6 +38,11 @@ reassembly smoke和test descriptor GPU smoke；通过后运行唯一完整批次
 三视图特征融合+辅助监督、J1样本级软路由+辅助监督、J3 Full+Person软路由+辅助监督。固定冠军
 Adapter、30 epochs/task和相同训练预算；每个task融合lane训练后冻结。J1必须同时超过J0和J3才继续。
 
+已进入`codex/end-to-end-taskwise-three-view-fusion`：完成J0/J1/J3、三视图transform、有效Face
+mask、0.1辅助监督、汇总器和launcher后，先运行完整单测与真实数据/GPU smoke。通过后使用三张
+空闲GPU并行seed0完整8-task validation。输出进入`logs/emotic_track_a_end_to_end_view_fusion/`和
+服务器`emotic_benchmark_runs/multi_lane_end_to_end_view_fusion_v0.1/`；不运行test或seed1/2。
+
 
 ## 当前优先：结束当前Router，验证固定R1稳定性（2026-09-09）
 

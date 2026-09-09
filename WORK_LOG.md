@@ -3297,3 +3297,13 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
   两者，未通过既定条件。test三种子R1/R2/R3为33.0119/33.0029/32.9758，R1保持正式冠军。
 - 9个结果文件约460KB已同步，result/control/logs组合SHA与服务器一致。结论是语义修正有效，但
   calibration小样本和低维全局描述仍限制泛化；结束当前Router路线，转端到端特征融合。
+
+## 2026-09-10：开始端到端taskwise多视图融合
+
+- 从`d439905`新建`codex/end-to-end-taskwise-three-view-fusion`。新增taskwise特征融合模块：J0固定
+  三路、J1动态三路、J3动态Full+Person；soft Router每task独立hidden16并从锁定固定权重初始化。
+- EMOTIC新增显式multi-view数据通路；Full/Person/Face共享flip，Person/Face完整letterbox，Face
+  reliability同时控制输入占位、融合mask和辅助损失mask。
+- runner新增特征融合参数组、BCE/ASL一致的0.1分支辅助监督、融合权重日志、协议配置和seed0
+  validation汇总器；新增三GPU launcher与回归测试。当前仅完成本地语法/shell/diff检查，服务器
+  完整测试和smoke尚待Git-only同步后执行。

@@ -161,7 +161,7 @@ class PairedFullPersonTransform:
             mask = torch.flip(mask, dims=(1,))
         return mask.reshape(-1)
 
-    def __call__(self, image, bbox):
+    def _apply(self, image, bbox):
         width, height = image.size
         box = self.target_box(bbox, width, height)
         if self.train:
@@ -213,9 +213,73 @@ class PairedFullPersonTransform:
             person = self.to_tensor(person)
         else:
             person = self.person_eval(person)
-        return {"full": full, "person": person, "bbox": geometry,
-                "person_patch_mask": person_patch_mask,
-                "condition_valid": (geometry[4] > 0).float() * geometry[5]}
+        return ({"full": full, "person": person, "bbox": geometry,
+                 "person_patch_mask": person_patch_mask,
+                 "condition_valid": (geometry[4] > 0).float() * geometry[5]},
+                flip)
+
+    def __call__(self, image, bbox):
+        result, _ = self._apply(image, bbox)
+        return result
+
+
+class ThreeViewTransform(PairedFullPersonTransform):
+    """Full/Person/Face transform with one shared horizontal flip.
+
+    Full keeps the champion legacy crop. Person and Face preserve their entire
+    boxes through CLIP-mean letterboxing. Invalid or unreliable faces use the
+    deterministic mean placeholder and carry a strict reliability mask, so
+    neither fusion nor auxiliary supervision can consume them.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        from .runner import build_transforms
+        _, self.face_eval = build_transforms(
+            kwargs.get("normalization", "clip"),
+            kwargs.get("crop_scale", (0.05, 1.0)),
+            input_mode="face_crop",
+        )
+
+    @staticmethod
+    def _face_crop(image, record, usable: bool):
+        if not usable:
+            return image.new("RGB", (1, 1), color=(123, 117, 104))
+        try:
+            box = np.asarray(record.get("face_crop_bbox"), dtype=np.float32).ravel()
+        except (AttributeError, TypeError, ValueError):
+            box = np.asarray([], dtype=np.float32)
+        width, height = image.size
+        if (box.size != 4 or not np.isfinite(box).all()
+                or not (0 <= box[0] < box[2] <= width)
+                or not (0 <= box[1] < box[3] <= height)):
+            raise RuntimeError("Invalid three-view Face crop bbox")
+        return image.crop((int(np.floor(box[0])), int(np.floor(box[1])),
+                           int(np.ceil(box[2])), int(np.ceil(box[3]))))
+
+    def __call__(self, image, bbox, face_record, face_training_valid,
+                 face_reliable):
+        result, flip = self._apply(image, bbox)
+        face = self._face_crop(image, face_record, bool(face_reliable))
+        if self.train:
+            face = TF.resize(
+                self.pad(face), (224, 224), transforms.InterpolationMode.BICUBIC
+            )
+            if flip:
+                face = TF.hflip(face)
+            face = self.to_tensor(face)
+        else:
+            face = self.face_eval(face)
+        result.update({
+            "face": face,
+            "face_training_valid": torch.tensor(
+                float(bool(face_training_valid)), dtype=torch.float32
+            ),
+            "face_reliable": torch.tensor(
+                float(bool(face_reliable)), dtype=torch.float32
+            ),
+        })
+        return result
 
 
 def move_model_inputs(images, device):
