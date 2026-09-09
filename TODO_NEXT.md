@@ -43,6 +43,9 @@ mask、0.1辅助监督、汇总器和launcher后，先运行完整单测与真�
 空闲GPU并行seed0完整8-task validation。输出进入`logs/emotic_track_a_end_to_end_view_fusion/`和
 服务器`emotic_benchmark_runs/multi_lane_end_to_end_view_fusion_v0.1/`；不运行test或seed1/2。
 
+当前159项全测和J0/J1/J3真实task0 GPU smoke均通过。下一动作是提交smoke记录、服务器ff-only同步，
+确认三卡空闲后启动唯一完整batch；运行中只监测退出码、OOM、非有限值和任务进度，不重复启动。
+
 
 ## 当前优先：结束当前Router，验证固定R1稳定性（2026-09-09）
 

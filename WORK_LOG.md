@@ -3310,3 +3310,6 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - 首次服务器159项全测通过；真实三方案task0 smoke暴露不可靠Face占位图错误调用实例`image.new`，
   J0/J1在首批数据前安全停止，J3完成84 updates/skipped0。修复为`PIL.Image.new`并补不可靠Face
   变换回归后，需要重新完整全测与三方案smoke；未启动正式validation。
+- 修复提交`a9c897e`后二次159项全测全通过。真实批次
+  `smoke_end_to_end_view_fusion_20260910_002`中J0/J1/J3均完成task0一轮84 updates、skipped0，
+  batch64无OOM；耗时35.3/34.2/28.3秒。三份config均clean且记录同一提交，错误扫描为空。

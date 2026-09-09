@@ -1602,3 +1602,6 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   task Adapter；主融合目标外增加0.1倍有效分支平均辅助监督，Face辅助损失仅使用可靠样本。
 - 详细协议见`docs/end_to_end_taskwise_three_view_fusion.md`。下一步完整单测、真实数据和GPU smoke；
   全部通过后并行J0/J1/J3。只有J1 final validation mAP同时超过J0/J3才补seed1/2。
+- 服务器修复后159项全测通过；真实task0 smoke在GPU0/1/2分别完成J0/J1/J3，每组84 updates、
+  skipped0、batch64无OOM/非有限值。J1学得平均权重约0.699/0.184/0.116，与J0有效/无效Face混合
+  后的0.709/0.177/0.114不同，确认Router参与更新；可启动唯一完整validation批次。
