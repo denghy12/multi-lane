@@ -1,5 +1,24 @@
 # 工作日志
 
+## 2026-09-09：同步并分析三视图Router validation
+
+- Face 90/10 source完整完成240 epochs、9,930 updates、0 skipped、耗时1,509.7秒；来源
+  `9b5d08c`且clean，8份val/calibration scores与compact states齐全。描述符覆盖calibration
+  1,532条、val 2,397条，可靠Face为924/1,460。
+- 自动Router首次因无脸manifest的`face_detection_score=null`触发TypeError；专家训练与描述符均
+  未受影响。`16c0b87`将nullable尺寸/分数fail-closed为0并补真实格式回归，服务器147项完整单测
+  通过；保留失败记录，只复用现有产物重跑CPU Router，三项exit code现均为0，test未访问。
+- final val mAP：R0 `42.4101`、R1 `42.7974`、最佳R2/prior1 `42.6674`、最佳R3/prior1
+  `42.6707`。R1对R0的8-task mAP均正；R3对R1的8-task mAP均负，决策为不进seed1/2、不test。
+- 弱prior使R2/R3 final最低降至41.55/41.39且forgetting升至1.71/1.74。task6仅51条
+  calibration，R3无prior虽降低calibration BCE，却提高validation BCE并大幅降低mAP，确认过拟合。
+- 当前动态Router正则中心Face0.10与固定赢家Face0.20不一致；强prior赢家在可靠Face上的平均权重只
+  约0.095--0.151。下一步先做一次R1中心公平修正，保持所有容量/特征/网格不变并只跑CPU；若仍
+  失败则停止当前per-task Router，不扩大网络。
+- 85个非compact文件共2.8MB同步至
+  `output/emotic_track_a_three_view_router/20260909_163655/`，result/control/logs组合哈希均精确匹配；
+  34MB compact checkpoints未下载。完整分析见该目录`analysis.md`。
+
 ## 2026-09-09：实现三视图样本级Router validation
 
 - 创建`codex/three-view-router-validation`；Face runner允许锁定的0或0.10 calibration fraction，

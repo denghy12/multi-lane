@@ -1,5 +1,21 @@
 # 项目上下文
 
+## 2026-09-09：三视图Router seed0 validation完成
+
+batch`three_view_router_seed0_20260909_163655`的90/10 Face source完成240 epochs、9,930
+updates、0 skipped；描述符和Router均完成，明确未访问test。首次Router因无脸manifest的nullable
+检测分读取失败；修复`16c0b87`增加null fail-closed回归，服务器147项完整单测通过后复用既有
+scores/descriptors仅重跑CPU Router成功。85个非compact结果/状态/日志已同步本地，三组组合
+SHA-256与服务器一致。
+
+R0固定FP、R1固定Face0.20、最佳R2、最佳R3的final val mAP依次为
+`42.4101/42.7974/42.6674/42.6707`；R3比R2仅高0.0033但比R1低0.1268，8个task均未超过
+R1，因此不补seed1/2且不运行test。R2/R3均由prior1胜出，无prior时final降至41.55/41.39并
+显著恶化forgetting，证实小calibration过拟合。当前Router prior中心Face权重为0.10而固定赢家为
+0.20；最强prior使可靠Face平均权重仅约0.095--0.151，构成不公平起点。下一步仅建议复用现有产物
+做一次R1中心`[0.64,0.16,0.20]`的CPU公平性修正；仍失败则停止per-task calibration Router。
+详细见本批`analysis.md`。
+
 ## 2026-09-09：三视图样本级Router实现与验收完成
 
 已从Face endpoint结果提交创建`codex/three-view-router-validation`。新增90/10 Face source支持，

@@ -1,6 +1,19 @@
 # 下一步任务
 
-## 当前优先：三视图样本级Router validation（2026-09-09）
+## 当前优先：校正Router的固定赢家中心（2026-09-09）
+
+1. 当前seed0三视图结果不满足advance：R1固定Face0.20 final val mAP`42.7974`，最佳R2/R3为
+   `42.6674/42.6707`；不补seed1/2，不运行test。
+2. 现Router有效Face初值/正则中心是`[0.72,0.18,0.10]`，与R1赢家
+   `[0.64,0.16,0.20]`不一致；最强prior胜出并系统性压低Face权重，需先消除该公平性漏洞。
+3. 下一批只修改valid prior为R1，invalid prior保持`[0.8,0.2,0]`；hidden16、每task独立、masked
+   softmax、R2/R3特征、80 epochs、prior `{0,0.1,1}`和选择规则全部不变。复用现有三专家scores和
+   描述符，只跑CPU Router，不重训专家。
+4. 若校正后R3仍未同时超过R1和最佳R2，停止per-task calibration Router，不扩大hidden、不增加
+   类别权重。动态路线只有在构造image-group out-of-fold预测、显著增加无泄漏训练样本后才重启；
+   追求mAP则保留R1，另行完成多seed validation后再考虑锁定test。
+
+## 已完成：三视图样本级Router validation（2026-09-09）
 
 1. Face endpoint阶段已通过：固定beta0.20在完整seed0 val将FP final mAP从43.3035提高到43.5812，
    8个task均改善；当前不运行test，也不继续搜索静态比例。
@@ -12,10 +25,10 @@
 4. task6 calibration只有51条：禁止扩大router、类别独立权重或直接用validation标签训练。报告
    calibration/validation gap、权重分布、逐task及质量分组。
 5. 只有R3同时超过R1与R2才宣称动态视觉路由有效；再补seed1/2 validation，锁定后一次test。
-6. 验收已经完成；两GPU seed0完整validation批次`three_view_router_seed0_20260909_163655`正在运行：
-   GPU0补训Face source，GPU1并行导出描述符，随后CPU比较R0/R1/R2/R3；全程不运行正式test。
-7. 完成后同步Face source小结果、三视图描述符、Router states/diagnostics/selection和日志；检查R3是否
-   同时超过R1与最佳R2。未通过则停止扩大Router；通过才补seed1/2 validation。
+6. 两GPU seed0完整validation批次`three_view_router_seed0_20260909_163655`已完成；Face source、
+   描述符和修复后CPU Router均成功，全程未运行test。
+7. 结果已同步：R3超过R2约0.0033但低R1约0.1268，不满足advance；按规则不补seed1/2、不test，
+   也不扩大Router。只保留上节所述R1中心公平性修正。
 
 ## 已完成：Face endpoint seed0 validation（2026-09-09）
 
