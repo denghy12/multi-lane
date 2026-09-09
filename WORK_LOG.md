@@ -14,6 +14,10 @@
 - GPU0 task0 1-epoch smoke完成64 updates、0 skipped，实际probability v2 score覆盖完整2,285条；
   与历史Full/Person task0 scores真实对齐后，1,382条可靠Face可改变输出，903条不可靠样本与FP
   逐元素完全相等。无checkpoint、未读取test，可启动seed0完整validation。
+- 验收记录提交`285f3e1`后，服务器worktree fast-forward并保持clean；GPU0启动seed0完整8-task
+  validation，tmux `multilane_face_endpoint_val_seed0_20260909`，批次
+  `face_endpoint_val_seed0_20260909_1320`。task0前5 epochs均64 updates/skipped0；launcher将在训练
+  完成后自动执行固定beta融合，任何训练或来源审计失败都会使批次失败而不会启动其他实验。
 
 ## 2026-09-09：完成阶段0 Face GPU smoke
 

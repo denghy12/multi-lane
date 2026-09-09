@@ -4,7 +4,7 @@
 
 1. `codex/face-endpoint-validation`已实现并Git-only同步服务器独立worktree；142项完整单测、真实
    manifest/transform/score-dump检查与task0 GPU smoke全部通过。
-2. 现在自动等待安全GPU并运行一个Face expert：seed0、8 tasks、30 epochs/task、batch64、
+2. Face expert已在GPU0运行：seed0、8 tasks、30 epochs/task、batch64、
    layer1/b32/LR4e-4/scale0.1/ReLU/independent、main BCE+Adapter ASL9.8/0/0.05、AMP/TF32。
 3. 完成后复用既有Full/Person validation scores，比较固定FP与可靠Face beta
    `{0,0.05,0.10,0.20}`；

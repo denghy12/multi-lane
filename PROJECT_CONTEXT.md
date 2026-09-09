@@ -11,6 +11,10 @@ beta `{0,0.05,0.10,0.20}`；其余样本逐元素精确回退锚点。新增来�
 不读取test。服务器142项完整单测、真实manifest数据检查和task0 1-epoch GPU/score-dump smoke均通过：
 64 updates、0 skipped；2,285个完整task0 val样本中1,382个可靠Face可参与融合，903个不可靠样本
 已验证逐元素精确回退FP。现可启动完整训练。协议详见`docs/face_endpoint_validation.md`。
+完整seed0 validation已在服务器独立worktree以clean HEAD `285f3e1`启动，tmux为
+`multilane_face_endpoint_val_seed0_20260909`，批次`face_endpoint_val_seed0_20260909_1320`，GPU0。
+启动检查显示task0已进入训练、每epoch 64 updates且skipped0；其余GPU空闲。本批完成后launcher会
+自动审计既有Full/Person端点并执行固定beta融合，不会读取test。
 
 ## 2026-09-08：Full–Person–Face动态路由路线（计划）
 
