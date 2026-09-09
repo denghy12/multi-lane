@@ -11,6 +11,20 @@
 6. 当前唯一正式batch为`fixed_three_view_seed012_test_20260909_213052`，已通过preflight并在GPU0/1/2
    运行。只等待完成，不重复启动；结束后核验3×240 epochs、skipped0、score对齐和固定融合摘要。
 
+本阶段已完成：固定三视图`33.0119 ± 0.3038`，相对Full+Person三个seed均为正，升级为当前正式
+冠军。结果、test scores和日志已同步且哈希一致。
+
+## 下一阶段：先修正增量Router语义，再做特征融合
+
+1. validation-only复用已有90/10三视图scores、CLIP descriptors和R2/R3 task states；不重训专家。
+2. 对task t评估时，分别用已冻结Router0...t只融合各自类别组，再拼接全部已见类别。增加回归测试，
+   保证训练新task不会改变旧类别的Router权重和融合结果。
+3. 比较固定R1、修正后的taskwise R2和R3。只有R3同时超过R1与R2，才补seed1/2 validation；否则
+   结束当前小样本离线Router路线。
+4. 随后新建端到端三视图特征融合分支，seed0 validation最小比较J0固定三视图、J1样本级软路由、
+   J3 Full+Person软路由；保持task独立冻结、分支辅助监督和现有冠军Adapter配置。
+5. J1必须超过J0且J3，才补seed1/2并锁定一次新test。不得使用本轮test类别差值选择新权重。
+
 
 ## 当前优先：结束当前Router，验证固定R1稳定性（2026-09-09）
 

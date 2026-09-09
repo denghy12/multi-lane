@@ -1565,3 +1565,9 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - 服务器150项完整单测、test Face数据对齐、真实test crop→CLIP、Image-token Adapter和两次更新的
   test score-dump smoke均通过。正式batch `fixed_three_view_seed012_test_20260909_213052`已在GPU0/1/2
   并行启动，三个seed均记录clean commit `acf4634`及同一test manifest哈希。
+- 正式test已完成并同步：固定三视图final mAP为`33.0119 ± 0.3038`，相对同seed Full+Person
+  `32.8263 ± 0.4025`提高`0.1856 ± 0.1000`，seed0/1/2分别提高
+  `0.0719/0.2247/0.2602`。task0--7平均mAP变化全部为正，当前升级为正式三种子冠军。
+- Face新增收益主要体现在Anger、Aversion和Suffering；Fear、Confidence和Sensitivity下降。
+  forgetting仅恶化`0.0144`。完整分析位于
+  `output/emotic_track_a_fixed_three_view_test/20260909_213052/analysis.md`。

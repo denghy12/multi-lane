@@ -3281,3 +3281,9 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - 正式batch `fixed_three_view_seed012_test_20260909_213052`在GPU0/1/2启动。三份config均为clean
   `acf4634`、test/fixed_test_fusion、30 epochs×8 tasks、无checkpoint、test manifest SHA一致；
   task0前3轮每轮64 steps、skipped0，显存约2GB/卡，无OOM或非有限值。
+- batch已完成：三组均240 epochs/10,980 updates/skipped0，退出码0；固定融合只执行一条锁定规则。
+  三视图final mAP `33.0119 ± 0.3038`，相对Full+Person三个seed均提高，平均`+0.1856`；average
+  mAP/cF1/oF1也分别提高`+0.3414/+0.0747/+0.1351`，forgetting增加`0.0144`。
+- Face sources/control/logs共46文件约9.4MB已同步本地，三部分组合SHA与服务器一致；无checkpoint。
+  task0--7的三种子平均增益全部为正。下一步优先用既有validation产物核查并修正taskwise Router
+  只作用于自身类别lane的增量语义，再决定是否进入端到端三视图特征融合。
