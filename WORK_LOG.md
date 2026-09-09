@@ -3313,3 +3313,6 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - 修复提交`a9c897e`后二次159项全测全通过。真实批次
   `smoke_end_to_end_view_fusion_20260910_002`中J0/J1/J3均完成task0一轮84 updates、skipped0，
   batch64无OOM；耗时35.3/34.2/28.3秒。三份config均clean且记录同一提交，错误扫描为空。
+- smoke记录提交`9f17799`后服务器ff-only同步。GPU0/1/2空闲均超过24GB时启动唯一完整validation
+  batch`end_to_end_view_fusion_seed0_20260910_005421`；三组config均为seed0/val-only、30epochs×8task、
+  checkpoint关闭，且训练前2轮稳定、skipped0、无OOM/Traceback/非有限值。

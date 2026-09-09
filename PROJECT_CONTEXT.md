@@ -1605,3 +1605,6 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - 服务器修复后159项全测通过；真实task0 smoke在GPU0/1/2分别完成J0/J1/J3，每组84 updates、
   skipped0、batch64无OOM/非有限值。J1学得平均权重约0.699/0.184/0.116，与J0有效/无效Face混合
   后的0.709/0.177/0.114不同，确认Router参与更新；可启动唯一完整validation批次。
+- clean提交`9f17799`上的唯一批次`end_to_end_view_fusion_seed0_20260910_005421`已在服务器独立
+  worktree启动；tmux为`multilane_e2e_fusion_20260910_005421`，GPU0/1/2并行J0/J1/J3。
+  三组均已完成前2个task0 epoch，每轮84 updates/skipped0，显存峰值观察约3.6GB，无错误。

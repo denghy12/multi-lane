@@ -46,6 +46,11 @@ mask、0.1辅助监督、汇总器和launcher后，先运行完整单测与真�
 当前159项全测和J0/J1/J3真实task0 GPU smoke均通过。下一动作是提交smoke记录、服务器ff-only同步，
 确认三卡空闲后启动唯一完整batch；运行中只监测退出码、OOM、非有限值和任务进度，不重复启动。
 
+唯一batch`end_to_end_view_fusion_seed0_20260910_005421`已启动，tmux
+`multilane_e2e_fusion_20260910_005421`。等待三组各完成240 epochs后由launcher自动生成
+`validation_summary.json`；未完成前不重复启动、不运行test。完成后同步result/control/logs并按J1同时
+超过J0/J3的预设规则决定是否补seed1/2。
+
 
 ## 当前优先：结束当前Router，验证固定R1稳定性（2026-09-09）
 
