@@ -67,6 +67,16 @@ class TaskwiseViewFusionTest(unittest.TestCase):
         self.assertEqual(tuple(result["face"].shape), (3, 224, 224))
         self.assertEqual(float(result["face_training_valid"]), 1)
         self.assertEqual(float(result["face_reliable"]), 1)
+        unreliable = transform(
+            Image.new("RGB", (80, 60), color=(180, 100, 40)),
+            [10, 5, 70, 55],
+            {"face_crop_bbox": [25, 10, 45, 30]},
+            True,
+            False,
+        )
+        self.assertEqual(float(unreliable["face_training_valid"]), 1)
+        self.assertEqual(float(unreliable["face_reliable"]), 0)
+        self.assertTrue(torch.isfinite(unreliable["face"]).all())
 
     def test_soft_three_view_starts_from_locked_fixed_priors(self) -> None:
         module = TaskwiseViewFusion(2, 4, "soft_three_view", hidden_dim=3)

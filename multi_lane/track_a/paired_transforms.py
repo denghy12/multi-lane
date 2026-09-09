@@ -13,6 +13,7 @@ import math
 
 import numpy as np
 import torch
+from PIL import Image
 from torchvision import transforms
 from torchvision.transforms import functional as TF
 
@@ -244,7 +245,7 @@ class ThreeViewTransform(PairedFullPersonTransform):
     @staticmethod
     def _face_crop(image, record, usable: bool):
         if not usable:
-            return image.new("RGB", (1, 1), color=(123, 117, 104))
+            return Image.new("RGB", (1, 1), color=(123, 117, 104))
         try:
             box = np.asarray(record.get("face_crop_bbox"), dtype=np.float32).ravel()
         except (AttributeError, TypeError, ValueError):

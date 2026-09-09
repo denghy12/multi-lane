@@ -3307,3 +3307,6 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - runner新增特征融合参数组、BCE/ASL一致的0.1分支辅助监督、融合权重日志、协议配置和seed0
   validation汇总器；新增三GPU launcher与回归测试。当前仅完成本地语法/shell/diff检查，服务器
   完整测试和smoke尚待Git-only同步后执行。
+- 首次服务器159项全测通过；真实三方案task0 smoke暴露不可靠Face占位图错误调用实例`image.new`，
+  J0/J1在首批数据前安全停止，J3完成84 updates/skipped0。修复为`PIL.Image.new`并补不可靠Face
+  变换回归后，需要重新完整全测与三方案smoke；未启动正式validation。
