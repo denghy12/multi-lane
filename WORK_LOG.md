@@ -8,8 +8,12 @@
   validation池并使用稳定ID。无效Face占位输入不能参与loss或最终融合。
 - 离线融合锁定FP=`0.8F+0.2P`与beta `{0,0.05,0.10,0.20}`；只有可靠Face才改变FP，其他样本
   精确回退。增加manifest SHA、来源配置、8-task score复现和ID/target对齐检查及可靠子集诊断。
-- 新增单GPU安全排队脚本。当前仅完成本地语法/diff检查；macOS Python缺PyTorch，完整单测、
-  真实数据和GPU smoke将在Git-only同步后的服务器独立worktree执行，通过后才启动seed0 validation。
+- 新增单GPU安全排队脚本。本地语法/diff检查通过；服务器独立worktree固定`56fcf4f`，142项完整
+  单测通过。真实数据检查确认train 16,001中12,442条、val 2,397中1,861条满足loss mask，
+  其中1,460条val满足严格融合质量线。
+- GPU0 task0 1-epoch smoke完成64 updates、0 skipped，实际probability v2 score覆盖完整2,285条；
+  与历史Full/Person task0 scores真实对齐后，1,382条可靠Face可改变输出，903条不可靠样本与FP
+  逐元素完全相等。无checkpoint、未读取test，可启动seed0完整validation。
 
 ## 2026-09-09：完成阶段0 Face GPU smoke
 

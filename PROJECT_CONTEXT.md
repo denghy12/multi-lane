@@ -8,7 +8,9 @@ expert训练和内部validation只包含`valid_face && !ambiguous_match`，过�
 融合固定既有`0.8 Full + 0.2 Person`，只对短边>=24px且检测分>=0.6的可靠Face尝试
 beta `{0,0.05,0.10,0.20}`；其余样本逐元素精确回退锚点。新增来源/hash/ID/target/指标重算审计、
 分组诊断、单GPU安全等待入口与回归测试。本阶段seed0、完整8-task、validation-only、无checkpoint，
-不读取test；服务器完整测试与GPU smoke通过前不启动训练。协议详见`docs/face_endpoint_validation.md`。
+不读取test。服务器142项完整单测、真实manifest数据检查和task0 1-epoch GPU/score-dump smoke均通过：
+64 updates、0 skipped；2,285个完整task0 val样本中1,382个可靠Face可参与融合，903个不可靠样本
+已验证逐元素精确回退FP。现可启动完整训练。协议详见`docs/face_endpoint_validation.md`。
 
 ## 2026-09-08：Full–Person–Face动态路由路线（计划）
 

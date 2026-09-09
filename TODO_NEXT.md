@@ -2,11 +2,12 @@
 
 ## 当前执行：Face endpoint seed0 validation（2026-09-09）
 
-1. `codex/face-endpoint-validation`代码已实现，待提交推送并Git-only同步服务器独立worktree。
-2. 先运行完整单测、真实manifest/transform/score-dump smoke与Adapter GPU smoke；任一步失败则不训练。
-3. 通过后自动等待安全GPU并运行一个Face expert：seed0、8 tasks、30 epochs/task、batch64、
+1. `codex/face-endpoint-validation`已实现并Git-only同步服务器独立worktree；142项完整单测、真实
+   manifest/transform/score-dump检查与task0 GPU smoke全部通过。
+2. 现在自动等待安全GPU并运行一个Face expert：seed0、8 tasks、30 epochs/task、batch64、
    layer1/b32/LR4e-4/scale0.1/ReLU/independent、main BCE+Adapter ASL9.8/0/0.05、AMP/TF32。
-4. 复用既有Full/Person validation scores，比较固定FP与可靠Face beta `{0,0.05,0.10,0.20}`；
+3. 完成后复用既有Full/Person validation scores，比较固定FP与可靠Face beta
+   `{0,0.05,0.10,0.20}`；
    不读取test。只有完整池final validation mAP严格提高才进入动态三路Router。
 
 ## 当前优先：2026-09-08三视图动态路由计划
