@@ -3274,3 +3274,10 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
   ddp环境执行。
 - 服务器首轮150项完整单测有149项通过；唯一失败是新增测试对float32归一化和采用了过严的7位
   十进制断言，实际为`0.99999994`。生产融合逻辑无误，测试容差修正为6位后重新执行全量测试。
+- 修正后150项全部通过。独立manifest复用train/val缓存并完成test 3,682图/5,368人物：有效Face
+  4,677，最终可靠Face 3,261，partial=false、重复分配0；provenance含test manifest SHA。
+- 真实test dataset对齐、有效/无效Face transform、4样本CLIP GPU、layer1/b32 Adapter-ASL GPU及
+  task0两次optimizer update的test score dump均通过；score为正确的task0 `3142×5`，skipped0。
+- 正式batch `fixed_three_view_seed012_test_20260909_213052`在GPU0/1/2启动。三份config均为clean
+  `acf4634`、test/fixed_test_fusion、30 epochs×8 tasks、无checkpoint、test manifest SHA一致；
+  task0前3轮每轮64 steps、skipped0，显存约2GB/卡，无OOM或非有限值。

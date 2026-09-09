@@ -1562,3 +1562,6 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   scale0.1/ReLU/independent、main BCE+Adapter ASL9.8/0/0.05、AMP/TF32、无checkpoint。
 - 本分支新增test Face manifest、固定三视图审计融合器及三GPU launcher。完整说明见
   `docs/fixed_three_view_seed012_test.md`。
+- 服务器150项完整单测、test Face数据对齐、真实test crop→CLIP、Image-token Adapter和两次更新的
+  test score-dump smoke均通过。正式batch `fixed_three_view_seed012_test_20260909_213052`已在GPU0/1/2
+  并行启动，三个seed均记录clean commit `acf4634`及同一test manifest哈希。

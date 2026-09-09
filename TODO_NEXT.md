@@ -8,6 +8,8 @@
 4. smoke通过后用三张空闲GPU并行seed0/1/2 Face正式test；复用已有同seed Full/Person test dumps。
 5. 三组完成后自动只计算一次锁定R1。最终报告三种子final mAP mean±sample std、逐seed相对同seed
    Full+Person差值及方向一致性；禁止根据test结果改变权重或质量门槛。
+6. 当前唯一正式batch为`fixed_three_view_seed012_test_20260909_213052`，已通过preflight并在GPU0/1/2
+   运行。只等待完成，不重复启动；结束后核验3×240 epochs、skipped0、score对齐和固定融合摘要。
 
 
 ## 当前优先：结束当前Router，验证固定R1稳定性（2026-09-09）
