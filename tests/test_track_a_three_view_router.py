@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
 
 import numpy as np
 import torch
@@ -15,10 +19,45 @@ from multi_lane.track_a.three_view_router import (
     _fuse,
     _probability_features,
     _standardize_fit_apply,
+    load_face_metadata,
 )
 
 
 class ThreeViewRouterTest(unittest.TestCase):
+    def test_face_metadata_treats_null_detection_fields_as_unreliable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "manifests").mkdir()
+            rows = (
+                {
+                    "sample_id": "train:missing-face",
+                    "valid_face": False,
+                    "ambiguous_match": False,
+                    "face_short_side": None,
+                    "face_detection_score": None,
+                },
+                {
+                    "sample_id": "train:reliable-face",
+                    "valid_face": True,
+                    "ambiguous_match": False,
+                    "face_short_side": 24.0,
+                    "face_detection_score": 0.6,
+                },
+            )
+            (root / "manifests" / "train.jsonl").write_text(
+                "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
+            )
+            with mock.patch(
+                "multi_lane.track_a.three_view_router.load_face_manifest_provenance"
+            ):
+                metadata = load_face_metadata(root, "train")
+        self.assertEqual(
+            metadata["train:missing-face"], FaceMetadata(False, False, 0.0, 0.0)
+        )
+        self.assertEqual(
+            metadata["train:reliable-face"], FaceMetadata(True, True, 24.0, 0.6)
+        )
+
     def test_initial_weights_match_priors_and_invalid_face_is_exact_zero(self) -> None:
         router = ThreeViewRouter(feature_dim=5, initialization_seed=7)
         features = torch.randn(4, 5)

@@ -140,8 +140,12 @@ def load_face_metadata(manifest_root: Path, split: str) -> Dict[str, FaceMetadat
             training_valid = bool(row.get("valid_face")) and not bool(
                 row.get("ambiguous_match")
             )
-            short_side = float(row.get("face_short_side", 0.0))
-            detection_score = float(row.get("face_detection_score", 0.0))
+            raw_short_side = row.get("face_short_side")
+            raw_detection_score = row.get("face_detection_score")
+            short_side = 0.0 if raw_short_side is None else float(raw_short_side)
+            detection_score = (
+                0.0 if raw_detection_score is None else float(raw_detection_score)
+            )
             reliable = (
                 training_valid and short_side >= 24.0 and detection_score >= 0.6
             )
