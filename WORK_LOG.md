@@ -3422,3 +3422,15 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
   skipped0，val mAP39.543071；禁止test、无checkpoint、无完整训练。
 - 重新安装本机公钥到服务器，普通SSH免密通过；本地SSH config启用IdentityFile和agent forwarding，
   服务器GitHub SSH鉴权通过，未传输私钥。恢复详情见`docs/server_environment_restore_20260910.md`。
+
+## 2026-09-10：实现分层class-aware OOF stacking
+
+- 从环境恢复提交创建`codex/class-aware-oof-stacking`。新增C0固定R1、C1每类三视图bias、C2
+  rank-2共享样本可靠性×类别view factor；全部直接读取已有OOF scores/descriptors和validation
+  endpoints，不包含专家训练或test入口。
+- C1只更新当前task引入类别；C2冻结最佳C1 bias，旧类interaction行冻结，但共享投影通过已见任务
+  OOF rehearsal保持稳定，并为每个task保存快照。评估旧类严格读取其引入task的前缀特征与快照。
+- 网格锁定为C1/C2正则各`{1,3,10}`，FP32、120 epochs/task、batch512、Adam1e-2、rank2。
+  降低后的advance规则为C2相对C0/C1均至少+0.05 final mAP，并通过两类以上和80%最大贡献占比检查。
+- 新增4项初始化、Face mask、类别隔离和rank2零初始化回归，以及单GPU安全launcher和协议文档。
+  本地Python编译、shell语法和diff检查通过；完整依赖测试与真实数据运行待服务器执行。

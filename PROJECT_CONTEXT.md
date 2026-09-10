@@ -1710,3 +1710,18 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   私钥未复制到服务器。服务器OOF worktree经Git-only fast-forward至`e0e6d57`；test-only仍为
   `0b59138`且其原有未提交改动完整保留，本次没有触碰。
 - 完整版本、命令、资产哈希和日志路径见`docs/server_environment_restore_20260910.md`。
+
+## 2026-09-10 class-aware OOF stacking
+
+- 用户确认执行OOF结果后的C0/C1/C2，并允许恢复环境后正常使用GPU。新分支
+  `codex/class-aware-oof-stacking`复用已有9个专家的无泄漏OOF scores、三视图描述符和100% train
+  validation endpoints；不重训专家、不读取test。
+- C0为固定R1；C1为每类独立的中心化三视图logit bias，只用该类引入task的OOF样本训练并以
+  `{1,3,10}`强正则回R1；C2冻结最佳C1 bias，增加共享线性样本可靠性投影与每类view factor的
+  rank-2交互，不增加类别MLP，交互正则仅比较`{1,3,10}`。
+- C1/C2固定FP32、Adam LR1e-2、batch512、120 epochs/task；无效Face权重严格0。旧类别参数冻结，
+  每类使用其引入task结束时的投影/参数快照，保持增量语义。训练支持CUDA并计划在空闲GPU执行。
+- 用户允许稍降门槛，预注册为C2同时超过C0/C1至少`0.05` final validation mAP；至少两个类别AP
+  提高超过0.01，且单一类别不超过全部正增益的80%。全部满足才进入seed1/2，当前阶段禁止test。
+- 实现、测试、单GPU launcher和协议见`docs/class_aware_oof_stacking.md`。下一步Git-only同步服务器
+  独立worktree，运行完整单测和真实OOF短smoke，通过后执行唯一seed0完整validation选择。

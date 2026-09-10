@@ -10,6 +10,16 @@
    `docs/server_environment_restore_20260910.md`先恢复授权与两套环境，再运行实验。
 4. 环境已就绪后，研究路线仍按下方OOF结果决策推进；不要因为恢复smoke重复启动OOF或正式test。
 
+## 当前执行：class-aware OOF stacking（2026-09-10）
+
+1. C0固定R1；C1搜索三档强正则的类别bias；C2冻结最佳C1并搜索三档rank-2样本×类别交互正则。
+   复用现有OOF scores/descriptors和seed0 endpoints，不重训专家、不读取test。
+2. Git-only推送`codex/class-aware-oof-stacking`，服务器创建独立clean worktree；先运行完整单测、
+   真实OOF来源审计和缩短训练smoke，再在空闲GPU运行唯一完整选择批次。
+3. 门槛已由0.10下调到0.05：C2必须相对C0和C1均至少+0.05 final validation mAP；至少两个类别
+   AP提高超过0.01，且最大单类不超过正增益80%。通过才补seed1/2，否则结束动态Router路线。
+4. 本阶段只产生validation selection、类别增益、权重诊断和stacker states；无正式test。
+
 ## OOF完成后的下一步（2026-09-10）
 
 1. 当前OOF-R3未同时超过R1和R2，严格停止现有Router：不补seed1/2、不运行test，不扩大hidden、
