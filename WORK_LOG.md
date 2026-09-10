@@ -3353,3 +3353,17 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - smoke记录提交`f98f74c`已推送并Git-only同步。GPU0/1/2连续空闲后启动唯一完整batch
   `full_anchored_residual_seed0_20260910_103042`；三组config的commit/tree、30 epochs、冠军Adapter、
   BCE+Adapter-ASL、residual scale0.1、aux loss0和val-only均核验一致。前三轮范围内skipped0、无错误。
+
+## 2026-09-10：同步并分析Full-anchored residual结果
+
+- A0/A1/A2及自动汇总均exit0；每组240 epochs、13,950 updates、skipped0，无OOM/非有限值/异常。
+  result/control/logs共27个原始文件约1MB已同步，三部分本地/服务器组合SHA-256完全一致，无checkpoint。
+- final/average validation mAP：A0=`42.3799/49.2652`、A1=`41.8802/47.9054`、
+  A2=`42.1556/48.8605`。A2低A0`0.2243`，未通过预设晋级规则，seed1/2与test均不运行。
+- A1/A2相对A0的8个累计task mAP全部为负。残差gate正常学习且远未饱和；A2虽把task7 current-only
+  mAP提高`1.3924`，但全类final下降且forgetting增加`0.0916`，属于当前新类拟合与旧类排序的交换。
+- A2改善Doubt/Confusion、Pleasure、Surprise、Sadness，但损失Anger、Aversion、Pain、Suffering等，
+  净mAP为负。停止训练级残差调参，保留独立专家固定R1正式冠军。
+- 若继续动态分路，下一项应先设计image-group K-fold OOF专家预测协议：独立专家不被Router反传，使用
+  完整OOF训练样本训练跨task共享小Router，taskwise输出冻结。结果报告位于
+  `output/emotic_track_a_full_anchored_residual/20260910_103042/analysis.md`。

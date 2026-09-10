@@ -75,6 +75,14 @@ worktree ff-only同步，并在GPU连续空闲检查后用三张卡启动唯一A
 `multilane_full_anchored_residual_20260910_103042`。当前只等待A0/A1/A2完成240 epochs，不重复启动、
 不访问test。结束后核验updates/skipped/error及汇总器的`advance_A2_to_seed1_seed2_validation`。
 
+本批已完成：A0/A1/A2 final validation mAP=`42.3799/41.8802/42.1556`，A2低A0`0.2243`，
+`advance=false`。停止该训练级融合，不补seed1/2、不运行test、不搜索residual scale/bottleneck/gate/
+auxiliary loss。固定R1继续保持正式冠军。
+
+下一步若继续实现样本级动态三视图，先制定image-group cross-fitting协议而非立即训练：用K-fold独立
+专家生成覆盖完整train的无泄漏OOF scores/质量特征，再训练跨task共享、类别无关且正则到R1的小Router；
+Router不向专家反传，task lane训练后冻结。先进行3-fold成本与样本覆盖审计，通过后才启动专家训练。
+
 
 ## 当前优先：结束当前Router，验证固定R1稳定性（2026-09-09）
 

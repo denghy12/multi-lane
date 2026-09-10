@@ -1641,3 +1641,13 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   worktree启动，tmux为`multilane_full_anchored_residual_20260910_103042`，GPU0/1/2运行A0/A1/A2。
   三份config均为seed0、30 epochs×8 tasks、validation-only、no-checkpoint和同一clean tree；A0已完成
   task0前4轮，A1/A2前2轮，全部84 updates/轮、skipped0且错误扫描为空。
+- 本批已完成并同步：三组均240 epochs/13,950 updates/skipped0，无运行错误。final validation mAP
+  A0/A1/A2=`42.3799/41.8802/42.1556`；A2比A1高`0.2754`但比A0低`0.2243`，8个累计task均
+  未超过A0，因此`advance=false`，不补seed1/2且不运行test。
+- 残差并未失活或饱和：Person最终系数约0.052--0.064，Face含无效样本的batch均值约0.033--0.042。
+  A2提高task6/7 current-only mAP，却恶化全部已见类排序与forgetting，说明当前类目标让小残差学习
+  新类捷径并间接拉偏共享head/Full路径。停止调残差容量、scale、gate和辅助loss。
+- 现有证据支持保留独立专家固定R1正式冠军`33.0119±0.3038`。若继续个性化分路，应使用按image-group
+  cross-fitting生成完整训练集无泄漏OOF专家预测，再训练跨task共享的小Router；不再用几十条
+  calibration或端到端反传破坏专家。完整报告见
+  `output/emotic_track_a_full_anchored_residual/20260910_103042/analysis.md`。
