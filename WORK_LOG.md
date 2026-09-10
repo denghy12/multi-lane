@@ -16,6 +16,12 @@
   calibration 51条。fold0三路task0 1-epoch GPU smoke均0 skipped，留出1,793条概率完全对齐；
   Face训练折正确过滤848条无效/歧义样本。完整train/val描述符smoke覆盖16,001/2,397条，哈希
   `14ee85cb...7ef9`/`30403962...308a`，可靠Face 9,696/1,460，test未访问。
+- 服务器主工作树被Automatic Upload提前写入两个新文件；已移动到可恢复备份
+  `/mnt/haoyuan/workspace/git-sync-backup-three-view-oof-20260910`并恢复主树原状态。独立实验worktree
+  创建于`/mnt/haoyuan/workspace/multi-lane-main-three-view-oof-crossfit`，未触碰test-only。
+- 正式batch`three_view_oof_seed0_20260910_160250`在clean `e490da0`启动，tmux
+  `multilane_three_view_oof_20260910`；GPU0--7一GPU一任务运行前8组，第9组自动排队。初始训练
+  0 skipped、每卡约2.0--2.1GB，无错误；launcher会在9组全部成功后才进入描述符与CPU Router。
 
 ## 2026-09-09：完成R1中心Router公平性修正
 

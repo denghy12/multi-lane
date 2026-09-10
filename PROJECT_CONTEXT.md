@@ -21,6 +21,10 @@ CLIP三路余弦；prior仍只比较`0/0.1/1`。验证端复用100% train的seed
 只在完整8-task validation比较固定R1、OOF-R2、OOF-R3。仅当R3 final validation mAP同时超过R1和
 R2才进入seed1/2；本批禁止test。实现当前已通过Python与shell语法检查；macOS系统Python缺NumPy，
 以上验收通过后允许启动唯一seed0 OOF validation批次。
+唯一批次`three_view_oof_seed0_20260910_160250`已在服务器clean HEAD `e490da0`启动，tmux为
+`multilane_three_view_oof_20260910`。GPU0--7已分别启动前8个fold/view专家；初始显存约2.0--2.1GB/
+卡，task0每轮Full/Person约56--57 updates、Face约43 updates，当前均0 skipped且无OOM/非有限值。
+第9个`fold2_face`将在任一GPU释放后自动接续，随后才执行完整描述符和CPU Router选择。
 
 ## 2026-09-09：R1中心Router公平性修正完成，动态Router停止
 

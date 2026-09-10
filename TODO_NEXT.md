@@ -13,6 +13,10 @@
 5. 同一批100% train endpoints上比较固定R1、最佳OOF-R2、最佳OOF-R3。只有R3 final validation
    mAP同时超过R1和R2才补seed1/2；否则停止该Router。当前批次不读取或运行test。
 
+唯一正式batch`three_view_oof_seed0_20260910_160250`已启动，tmux
+`multilane_three_view_oof_20260910`。前8组正在GPU0--7运行，第9组自动排队；不重复启动。完成后
+同步OOF来源摘要、Router states/selection、control和日志，并执行预设R3双重胜出判断。
+
 ## 当前执行：固定R1三种子正式test（2026-09-09）
 
 1. 提交推送当前分支；安全处理Automatic Upload后，在服务器新建独立worktree，不触碰test-only。
