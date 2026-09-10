@@ -3405,3 +3405,19 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - 若继续动态分路，下一项应先设计image-group K-fold OOF专家预测协议：独立专家不被Router反传，使用
   完整OOF训练样本训练跨task共享小Router，taskwise输出冻结。结果报告位于
   `output/emotic_track_a_full_anchored_residual/20260910_103042/analysis.md`。
+
+## 2026-09-10：恢复服务器训练与Face环境
+
+- 新容器`b234c89a7a5b`审计：8张RTX4090、driver580.173.02、系统CUDA12.4；挂载盘代码、
+  数据、权重和结果完整，但Conda只剩base，旧`ddp`/`cocoer-preprocess`和SSH授权文件丢失。
+- 根据历史config与Face audit恢复两套Python3.9.23环境。训练栈锁定torch2.0.1+cu118、
+  torchvision0.15.2+cu118、numpy1.26.4和requirements固定版本；Face栈锁定InsightFace0.7.3、
+  ONNXRuntime1.18.0、OpenCV4.10.0、Pillow11.3.0、SciPy1.13.1，并补同版本torch栈满足项目导入。
+- 两套环境`pip check`通过；ddp识别8卡并完成CUDA矩阵运算。SCRFD权重大小16,923,827字节，
+  SHA-256=`5838f7fe053675b1c7a08b633df49e7af5495cee0493c7dcf6697200b85b5b91`，真实EMOTIC图检测成功。
+- OOF实验worktree从`e490da0`安全ff-only到`e0e6d57`，未改主工作树或test-only。169项完整单测
+  全通过；冠军Image-token layer1/b32 Adapter-ASL GPU smoke和真实Face→CLIP GPU smoke通过。
+- 最小端到端smoke使用Full/seed0/OOF fold0/task0/1epoch/batch64/AMP+TF32，完成56步、
+  skipped0，val mAP39.543071；禁止test、无checkpoint、无完整训练。
+- 重新安装本机公钥到服务器，普通SSH免密通过；本地SSH config启用IdentityFile和agent forwarding，
+  服务器GitHub SSH鉴权通过，未传输私钥。恢复详情见`docs/server_environment_restore_20260910.md`。

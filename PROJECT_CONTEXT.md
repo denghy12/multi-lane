@@ -1692,3 +1692,20 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   cross-fitting生成完整训练集无泄漏OOF专家预测，再训练跨task共享的小Router；不再用几十条
   calibration或端到端反传破坏专家。完整报告见
   `output/emotic_track_a_full_anchored_residual/20260910_103042/analysis.md`。
+
+## 2026-09-10 服务器重置与环境恢复
+
+- 审计确认服务器重置只清除了容器层：`/mnt/haoyuan/workspace` 下的所有Git工作树、EMOTIC、
+  CLIP/SCRFD权重、历史日志和实验结果均保留；丢失的是`/opt/conda/envs/ddp`、
+  `cocoer-preprocess`和`/root/.ssh`授权状态。
+- 已恢复`ddp`：Python3.9.23、torch2.0.1+cu118、torchvision0.15.2+cu118、numpy1.26.4及
+  项目固定依赖；恢复`cocoer-preprocess`：InsightFace0.7.3、ONNXRuntime1.18.0、
+  OpenCV4.10.0、Pillow11.3.0、SciPy1.13.1及相同torch栈。重置后的base Python3.11/
+  torch2.6不得用于复现实验。
+- 两环境`pip check`、8卡CUDA计算、SCRFD真实图检测、4样本Face crop到frozen CLIP、
+  Image-token layer1/b32 Adapter-ASL forward/backward均通过；项目169项完整单测全通过。
+- 额外完成Full/seed0/OOF fold0/task0/1 epoch端到端恢复smoke：56 updates、skipped0、
+  val mAP39.543071，未访问test且未保存checkpoint。没有启动任何新完整实验。
+- 已恢复本地到服务器的公钥登录与SSH agent forwarding，服务器通过转发的本地密钥访问GitHub；
+  私钥未复制到服务器。服务器OOF worktree经Git-only fast-forward至`e0e6d57`，test-only未修改。
+- 完整版本、命令、资产哈希和日志路径见`docs/server_environment_restore_20260910.md`。

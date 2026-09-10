@@ -1,5 +1,15 @@
 # 下一步任务
 
+## 服务器环境恢复完成（2026-09-10）
+
+1. `ddp`与`cocoer-preprocess`均已恢复并通过169项全测、真实Face检测、CLIP/Adapter GPU smoke和
+   单task单epoch端到端smoke；当前不需要重跑任何正式实验。
+2. 后续运行必须显式使用`/opt/conda/envs/ddp/bin/python`，不得使用重置后的base Python3.11/
+   torch2.6。Face离线检测使用`/opt/conda/envs/cocoer-preprocess/bin/python`。
+3. SSH免密和GitHub agent forwarding已恢复。若容器再次重置，按
+   `docs/server_environment_restore_20260910.md`先恢复授权与两套环境，再运行实验。
+4. 环境已就绪后，研究路线仍按下方OOF结果决策推进；不要因为恢复smoke重复启动OOF或正式test。
+
 ## OOF完成后的下一步（2026-09-10）
 
 1. 当前OOF-R3未同时超过R1和R2，严格停止现有Router：不补seed1/2、不运行test，不扩大hidden、
