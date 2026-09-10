@@ -3316,3 +3316,19 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - smoke记录提交`9f17799`后服务器ff-only同步。GPU0/1/2空闲均超过24GB时启动唯一完整validation
   batch`end_to_end_view_fusion_seed0_20260910_005421`；三组config均为seed0/val-only、30epochs×8task、
   checkpoint关闭，且训练前2轮稳定、skipped0、无OOM/Traceback/非有限值。
+
+## 2026-09-10：同步并分析端到端taskwise多视图融合结果
+
+- J0/J1/J3均正常退出并完成240 epochs、13,950 optimizer updates、skipped0；26份result/control/log
+  原始文件已同步本地并与服务器三部分SHA-256一致，无checkpoint、OOM、非有限loss或运行异常。
+- final/average validation mAP：J0=`42.5330/49.7360`，J1=`39.8569/46.5638`，
+  J3=`38.3318/44.8969`。J1相对J0为`-2.6762`，相对J3为`+1.5251`；按预设规则拒绝晋级，
+  seed1/2和test均未运行。
+- J1和J3从task0起所有task都低于J0。J1最后各task的Person权重达到0.537--0.966，J3达到
+  0.793--0.991；无约束竞争式softmax把Person当作当前类训练捷径并压制Full上下文，是主要失败机制。
+- 独立训练的固定三专家seed0 validation为`43.5812`，共享任务参数的J0低`1.0481`，进一步提示
+  多视图共用selectors/prompts/head/Adapter存在梯度冲突和专门化损失。结果报告写入
+  `output/emotic_track_a_end_to_end_view_fusion/20260910_005421/analysis.md`。
+- 下一阶段建议改成Full-anchored complementary residual：Full系数固定1，Person/Face经各自taskwise
+  零初始化轻量投影以小有界残差加入；先只做A0 Full、A1 Full+Person、A2 Full+Person+Face三组
+  seed0完整validation。当前不修改代码、不启动新实验。

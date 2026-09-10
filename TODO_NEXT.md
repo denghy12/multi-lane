@@ -51,6 +51,17 @@ mask、0.1辅助监督、汇总器和launcher后，先运行完整单测与真�
 `validation_summary.json`；未完成前不重复启动、不运行test。完成后同步result/control/logs并按J1同时
 超过J0/J3的预设规则决定是否补seed1/2。
 
+本批已完成：J0/J1/J3 final validation mAP为`42.5330/39.8569/38.3318`。J1未超过J0，
+`advance=false`；不补seed1/2、不运行test，也不扩大当前Router。三组原始结果、日志和分析已同步。
+
+下一步优先实现Full-anchored complementary residual，而不是继续让三路softmax竞争：
+
+1. Full表征保持系数1和冠军主路径；Person/Face只能通过零初始化、小尺度、有界残差补充。
+2. Person与Face使用各自task-specific轻量projection/Adapter，task结束冻结；无效Face残差严格为0。
+3. seed0完整8-task validation仅比较A0 fresh Full anchor、A1 Full+Person residual、A2
+   Full+Person+Face residual，训练预算和冠军Adapter协议一致。
+4. 只有A2同时超过A0/A1才补seed1/2；否则保留独立专家固定R1正式冠军并停止训练级特征融合扩展。
+
 
 ## 当前优先：结束当前Router，验证固定R1稳定性（2026-09-09）
 

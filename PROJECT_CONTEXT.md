@@ -1608,3 +1608,13 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - clean提交`9f17799`上的唯一批次`end_to_end_view_fusion_seed0_20260910_005421`已在服务器独立
   worktree启动；tmux为`multilane_e2e_fusion_20260910_005421`，GPU0/1/2并行J0/J1/J3。
   三组均已完成前2个task0 epoch，每轮84 updates/skipped0，显存峰值观察约3.6GB，无错误。
+- 本批已完整结束并同步：J0/J1/J3均完成240 epochs、13,950 updates、skipped0，无OOM、非有限值或
+  运行错误。final validation mAP分别为`42.5330/39.8569/38.3318`，J1比J0低`2.6762`，未通过
+  同时超过J0/J3的预设条件，因此不补seed1/2且不运行test。
+- J1各task最终Person平均权重为`0.966/0.941/0.761/0.799/0.616/0.806/0.537/0.794`；J3更接近
+  Person-only。下降从task0开始，说明主要是竞争式softmax Router把Full场景通路关闭，而非task6
+  小样本或增量lane覆盖。J1仍比J3高`1.5251`，Face存在补充信息但不能抵消Person塌缩。
+- 既有独立专家固定三视图seed0 validation为`43.5812`，比共享参数J0高`1.0481`；训练机制不同，
+  不能作为严格同批消融，但提示共享selectors/prompts/head/Adapter削弱视图专门化。下一步停止当前
+  simplex Router，改做Full系数固定为1、Person/Face为零初始化有界taskwise残差的最小A0/A1/A2
+  validation。完整报告见`output/emotic_track_a_end_to_end_view_fusion/20260910_005421/analysis.md`。
