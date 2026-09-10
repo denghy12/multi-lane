@@ -185,6 +185,7 @@ def export_descriptor_set(
     device_name: str,
     batch_size: int,
     workers: int,
+    train_scope: str = "calibration",
 ) -> Dict[str, object]:
     if output_dir.exists():
         raise FileExistsError(output_dir)
@@ -204,15 +205,21 @@ def export_descriptor_set(
     set_seed(0, tf32=True)
     visual = load_openai_clip_visual(clip_checkpoint).float().to(device)
     visual.requires_grad_(False)
+    if train_scope not in ("calibration", "all"):
+        raise ValueError("train_scope must be calibration or all")
     output_dir.mkdir(parents=True)
     split_records = {}
     for split in ("train", "val"):
         full, person, face = _build_sources(dataset_parent, face_manifest_root, split)
         if split == "train":
-            _, indices = fit_calibration_indices(
-                full, tuple(range(len(CLASS_ORDER))), CALIBRATION_FRACTION
-            )
-            purpose = "stable_sha256_image_group_v1_calibration_only"
+            if train_scope == "calibration":
+                _, indices = fit_calibration_indices(
+                    full, tuple(range(len(CLASS_ORDER))), CALIBRATION_FRACTION
+                )
+                purpose = "stable_sha256_image_group_v1_calibration_only"
+            else:
+                indices = list(range(len(full)))
+                purpose = "complete_train_pool_for_oof_router"
         else:
             indices = list(range(len(full)))
             purpose = "complete_validation_pool"
@@ -242,8 +249,14 @@ def export_descriptor_set(
         "feature_names": list(FEATURE_NAMES),
         "feature_definition": "cosine_similarity_of_frozen_clip_final_embeddings",
         "invalid_face_values": "face-related_cosines_zero_and_masked",
-        "calibration_fraction": CALIBRATION_FRACTION,
-        "calibration_split": "stable_sha256_image_group_v1",
+        "train_scope": train_scope,
+        "calibration_fraction": (
+            CALIBRATION_FRACTION if train_scope == "calibration" else None
+        ),
+        "calibration_split": (
+            "stable_sha256_image_group_v1"
+            if train_scope == "calibration" else None
+        ),
         "source_git": source_git,
         "clip_checkpoint": str(clip_checkpoint.resolve()),
         "clip_checkpoint_sha256": OPENAI_VIT_B16_SHA256,
@@ -268,6 +281,7 @@ def main() -> None:
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--workers", type=int, default=2)
+    parser.add_argument("--train-scope", choices=("calibration", "all"), default="calibration")
     args = parser.parse_args()
     export_descriptor_set(
         args.data_root,
@@ -277,6 +291,7 @@ def main() -> None:
         args.device,
         args.batch_size,
         args.workers,
+        args.train_scope,
     )
 
 

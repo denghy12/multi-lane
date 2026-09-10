@@ -149,6 +149,32 @@ def fit_calibration_indices(
     return fit, calibration
 
 
+def crossfit_fold_indices(
+    source,
+    candidate_indices: Sequence[int],
+    folds: int,
+    held_out_fold: int,
+    split_salt: str = "emotic-three-view-oof-v1",
+) -> Tuple[List[int], List[int]]:
+    """Split image groups into a deterministic train/OOF fold partition."""
+    if folds < 2:
+        raise ValueError("Cross-fit requires at least two folds")
+    if not 0 <= held_out_fold < folds:
+        raise ValueError("Held-out cross-fit fold is outside the fold range")
+    fit, held_out = [], []
+    for index in candidate_indices:
+        sample_id = str(source.sample_ids[index])
+        image_group = sample_id.rsplit("#person=", 1)[0]
+        digest = hashlib.sha256(
+            f"{split_salt}:{image_group}".encode("utf-8")
+        ).digest()
+        fold = int.from_bytes(digest[:8], "big") % folds
+        (held_out if fold == held_out_fold else fit).append(index)
+    if not fit or not held_out:
+        raise RuntimeError("Deterministic cross-fit split produced an empty partition")
+    return fit, held_out
+
+
 def filter_face_training_indices(source: EMOTIC, indices: Sequence[int]) -> List[int]:
     """Keep only manifest-approved Face samples for loss-bearing views."""
     validity = getattr(source, "face_training_valid", None)
@@ -1452,6 +1478,18 @@ def parse_args() -> argparse.Namespace:
         help="Save deterministic held-out train scores after every task.",
     )
     parser.add_argument(
+        "--crossfit-folds",
+        type=int,
+        default=0,
+        help="Number of deterministic image-group folds used for OOF source training.",
+    )
+    parser.add_argument(
+        "--crossfit-held-out-fold",
+        type=int,
+        default=None,
+        help="Zero-based image-group fold excluded from training and exported as OOF scores.",
+    )
+    parser.add_argument(
         "--save-compact-checkpoints",
         action="store_true",
         help="Save per-task method state without the frozen CLIP visual tower.",
@@ -1581,7 +1619,9 @@ def main() -> None:
             raise ValueError("face_crop input requires --face-manifest-root")
         if not args.save_evaluation_scores:
             raise ValueError("Face endpoint requires evaluation score dumps")
-        if args.reporting_split == "test" and args.calibration_fraction != 0.0:
+        if args.reporting_split == "test" and (
+            args.calibration_fraction != 0.0 or args.crossfit_folds
+        ):
             raise ValueError("Locked Face test source must train on the complete fit split")
         if args.calibration_fraction not in (0.0, 0.1):
             raise ValueError(
@@ -1614,9 +1654,19 @@ def main() -> None:
         or not 0 <= args.calibration_fraction < 0.5
     ):
         raise ValueError("calibration-fraction must be finite and in [0, 0.5)")
-    if args.save_calibration_scores and args.calibration_fraction <= 0:
+    crossfit_enabled = args.crossfit_folds != 0 or args.crossfit_held_out_fold is not None
+    if crossfit_enabled:
+        if args.crossfit_folds != 3:
+            raise ValueError("Three-view OOF protocol requires exactly three folds")
+        if args.crossfit_held_out_fold not in range(args.crossfit_folds):
+            raise ValueError("crossfit-held-out-fold must identify one configured fold")
+        if args.calibration_fraction != 0.0:
+            raise ValueError("Cross-fit and calibration-fraction are mutually exclusive")
+        if args.reporting_split != "val" or not args.save_calibration_scores:
+            raise ValueError("Cross-fit sources are validation-only and must export OOF scores")
+    if args.save_calibration_scores and args.calibration_fraction <= 0 and not crossfit_enabled:
         raise ValueError(
-            "Calibration score export requires a positive calibration fraction"
+            "Calibration score export requires calibration or cross-fit holdout"
         )
     if args.calibration_fraction > 0 and not args.save_calibration_scores:
         raise ValueError("A calibration holdout must save its score provenance")
@@ -1799,7 +1849,7 @@ def main() -> None:
             multi_view_transform=multi_view_eval,
             face_manifest_root=args.face_manifest_root,
         )
-        if args.calibration_fraction > 0
+        if args.calibration_fraction > 0 or crossfit_enabled
         else None
     )
     val_source = EMOTIC(
@@ -2057,10 +2107,21 @@ def main() -> None:
         "calibration_fraction": args.calibration_fraction,
         "calibration_split": (
             "stable_sha256_image_group_v1"
-            if args.calibration_fraction > 0
-            else None
+            if args.calibration_fraction > 0 else (
+                "stable_sha256_image_group_3fold_oof_v1"
+                if crossfit_enabled else None
+            )
         ),
-        "calibration_training_exclusion": args.calibration_fraction > 0,
+        "crossfit_folds": args.crossfit_folds if crossfit_enabled else None,
+        "crossfit_held_out_fold": (
+            args.crossfit_held_out_fold if crossfit_enabled else None
+        ),
+        "crossfit_split_salt": (
+            "emotic-three-view-oof-v1" if crossfit_enabled else None
+        ),
+        "calibration_training_exclusion": (
+            args.calibration_fraction > 0 or crossfit_enabled
+        ),
         "save_calibration_scores": args.save_calibration_scores,
         "save_compact_checkpoints": args.save_compact_checkpoints,
         "compact_checkpoint_excludes_frozen_visual": (
@@ -2164,9 +2225,17 @@ def main() -> None:
     for task_id in range(args.max_tasks):
         print(f"begin_task={task_id}", flush=True)
         model.activate_task(task_id)
-        fit_indices, calibration_indices = fit_calibration_indices(
-            train_source, task_indices(task_id), args.calibration_fraction
-        )
+        if crossfit_enabled:
+            fit_indices, calibration_indices = crossfit_fold_indices(
+                train_source,
+                task_indices(task_id),
+                args.crossfit_folds,
+                args.crossfit_held_out_fold,
+            )
+        else:
+            fit_indices, calibration_indices = fit_calibration_indices(
+                train_source, task_indices(task_id), args.calibration_fraction
+            )
         unfiltered_fit_count = len(fit_indices)
         if args.input_mode == "face_crop":
             fit_indices = filter_face_training_indices(train_source, fit_indices)

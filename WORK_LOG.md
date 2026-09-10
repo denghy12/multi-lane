@@ -1,5 +1,16 @@
 # 工作日志
 
+## 2026-09-10：实现三视图3-fold OOF Router
+
+- 新建`codex/three-view-oof-crossfit`；Runner增加稳定image-group 3-fold协议及严格互斥/validation-only
+  参数检查，OOF fold继续输出实际评估概率、完整来源配置和训练排除证明。
+- 新增9个专家任务的8卡安全调度器：`3 folds × Full/Person/Face`，每卡同一时刻最多一组，先完成的
+  GPU自动接续第9组；异常时停止批次，结果/日志分别写benchmark root与项目output/logs。
+- 冻结CLIP描述符导出支持完整train池。新增OOF来源审计、fold去重合并、共享hidden16主干+task偏置
+  Router、逐task状态快照、R1/R2/R3完整validation汇总和advance规则；不含test入口。
+- 增加image-group完整且互斥覆盖、多人同图同fold、Router固定先验、无效Face精确为0及task bias隔离
+  回归。Python编译、shell语法及diff检查通过；本地系统Python缺NumPy，依赖型测试转服务器执行。
+
 ## 2026-09-09：完成R1中心Router公平性修正
 
 - `5675a3b`把valid prior严格对齐固定R1`[0.64,0.16,0.20]`，invalid prior不变；测试显式锁定

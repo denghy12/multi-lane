@@ -1,5 +1,18 @@
 # 下一步任务
 
+## 当前执行：三视图image-group OOF/cross-fitting（2026-09-10）
+
+1. 提交推送`codex/three-view-oof-crossfit`，服务器审计全部worktree并创建新的独立clean worktree，
+   不修改主工作树和`multi-lane-main-test-only`。
+2. 在ddp环境运行完整单测、真实train image-group三折覆盖/三视图ID与target对齐检查，以及单task
+   Full/Person/Face OOF score-dump与Adapter GPU smoke；任何失败都不启动完整实验。
+3. 使用GPU0--7安全调度9个seed0 OOF专家：3 folds×3 views，每个专家8 tasks×30 epochs，模型、
+   loss、Adapter、增强和精度协议全部固定。每条训练预测必须来自未训练该image-group的fold模型。
+4. 专家完成后导出完整train/val冻结CLIP描述符，在CPU训练OOF-R2/R3：共享hidden16主干、每task
+   3维偏置、prior`0/0.1/1`、80 epochs/task、旧task快照冻结、无效Face权重0。
+5. 同一批100% train endpoints上比较固定R1、最佳OOF-R2、最佳OOF-R3。只有R3 final validation
+   mAP同时超过R1和R2才补seed1/2；否则停止该Router。当前批次不读取或运行test。
+
 ## 当前执行：固定R1三种子正式test（2026-09-09）
 
 1. 提交推送当前分支；安全处理Automatic Upload后，在服务器新建独立worktree，不触碰test-only。

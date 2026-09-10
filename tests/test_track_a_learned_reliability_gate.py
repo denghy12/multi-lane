@@ -25,6 +25,7 @@ from multi_lane.track_a.learned_reliability_gate import (
 from multi_lane.track_a.runner import (
     compact_model_state_dict,
     fit_calibration_indices,
+    crossfit_fold_indices,
     TASK_SIZES,
 )
 from multi_lane.track_a.search_constrained_gated_fusion import Geometry
@@ -164,6 +165,27 @@ class LearnedReliabilityGateTest(unittest.TestCase):
         full_fit, full_calibration = fit_calibration_indices(full, (0,), 0.0)
         self.assertEqual(full_fit, list(range(len(ids))))
         self.assertEqual(full_calibration, [])
+
+    def test_crossfit_partition_covers_image_groups_exactly_once(self):
+        ids = [
+            f"train/image{index}.jpg#person={person}"
+            for index in range(90)
+            for person in (0, 1)
+        ]
+        source = FakeSource(ids)
+        held_out_sets = []
+        for fold in range(3):
+            fit, held_out = crossfit_fold_indices(source, range(len(ids)), 3, fold)
+            self.assertFalse(set(fit).intersection(held_out))
+            self.assertEqual(set(fit).union(held_out), set(range(len(ids))))
+            held_out_sets.append(set(held_out))
+        self.assertEqual(set.union(*held_out_sets), set(range(len(ids))))
+        self.assertFalse(held_out_sets[0] & held_out_sets[1])
+        self.assertFalse(held_out_sets[0] & held_out_sets[2])
+        self.assertFalse(held_out_sets[1] & held_out_sets[2])
+        for index in range(0, len(ids), 2):
+            memberships = [index in fold for fold in held_out_sets]
+            self.assertEqual(memberships, [index + 1 in fold for fold in held_out_sets])
 
     def test_compact_state_omits_only_visual_tower(self):
         model = TinyRestorableModel()

@@ -1,5 +1,22 @@
 # 项目上下文
 
+## 2026-09-10：启动三视图image-group OOF/cross-fitting路线
+
+在固定R1已取得正式三种子`33.0119 ± 0.3038`、而10% calibration Router和两种训练级融合均
+失败后，创建`codex/three-view-oof-crossfit`，执行原动态路由计划中尚未完成的3-fold备用方案。
+新增Runner的稳定image-group三折排除/留出接口：每个fold的Full、Person、Face专家只在另外两折
+训练，留出折只用于导出OOF概率；三个fold合并后覆盖完整train池，每条Router训练预测均来自未见
+该图的专家。专家固定seed0、8 tasks、30 epochs/task、batch64、cosine min0、主LR0.0125、
+Image-token Adapter layer1/b32/LR4e-4/scale0.1/ReLU/independent、主BCE+Adapter ASL9.8/0/0.05、
+CLIP normalization及AMP/TF32。
+
+Router改为跨task共享hidden16可靠性主干加每task仅3维偏置，按task递进训练并保存task快照；旧类别
+始终使用其原task快照，无效Face权重严格为0。R2使用质量/预测统计，R3再加入覆盖完整train的冻结
+CLIP三路余弦；prior仍只比较`0/0.1/1`。验证端复用100% train的seed0 Full/Person/Face endpoints，
+只在完整8-task validation比较固定R1、OOF-R2、OOF-R3。仅当R3 final validation mAP同时超过R1和
+R2才进入seed1/2；本批禁止test。实现当前已通过Python与shell语法检查；macOS系统Python缺NumPy，
+完整单测、真实数据对齐和GPU smoke将在Git-only同步后的服务器ddp环境执行。
+
 ## 2026-09-09：R1中心Router公平性修正完成，动态Router停止
 
 提交`5675a3b`只将可靠Face初值/正则中心从`[0.72,0.18,0.10]`校正为固定R1赢家
