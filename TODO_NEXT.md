@@ -1,5 +1,15 @@
 # 下一步任务
 
+## OOF完成后的下一步（2026-09-10）
+
+1. 当前OOF-R3未同时超过R1和R2，严格停止现有Router：不补seed1/2、不运行test，不扩大hidden、
+   descriptor或prior搜索。固定R1仍是正式三种子冠军`33.0119 ± 0.3038`。
+2. 下一轮可复用现有22MB OOF产物，不重训9个专家，先做CPU-only seed0 validation：C0固定R1；
+   C1为强收缩到R1的class-specific三路bias；C2在C1上增加rank-2共享样本可靠性交互。
+3. 无效Face始终权重0；每个类别只使用其增量task结束时的Router快照。禁止每类独立大MLP或test选参。
+4. 只有C2同时超过C0/C1至少`0.10` final mAP，且收益不由单类独占，才补seed1/2 validation；
+   否则结束动态融合路线，转向提高独立Face expert或保持固定R1。
+
 ## 当前执行：三视图image-group OOF/cross-fitting（2026-09-10）
 
 1. 提交推送`codex/three-view-oof-crossfit`，服务器审计全部worktree并创建新的独立clean worktree，

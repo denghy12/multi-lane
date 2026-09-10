@@ -1,5 +1,20 @@
 # 工作日志
 
+## 2026-09-10：同步并分析三视图OOF Router
+
+- 正式batch 11项状态全0，9个专家各240 epochs、0 skipped；Full/Person每fold总updates为
+  `9300/9390/9390`，Face为`7410/7380/7320`，无OOM、Traceback或非有限值，test未访问。
+- 固定R1/最佳R2/最佳R3 final val mAP=`43.581193/43.587281/43.586777`。R3比R1高
+  `0.005584`但比R2低`0.000504`，预设advance=false。R3 average/cF1/oF1更好且forgetting更低，
+  但final收益远小于种子方差，不补seed1/2、不test。
+- prior0使R2/R3降至`42.9327/42.6948`，prior0.1仍为`43.5523/43.4520`；只有prior1接近R1。
+  学习权重的全量均值/std与固定R1由Face-valid mask自然产生的统计几乎一致，动态路由退化为先验。
+- task6 R3相对R1：Sadness`-0.9809`、Sensitivity`+0.1050`、Suffering`+0.0187`，暴露同task类别
+  共用权重的冲突。下一步候选为复用OOF产物的分层class-aware stacking，先CPU seed0 validation。
+- 完整结果、scores、descriptors、states、control和logs共264文件约22MB已同步；20MB原始归档本地
+  SHA-256 `c3f67534...529d203`与服务器一致。第一次归档误把目标放入被打包目录并提示self-read，
+  该无效包已删除，最终同步包在被归档目录外重新生成。
+
 ## 2026-09-10：实现三视图3-fold OOF Router
 
 - 新建`codex/three-view-oof-crossfit`；Runner增加稳定image-group 3-fold协议及严格互斥/validation-only

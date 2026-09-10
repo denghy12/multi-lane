@@ -1,5 +1,20 @@
 # 项目上下文
 
+## 2026-09-10：三视图OOF/cross-fitting完成，当前Router停止
+
+唯一batch`three_view_oof_seed0_20260910_160250`完整结束：9个fold/view专家、描述符和Router退出码
+全0；每个专家8 tasks×30 epochs、0 skipped，无OOM/非有限值，明确`test_accessed=false`。完整
+结果264文件约22MB已同步本地，压缩包SHA-256为`c3f67534...529d203`。固定R1、最佳OOF-R2/
+prior1、最佳OOF-R3/prior1的final validation mAP为`43.581193/43.587281/43.586777`；R3高R1
+仅`0.005584`但低R2 `0.000504`，不满足R3双重胜出规则。R3虽将average/cF1/oF1分别改善
+`0.061706/0.271860/0.083202`并将forgetting降低`0.003036`，但幅度不足以支持seed1/2或test。
+
+OOF把task6监督从51条扩大到627条仍未产生实质收益；无prior的R2/R3反降至`42.9327/42.6948`，
+只有prior1接近固定R1。权重均值/std几乎可由可靠Face mask下的固定R1混合完全解释，说明Router近似
+常数。根本结构限制是同task全部类别共享一组三路权重：R3对task6 Sadness/Sensitivity/Suffering
+分别`-0.9809/+0.1050/+0.0187`，类别需求相反而互相抵消。停止扩大当前Router。若继续，优先复用
+现有OOF产物做CPU-only分层class-aware stacking，而非重训专家；详见本批`analysis.md`。
+
 ## 2026-09-10：启动三视图image-group OOF/cross-fitting路线
 
 在固定R1已取得正式三种子`33.0119 ± 0.3038`、而10% calibration Router和两种训练级融合均
