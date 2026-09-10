@@ -10,7 +10,9 @@
 
 同时在正式结果汇总前发现并修复字段名错误：序列化指标使用`per_class_ap`列表，而非不存在的
 `class_ap`字典；逐类增益现按`CLASS_ORDER`显式映射，并增加回归测试。完成服务器全测与真实OOF
-GPU smoke后重新启动新的seed0 validation run；仍禁止test，门槛与C0/C1/C2协议不变。
+GPU smoke后重新启动时，又在首个C1反向捕获PyTorch2.0.1 CUDA高级索引写入的内部断言；梯度行
+mask改用兼容的`index_fill_`。失败run均在产生候选前停止并保留，下一新run仍禁止test，门槛与
+C0/C1/C2协议不变。
 
 ## 2026-09-10：三视图OOF/cross-fitting完成，当前Router停止
 

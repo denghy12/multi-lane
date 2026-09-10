@@ -213,7 +213,7 @@ def _train_c1(
                 objective.backward()
                 if model.class_bias.grad is not None:
                     mask = torch.zeros_like(model.class_bias.grad)
-                    mask[current] = 1
+                    mask.index_fill_(0, current, 1)
                     model.class_bias.grad.mul_(mask)
                 optimizer.step()
                 final = (float(data_loss.detach()), float(prior_loss.detach()))
@@ -314,7 +314,7 @@ def _train_c2(
                     objective.backward()
                     if model.class_interaction.grad is not None:
                         mask = torch.zeros_like(model.class_interaction.grad)
-                        mask[current] = 1
+                        mask.index_fill_(0, current, 1)
                         model.class_interaction.grad.mul_(mask)
                     optimizer.step()
                     final = (

@@ -9,6 +9,8 @@
   仍使用1.26.4。
 - 修正结果汇总将不存在的`class_ap`当字典读取的问题，改为按`CLASS_ORDER`映射序列化的
   `per_class_ap`，并补充长度和顺序回归测试。首次失败产物保留，新run将在服务器全测/smoke后启动。
+- 第二次启动在首个C1 backward后由PyTorch2.0.1 CUDA内部断言停止，定位为二维梯度mask的高级
+  索引赋值；改为按第0维`index_fill_`，同时覆盖C1 bias和C2 interaction，不改变优化语义。
 
 ## 2026-09-10：同步并分析三视图OOF Router
 
