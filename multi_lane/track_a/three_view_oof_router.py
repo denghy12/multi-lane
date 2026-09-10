@@ -82,8 +82,10 @@ class SharedTaskBiasRouter(nn.Module):
         ):
             raise ValueError("Invalid shared Router inputs")
         logits = self.output(self.trunk(features)) + self.task_bias(task_ids)
-        logits[:, 2] = logits[:, 2].masked_fill(
-            ~face_reliable, torch.finfo(logits.dtype).min
+        logits = logits.masked_fill(
+            ~face_reliable[:, None]
+            & torch.tensor([False, False, True], device=logits.device),
+            torch.finfo(logits.dtype).min,
         )
         weights = torch.softmax(logits, dim=-1)
         if not torch.isfinite(weights).all():
@@ -182,7 +184,7 @@ def load_validation_tasks(
     for config, view in zip(configs, expected_views):
         if config.get("input_mode") != view or config.get("reporting_split") != "val":
             raise ValueError("Validation endpoint view differs")
-        if float(config.get("calibration_fraction", -1)) != 0.0:
+        if float(config.get("calibration_fraction", 0.0)) != 0.0:
             raise ValueError("OOF validation endpoints must use the complete train split")
     for other in configs[1:]:
         for field in COMMON_CONFIG_FIELDS:
@@ -343,7 +345,6 @@ def _train_candidate(
     candidate_root.mkdir(parents=True, exist_ok=False)
     router = SharedTaskBiasRouter(len(feature_names), len(TASK_SIZES), 52000).float()
     states, task_records = [], []
-    rows: List[TaskMetrics] = []
     generator = torch.Generator().manual_seed(53000)
     for task_id in range(len(TASK_SIZES)):
         accumulated = np.concatenate([item["raw"] for item in prepared[: task_id + 1]])
@@ -395,11 +396,6 @@ def _train_candidate(
         state_path = candidate_root / f"task{task_id}.pth"
         torch.save(state, state_path)
         states.append(state)
-        partial_rows, _ = _evaluate_taskwise(
-            validation_tasks[: task_id + 1], states, val_geometry, val_face,
-            descriptors["val"] if use_visual else None,
-        )
-        rows.append(partial_rows[-1])
         item = prepared[task_id]
         train_weights = _state_weights(
             state,
