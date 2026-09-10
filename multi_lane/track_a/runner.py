@@ -151,7 +151,7 @@ def fit_calibration_indices(
 
 def crossfit_fold_indices(
     source,
-    candidate_indices: Sequence[int],
+    class_indices: Sequence[int],
     folds: int,
     held_out_fold: int,
     split_salt: str = "emotic-three-view-oof-v1",
@@ -161,8 +161,15 @@ def crossfit_fold_indices(
         raise ValueError("Cross-fit requires at least two folds")
     if not 0 <= held_out_fold < folds:
         raise ValueError("Held-out cross-fit fold is outside the fold range")
+    eligible = [
+        index
+        for index, target in enumerate(source.targets)
+        if _intersects(target, class_indices)
+    ]
+    if not eligible:
+        raise RuntimeError("EMOTIC cross-fit view contains no samples")
     fit, held_out = [], []
-    for index in candidate_indices:
+    for index in eligible:
         sample_id = str(source.sample_ids[index])
         image_group = sample_id.rsplit("#person=", 1)[0]
         digest = hashlib.sha256(

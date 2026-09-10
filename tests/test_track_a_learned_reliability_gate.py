@@ -187,6 +187,15 @@ class LearnedReliabilityGateTest(unittest.TestCase):
             memberships = [index in fold for fold in held_out_sets]
             self.assertEqual(memberships, [index + 1 in fold for fold in held_out_sets])
 
+    def test_crossfit_argument_is_class_indices_not_sample_indices(self):
+        source = FakeSource([f"train/image{index}.jpg#person=0" for index in range(60)])
+        source.targets = [[0] if index % 2 == 0 else [1] for index in range(60)]
+        fold_members = []
+        for fold in range(3):
+            _, held_out = crossfit_fold_indices(source, (1,), 3, fold)
+            fold_members.extend(held_out)
+        self.assertEqual(sorted(fold_members), list(range(1, 60, 2)))
+
     def test_compact_state_omits_only_visual_tower(self):
         model = TinyRestorableModel()
         compact = compact_model_state_dict(model)
