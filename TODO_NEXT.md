@@ -71,6 +71,10 @@ seed0 validation batch；运行期间不访问test、不启动重复batch。
 worktree ff-only同步，并在GPU连续空闲检查后用三张卡启动唯一A0/A1/A2完整batch。完成后只运行
 严格validation汇总器；A2未同时超过A0/A1时必须停止，不得运行test。
 
+唯一batch`full_anchored_residual_seed0_20260910_103042`已在GPU0/1/2启动，tmux为
+`multilane_full_anchored_residual_20260910_103042`。当前只等待A0/A1/A2完成240 epochs，不重复启动、
+不访问test。结束后核验updates/skipped/error及汇总器的`advance_A2_to_seed1_seed2_validation`。
+
 
 ## 当前优先：结束当前Router，验证固定R1稳定性（2026-09-09）
 

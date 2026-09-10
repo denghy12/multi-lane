@@ -1637,3 +1637,7 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - 修复后164项完整测试通过；A0/A1/A2真实task0 smoke均完成84 updates、skipped0，无OOM/非有限值。
   一轮诊断val mAP为`40.7614/41.1825/41.4034`，仅证明通路有效，不用于选优。下一步在同一clean
   提交上启动唯一三GPU完整validation批次。
+- clean提交`f98f74c`上的唯一批次`full_anchored_residual_seed0_20260910_103042`已在服务器独立
+  worktree启动，tmux为`multilane_full_anchored_residual_20260910_103042`，GPU0/1/2运行A0/A1/A2。
+  三份config均为seed0、30 epochs×8 tasks、validation-only、no-checkpoint和同一clean tree；A0已完成
+  task0前4轮，A1/A2前2轮，全部84 updates/轮、skipped0且错误扫描为空。

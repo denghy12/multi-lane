@@ -3350,3 +3350,6 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - 修复提交`f0c3a82`令Person/Face不再运行Full Image-token Adapter，之后恢复Adapter再计算Full；
   164项全测全通过。真实A0/A1/A2 task0 smoke各完成1 epoch/84 updates/skipped0，无OOM或错误，
   val mAP诊断值`40.7614/41.1825/41.4034`。该一轮值不参与正式选择，只证明三条训练路径有效。
+- smoke记录提交`f98f74c`已推送并Git-only同步。GPU0/1/2连续空闲后启动唯一完整batch
+  `full_anchored_residual_seed0_20260910_103042`；三组config的commit/tree、30 epochs、冠军Adapter、
+  BCE+Adapter-ASL、residual scale0.1、aux loss0和val-only均核验一致。前三轮范围内skipped0、无错误。
