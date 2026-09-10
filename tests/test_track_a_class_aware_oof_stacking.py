@@ -5,7 +5,11 @@ import unittest
 import numpy as np
 import torch
 
-from multi_lane.track_a.class_aware_oof_stacking import ClassAwareStacker
+from multi_lane.track_a.class_aware_oof_stacking import (
+    ClassAwareStacker,
+    _named_final_ap_gains,
+)
+from multi_lane.track_a.runner import CLASS_ORDER
 from multi_lane.track_a.three_view_router import INVALID_PRIOR, VALID_PRIOR
 
 
@@ -58,6 +62,21 @@ class ClassAwareOofStackingTest(unittest.TestCase):
         model = ClassAwareStacker(classes=3, feature_dim=4, rank=2)
         with self.assertRaises(ValueError):
             model(torch.zeros(2, 3), torch.tensor([0]), torch.ones(2, dtype=torch.bool))
+
+    def test_final_class_gains_use_serialized_per_class_ap_order(self) -> None:
+        reference = {"task_metrics": [{"per_class_ap": [1.0] * len(CLASS_ORDER)}]}
+        candidate = {
+            "task_metrics": [
+                {"per_class_ap": [1.0 + index / 100.0 for index in range(len(CLASS_ORDER))]}
+            ]
+        }
+        gains = _named_final_ap_gains(candidate, reference)
+        self.assertEqual(list(gains), list(CLASS_ORDER))
+        self.assertAlmostEqual(gains[CLASS_ORDER[7]], 0.07)
+
+        candidate["task_metrics"][-1]["per_class_ap"] = [1.0]
+        with self.assertRaisesRegex(ValueError, "class order"):
+            _named_final_ap_gains(candidate, reference)
 
 
 if __name__ == "__main__":

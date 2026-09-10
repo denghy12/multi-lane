@@ -54,6 +54,17 @@ MAX_SINGLE_CLASS_POSITIVE_SHARE = 0.80
 THRESHOLD = 0.5
 
 
+def _named_final_ap_gains(candidate: Mapping[str, Any], reference: Mapping[str, Any]) -> Dict[str, float]:
+    candidate_ap = candidate["task_metrics"][-1]["per_class_ap"]
+    reference_ap = reference["task_metrics"][-1]["per_class_ap"]
+    if len(candidate_ap) != len(CLASS_ORDER) or len(reference_ap) != len(CLASS_ORDER):
+        raise ValueError("Final per-class AP does not match the protocol class order")
+    return {
+        name: float(candidate_ap[index] - reference_ap[index])
+        for index, name in enumerate(CLASS_ORDER)
+    }
+
+
 class ClassAwareStacker(nn.Module):
     """R1-anchored class bias with an optional rank-k sample interaction."""
 
@@ -516,11 +527,8 @@ def select_class_aware_stacking(
         ),
     )
 
-    c0_ap = c0["task_metrics"][-1]["class_ap"]
-    c1_ap = best_c1["task_metrics"][-1]["class_ap"]
-    c2_ap = best_c2["task_metrics"][-1]["class_ap"]
-    gains_c0 = {name: float(c2_ap[name] - c0_ap[name]) for name in CLASS_ORDER}
-    gains_c1 = {name: float(c2_ap[name] - c1_ap[name]) for name in CLASS_ORDER}
+    gains_c0 = _named_final_ap_gains(best_c2, c0)
+    gains_c1 = _named_final_ap_gains(best_c2, best_c1)
     positive = {name: gain for name, gain in gains_c0.items() if gain > POSITIVE_CLASS_EPS}
     positive_total = float(sum(positive.values()))
     largest_positive_share = (

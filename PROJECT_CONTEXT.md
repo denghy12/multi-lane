@@ -1,5 +1,17 @@
 # 项目上下文
 
+## 2026-09-11：class-aware OOF 首次启动前审计修正
+
+首次正式启动在训练前被严格 endpoint 审计安全中止，未产生任何 C1/C2 训练结果。根因不是 GPU
+或 score 损坏：历史 schema-v1 dump 只保存 logits，NumPy 1.26.4 与历史环境对并列分数的
+`argsort`顺序不同，使 task0 mAP 漂移约0.0013。临时使用 NumPy 1.23.5 后，Full、Person、Face
+三组共24个 validation task 的 mAP/cF1/oF1 及逐类AP全部按1e-10容差复现，因此 Track-A `ddp`
+环境和`requirements.txt`改回1.23.5；Face预处理环境继续保持1.26.4。
+
+同时在正式结果汇总前发现并修复字段名错误：序列化指标使用`per_class_ap`列表，而非不存在的
+`class_ap`字典；逐类增益现按`CLASS_ORDER`显式映射，并增加回归测试。完成服务器全测与真实OOF
+GPU smoke后重新启动新的seed0 validation run；仍禁止test，门槛与C0/C1/C2协议不变。
+
 ## 2026-09-10：三视图OOF/cross-fitting完成，当前Router停止
 
 唯一batch`three_view_oof_seed0_20260910_160250`完整结束：9个fold/view专家、描述符和Router退出码

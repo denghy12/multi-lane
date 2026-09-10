@@ -1,5 +1,15 @@
 # 工作日志
 
+## 2026-09-11：修复class-aware OOF历史数值复现与汇总字段
+
+- 首次正式run在任何训练前由`validated_run_scores`中止：NumPy1.26.4复算历史schema-v1 Full task0
+  mAP比记录值高0.001280；概率哈希完全相同，排除模型、CUDA和数据变化。
+- 通过临时隔离的NumPy1.23.5验证Full/Person/Face三组24个validation task全部严格复现，确认
+  历史训练指标环境应为1.23.5。保持审计容差不变，修正`requirements.txt`和恢复文档；Face环境
+  仍使用1.26.4。
+- 修正结果汇总将不存在的`class_ap`当字典读取的问题，改为按`CLASS_ORDER`映射序列化的
+  `per_class_ap`，并补充长度和顺序回归测试。首次失败产物保留，新run将在服务器全测/smoke后启动。
+
 ## 2026-09-10：同步并分析三视图OOF Router
 
 - 正式batch 11项状态全0，9个专家各240 epochs、0 skipped；Full/Person每fold总updates为

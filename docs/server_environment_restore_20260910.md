@@ -17,7 +17,7 @@ Python 3.9、PyTorch 2.0.1+cu118 与 CUDA 11.8 wheel。
 - PyTorch 2.0.1+cu118
 - torchvision 0.15.2+cu118
 - torchaudio 2.0.2+cu118
-- NumPy 1.26.4
+- NumPy 1.23.5（历史 score dump 的严格 mAP 复算依赖该版本的并列排序行为）
 - SciPy 1.13.1
 - Pillow 9.2.0
 - timm 0.6.7
@@ -38,6 +38,11 @@ Python 3.9、PyTorch 2.0.1+cu118 与 CUDA 11.8 wheel。
 cd /mnt/haoyuan/workspace/multi-lane-main
 /opt/conda/envs/ddp/bin/python -m pip install -r requirements.txt scipy==1.13.1
 ```
+
+恢复后必须用 `validated_run_scores` 审计历史 Full、Person、Face validation dumps。NumPy
+1.26.4 虽生成相同概率，但 `argsort` 对并列分数的排序变化会使 task mAP 产生约千分之一的漂移，
+无法满足逐字段精确复现；1.23.5 已对三组共24个 task dump 全部验证通过。Face预处理环境不参与
+这些指标复算，仍保持 NumPy 1.26.4。
 
 ### Face 预处理环境 `/opt/conda/envs/cocoer-preprocess`
 
