@@ -1707,5 +1707,6 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - 额外完成Full/seed0/OOF fold0/task0/1 epoch端到端恢复smoke：56 updates、skipped0、
   val mAP39.543071，未访问test且未保存checkpoint。没有启动任何新完整实验。
 - 已恢复本地到服务器的公钥登录与SSH agent forwarding，服务器通过转发的本地密钥访问GitHub；
-  私钥未复制到服务器。服务器OOF worktree经Git-only fast-forward至`e0e6d57`，test-only未修改。
+  私钥未复制到服务器。服务器OOF worktree经Git-only fast-forward至`e0e6d57`；test-only仍为
+  `0b59138`且其原有未提交改动完整保留，本次没有触碰。
 - 完整版本、命令、资产哈希和日志路径见`docs/server_environment_restore_20260910.md`。

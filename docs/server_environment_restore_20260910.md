@@ -102,3 +102,6 @@ cd /mnt/haoyuan/workspace/multi-lane-main
 - 普通 `ssh 172.31.214.226` 会转发本机已加载的 GitHub key；服务器内
   `ssh -T git@github.com` 已通过，因此保持远端 `git@github.com:denghy12/multi-lane.git` 不变。
 - 私钥没有复制到服务器。若容器再次重置，只需重新执行 `ssh-copy-id`，随后按本文重建环境。
+
+`/mnt/haoyuan/workspace/multi-lane-main-test-only` 仍停在 `0b59138`。该工作树原有的两个已修改
+Python 文件、两个未跟踪脚本和 `datasets` 项均保持原样；本次恢复未清理、覆盖或提交它们。
