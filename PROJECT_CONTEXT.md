@@ -1631,3 +1631,9 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   8 tasks×30 epochs、冠军Adapter和BCE/ASL协议，validation-only、no-checkpoint、test forbidden。
   只有A2 final mAP同时超过A0/A1才补seed1/2。协议见
   `docs/full_anchored_complementary_residual.md`。
+- 首轮163项测试通过，但真实A1/A2 smoke发现AMP cast cache会复用先前no-grad辅助视图中的Adapter
+  权重，使Full ASL梯度断开；两组在首个反传安全停止，未启动完整实验。修复为辅助视图完全关闭
+  Full Image-token Adapter，再恢复Adapter执行Full前向，明确落实视图专门化并消除cache歧义。
+- 修复后164项完整测试通过；A0/A1/A2真实task0 smoke均完成84 updates、skipped0，无OOM/非有限值。
+  一轮诊断val mAP为`40.7614/41.1825/41.4034`，仅证明通路有效，不用于选优。下一步在同一clean
+  提交上启动唯一三GPU完整validation批次。

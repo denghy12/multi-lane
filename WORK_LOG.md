@@ -3345,3 +3345,8 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
   严格validation汇总规则测试。
 - 新增A0/A1/A2单组runner、三GPU launcher、汇总器及协议文档。macOS系统Python缺torch，已完成
   Python静态编译和shell语法检查；完整测试、真实数据与GPU smoke待服务器ddp环境执行。
+- 实现`93433e2`在服务器独立worktree的163项全测通过。首轮真实smoke中A0完成，A1/A2暴露AMP
+  cast cache与no-grad辅助前向交互，Adapter-ASL在首步报告参数未参与图；两组安全停止且未启动full。
+- 修复提交`f0c3a82`令Person/Face不再运行Full Image-token Adapter，之后恢复Adapter再计算Full；
+  164项全测全通过。真实A0/A1/A2 task0 smoke各完成1 epoch/84 updates/skipped0，无OOM或错误，
+  val mAP诊断值`40.7614/41.1825/41.4034`。该一轮值不参与正式选择，只证明三条训练路径有效。

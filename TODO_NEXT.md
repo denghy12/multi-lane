@@ -67,6 +67,10 @@ mask、0.1辅助监督、汇总器和launcher后，先运行完整单测与真�
 真实A0/A1/A2数据通路和Image-token Adapter GPU smoke。全部通过且三张GPU安全空闲后，启动唯一
 seed0 validation batch；运行期间不访问test、不启动重复batch。
 
+当前修复后164项全测与三组真实task0 smoke均通过。下一动作是提交推送smoke记录、服务器实验
+worktree ff-only同步，并在GPU连续空闲检查后用三张卡启动唯一A0/A1/A2完整batch。完成后只运行
+严格validation汇总器；A2未同时超过A0/A1时必须停止，不得运行test。
+
 
 ## 当前优先：结束当前Router，验证固定R1稳定性（2026-09-09）
 
