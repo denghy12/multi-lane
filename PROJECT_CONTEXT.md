@@ -8,14 +8,19 @@
 训练，留出折只用于导出OOF概率；三个fold合并后覆盖完整train池，每条Router训练预测均来自未见
 该图的专家。专家固定seed0、8 tasks、30 epochs/task、batch64、cosine min0、主LR0.0125、
 Image-token Adapter layer1/b32/LR4e-4/scale0.1/ReLU/independent、主BCE+Adapter ASL9.8/0/0.05、
-CLIP normalization及AMP/TF32。
+CLIP normalization及AMP/TF32。服务器独立worktree当前HEAD `0e357e3`已通过166项完整单测；
+真实EMOTIC三视图16,001条train样本ID/target完全对齐，task0--7三折留出分别完整覆盖
+`5353/4394/861/9931/4352/2536/627/1526`条eligible，互不重复。task0的Full/Person/Face
+并行1-epoch OOF smoke均0 skipped，三路留出1,793条ID、target和概率形状逐项一致；Face训练折在
+loss前正确剔除848条无效/歧义样本，但留出score仍覆盖全部样本。完整train/val冻结CLIP描述符
+导出smoke也通过，分别覆盖16,001/2,397条，可靠Face为9,696/1,460，明确未访问test。
 
 Router改为跨task共享hidden16可靠性主干加每task仅3维偏置，按task递进训练并保存task快照；旧类别
 始终使用其原task快照，无效Face权重严格为0。R2使用质量/预测统计，R3再加入覆盖完整train的冻结
 CLIP三路余弦；prior仍只比较`0/0.1/1`。验证端复用100% train的seed0 Full/Person/Face endpoints，
 只在完整8-task validation比较固定R1、OOF-R2、OOF-R3。仅当R3 final validation mAP同时超过R1和
 R2才进入seed1/2；本批禁止test。实现当前已通过Python与shell语法检查；macOS系统Python缺NumPy，
-完整单测、真实数据对齐和GPU smoke将在Git-only同步后的服务器ddp环境执行。
+以上验收通过后允许启动唯一seed0 OOF validation批次。
 
 ## 2026-09-09：R1中心Router公平性修正完成，动态Router停止
 

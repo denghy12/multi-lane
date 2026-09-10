@@ -4,8 +4,8 @@
 
 1. 提交推送`codex/three-view-oof-crossfit`，服务器审计全部worktree并创建新的独立clean worktree，
    不修改主工作树和`multi-lane-main-test-only`。
-2. 在ddp环境运行完整单测、真实train image-group三折覆盖/三视图ID与target对齐检查，以及单task
-   Full/Person/Face OOF score-dump与Adapter GPU smoke；任何失败都不启动完整实验。
+2. 已完成：ddp环境166项完整单测、真实train image-group三折覆盖/三视图ID与target对齐、单task
+   Full/Person/Face OOF score-dump与Adapter GPU smoke、完整train/val描述符导出均通过。
 3. 使用GPU0--7安全调度9个seed0 OOF专家：3 folds×3 views，每个专家8 tasks×30 epochs，模型、
    loss、Adapter、增强和精度协议全部固定。每条训练预测必须来自未训练该image-group的fold模型。
 4. 专家完成后导出完整train/val冻结CLIP描述符，在CPU训练OOF-R2/R3：共享hidden16主干、每task
