@@ -3339,7 +3339,8 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
   `residual_full_person/residual_three_view`，每task/每辅助视图各有独立bottleneck16投影与标量gate。
 - Full权重固定1；投影末层零初始化，残差向量经`x/(1+||x||)`限幅，系数为
   `0.1*sigmoid(gate)`。无效Face系数为0；新task激活时只有当前task残差参数可训练，旧task冻结。
-- 模型先以no-grad生成Person/Face源特征，再正常生成Full特征，避免辅助视图更新共享task lane；
+- 模型先关闭Full Image-token Adapter并以no-grad生成Person/Face源特征，再恢复Adapter并正常生成Full，
+  避免辅助视图更新或复用共享Full Adapter；
   A1/A2关闭branch auxiliary loss。新增初始化等价、残差限幅、Face mask、stop-gradient、task冻结与
   严格validation汇总规则测试。
 - 新增A0/A1/A2单组runner、三GPU launcher、汇总器及协议文档。macOS系统Python缺torch，已完成

@@ -517,11 +517,23 @@ class MultiLaneModel(nn.Module):
             # The auxiliary views are complementary frozen feature sources.
             # Their task-specific residual modules learn the mapping, while
             # only Full is allowed to update the shared MULTI-LANE pathway.
-            with torch.no_grad():
-                features = {
-                    name: self._encode_single_lanes(images[name], all_seen_lanes)
-                    for name in self.view_fusion_module.view_names[1:]
-                }
+            adapter_runtime = self.adapter_runtime_enabled
+            try:
+                # Do not run the shared Full Image-token Adapter in auxiliary
+                # branches. Besides enforcing view specialization, this avoids
+                # AMP's cast cache retaining no-grad Adapter weights before the
+                # differentiable Full pass in the same autocast context.
+                if self.adapter_bank is not None:
+                    self.set_adapter_runtime_enabled(False)
+                with torch.no_grad():
+                    features = {
+                        name: self._encode_single_lanes(
+                            images[name], all_seen_lanes
+                        )
+                        for name in self.view_fusion_module.view_names[1:]
+                    }
+            finally:
+                self.set_adapter_runtime_enabled(adapter_runtime)
             features["full"] = self._encode_single_lanes(
                 images["full"], all_seen_lanes
             )

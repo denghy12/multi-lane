@@ -1624,8 +1624,8 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - 用户确认停止softmax Router并开始A0/A1/A2。新建`codex/full-anchored-complementary-residual`，
   Full系数恒为1；Person/Face分别通过task-specific bottleneck16残差Adapter补充，输出投影零初始化，
   残差先约束到单位范数内，再乘`0.1*sigmoid(task gate)`，有效强度严格不超过0.1。
-- Person/Face源特征在残差模块前stop-gradient，使共享selectors/prompts/head前的Image-token Adapter
-  只接受Full主路径梯度；本阶段分支辅助loss为0，直接消除上一轮共享多视图监督的梯度冲突。各task
+- Person/Face源特征关闭Full Image-token Adapter并在残差模块前stop-gradient，使共享task参数与
+  Image-token Adapter只接受Full主路径梯度；本阶段分支辅助loss为0，直接消除上一轮共享多视图监督的梯度冲突。各task
   残差模块训练后冻结，无效Face权重与残差严格为0。
 - A0为fresh Full冠军锚点，A1为Full+Person residual，A2为Full+Person+Face residual。固定seed0、
   8 tasks×30 epochs、冠军Adapter和BCE/ASL协议，validation-only、no-checkpoint、test forbidden。

@@ -17,8 +17,8 @@ cat > "${CONTROL_DIR}/experiment_manifest.txt" <<EOF
 batch=${BATCH_ID}
 selection=seed0 complete 8-task validation only; test forbidden
 A0=fresh Full champion anchor
-A1=Full coefficient1 + detached Person taskwise zero-init bounded residual
-A2=Full coefficient1 + detached Person/valid-Face taskwise zero-init bounded residuals
+A1=Full coefficient1 + no-Full-Adapter detached Person taskwise zero-init bounded residual
+A2=Full coefficient1 + no-Full-Adapter detached Person/valid-Face taskwise zero-init bounded residuals
 residual=bottleneck16, GELU, task scalar sigmoid gate, coefficient range [0,0.1], no auxiliary branch loss
 advance=A2 final validation mAP must exceed both A0 and A1
 EOF

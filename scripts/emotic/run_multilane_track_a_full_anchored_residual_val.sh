@@ -38,7 +38,7 @@ if [[ "${needs_face}" == 1 ]]; then
   face_args=(--face-manifest-root "${FACE_MANIFEST_ROOT}")
 fi
 
-echo "Full-anchored residual validation: method=${METHOD} mode=${fusion_mode} seed=0 gpu=${GPU} dataset=EMOTIC tasks=8 epochs=30 batch=64 main_lr=0.0125 cosine_min0_nowarmup full=coefficient1 auxiliary=detached_taskwise_bottleneck16_zero_init residual_scale_max0.1 aux_loss=0 normalization=clip layer=1 b32 adapter_lr=4e-4 scale0.1 relu independent main=BCE adapter=ASL9.8/0/0.05 AMP/TF32=on reporting=val checkpoint=off test=forbidden"
+echo "Full-anchored residual validation: method=${METHOD} mode=${fusion_mode} seed=0 gpu=${GPU} dataset=EMOTIC tasks=8 epochs=30 batch=64 main_lr=0.0125 cosine_min0_nowarmup full=coefficient1 auxiliary=no_full_adapter+detached_taskwise_bottleneck16_zero_init residual_scale_max0.1 aux_loss=0 normalization=clip layer=1 b32 adapter_lr=4e-4 scale0.1 relu independent main=BCE adapter=ASL9.8/0/0.05 AMP/TF32=on reporting=val checkpoint=off test=forbidden"
 
 CUDA_VISIBLE_DEVICES="${GPU}" "${PYTHON}" -m multi_lane.track_a.runner \
   --seed 0 \

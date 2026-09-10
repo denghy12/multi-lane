@@ -239,6 +239,14 @@ class TaskwiseViewFusionTest(unittest.TestCase):
             for parameter in model.view_fusion_module.task_residuals[1].parameters()
         ))
 
+    def test_residual_forward_restores_full_adapter_runtime(self) -> None:
+        model = tiny_model("residual_full_person")
+        inputs = three_view_batch()
+        model.current_all_logits_with_views({
+            "full": inputs["full"], "person": inputs["person"],
+        })
+        self.assertTrue(model.adapter_runtime_enabled)
+
 
 if __name__ == "__main__":
     unittest.main()

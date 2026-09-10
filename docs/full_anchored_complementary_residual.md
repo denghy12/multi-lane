@@ -24,9 +24,10 @@ The coefficient is `0.1 * sigmoid(gate_view,k)` and is therefore strictly in
 `[0, 0.1]`. Full always has coefficient one. No branch competes through a
 sum-to-one constraint.
 
-Person and Face source features are detached before their view-specific residual
-Adapters. Consequently the shared Selector/Prompt/Image-token Adapter pathway is
-updated only through Full; auxiliary views cannot distort the champion Full path.
+Person and Face source features are generated without the Full Image-token Adapter
+and detached before their view-specific residual Adapters. Consequently the shared
+Selector/Prompt/Image-token Adapter pathway is updated only through Full; auxiliary
+views cannot distort the champion Full path or reuse its view-specific Adapter.
 Residual modules are trained only for the current task and frozen after that task.
 Unreliable Face samples have an exact zero Face coefficient and residual.
 
