@@ -1399,12 +1399,14 @@ def parse_args() -> argparse.Namespace:
         "--view-fusion",
         choices=(
             "disabled", "fixed_three_view", "soft_three_view",
-            "soft_full_person",
+            "soft_full_person", "residual_full_person",
+            "residual_three_view",
         ),
         default="disabled",
     )
     parser.add_argument("--view-fusion-hidden-dim", type=int, default=16)
     parser.add_argument("--view-fusion-learning-rate", type=float, default=4e-4)
+    parser.add_argument("--view-residual-scale", type=float, default=0.1)
     parser.add_argument("--view-auxiliary-loss-weight", type=float, default=0.0)
     parser.add_argument("--paired-full-person", action="store_true",
                         help="Also permit a paired-input, conditioning-disabled control.")
@@ -1534,7 +1536,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     three_view_fusion = args.view_fusion in {
-        "fixed_three_view", "soft_three_view"
+        "fixed_three_view", "soft_three_view", "residual_three_view"
     }
     paired_inputs = (
         args.paired_full_person
@@ -1552,6 +1554,8 @@ def main() -> None:
         raise ValueError("View-fusion hidden dimension must be positive")
     if not math.isfinite(args.view_fusion_learning_rate) or args.view_fusion_learning_rate <= 0:
         raise ValueError("View-fusion learning rate must be finite and positive")
+    if not math.isfinite(args.view_residual_scale) or not 0 < args.view_residual_scale <= 1:
+        raise ValueError("View residual scale must be finite and in (0, 1]")
     if not math.isfinite(args.view_auxiliary_loss_weight) or not 0 <= args.view_auxiliary_loss_weight <= 1:
         raise ValueError("View auxiliary loss weight must be in [0, 1]")
     if args.view_fusion == "disabled" and args.view_auxiliary_loss_weight != 0:
@@ -1714,6 +1718,7 @@ def main() -> None:
         selector_condition_scale=args.selector_condition_scale,
         view_fusion=args.view_fusion,
         view_fusion_hidden_dim=args.view_fusion_hidden_dim,
+        view_residual_scale=args.view_residual_scale,
     ).float().to(device)
     model.visual_encoder.requires_grad_(False)
     model.assert_visual_frozen()
@@ -1965,16 +1970,22 @@ def main() -> None:
         ),
         "view_fusion_hidden_dim": (
             args.view_fusion_hidden_dim
-            if args.view_fusion.startswith("soft_") else None
+            if model.view_fusion_module.learned else None
         ),
         "view_fusion_learning_rate": (
             args.view_fusion_learning_rate
-            if args.view_fusion.startswith("soft_") else None
+            if model.view_fusion_module.learned else None
+        ),
+        "view_residual_scale": (
+            args.view_residual_scale
+            if model.view_fusion_module.residual else None
         ),
         "view_fusion_parameters_per_task": fusion_parameters_per_task,
         "view_fusion_task_semantics": (
             "router_k_only_fuses_task_k_lane_and_freezes_after_task"
             if args.view_fusion.startswith("soft_")
+            else "full_fixed_one_auxiliary_taskwise_residuals_freeze_after_task"
+            if model.view_fusion_module.residual
             else "fixed_per_sample_reliability_masked_weights"
             if args.view_fusion == "fixed_three_view" else None
         ),

@@ -1618,3 +1618,16 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   不能作为严格同批消融，但提示共享selectors/prompts/head/Adapter削弱视图专门化。下一步停止当前
   simplex Router，改做Full系数固定为1、Person/Face为零初始化有界taskwise残差的最小A0/A1/A2
   validation。完整报告见`output/emotic_track_a_end_to_end_view_fusion/20260910_005421/analysis.md`。
+
+## 2026-09-10 Full-anchored complementary residual
+
+- 用户确认停止softmax Router并开始A0/A1/A2。新建`codex/full-anchored-complementary-residual`，
+  Full系数恒为1；Person/Face分别通过task-specific bottleneck16残差Adapter补充，输出投影零初始化，
+  残差先约束到单位范数内，再乘`0.1*sigmoid(task gate)`，有效强度严格不超过0.1。
+- Person/Face源特征在残差模块前stop-gradient，使共享selectors/prompts/head前的Image-token Adapter
+  只接受Full主路径梯度；本阶段分支辅助loss为0，直接消除上一轮共享多视图监督的梯度冲突。各task
+  残差模块训练后冻结，无效Face权重与残差严格为0。
+- A0为fresh Full冠军锚点，A1为Full+Person residual，A2为Full+Person+Face residual。固定seed0、
+  8 tasks×30 epochs、冠军Adapter和BCE/ASL协议，validation-only、no-checkpoint、test forbidden。
+  只有A2 final mAP同时超过A0/A1才补seed1/2。协议见
+  `docs/full_anchored_complementary_residual.md`。

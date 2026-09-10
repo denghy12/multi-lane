@@ -119,6 +119,54 @@ class TaskwiseViewFusionTest(unittest.TestCase):
         second, _ = module(changed, (0,), reliable)
         self.assertTrue(torch.equal(first[0], second[0]))
 
+    def test_residual_fusion_starts_as_exact_full_and_is_bounded(self) -> None:
+        module = TaskwiseViewFusion(
+            1, 4, "residual_full_person", hidden_dim=3,
+            residual_scale=0.1,
+        )
+        module.restore_task(0)
+        full = torch.randn(2, 1, 4, requires_grad=True)
+        person = torch.randn(2, 1, 4, requires_grad=True)
+        fused, coefficients = module(
+            {"full": full, "person": person}, (0,), None
+        )
+        self.assertTrue(torch.equal(fused, full))
+        self.assertTrue(torch.equal(coefficients[..., 0], torch.ones(2, 1)))
+        self.assertTrue(torch.all(coefficients[..., 1] >= 0))
+        self.assertTrue(torch.all(coefficients[..., 1] <= 0.1))
+        fused.sum().backward()
+        self.assertIsNotNone(full.grad)
+        self.assertIsNone(person.grad)
+        projection = module.task_residuals[0]["projections"]["person"]
+        self.assertIsNotNone(projection[3].weight.grad)
+
+    def test_residual_face_is_masked_and_old_task_is_frozen(self) -> None:
+        module = TaskwiseViewFusion(
+            2, 4, "residual_three_view", hidden_dim=3,
+            residual_scale=0.1,
+        )
+        module.restore_task(1)
+        self.assertTrue(all(
+            not parameter.requires_grad
+            for parameter in module.task_residuals[0].parameters()
+        ))
+        self.assertTrue(all(
+            parameter.requires_grad
+            for parameter in module.task_residuals[1].parameters()
+        ))
+        features = {
+            name: torch.randn(2, 2, 4) for name in module.view_names
+        }
+        reliable = torch.tensor([False, True])
+        before, coefficients = module(features, (0, 1), reliable)
+        self.assertTrue(torch.equal(
+            coefficients[0, :, 2], torch.zeros(2)
+        ))
+        changed = copy.deepcopy(features)
+        changed["face"][0].fill_(1e6)
+        after, _ = module(changed, (0, 1), reliable)
+        self.assertTrue(torch.equal(before[0], after[0]))
+
     def test_fused_model_returns_branch_logits_and_preserves_frozen_clip(self) -> None:
         model = tiny_model("soft_three_view")
         inputs = three_view_batch()
@@ -174,6 +222,22 @@ class TaskwiseViewFusionTest(unittest.TestCase):
         self.assertEqual(set(identifiers), {
             id(parameter) for parameter in [*base, *adapter]
         })
+
+    def test_residual_optimizer_contains_only_current_task_module(self) -> None:
+        model = tiny_model("residual_three_view")
+        active = list(model.fusion_optimizer_parameters())
+        self.assertTrue(active)
+        self.assertEqual(
+            {id(parameter) for parameter in active},
+            {
+                id(parameter)
+                for parameter in model.view_fusion_module.task_residuals[0].parameters()
+            },
+        )
+        self.assertTrue(all(
+            not parameter.requires_grad
+            for parameter in model.view_fusion_module.task_residuals[1].parameters()
+        ))
 
 
 if __name__ == "__main__":

@@ -62,6 +62,11 @@ mask、0.1辅助监督、汇总器和launcher后，先运行完整单测与真�
    Full+Person+Face residual，训练预算和冠军Adapter协议一致。
 4. 只有A2同时超过A0/A1才补seed1/2；否则保留独立专家固定R1正式冠军并停止训练级特征融合扩展。
 
+当前已在`codex/full-anchored-complementary-residual`完成核心实现、三组launcher、严格汇总器、测试和
+协议文档。下一步提交推送；服务器先审计全部worktree并创建新的独立clean worktree，运行完整单测、
+真实A0/A1/A2数据通路和Image-token Adapter GPU smoke。全部通过且三张GPU安全空闲后，启动唯一
+seed0 validation batch；运行期间不访问test、不启动重复batch。
+
 
 ## 当前优先：结束当前Router，验证固定R1稳定性（2026-09-09）
 

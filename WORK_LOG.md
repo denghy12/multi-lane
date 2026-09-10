@@ -3332,3 +3332,15 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - 下一阶段建议改成Full-anchored complementary residual：Full系数固定1，Person/Face经各自taskwise
   零初始化轻量投影以小有界残差加入；先只做A0 Full、A1 Full+Person、A2 Full+Person+Face三组
   seed0完整validation。当前不修改代码、不启动新实验。
+
+## 2026-09-10：实现Full-anchored complementary residual
+
+- 从`6b7a850`新建`codex/full-anchored-complementary-residual`。扩展TaskwiseViewFusion加入
+  `residual_full_person/residual_three_view`，每task/每辅助视图各有独立bottleneck16投影与标量gate。
+- Full权重固定1；投影末层零初始化，残差向量经`x/(1+||x||)`限幅，系数为
+  `0.1*sigmoid(gate)`。无效Face系数为0；新task激活时只有当前task残差参数可训练，旧task冻结。
+- 模型先以no-grad生成Person/Face源特征，再正常生成Full特征，避免辅助视图更新共享task lane；
+  A1/A2关闭branch auxiliary loss。新增初始化等价、残差限幅、Face mask、stop-gradient、task冻结与
+  严格validation汇总规则测试。
+- 新增A0/A1/A2单组runner、三GPU launcher、汇总器及协议文档。macOS系统Python缺torch，已完成
+  Python静态编译和shell语法检查；完整测试、真实数据与GPU smoke待服务器ddp环境执行。

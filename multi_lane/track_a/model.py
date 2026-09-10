@@ -47,6 +47,7 @@ class MultiLaneModel(nn.Module):
         selector_condition_scale: float = 0.1,
         view_fusion: str = "disabled",
         view_fusion_hidden_dim: int = 16,
+        view_residual_scale: float = 0.1,
     ) -> None:
         super().__init__()
         if not task_sizes or any(int(size) <= 0 for size in task_sizes):
@@ -200,6 +201,7 @@ class MultiLaneModel(nn.Module):
             self.view_fusion_module = TaskwiseViewFusion(
                 len(self._task_sizes), self.output_dim, view_fusion,
                 hidden_dim=view_fusion_hidden_dim,
+                residual_scale=view_residual_scale,
             )
         self._last_fusion_weights: Optional[torch.Tensor] = None
 
@@ -511,10 +513,23 @@ class MultiLaneModel(nn.Module):
             face_reliable = images.get("face_reliable")
             if face_reliable is None or face_reliable.shape != (batch,):
                 raise ValueError("Three-view fusion requires a valid Face mask")
-        features = {
-            name: self._encode_single_lanes(images[name], all_seen_lanes)
-            for name in self.view_fusion_module.view_names
-        }
+        if self.view_fusion_module.residual:
+            # The auxiliary views are complementary frozen feature sources.
+            # Their task-specific residual modules learn the mapping, while
+            # only Full is allowed to update the shared MULTI-LANE pathway.
+            with torch.no_grad():
+                features = {
+                    name: self._encode_single_lanes(images[name], all_seen_lanes)
+                    for name in self.view_fusion_module.view_names[1:]
+                }
+            features["full"] = self._encode_single_lanes(
+                images["full"], all_seen_lanes
+            )
+        else:
+            features = {
+                name: self._encode_single_lanes(images[name], all_seen_lanes)
+                for name in self.view_fusion_module.view_names
+            }
         lane_ids = self._lane_ids(all_seen_lanes)
         fused, weights = self.view_fusion_module(
             features, lane_ids, face_reliable
