@@ -15,6 +15,7 @@ from multi_lane.track_a.fuse_face_endpoint_validation import (
     load_face_reliability,
     masked_face_fusion,
 )
+from multi_lane.track_a.compare_face_expert_quality import _fixed_candidate
 from multi_lane.track_a.runner import (
     PadToSquare,
     build_transforms,
@@ -30,6 +31,7 @@ class FaceEndpointInputTest(unittest.TestCase):
         source.face_records = [{"face_crop_bbox": [10, 5, 30, 25]}]
         source.face_training_valid = [valid]
         source.sample_ids = ["train:a.jpg#person=0"]
+        source.face_crop_margin = 0.15
         return source
 
     def test_valid_face_uses_manifest_crop(self) -> None:
@@ -57,6 +59,24 @@ class FaceEndpointInputTest(unittest.TestCase):
         self.assertEqual(tuple(output.shape), (3, 224, 224))
         self.assertTrue(torch.isfinite(output).all())
 
+    def test_face_crop_margin_is_recomputed_from_raw_detection(self) -> None:
+        source = self._dataset(True)
+        source.face_records = [{
+            "face_bbox": [20, 10, 40, 30],
+            "face_crop_bbox": [17, 7, 43, 33],
+        }]
+        source.face_crop_margin = 0.05
+        image = Image.new("RGB", (80, 60), color=(255, 0, 0))
+        self.assertEqual(source._crop_face(image, 0).size, (22, 22))
+
+    def test_face_specific_jitter_is_opt_in(self) -> None:
+        train, _ = build_transforms(
+            "clip", (0.05, 1.0), input_mode="face_crop",
+            face_color_jitter_strength=0.1,
+            face_color_jitter_probability=0.5,
+        )
+        self.assertTrue(any(isinstance(item, transforms.RandomApply) for item in train.transforms))
+
     def test_face_loss_indices_strictly_exclude_invalid_and_ambiguous(self) -> None:
         source = object.__new__(EMOTIC)
         source.file_paths = ["a", "b", "c", "d"]
@@ -67,6 +87,13 @@ class FaceEndpointInputTest(unittest.TestCase):
 
 
 class FaceEndpointFusionTest(unittest.TestCase):
+    def test_quality_comparison_uses_only_locked_face_weight(self) -> None:
+        result = {"candidates": [
+            {"beta": 0.0, "metrics": {"final_mAP": 1.0}},
+            {"beta": 0.20, "metrics": {"final_mAP": 2.0}},
+        ]}
+        self.assertEqual(_fixed_candidate(result)["metrics"]["final_mAP"], 2.0)
+
     @staticmethod
     def _manifest_root(root: Path, include_test: bool = False) -> Path:
         detector = {

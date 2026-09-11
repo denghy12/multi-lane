@@ -1,5 +1,15 @@
 # 下一步任务
 
+## 当前执行：独立Face expert质量validation（2026-09-11）
+
+1. 分支`codex/face-expert-quality-validation`锁定Full/Person与R1 beta0.20，只训练三个seed0 Face
+   候选：可靠训练过滤m15、可靠过滤m05、可靠过滤m05+轻量ColorJitter。
+2. 提交推送后服务器创建独立worktree；先完整单测、真实Face crop/filter和Adapter GPU smoke，
+   全部通过后在GPU0/1/2并行运行完整8-task validation。
+3. 只比较可靠Face final mAP与固定R1全量final mAP；两者相对旧Face锚点均至少+0.05才补
+   seed1/2。权重不搜索，当前阶段禁止test。
+4. 若三组均不通过，停止密集搜索Face margin/基础增强，重新评估Face专用表征而非继续调融合器。
+
 ## 服务器环境恢复完成（2026-09-10）
 
 1. `ddp`与`cocoer-preprocess`均已恢复并通过169项全测、真实Face检测、CLIP/Adapter GPU smoke和

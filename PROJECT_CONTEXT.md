@@ -1,5 +1,18 @@
 # 项目上下文
 
+## 2026-09-11：启动独立Face expert质量诊断
+
+在动态Router/stacking收口后创建`codex/face-expert-quality-validation`。Full、Person及R1固定不变：
+可靠Face使用`[0.64,0.16,0.20]`，其余严格`[0.80,0.20,0]`，Face beta锁死0.20且不搜索。
+Runner新增从manifest原始检测框按配置margin重算crop、Face专用ColorJitter，以及Face loss训练样本
+短边/检测分阈值；融合可靠性mask仍固定短边24px/检测分0.6，不随训练过滤漂移。
+
+既有margin0.15、仅valid非歧义Face source作为冻结锚点；三组seed0完整8-task validation为：
+`reliable_m15`（训练与融合可靠性对齐）、`reliable_m05`（缩小margin提高脸部有效分辨率）、
+`reliable_m05_jitter`（再加0.1@0.5轻量颜色增强）。三组共享原模型/优化协议，GPU并行，不读test、
+不存checkpoint。候选必须相对锚点同时提高可靠Face final mAP和锁定R1 final mAP各至少0.05，才补
+seed1/2；详见`docs/face_expert_quality_validation.md`。
+
 ## 2026-09-11：class-aware OOF stacking完成，动态Router路线收口
 
 修复历史数值环境与CUDA mask兼容后，唯一有效run `class_aware_oof_seed0_20260911_002`退出码0，

@@ -1,5 +1,14 @@
 # 工作日志
 
+## 2026-09-11：实现独立Face expert质量validation
+
+- 新建`codex/face-expert-quality-validation`，没有改动Full/Person模型或R1融合权重。
+- EMOTIC Face输入支持从raw detection bbox重算margin、训练loss独立使用短边/检测分阈值、Face专用
+  ColorJitter；训练mask和固定fusion reliability mask分离，避免实验参数意外改变融合样本集合。
+- 新增三候选GPU并行launcher与固定beta0.20比较器；比较器同时审计Face可靠子集和R1全量final
+  validation mAP，双指标均至少+0.05才advance，禁止test。
+- 增加crop margin、Face jitter和锁定beta回归；协议见`docs/face_expert_quality_validation.md`。
+
 ## 2026-09-11：完成并同步class-aware OOF stacking
 
 - 有效run `class_aware_oof_seed0_20260911_002`完成C1/C2各三档、每档8个task state，退出码0、

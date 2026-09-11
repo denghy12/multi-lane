@@ -924,6 +924,9 @@ class EMOTIC(torch.utils.data.Dataset):
         paired_transform=None,
         multi_view_transform=None,
         face_manifest_root=None,
+        face_crop_margin=0.15,
+        face_min_training_short_side=0.0,
+        face_min_training_score=0.0,
     ):
         self.root = os.path.expanduser(root)
         self.transform = transform
@@ -959,6 +962,17 @@ class EMOTIC(torch.utils.data.Dataset):
         self.person_crop_margin = float(person_crop_margin)
         if not np.isfinite(self.person_crop_margin) or not 0.0 <= self.person_crop_margin <= 1.0:
             raise ValueError('EMOTIC person_crop_margin must be finite and in [0, 1].')
+        self.face_crop_margin = float(face_crop_margin)
+        self.face_min_training_short_side = float(face_min_training_short_side)
+        self.face_min_training_score = float(face_min_training_score)
+        if not np.isfinite(self.face_crop_margin) or not 0.0 <= self.face_crop_margin <= 1.0:
+            raise ValueError('EMOTIC face_crop_margin must be finite and in [0, 1].')
+        if (not np.isfinite(self.face_min_training_short_side)
+                or self.face_min_training_short_side < 0):
+            raise ValueError('EMOTIC face_min_training_short_side must be finite and nonnegative.')
+        if (not np.isfinite(self.face_min_training_score)
+                or not 0.0 <= self.face_min_training_score <= 1.0):
+            raise ValueError('EMOTIC face_min_training_score must be finite and in [0, 1].')
 
         if self.download:
             raise RuntimeError('EMOTIC must be prepared manually under the data path.')
@@ -1044,15 +1058,23 @@ class EMOTIC(torch.utils.data.Dataset):
                     f'Face manifest/sample IDs differ: missing={missing}, extra={extra}'
                 )
             self.face_records = [records[sample_id] for sample_id in self.sample_ids]
-            self.face_training_valid = [
+            base_valid = [
                 bool(record.get('valid_face')) and not bool(record.get('ambiguous_match'))
                 for record in self.face_records
+            ]
+            self.face_training_valid = [
+                valid
+                and float(record.get('face_short_side', 0.0))
+                >= self.face_min_training_short_side
+                and float(record.get('face_detection_score', 0.0))
+                >= self.face_min_training_score
+                for valid, record in zip(base_valid, self.face_records)
             ]
             self.face_reliable = [
                 valid
                 and float(record.get('face_short_side', 0.0)) >= 24.0
                 and float(record.get('face_detection_score', 0.0)) >= 0.6
-                for valid, record in zip(self.face_training_valid, self.face_records)
+                for valid, record in zip(base_valid, self.face_records)
             ]
 
     def __len__(self):
@@ -1101,7 +1123,10 @@ class EMOTIC(torch.utils.data.Dataset):
             # A CLIP-mean placeholder keeps batching deterministic.  It is never
             # used for Face loss or fusion because both paths apply the mask.
             return Image.new('RGB', (1, 1), color=(123, 117, 104))
-        bbox = record.get('face_crop_bbox')
+        bbox = record.get('face_bbox')
+        if bbox is None:
+            # Compatibility with minimal fixtures and schema-v1 derivatives.
+            bbox = record.get('face_crop_bbox')
         try:
             bbox = np.asarray(bbox, dtype=np.float32).ravel()
         except (TypeError, ValueError):
@@ -1112,6 +1137,13 @@ class EMOTIC(torch.utils.data.Dataset):
         x1, y1, x2, y2 = bbox.tolist()
         if not (0 <= x1 < x2 <= width and 0 <= y1 < y2 <= height):
             raise RuntimeError(f'Out-of-bounds Face crop bbox for {self.sample_ids[index]}')
+        if record.get('face_bbox') is not None:
+            box_width, box_height = x2 - x1, y2 - y1
+            margin = float(getattr(self, 'face_crop_margin', 0.15))
+            x1 = max(0.0, x1 - margin * box_width)
+            y1 = max(0.0, y1 - margin * box_height)
+            x2 = min(float(width), x2 + margin * box_width)
+            y2 = min(float(height), y2 + margin * box_height)
         return img.crop((int(np.floor(x1)), int(np.floor(y1)),
                          int(np.ceil(x2)), int(np.ceil(y2))))
 

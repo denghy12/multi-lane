@@ -235,6 +235,8 @@ def build_transforms(
     person_transform_mode: str = "legacy_crop",
     person_color_jitter_strength: float = 0.0,
     person_color_jitter_probability: float = 0.0,
+    face_color_jitter_strength: float = 0.0,
+    face_color_jitter_probability: float = 0.0,
 ):
     if input_normalization not in {"none", "clip"}:
         raise ValueError("Input normalization must be none or clip")
@@ -251,6 +253,10 @@ def build_transforms(
         raise ValueError("Person color jitter strength must be in [0, 0.5]")
     if not 0 <= person_color_jitter_probability <= 1:
         raise ValueError("Person color jitter probability must be in [0, 1]")
+    if not 0 <= face_color_jitter_strength <= 0.5:
+        raise ValueError("Face color jitter strength must be in [0, 0.5]")
+    if not 0 <= face_color_jitter_probability <= 1:
+        raise ValueError("Face color jitter probability must be in [0, 1]")
     normalize = (
         [transforms.Normalize(CLIP_IMAGE_MEAN, CLIP_IMAGE_STD)]
         if input_normalization == "clip" else []
@@ -263,12 +269,16 @@ def build_transforms(
             if input_normalization == "clip" else 0
         )
         color_jitter = []
-        if (
-            input_mode == "person_crop"
-            and person_color_jitter_strength
-            and person_color_jitter_probability
-        ):
-            strength = float(person_color_jitter_strength)
+        jitter_strength = (
+            face_color_jitter_strength
+            if input_mode == "face_crop" else person_color_jitter_strength
+        )
+        jitter_probability = (
+            face_color_jitter_probability
+            if input_mode == "face_crop" else person_color_jitter_probability
+        )
+        if jitter_strength and jitter_probability:
+            strength = float(jitter_strength)
             color_jitter = [
                 transforms.RandomApply(
                     [
@@ -279,7 +289,7 @@ def build_transforms(
                             hue=min(0.5, strength * 0.2),
                         )
                     ],
-                    p=float(person_color_jitter_probability),
+                    p=float(jitter_probability),
                 )
             ]
         train = transforms.Compose(
@@ -1422,6 +1432,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Completed train/val Face audit root required by face_crop input.",
     )
+    parser.add_argument("--face-crop-margin", type=float, default=0.15)
+    parser.add_argument("--face-min-training-short-side", type=float, default=0.0)
+    parser.add_argument("--face-min-training-score", type=float, default=0.0)
+    parser.add_argument("--face-color-jitter-strength", type=float, default=0.0)
+    parser.add_argument("--face-color-jitter-probability", type=float, default=0.0)
     parser.add_argument("--selector-conditioning", choices=TaskSelectorConditioner.MODES,
                         default="disabled")
     parser.add_argument("--selector-condition-layers", type=int, nargs="+", default=(1,))
@@ -1621,6 +1636,18 @@ def main() -> None:
         raise ValueError("person-color-jitter-strength must be in [0, 0.5]")
     if not 0 <= args.person_color_jitter_probability <= 1:
         raise ValueError("person-color-jitter-probability must be in [0, 1]")
+    if not math.isfinite(args.face_crop_margin) or not 0 <= args.face_crop_margin <= 1:
+        raise ValueError("face-crop-margin must be finite and in [0, 1]")
+    if (not math.isfinite(args.face_min_training_short_side)
+            or args.face_min_training_short_side < 0):
+        raise ValueError("face-min-training-short-side must be finite and nonnegative")
+    if (not math.isfinite(args.face_min_training_score)
+            or not 0 <= args.face_min_training_score <= 1):
+        raise ValueError("face-min-training-score must be finite and in [0, 1]")
+    if not 0 <= args.face_color_jitter_strength <= 0.5:
+        raise ValueError("face-color-jitter-strength must be in [0, 0.5]")
+    if not 0 <= args.face_color_jitter_probability <= 1:
+        raise ValueError("face-color-jitter-probability must be in [0, 1]")
     if args.input_mode == "face_crop":
         if args.face_manifest_root is None:
             raise ValueError("face_crop input requires --face-manifest-root")
@@ -1815,6 +1842,8 @@ def main() -> None:
         person_transform_mode=args.person_transform_mode,
         person_color_jitter_strength=args.person_color_jitter_strength,
         person_color_jitter_probability=args.person_color_jitter_probability,
+        face_color_jitter_strength=args.face_color_jitter_strength,
+        face_color_jitter_probability=args.face_color_jitter_probability,
     )
     dataset_parent = resolve_dataset_parent(args.data_root)
     paired_train = paired_eval = None
@@ -1846,6 +1875,9 @@ def main() -> None:
         paired_transform=paired_train,
         multi_view_transform=multi_view_train,
         face_manifest_root=args.face_manifest_root,
+        face_crop_margin=args.face_crop_margin,
+        face_min_training_short_side=args.face_min_training_short_side,
+        face_min_training_score=args.face_min_training_score,
     )
     calibration_source = (
         EMOTIC(
@@ -1855,6 +1887,9 @@ def main() -> None:
             paired_transform=paired_eval,
             multi_view_transform=multi_view_eval,
             face_manifest_root=args.face_manifest_root,
+            face_crop_margin=args.face_crop_margin,
+            face_min_training_short_side=args.face_min_training_short_side,
+            face_min_training_score=args.face_min_training_score,
         )
         if args.calibration_fraction > 0 or crossfit_enabled
         else None
@@ -1866,6 +1901,9 @@ def main() -> None:
         paired_transform=paired_eval,
         multi_view_transform=multi_view_eval,
         face_manifest_root=args.face_manifest_root,
+        face_crop_margin=args.face_crop_margin,
+        face_min_training_short_side=args.face_min_training_short_side,
+        face_min_training_score=args.face_min_training_score,
     )
     if args.reporting_split == "test":
         reporting_source = EMOTIC(
@@ -1875,6 +1913,9 @@ def main() -> None:
             paired_transform=paired_eval,
             multi_view_transform=multi_view_eval,
             face_manifest_root=args.face_manifest_root,
+            face_crop_margin=args.face_crop_margin,
+            face_min_training_short_side=args.face_min_training_short_side,
+            face_min_training_score=args.face_min_training_score,
         )
         validate_classes(train_source, val_source, reporting_source)
     else:
@@ -1903,11 +1944,21 @@ def main() -> None:
             face_counts[str(task_id)] = {
                 "train_eligible": len(train_eligible),
                 "train_valid_nonambiguous": sum(
+                    bool(train_source.face_records[index].get("valid_face"))
+                    and not bool(train_source.face_records[index].get("ambiguous_match"))
+                    for index in train_eligible
+                ),
+                "train_selected_for_face_loss": sum(
                     bool(train_source.face_training_valid[index])
                     for index in train_eligible
                 ),
                 "val_eligible": len(val_eligible),
                 "val_valid_nonambiguous": sum(
+                    bool(val_source.face_records[index].get("valid_face"))
+                    and not bool(val_source.face_records[index].get("ambiguous_match"))
+                    for index in val_eligible
+                ),
+                "val_selected_for_face_loss_diagnostic": sum(
                     bool(val_source.face_training_valid[index])
                     for index in val_eligible
                 ),
@@ -2016,8 +2067,23 @@ def main() -> None:
             if args.input_mode == "face_crop" or three_view_fusion else None
         ),
         "face_transform": (
-            "manifest_margin15_pad_square_resize224_horizontal_flip_train_only"
-            if args.input_mode == "face_crop" or three_view_fusion else None
+            "raw_face_bbox_configurable_margin_pad_square_resize224_horizontal_flip_train_only"
+            if args.input_mode == "face_crop"
+            else "manifest_margin15_pad_square_resize224_horizontal_flip_train_only"
+            if three_view_fusion else None
+        ),
+        "face_crop_margin": args.face_crop_margin if args.input_mode == "face_crop" else None,
+        "face_min_training_short_side": (
+            args.face_min_training_short_side if args.input_mode == "face_crop" else None
+        ),
+        "face_min_training_score": (
+            args.face_min_training_score if args.input_mode == "face_crop" else None
+        ),
+        "face_color_jitter_strength": (
+            args.face_color_jitter_strength if args.input_mode == "face_crop" else None
+        ),
+        "face_color_jitter_probability": (
+            args.face_color_jitter_probability if args.input_mode == "face_crop" else None
         ),
         "paired_full_person": paired_inputs,
         "view_fusion": args.view_fusion,
