@@ -11,6 +11,12 @@ Image-token Adapter和主BCE/Adapter ASL不变；Full、Person及固定R1权重�
 候选仍须相对旧Face锚点同时提高可靠Face和R1 final validation mAP各至少0.05；失败即停止margin、过滤
 和基础增强，转向表情预训练Face encoder。协议见`docs/face_reliable_equal_updates_validation.md`。
 
+实现提交`b0c4ba2`已推送，服务器独立worktree
+`/mnt/haoyuan/workspace/multi-lane-main-face-reliable-equal-updates`固定该提交且clean。179项完整单测通过；
+真实Face/ViT-B/16/Adapter task0两步GPU smoke完成2 updates、0 skipped、scheduler终点LR0，写出完整val
+scores且无checkpoint。唯一batch `face_reliable_equal_updates_seed0_20260911_094039`已在GPU0启动，tmux
+为`multilane_face_equal_updates_20260911_094039`；task0首轮48 updates、0 skipped，无OOM/非有限值。
+
 ## 2026-09-11：独立Face expert基础质量诊断完成
 
 batch `face_quality_seed0_20260911_001`三组均完成240 epochs/8,610 updates、0 skipped，退出码全0，

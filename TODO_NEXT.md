@@ -10,6 +10,11 @@
 4. 只有可靠Face和固定R1 final validation mAP相对旧锚点均至少`+0.05`才继续；否则停止margin、
    过滤和基础增强路线，转向landmark对齐的AffectNet/FERPlus表情预训练Face encoder。
 
+前置验收已完成：179项全测和真实GPU smoke均通过。唯一正式batch
+`face_reliable_equal_updates_seed0_20260911_094039`正在GPU0运行，tmux为
+`multilane_face_equal_updates_20260911_094039`。只等待8 tasks完成并由launcher自动执行严格R1比较；
+不重复启动、不访问test。
+
 ## 独立Face expert质量validation已完成（2026-09-11）
 
 1. 三组均完成；固定R1 final val mAP为m15过滤`43.4933`、m05`43.3646`、m05+jitter

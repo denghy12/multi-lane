@@ -9,6 +9,11 @@
   明确禁止test和checkpoint。
 - 下一步：本地静态检查后提交推送；服务器创建独立worktree，运行完整单测、真实数据和GPU smoke，
   通过后启动唯一完整validation。
+- `b0c4ba2`已推送；服务器新建独立clean worktree，主工作树与test-only的用户改动均未触碰。
+- ddp环境179项完整单测通过。真实Face task0两步GPU smoke完成2 updates、0 skipped、终点LR0、val score
+  dump成功且无checkpoint；后置断言仅因预期旧目录名而报错，读取实际`val_scores/task0.npz`复核通过。
+- 正式batch `face_reliable_equal_updates_seed0_20260911_094039`已在GPU0/tmux
+  `multilane_face_equal_updates_20260911_094039`启动；首轮48 updates、0 skipped、约2.1GB显存，运行正常。
 
 ## 2026-09-11：同步并分析独立Face expert质量结果
 
