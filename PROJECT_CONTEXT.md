@@ -13,6 +13,12 @@ Runner新增从manifest原始检测框按配置margin重算crop、Face专用Colo
 不存checkpoint。候选必须相对锚点同时提高可靠Face final mAP和锁定R1 final mAP各至少0.05，才补
 seed1/2；详见`docs/face_expert_quality_validation.md`。
 
+服务器独立worktree为`/mnt/haoyuan/workspace/multi-lane-main-face-expert-quality`，177项完整单测、
+真实数据crop/filter审计和最严格候选task0一轮GPU smoke均通过。正式batch
+`face_quality_seed0_20260911_001`已在clean `0972d1a`启动，tmux为
+`multilane_face_quality_20260911`；GPU0/1/2分别运行m15、m05、m05+jitter，初始约2GB/卡、0 skipped，
+无OOM/非有限值。三组完成后launcher自动执行固定R1比较。
+
 ## 2026-09-11：class-aware OOF stacking完成，动态Router路线收口
 
 修复历史数值环境与CUDA mask兼容后，唯一有效run `class_aware_oof_seed0_20260911_002`退出码0，

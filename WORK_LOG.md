@@ -8,6 +8,10 @@
 - 新增三候选GPU并行launcher与固定beta0.20比较器；比较器同时审计Face可靠子集和R1全量final
   validation mAP，双指标均至少+0.05才advance，禁止test。
 - 增加crop margin、Face jitter和锁定beta回归；协议见`docs/face_expert_quality_validation.md`。
+- `0972d1a`已推送；服务器创建独立clean worktree。177项全测通过；真实train审计为16,001样本、
+  原valid非歧义12,442、融合可靠9,696，m15/m05同一crop尺寸示例107×126/91×107。
+- m05+jitter完成task0一轮GPU smoke：48 updates、skipped0、finite loss、val mAP32.9527。正式batch
+  `face_quality_seed0_20260911_001`已在GPU0/1/2并行启动，日志/状态/结果路径符合协议。
 
 ## 2026-09-11：完成并同步class-aware OOF stacking
 

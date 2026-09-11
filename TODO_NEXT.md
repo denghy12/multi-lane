@@ -9,6 +9,8 @@
 3. 只比较可靠Face final mAP与固定R1全量final mAP；两者相对旧Face锚点均至少+0.05才补
    seed1/2。权重不搜索，当前阶段禁止test。
 4. 若三组均不通过，停止密集搜索Face margin/基础增强，重新评估Face专用表征而非继续调融合器。
+5. 正式batch `face_quality_seed0_20260911_001`当前在tmux
+   `multilane_face_quality_20260911`运行；完成后同步三组scores、summary、日志和状态并分析。
 
 ## 服务器环境恢复完成（2026-09-10）
 
