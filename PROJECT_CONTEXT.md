@@ -1,5 +1,19 @@
 # 项目上下文
 
+## 2026-09-11：class-aware OOF stacking完成，动态Router路线收口
+
+修复历史数值环境与CUDA mask兼容后，唯一有效run `class_aware_oof_seed0_20260911_002`退出码0，
+明确`test_accessed=false`。C0固定R1、最佳C1 prior1、最佳C2 rank2/prior10的final validation
+mAP为`43.581193/43.586666/43.600490`；C2相对C0/C1仅`+0.019297/+0.013824`，低于已放宽
+的双重`+0.05`门槛，因此不补seed1/2、不运行test。
+
+C2相对C0在8个task mAP均小幅提高，并有8类AP增益超过0.01，最大单类占正增益42.53%；收益
+不是单类偶然。但主要提升Sensitivity/Fear/Sympathy `+0.2357/+0.1602/+0.0600`，同时
+Suffering/Pain下降`-0.0314/-0.0253`。最强prior10胜过prior1/3，表明动态交互越接近固定先验越
+稳定，可学习融合上限很低。按规则停止搜索Router prior/rank/hidden/描述符；后续若追求mAP，应
+先提高独立Face expert，再用锁定R1验证，而非继续重排三个高度相关专家。详见
+`docs/class_aware_oof_stacking_results_20260911.md`。
+
 ## 2026-09-11：class-aware OOF 首次启动前审计修正
 
 首次正式启动在训练前被严格 endpoint 审计安全中止，未产生任何 C1/C2 训练结果。根因不是 GPU

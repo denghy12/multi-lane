@@ -1,5 +1,16 @@
 # 工作日志
 
+## 2026-09-11：完成并同步class-aware OOF stacking
+
+- 有效run `class_aware_oof_seed0_20260911_002`完成C1/C2各三档、每档8个task state，退出码0、
+  `test_accessed=false`，无OOM/非有限值；174项全测与C1/C2真实GPU smoke通过。
+- C0/C1/C2 final val mAP=`43.581193/43.586666/43.600490`；C2相对两锚点仅
+  `+0.019297/+0.013824`，未过预注册`+0.05`双门槛，advance=false。
+- C2的8个task mAP均小幅高于C0，8类正增益超过0.01且最大类占42.53%；但Sensitivity/Fear增益
+  与Suffering/Pain退化并存。最强prior10最好，支持“动态信号不稳、强收缩才有效”的判断。
+- 结果、48个小型state、日志和退出码打包同步；68KB归档两端SHA-256均为
+  `978e6c72...19e841d8`。按规则结束动态Router，不补seed1/2、不test；详细分析见结果文档。
+
 ## 2026-09-11：修复class-aware OOF历史数值复现与汇总字段
 
 - 首次正式run在任何训练前由`validated_run_scores`中止：NumPy1.26.4复算历史schema-v1 Full task0

@@ -10,16 +10,16 @@
    `docs/server_environment_restore_20260910.md`先恢复授权与两套环境，再运行实验。
 4. 环境已就绪后，研究路线仍按下方OOF结果决策推进；不要因为恢复smoke重复启动OOF或正式test。
 
-## 当前执行：class-aware OOF stacking（2026-09-11）
+## class-aware OOF stacking已完成（2026-09-11）
 
-1. C0固定R1；C1搜索三档强正则的类别bias；C2冻结最佳C1并搜索三档rank-2样本×类别交互正则。
-   复用现有OOF scores/descriptors和seed0 endpoints，不重训专家、不读取test。
-2. 首次run因恢复环境NumPy版本不符在训练前安全中止；已确认历史24个endpoint仅在1.23.5下严格
-   复现，并修复逐类别AP字段；第二次run暴露PyTorch2.0.1 CUDA梯度mask索引兼容问题，已改用
-   `index_fill_`。下一步Git-only同步并做C1/C2真实反向smoke，再运行新的唯一完整选择批次。
-3. 门槛已由0.10下调到0.05：C2必须相对C0和C1均至少+0.05 final validation mAP；至少两个类别
-   AP提高超过0.01，且最大单类不超过正增益80%。通过才补seed1/2，否则结束动态Router路线。
-4. 本阶段只产生validation selection、类别增益、权重诊断和stacker states；无正式test。
+1. 唯一有效run完成且未访问test：C0/C1/C2 final val mAP为
+   `43.581193/43.586666/43.600490`。
+2. C2相对C0/C1为`+0.019297/+0.013824`，虽收益分散且8个task均略升，仍未通过已放宽的双重
+   `+0.05`门槛；不再下调门槛，不补seed1/2、不运行test。
+3. 停止当前动态Router/stacking：不搜索更多prior、rank、hidden、描述符维度或类别独立大网络。
+4. 下一候选方向为提高独立Face expert的信息质量；保持Full、Person与固定R1权重不变，先在
+   validation验证Face自身和R1融合是否同时提升，再决定是否补多seed。详细见
+   `docs/class_aware_oof_stacking_results_20260911.md`。
 
 ## OOF完成后的下一步（2026-09-10）
 
