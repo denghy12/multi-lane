@@ -1001,6 +1001,28 @@ def scheduler_config_name(
     }[mode]
 
 
+def optimizer_update_budget_for_task(
+    task_id: int,
+    shared_budget: Optional[int],
+    per_task_budgets: Optional[Sequence[int]],
+) -> Optional[int]:
+    """Resolve one update budget without silently mixing shared/list protocols."""
+    if shared_budget is not None and per_task_budgets is not None:
+        raise ValueError("Shared and per-task optimizer update budgets are mutually exclusive")
+    if shared_budget is not None:
+        if shared_budget <= 0:
+            raise ValueError("Optimizer update budget must be positive")
+        return int(shared_budget)
+    if per_task_budgets is None:
+        return None
+    if task_id < 0 or task_id >= len(per_task_budgets):
+        raise ValueError("Task index is outside the per-task optimizer update budgets")
+    budget = int(per_task_budgets[task_id])
+    if budget <= 0:
+        raise ValueError("Optimizer update budget must be positive")
+    return budget
+
+
 def train_task(
     model: MultiLaneModel,
     loader: DataLoader,
@@ -1380,6 +1402,13 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--optimizer-updates-by-task",
+        type=int,
+        nargs="+",
+        default=None,
+        help="One fixed optimizer-update budget for every frozen protocol task.",
+    )
+    parser.add_argument(
         "--scheduler-mode",
         choices=("cosine", "linear", "constant", "multistep"),
         default="cosine",
@@ -1718,6 +1747,17 @@ def main() -> None:
         raise ValueError("Adapter weight decay must be non-negative")
     if args.optimizer_updates_per_task is not None and args.optimizer_updates_per_task <= 0:
         raise ValueError("optimizer-updates-per-task must be positive")
+    if args.optimizer_updates_by_task is not None:
+        if args.optimizer_updates_per_task is not None:
+            raise ValueError(
+                "optimizer-updates-per-task and optimizer-updates-by-task are mutually exclusive"
+            )
+        if len(args.optimizer_updates_by_task) != len(TASK_SIZES):
+            raise ValueError(
+                "optimizer-updates-by-task must provide all protocol task budgets"
+            )
+        if any(value <= 0 for value in args.optimizer_updates_by_task):
+            raise ValueError("optimizer-updates-by-task values must be positive")
     scheduler_warmup_epochs(args.epochs, args.scheduler_warmup_ratio)
     scheduler_milestone_epochs(
         args.epochs, args.scheduler_multistep_milestones
@@ -1732,7 +1772,10 @@ def main() -> None:
         raise ValueError(
             "scheduler min LR and warmup ratios require cosine mode"
         )
-    if args.optimizer_updates_per_task is not None and (
+    if (
+        args.optimizer_updates_per_task is not None
+        or args.optimizer_updates_by_task is not None
+    ) and (
         args.scheduler_mode != "cosine"
         or args.scheduler_min_lr_ratio != 0
         or args.scheduler_warmup_ratio != 0
@@ -2021,19 +2064,31 @@ def main() -> None:
         "threshold": args.threshold,
         "training_budget_mode": (
             "optimizer_updates"
-            if args.optimizer_updates_per_task is not None else "epochs"
+            if args.optimizer_updates_per_task is not None
+            or args.optimizer_updates_by_task is not None
+            else "epochs"
         ),
         "epochs_per_task": (
-            None if args.optimizer_updates_per_task is not None else args.epochs
+            None
+            if args.optimizer_updates_per_task is not None
+            or args.optimizer_updates_by_task is not None
+            else args.epochs
         ),
         "optimizer_updates_per_task": args.optimizer_updates_per_task,
+        "optimizer_updates_by_task": args.optimizer_updates_by_task,
         "train_batch_size": args.train_batch_size,
         "eval_batch_size": args.eval_batch_size,
         "workers": args.workers,
         "optimizer": "Adam_reset_per_task",
         "learning_rate": learning_rate,
         "scheduler": scheduler_config_name(
-            args.optimizer_updates_per_task,
+            (
+                args.optimizer_updates_per_task
+                if args.optimizer_updates_per_task is not None
+                else args.optimizer_updates_by_task[0]
+                if args.optimizer_updates_by_task is not None
+                else None
+            ),
             args.scheduler_mode,
             args.scheduler_min_lr_ratio,
             args.scheduler_warmup_ratio,
@@ -2055,7 +2110,9 @@ def main() -> None:
         "scheduler_multistep_gamma": args.scheduler_multistep_gamma,
         "scheduler_step_unit": (
             "successful_optimizer_update"
-            if args.optimizer_updates_per_task is not None else "epoch"
+            if args.optimizer_updates_per_task is not None
+            or args.optimizer_updates_by_task is not None
+            else "epoch"
         ),
         "weight_decay": args.weight_decay,
         "temperature": args.temperature,
@@ -2369,6 +2426,11 @@ def main() -> None:
             "calibration": len(calibration_indices),
             "face_filter_removed": unfiltered_fit_count - len(fit_indices),
         }
+        task_update_budget = optimizer_update_budget_for_task(
+            task_id,
+            args.optimizer_updates_per_task,
+            args.optimizer_updates_by_task,
+        )
         history = train_task(
             model, train_loader, val_loader, device, task_id,
             args.epochs, learning_rate, args.weight_decay,
@@ -2384,7 +2446,7 @@ def main() -> None:
             asl_gamma_pos=args.asl_gamma_pos,
             asl_clip=args.asl_clip,
             asl_eps=args.asl_eps,
-            optimizer_updates_per_task=args.optimizer_updates_per_task,
+            optimizer_updates_per_task=task_update_budget,
             adapter_regularization=args.adapter_regularization,
             adapter_regularization_fraction=args.adapter_regularization_fraction,
             adapter_regularization_calibration_updates=(

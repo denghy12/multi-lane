@@ -1,5 +1,16 @@
 # 项目上下文
 
+## 2026-09-11：实现reliable_m15等更新量公平实验
+
+创建`codex/face-reliable-equal-updates`，只补一个seed0完整8-task validation控制。新增按task指定成功
+optimizer updates的runner协议，预算锁定为`[1920,1620,360,3570,1710,960,240,600]`，每task
+CosineAnnealingLR以对应updates为T_max并在零LR结束。实验保持reliable_m15的过滤、margin0.15、冠军
+Image-token Adapter和主BCE/Adapter ASL不变；Full、Person及固定R1权重均复用。
+
+比较器新增显式等更新量审计，核验配置、逐task实际完成量、总计10,980、零skipped及scheduler终点。
+候选仍须相对旧Face锚点同时提高可靠Face和R1 final validation mAP各至少0.05；失败即停止margin、过滤
+和基础增强，转向表情预训练Face encoder。协议见`docs/face_reliable_equal_updates_validation.md`。
+
 ## 2026-09-11：独立Face expert基础质量诊断完成
 
 batch `face_quality_seed0_20260911_001`三组均完成240 epochs/8,610 updates、0 skipped，退出码全0，

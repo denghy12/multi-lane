@@ -15,7 +15,11 @@ from multi_lane.track_a.fuse_face_endpoint_validation import (
     load_face_reliability,
     masked_face_fusion,
 )
-from multi_lane.track_a.compare_face_expert_quality import _fixed_candidate
+from multi_lane.track_a.compare_face_expert_quality import (
+    EQUAL_UPDATE_BUDGETS,
+    _fixed_candidate,
+    _validate_equal_update_candidate,
+)
 from multi_lane.track_a.runner import (
     PadToSquare,
     build_transforms,
@@ -93,6 +97,35 @@ class FaceEndpointFusionTest(unittest.TestCase):
             {"beta": 0.20, "metrics": {"final_mAP": 2.0}},
         ]}
         self.assertEqual(_fixed_candidate(result)["metrics"]["final_mAP"], 2.0)
+
+    def test_equal_update_audit_checks_each_task_and_scheduler_endpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "config.json").write_text(json.dumps({
+                "optimizer_updates_by_task": list(EQUAL_UPDATE_BUDGETS),
+            }), encoding="utf-8")
+            (root / "seed_summary.json").write_text(json.dumps({
+                "completed_optimizer_updates": sum(EQUAL_UPDATE_BUDGETS),
+            }), encoding="utf-8")
+            history = {
+                str(task_id): [{
+                    "completed_task_optimizer_updates": budget,
+                    "skipped_optimizer_steps": 0,
+                    "next_learning_rate": 0.0,
+                }]
+                for task_id, budget in enumerate(EQUAL_UPDATE_BUDGETS)
+            }
+            (root / "training_history.json").write_text(
+                json.dumps(history), encoding="utf-8"
+            )
+            audit = _validate_equal_update_candidate(root)
+            self.assertEqual(audit["completed_total"], 10980)
+            history["6"][0]["completed_task_optimizer_updates"] -= 1
+            (root / "training_history.json").write_text(
+                json.dumps(history), encoding="utf-8"
+            )
+            with self.assertRaises(ValueError):
+                _validate_equal_update_candidate(root)
 
     @staticmethod
     def _manifest_root(root: Path, include_test: bool = False) -> Path:

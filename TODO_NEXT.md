@@ -1,5 +1,15 @@
 # 下一步任务
 
+## 当前执行：reliable_m15等更新量公平实验（2026-09-11）
+
+1. 已实现按task成功updates预算：`[1920,1620,360,3570,1710,960,240,600]`，总计10,980；
+   每task cosine在自己的更新终点降至0。
+2. 只运行seed0完整8-task validation；锁定Face reliable_m15、Full/Person来源、R1 Face权重0.20、
+   threshold0.5，不保存checkpoint、不访问test。
+3. 提交推送后，在服务器独立worktree完成完整单测、真实数据和Adapter GPU smoke，再启动唯一正式批次。
+4. 只有可靠Face和固定R1 final validation mAP相对旧锚点均至少`+0.05`才继续；否则停止margin、
+   过滤和基础增强路线，转向landmark对齐的AffectNet/FERPlus表情预训练Face encoder。
+
 ## 独立Face expert质量validation已完成（2026-09-11）
 
 1. 三组均完成；固定R1 final val mAP为m15过滤`43.4933`、m05`43.3646`、m05+jitter

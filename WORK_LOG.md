@@ -1,5 +1,15 @@
 # 工作日志
 
+## 2026-09-11：reliable_m15等更新量控制实现
+
+- 从`9fd6b43`创建`codex/face-reliable-equal-updates`，没有修改或暂存四份用户未跟踪的Adapter调参文档。
+- Runner新增`--optimizer-updates-by-task`，要求完整8项正整数且不能与统一预算并用；每task仅按成功
+  optimizer step计数，独立重建对应T_max的cosine scheduler。
+- 新增单候选seed0 launcher和严格汇总审计；Full、Person、旧Face锚点、固定R1及0.05双门槛不变，
+  明确禁止test和checkpoint。
+- 下一步：本地静态检查后提交推送；服务器创建独立worktree，运行完整单测、真实数据和GPU smoke，
+  通过后启动唯一完整validation。
+
 ## 2026-09-11：同步并分析独立Face expert质量结果
 
 - 三组完整结束且状态全0；每组240 epochs、8,610 updates、0 skipped，无OOM/非有限值，未访问test。

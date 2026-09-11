@@ -90,7 +90,10 @@ def masked_face_fusion(
 
 
 def _validate_face_run(
-    full_run: Path, face_run: Path, manifest_root: Path
+    full_run: Path,
+    face_run: Path,
+    manifest_root: Path,
+    allow_face_training_budget_difference: bool = False,
 ) -> Mapping[str, Any]:
     full_config = _load_json(full_run / "config.json")
     face_config = _load_json(face_run / "config.json")
@@ -105,6 +108,10 @@ def _validate_face_run(
     if face_config.get("face_manifest") != provenance:
         raise ValueError("Face run manifest provenance differs from the supplied audit")
     for field in COMMON_CONFIG_FIELDS:
+        if allow_face_training_budget_difference and field in {
+            "training_budget_mode", "epochs_per_task", "scheduler"
+        }:
+            continue
         if full_config.get(field) != face_config.get(field):
             raise ValueError(f"Face and Full runs differ on fixed config field {field}")
     return summary
@@ -116,11 +123,17 @@ def fuse_face_endpoint_validation(
     face_run: Path,
     manifest_root: Path,
     betas: Sequence[float] = BETAS,
+    allow_face_training_budget_difference: bool = False,
 ) -> Dict[str, Any]:
     if tuple(float(value) for value in betas) != BETAS:
         raise ValueError(f"Stage-1 beta grid is locked to {BETAS}")
     full_summary, person_summary = _validate_runs(full_run, person_run)
-    face_summary = _validate_face_run(full_run, face_run, manifest_root)
+    face_summary = _validate_face_run(
+        full_run,
+        face_run,
+        manifest_root,
+        allow_face_training_budget_difference,
+    )
     full_dumps, _ = validated_run_scores(full_run, "val")
     person_dumps, _ = validated_run_scores(person_run, "val")
     face_dumps, _ = validated_run_scores(face_run, "val")

@@ -24,6 +24,7 @@ from multi_lane.track_a.runner import (
     compute_training_loss,
     compute_metrics,
     calibrated_adapter_regularization_weight,
+    optimizer_update_budget_for_task,
     summarize_tasks,
     scheduler_milestone_epochs,
     scheduler_warmup_epochs,
@@ -238,6 +239,21 @@ class TrackAModelTest(unittest.TestCase):
         self.assertEqual(sum(row["optimizer_steps"] for row in history), 3)
         self.assertEqual(history[-1]["completed_task_optimizer_updates"], 3)
         self.assertAlmostEqual(history[-1]["next_learning_rate"], 0.0)
+
+    def test_per_task_optimizer_update_budget_is_resolved_exactly(self) -> None:
+        budgets = (1920, 1620, 360, 3570, 1710, 960, 240, 600)
+        self.assertEqual(
+            [optimizer_update_budget_for_task(task, None, budgets) for task in range(8)],
+            list(budgets),
+        )
+        self.assertEqual(optimizer_update_budget_for_task(7, 123, None), 123)
+        self.assertIsNone(optimizer_update_budget_for_task(0, None, None))
+        with self.assertRaises(ValueError):
+            optimizer_update_budget_for_task(0, 123, budgets)
+        with self.assertRaises(ValueError):
+            optimizer_update_budget_for_task(8, None, budgets)
+        with self.assertRaises(ValueError):
+            optimizer_update_budget_for_task(0, None, (0,))
 
     def test_relative_min_cosine_scales_every_parameter_group(self) -> None:
         first = nn.Parameter(torch.ones(()))
