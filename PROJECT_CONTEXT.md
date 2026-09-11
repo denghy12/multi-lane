@@ -1,5 +1,19 @@
 # 项目上下文
 
+## 2026-09-11：独立Face expert基础质量诊断完成
+
+batch `face_quality_seed0_20260911_001`三组均完成240 epochs/8,610 updates、0 skipped，退出码全0，
+无test/checkpoint。旧Face锚点、reliable_m15、reliable_m05、reliable_m05+jitter的可靠Face final
+mAP为`36.3096/37.3942/36.2327/36.4197`，固定R1 final mAP为
+`43.5812/43.4933/43.3646/43.3363`。三组均未同时提高Face和R1，advance=false，不补seed1/2、
+不运行test。
+
+可靠过滤使Face自身提高1.0846却使R1下降0.0879；m05与jitter进一步降低融合，说明更紧crop丢失
+头姿/周边语境，颜色增强主要改变阈值校准而没有增加互补排序信息。过滤还将旧锚点10,980 updates
+降至8,610，存在21.6%训练量混杂。下一步只值得做一次reliable_m15等更新量seed0 validation公平
+控制；若仍失败，停止crop/filter/基础增强，转向landmark对齐的面部表情预训练encoder。详见
+`docs/face_expert_quality_results_20260911.md`。
+
 ## 2026-09-11：启动独立Face expert质量诊断
 
 在动态Router/stacking收口后创建`codex/face-expert-quality-validation`。Full、Person及R1固定不变：

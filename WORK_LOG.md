@@ -1,5 +1,15 @@
 # 工作日志
 
+## 2026-09-11：同步并分析独立Face expert质量结果
+
+- 三组完整结束且状态全0；每组240 epochs、8,610 updates、0 skipped，无OOM/非有限值，未访问test。
+- 旧锚点/reliable_m15/m05/m05+jitter固定R1 final val mAP分别为
+  `43.581193/43.493266/43.364586/43.336309`；全部下降，双指标门槛均失败。
+- reliable_m15可靠Face自身提高`+1.084585`，但R1降低`-0.087927`；m05丢失脸周语境，jitter主要
+  改善oF1而破坏融合排序，均不应继续搜索。
+- 50个结果/score/log/status文件已同步；3.6MB归档两端SHA-256为
+  `8c869470...5121757`。下一步建议仅补一次reliable_m15等更新量公平控制。
+
 ## 2026-09-11：实现独立Face expert质量validation
 
 - 新建`codex/face-expert-quality-validation`，没有改动Full/Person模型或R1融合权重。

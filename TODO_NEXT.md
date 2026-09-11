@@ -1,16 +1,14 @@
 # 下一步任务
 
-## 当前执行：独立Face expert质量validation（2026-09-11）
+## 独立Face expert质量validation已完成（2026-09-11）
 
-1. 分支`codex/face-expert-quality-validation`锁定Full/Person与R1 beta0.20，只训练三个seed0 Face
-   候选：可靠训练过滤m15、可靠过滤m05、可靠过滤m05+轻量ColorJitter。
-2. 提交推送后服务器创建独立worktree；先完整单测、真实Face crop/filter和Adapter GPU smoke，
-   全部通过后在GPU0/1/2并行运行完整8-task validation。
-3. 只比较可靠Face final mAP与固定R1全量final mAP；两者相对旧Face锚点均至少+0.05才补
-   seed1/2。权重不搜索，当前阶段禁止test。
-4. 若三组均不通过，停止密集搜索Face margin/基础增强，重新评估Face专用表征而非继续调融合器。
-5. 正式batch `face_quality_seed0_20260911_001`当前在tmux
-   `multilane_face_quality_20260911`运行；完成后同步三组scores、summary、日志和状态并分析。
+1. 三组均完成；固定R1 final val mAP为m15过滤`43.4933`、m05`43.3646`、m05+jitter
+   `43.3363`，均低旧锚点`43.5812`。不补seed1/2、不test、不继续搜索margin/jitter。
+2. reliable_m15的Face可靠子集提高1.0846，但总updates因过滤少21.6%。下一步只做一个公平控制：
+   按旧锚点逐task updates `[1920,1620,360,3570,1710,960,240,600]`重跑reliable_m15，保持固定R1。
+3. 等更新量候选仍须同时提高Face可靠子集与R1 final mAP各至少0.05；失败则结束基础Face输入路线。
+4. 后续结构方向为landmark对齐的面部表情预训练encoder+task-specific轻量投影/Adapter，不再优化
+   融合器。完整结果见`docs/face_expert_quality_results_20260911.md`。
 
 ## 服务器环境恢复完成（2026-09-10）
 
