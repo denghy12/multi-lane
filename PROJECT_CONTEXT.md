@@ -1,5 +1,19 @@
 # 项目上下文
 
+## 2026-09-12：实现Face表情预训练专用表征
+
+创建`codex/face-expression-pretrained-validation`，停止Router与基础Face输入超参搜索。新增manifest
+五点landmark完整性/相似变换/逐task有效正例审计；EMOTIC新增默认关闭的五点相似变换对齐，锁定
+margin0.15和无效点letterbox回退。首轮锁定官方EmotiEffLib AffectNet EfficientNet-B0并冻结，比较
+task-specific Linear投影与task-specific b32零初始化残差Adapter；后者保持主BCE/Adapter
+ASL9.8/0/0.05。Full、Person、旧CLIP Face和可靠性mask均复用，R1 beta严格固定0.20。
+官方权重SHA-256锁定为`47c1423f...c652b17`。
+
+本轮仅seed0完整8-task validation，两组并行，30 epochs/task、batch64、Adam、head LR0.0125、
+Adapter LR4e-4、cosine min0、无warmup、AMP/TF32，不存checkpoint、不访问test。只有可靠Face子集
+与固定R1 final mAP均相对旧锚点至少提高0.05，才补seed1/2。协议见
+`docs/face_expression_pretrained_validation.md`。
+
 ## 2026-09-12：reliable_m15等更新量实验完成，基础Face输入路线停止
 
 唯一batch `face_reliable_equal_updates_seed0_20260911_094039`完整结束：逐task实际updates严格等于

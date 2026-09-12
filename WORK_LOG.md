@@ -1,5 +1,15 @@
 # 工作日志
 
+## 2026-09-12：开始Face表情预训练专用表征
+
+- 新分支`codex/face-expression-pretrained-validation`。
+- 增加五点相似变换对齐及覆盖/变换/逐task正例审计；默认数据行为保持不变。
+- 增加冻结EmotiEffLib AffectNet EfficientNet-B0的增量Face runner：task-specific Linear投影，或
+  task-specific零初始化b32残差Adapter。
+- 增加两组并行validation launcher与锁定R1 beta0.20的严格比较器；禁止test和权重搜索。
+- 预训练来源选择受官方EmotiEffLib文档与模型仓库约束；权重SHA-256锁定为
+  `47c1423f3e6f50e3750bf7b0eda7db947c9ce0c2637e1766bf2187eddc652b17`。
+
 ## 2026-09-12：同步并分析Face等更新量结果
 
 - batch完成300个数据循环、10,980次成功updates、0 skipped，8个task实际预算与旧锚点逐项相等；

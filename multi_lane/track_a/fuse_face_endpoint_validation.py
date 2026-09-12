@@ -94,6 +94,7 @@ def _validate_face_run(
     face_run: Path,
     manifest_root: Path,
     allow_face_training_budget_difference: bool = False,
+    allow_face_representation_difference: bool = False,
 ) -> Mapping[str, Any]:
     full_config = _load_json(full_run / "config.json")
     face_config = _load_json(face_run / "config.json")
@@ -112,6 +113,19 @@ def _validate_face_run(
             "training_budget_mode", "epochs_per_task", "scheduler"
         }:
             continue
+        if allow_face_representation_difference and field in {
+            "parameter_group_loss_routing",
+            "adapter_parameter_objective",
+            "asl",
+            "input_normalization",
+            "adapter_mode",
+            "adapter_bottleneck_dim",
+            "adapter_layer_indices",
+            "adapter_residual_scale",
+            "adapter_activation",
+            "adapter_learning_rate",
+        }:
+            continue
         if full_config.get(field) != face_config.get(field):
             raise ValueError(f"Face and Full runs differ on fixed config field {field}")
     return summary
@@ -124,15 +138,21 @@ def fuse_face_endpoint_validation(
     manifest_root: Path,
     betas: Sequence[float] = BETAS,
     allow_face_training_budget_difference: bool = False,
+    allow_face_representation_difference: bool = False,
+    require_stage1_grid: bool = True,
 ) -> Dict[str, Any]:
-    if tuple(float(value) for value in betas) != BETAS:
+    selected_betas = tuple(float(value) for value in betas)
+    if require_stage1_grid and selected_betas != BETAS:
         raise ValueError(f"Stage-1 beta grid is locked to {BETAS}")
+    if not selected_betas or any(value not in BETAS for value in selected_betas):
+        raise ValueError(f"Face beta values must be selected from {BETAS}")
     full_summary, person_summary = _validate_runs(full_run, person_run)
     face_summary = _validate_face_run(
         full_run,
         face_run,
         manifest_root,
         allow_face_training_budget_difference,
+        allow_face_representation_difference,
     )
     full_dumps, _ = validated_run_scores(full_run, "val")
     person_dumps, _ = validated_run_scores(person_run, "val")
@@ -140,7 +160,7 @@ def fuse_face_endpoint_validation(
     reliability = load_face_reliability(manifest_root)
 
     candidates: List[Dict[str, Any]] = [
-        {"beta": float(beta), "rows": []} for beta in betas
+        {"beta": float(beta), "rows": []} for beta in selected_betas
     ]
     face_all_rows: List[TaskMetrics] = []
     face_reliable_rows: List[TaskMetrics] = []

@@ -927,6 +927,7 @@ class EMOTIC(torch.utils.data.Dataset):
         face_crop_margin=0.15,
         face_min_training_short_side=0.0,
         face_min_training_score=0.0,
+        face_alignment='none',
     ):
         self.root = os.path.expanduser(root)
         self.transform = transform
@@ -963,6 +964,9 @@ class EMOTIC(torch.utils.data.Dataset):
         if not np.isfinite(self.person_crop_margin) or not 0.0 <= self.person_crop_margin <= 1.0:
             raise ValueError('EMOTIC person_crop_margin must be finite and in [0, 1].')
         self.face_crop_margin = float(face_crop_margin)
+        if face_alignment not in ('none', 'five_point'):
+            raise ValueError("EMOTIC face_alignment must be 'none' or 'five_point'.")
+        self.face_alignment = face_alignment
         self.face_min_training_short_side = float(face_min_training_short_side)
         self.face_min_training_score = float(face_min_training_score)
         if not np.isfinite(self.face_crop_margin) or not 0.0 <= self.face_crop_margin <= 1.0:
@@ -1123,6 +1127,14 @@ class EMOTIC(torch.utils.data.Dataset):
             # A CLIP-mean placeholder keeps batching deterministic.  It is never
             # used for Face loss or fusion because both paths apply the mask.
             return Image.new('RGB', (1, 1), color=(123, 117, 104))
+        if getattr(self, 'face_alignment', 'none') == 'five_point':
+            from multi_lane.track_a.face_alignment import align_face_five_points
+
+            aligned = align_face_five_points(
+                img, record, size=224, margin=self.face_crop_margin
+            )
+            if aligned is not None:
+                return aligned
         bbox = record.get('face_bbox')
         if bbox is None:
             # Compatibility with minimal fixtures and schema-v1 derivatives.
