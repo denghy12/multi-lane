@@ -4,9 +4,10 @@
 
 1. 官方EmotiEffLib AffectNet EfficientNet-B0权重已锁定，SHA-256为
    `47c1423f3e6f50e3750bf7b0eda7db947c9ce0c2637e1766bf2187eddc652b17`；冻结encoder和BatchNorm统计。
-2. 提交推送当前分支，服务器创建独立clean worktree；先运行完整单测和五点landmark审计。
-3. 审计通过后运行真实五点对齐dataset、checkpoint加载及projection/Adapter GPU smoke。
-4. 两张空闲GPU并行seed0完整8-task validation：task-specific Linear投影和task-specific b32
+2. 已提交推送并创建服务器独立clean worktree；187项完整单测与五点审计通过。
+3. 官方checkpoint、真实五点对齐dataset及projection/Adapter GPU smoke均通过，0非有限值，峰值不足
+   200MiB。
+4. 下一步两张GPU并行seed0完整8-task validation：task-specific Linear投影和task-specific b32
    Adapter；不访问test、不保存checkpoint。
 5. 自动按锁定R1 beta0.20比较。可靠Face与R1 final validation mAP必须各提高至少0.05才补
    seed1/2；否则停止该encoder候选，不改变融合器或Face输入阈值。

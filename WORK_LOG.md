@@ -11,6 +11,9 @@
   `47c1423f3e6f50e3750bf7b0eda7db947c9ce0c2637e1766bf2187eddc652b17`。
 - 服务器首次加载发现官方权重使用新版`timm.layers` pickle路径；加载器增加精确模块别名以兼容项目
   锁定的`timm0.6.7`，不升级或扰动共享训练环境。
+- 服务器独立worktree完成187项全测；五点审计train/val覆盖99.968%/100%、变换失败0，仅4个train
+  样本回退。官方checkpoint输出1280维有限特征且参数全冻结；真实4样本projection和Adapter单步GPU
+  smoke通过，loss有限，峰值显存分别约190/194MiB。
 
 ## 2026-09-12：同步并分析Face等更新量结果
 

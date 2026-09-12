@@ -14,6 +14,11 @@ Adapter LR4e-4、cosine min0、无warmup、AMP/TF32，不存checkpoint、不访�
 与固定R1 final mAP均相对旧锚点至少提高0.05，才补seed1/2。协议见
 `docs/face_expression_pretrained_validation.md`。
 
+服务器独立worktree为`/mnt/haoyuan/workspace/multi-lane-main-face-expression-pretrained`。187项完整
+单测通过；官方权重在锁定`timm0.6.7`兼容映射后加载成功，冻结特征维度1280。五点审计train/val
+覆盖为99.968%/100%，仅4个train样本回退，变换失败0；真实4样本projection/Adapter GPU训练步均
+有限，峰值显存分别190/194MiB。
+
 ## 2026-09-12：reliable_m15等更新量实验完成，基础Face输入路线停止
 
 唯一batch `face_reliable_equal_updates_seed0_20260911_094039`完整结束：逐task实际updates严格等于
