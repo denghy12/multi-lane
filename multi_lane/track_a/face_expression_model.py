@@ -3,12 +3,30 @@
 from __future__ import annotations
 
 from pathlib import Path
+import importlib
+import sys
 from typing import Iterable, Optional, Sequence, Tuple
 
 import torch
 from torch import nn
 
 from .adapter import TransformerBlockAdapter
+
+
+def _install_timm_checkpoint_compatibility_aliases() -> None:
+    """Map current EmotiEffLib pickle paths onto the project's timm 0.6 API."""
+    aliases = {
+        "timm.layers": "timm.models.layers",
+        "timm.layers.adaptive_avgmax_pool": (
+            "timm.models.layers.adaptive_avgmax_pool"
+        ),
+        "timm.layers.conv2d_same": "timm.models.layers.conv2d_same",
+        "timm.layers.norm_act": "timm.models.layers.norm_act",
+        "timm.models._efficientnet_blocks": "timm.models.efficientnet_blocks",
+    }
+    for serialized_name, installed_name in aliases.items():
+        if serialized_name not in sys.modules:
+            sys.modules[serialized_name] = importlib.import_module(installed_name)
 
 
 def load_frozen_emotieff_encoder(checkpoint: Path) -> Tuple[nn.Module, int]:
@@ -18,6 +36,8 @@ def load_frozen_emotieff_encoder(checkpoint: Path) -> Tuple[nn.Module, int]:
     # The official artifact serializes the complete timm EfficientNet object.
     # Importing timm registers its module classes before torch unpickles it.
     import timm  # noqa: F401
+
+    _install_timm_checkpoint_compatibility_aliases()
 
     try:
         model = torch.load(checkpoint, map_location="cpu", weights_only=False)

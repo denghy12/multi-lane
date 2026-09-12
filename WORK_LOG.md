@@ -9,6 +9,8 @@
 - 增加两组并行validation launcher与锁定R1 beta0.20的严格比较器；禁止test和权重搜索。
 - 预训练来源选择受官方EmotiEffLib文档与模型仓库约束；权重SHA-256锁定为
   `47c1423f3e6f50e3750bf7b0eda7db947c9ce0c2637e1766bf2187eddc652b17`。
+- 服务器首次加载发现官方权重使用新版`timm.layers` pickle路径；加载器增加精确模块别名以兼容项目
+  锁定的`timm0.6.7`，不升级或扰动共享训练环境。
 
 ## 2026-09-12：同步并分析Face等更新量结果
 

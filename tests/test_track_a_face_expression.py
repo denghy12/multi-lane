@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+import sys
 
 import numpy as np
 import torch
@@ -13,7 +14,10 @@ from multi_lane.track_a.face_alignment import (
     estimate_similarity_transform,
     valid_five_point_landmarks,
 )
-from multi_lane.track_a.face_expression_model import FaceExpressionIncrementalModel
+from multi_lane.track_a.face_expression_model import (
+    FaceExpressionIncrementalModel,
+    _install_timm_checkpoint_compatibility_aliases,
+)
 
 
 class TinyEncoder(nn.Module):
@@ -71,6 +75,11 @@ class FaceExpressionModelTest(unittest.TestCase):
         self.assertFalse(model.encoder.training)
         self.assertTrue(all(not parameter.requires_grad for parameter in model.encoder.parameters()))
         self.assertTrue(all(parameter.requires_grad for parameter in model.heads[0].parameters()))
+
+    def test_checkpoint_module_aliases_support_locked_timm(self) -> None:
+        _install_timm_checkpoint_compatibility_aliases()
+        self.assertIn("timm.layers.adaptive_avgmax_pool", sys.modules)
+        self.assertIn("timm.models._efficientnet_blocks", sys.modules)
 
     def test_new_task_does_not_change_old_head_logits(self) -> None:
         torch.manual_seed(5)
