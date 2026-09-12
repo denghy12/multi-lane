@@ -1,5 +1,18 @@
 # 项目上下文
 
+## 2026-09-12：reliable_m15等更新量实验完成，基础Face输入路线停止
+
+唯一batch `face_reliable_equal_updates_seed0_20260911_094039`完整结束：逐task实际updates严格等于
+`[1920,1620,360,3570,1710,960,240,600]`，总计10,980，0 skipped、各scheduler终点LR0，未读test、
+无checkpoint。可靠Face final val mAP由旧锚点36.3096降至36.1713（-0.1384），固定R1由43.5812
+降至43.4675（-0.1137），双`+0.05`门槛失败，不补seed1/2、不test。
+
+等更新量版本相对同过滤30-epoch版本的可靠Face又下降1.2229，R1下降0.0257，说明之前失败不是少
+21.6%更新造成的欠拟合；更像较小、偏置可靠子集上的排序过拟合。按预案停止margin、过滤阈值和基础
+增强搜索。下一阶段改用五点landmark对齐的表情预训练Face encoder与task-specific轻量投影/Adapter，
+固定Full、Person与R1验证其是否带来真正新增信息。详见
+`docs/face_reliable_equal_updates_results_20260912.md`。
+
 ## 2026-09-11：实现reliable_m15等更新量公平实验
 
 创建`codex/face-reliable-equal-updates`，只补一个seed0完整8-task validation控制。新增按task指定成功

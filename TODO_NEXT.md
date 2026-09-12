@@ -1,5 +1,18 @@
 # 下一步任务
 
+## 下一阶段：Face表情预训练专用表征（2026-09-12）
+
+1. reliable_m15等更新量控制已失败：可靠Face/R1分别相对旧锚点`-0.1384/-0.1137`；不补seed1/2、
+   不运行test，正式停止margin、过滤阈值和基础增强路线。
+2. 新建独立实验分支，复用manifest已有`face_keypoints`审计五点覆盖、顺序、有限性和对齐边界；无需
+   重跑Face detector。
+3. 引入AffectNet/FERPlus等表情预训练encoder，冻结主干；恢复旧锚点`valid && !ambiguous`训练池，
+   用五点相似变换+margin0.15上下文，无效关键点回退letterbox并保留mask。
+4. seed0 validation最小比较旧CLIP Face锚点、表情encoder+task-specific轻量投影、表情encoder+
+   task-specific bottleneck Adapter；Full、Person和R1 beta0.20固定。
+5. 仍执行Face可靠子集与固定R1 final mAP各至少`+0.05`的双门槛；通过后才补seed1/2并考虑一次锁定
+   test。开始编码前先锁定预训练权重来源、许可、输入分辨率/normalization和权重SHA。
+
 ## 当前执行：reliable_m15等更新量公平实验（2026-09-11）
 
 1. 已实现按task成功updates预算：`[1920,1620,360,3570,1710,960,240,600]`，总计10,980；

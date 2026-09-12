@@ -1,5 +1,18 @@
 # 工作日志
 
+## 2026-09-12：同步并分析Face等更新量结果
+
+- batch完成300个数据循环、10,980次成功updates、0 skipped，8个task实际预算与旧锚点逐项相等；
+  launcher/summary均exit0，无OOM/NaN，test未访问。
+- 可靠Face final mAP `36.171260`，相对旧锚点`-0.138350`；固定R1 `43.467534`，相对旧锚点
+  `-0.113659`。双0.05门槛失败，不补seed1/2、不test。
+- R1的8个task mAP全部下降；final cF1/oF1略升但mAP下降，类别上Sadness/Anger/Aversion/Peace的
+  损失抵消少数类别收益，定位为阈值校准变化而非排序提升。
+- 19个非checkpoint产物已同步到本地并打包，服务器/本地SHA-256均为
+  `e0720999...00b8a8`。按协议关闭margin/filter/basic augmentation路线。
+- 下一步只做Face专用表征：审计既有五点关键点，冻结表情预训练encoder，接task-specific轻量投影
+  或Adapter；Full、Person和固定R1保持不变。
+
 ## 2026-09-11：reliable_m15等更新量控制实现
 
 - 从`9fd6b43`创建`codex/face-reliable-equal-updates`，没有修改或暂存四份用户未跟踪的Adapter调参文档。
