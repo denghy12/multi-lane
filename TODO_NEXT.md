@@ -1,5 +1,17 @@
 # 下一步任务
 
+## 下一候选：OOF跨视图教师蒸馏Full lane（未启动）
+
+1. Face表情预训练projection、Adapter和CLIP+AffectNet残差均未提高可靠Face或R1；停止该路线，
+   不补seed1/2、不test、不再调rank/scale/LR。
+2. 保持旧CLIP Face和固定R1不变；复用已有image-group OOF Person/Face scores和稳定sample ID。
+3. 只对每task当前新类构造强正则软教师，与真实BCE/Adapter ASL共同训练Full lane；旧task
+   selectors/prompts/head/Adapter与蒸馏目标都不再改动。
+4. seed0完整8-task validation最小比较：D0 fresh Full champion、D1 Person OOF teacher、
+   D2 Person+Face OOF teacher。
+5. 先要求Full standalone final/average mAP高于D0，再将对应Full scores代入锁定R1检查是否继续
+   提高；失败时不扩大蒸馏权重网格。
+
 ## 当前执行：CLIP Face + AffectNet补充残差（2026-09-13）
 
 1. 新分支只实现一个混合候选：旧CLIP Face主路径不变，冻结AffectNet embedding+8类logits通过
@@ -10,7 +22,8 @@
 4. 失败首启动未执行优化；dict输入路由修复后，干净batch
    `face_expression_residual_seed0_20260913_143719_retry1`已在GPU5/tmux
    `ml_face_expr_residual_retry1`正常运行完整8-task validation。仍固定R1 beta0.20、不存checkpoint、不访问test。
-5. 只有可靠Face与固定R1 final mAP均至少+0.05才补seed1/2；否则结束Face专用表征路线。
+5. 已完成：可靠Face/固定R1相对锚点`-0.9660/-0.2765`，双门槛失败。不补seed1/2、
+   不test，Face专用表征路线结束。
 
 ## 当前执行：Face表情预训练专用表征（2026-09-12）
 

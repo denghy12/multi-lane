@@ -1,5 +1,15 @@
 # 工作日志
 
+## 2026-09-13：同步并分析CLIP Face + AffectNet补充残差
+
+- batch完成240 epochs/10,980 updates/0 skipped，exit0，无OOM/NaN，test未访问。
+- Face all/可靠Face/固定R1 final mAP相对锚点为`-1.5959/-0.9660/-0.2765`；R1八个task
+  全部下降，forgetting变差`+0.0661`。
+- 17个非checkpoint结果文件已同步至本地`output/emotic_track_a_face_expression_residual/`，三组
+  逐文件SHA-256均与服务器一致。
+- 按预注册门槛停止Face专用表征，不补seed1/2、不test。下一候选为OOF跨视图教师
+  蒸馏Full lane，先做seed0 validation三组最小对照。
+
 ## 2026-09-13：开始CLIP Face + AffectNet补充残差
 
 - 创建`codex/face-expression-residual-validation`，不修改或暂存四份用户未跟踪的Adapter调参文档。

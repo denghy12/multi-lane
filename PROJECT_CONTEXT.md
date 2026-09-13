@@ -1,5 +1,17 @@
 # 项目上下文
 
+## 2026-09-13：CLIP Face + AffectNet补充残差失败，Face专用表征路线结束
+
+seed0完整8-task validation batch `face_expression_residual_seed0_20260913_143719_retry1`完成：
+240 epochs、10,980 updates、0 skipped，无OOM/NaN、checkpoint或test访问。候选的Face all/可靠Face/
+固定R1 final mAP为`31.7562/35.3436/43.3047`，相对旧CLIP Face锚点变化
+`-1.5959/-0.9660/-0.2765`。R1的8个task全部下降，forgetting从`0.9039`增至`0.9701`。
+
+两项`+0.05`门槛均失败，不补seed1/2、不test，按协议结束Face专用表征路线；保留旧
+CLIP Face与固定R1。下一个首选ViT-B/16方向是复用现有OOF预测做当前新类的跨视图教师蒸馏，
+辅助视图仅提供训练监督，不再直接写入推理特征。结果详见
+`docs/face_expression_residual_results_20260913.md`。
+
 ## 2026-09-13：实现CLIP Face + AffectNet补充残差
 
 从`376885a`创建`codex/face-expression-residual-validation`。上一轮AffectNet完全替换CLIP Face失败后，
