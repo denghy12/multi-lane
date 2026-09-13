@@ -1,5 +1,15 @@
 # 工作日志
 
+## 2026-09-13：同步并分析OOF跨视图蒸馏结果
+
+- D0/D1/D2均完成240 epochs、13,950 updates、0 skipped，exit0，无OOM/NaN/test访问。
+- 49个配置、指标、历史、validation scores、日志和比较文件已同步到本地，逐文件
+  SHA-256一致，总计5.0MB，无checkpoint。
+- D1的Full final/average/固定R1 final相对D0为`-0.2908/-1.1380/-0.4773`；D2为
+  `+0.1928/-0.4150/-0.0754`，两者都未通过锁定门槛，不补seed1/2、不test。
+- 额外OOF教师审计显示Person/Person+Face在所有task均弱于Full OOF；固定R1 OOF则在所有
+  task均提高AP且降低BCE。下一候选为仅运行D3 R1-OOF教师seed0 validation。
+
 ## 2026-09-13：开始OOF跨视图教师蒸馏Full lane
 
 - 新建`exp/oof-cross-view-distillation`；四份用户未跟踪Adapter调参文档保持未修改。

@@ -1,5 +1,17 @@
 # 项目上下文
 
+## 2026-09-13：OOF跨视图蒸馏D1/D2未通过门槛
+
+batch `oof_distillation_seed0_20260913_230500`的D0/D1/D2均正常完成，未访问test。
+D1 Person OOF的Full final/average/固定R1 final相对D0为`-0.2908/-1.1380/-0.4773`；
+D2 Person+Face OOF为`+0.1928/-0.4150/-0.0754`，因此不补seed1/2、不test。
+
+D2改善Full的Sadness/Sensitivity/Suffering `+4.5477/+0.5620/+3.7853`，证明跨视图
+信息可蒸馏；但auxiliary-only OOF教师在8个task上均弱于Full OOF且BCE更高，导致
+早期类别广泛损失。下一个最小实验应仅为D3：用在8 task上均强于Full OOF的无泄漏
+固定R1 OOF集成教师，保持mix0.20和其他设置不变。详见
+`docs/oof_cross_view_distillation_results_20260913.md`。
+
 ## 2026-09-13：实现OOF跨视图教师蒸馏Full lane
 
 创建`exp/oof-cross-view-distillation`，复用已有三折image-group OOF Person/Face预测，不重训
