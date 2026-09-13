@@ -5,12 +5,13 @@ import unittest
 import torch
 from PIL import Image
 from torch import nn
+from torch.utils.data import DataLoader
 
 from test_track_a_reproduction import FakeVisual
 from multi_lane.track_a.face_dual_transform import DualFaceTransform
 from multi_lane.track_a.face_expression_residual import FaceExpressionResidualModel
 from multi_lane.track_a.model import MultiLaneModel
-from multi_lane.track_a.runner import build_optimizer_groups
+from multi_lane.track_a.runner import TASK_SIZES, build_optimizer_groups, train_task
 
 
 class TinyExpressionEncoder(nn.Module):
@@ -22,7 +23,9 @@ class TinyExpressionEncoder(nn.Module):
         return self.projection(images.mean(dim=(2, 3)))
 
 
-def hybrid_model(seed: int = 17) -> FaceExpressionResidualModel:
+def hybrid_model(
+    seed: int = 17, task_sizes: tuple[int, ...] = (2, 1)
+) -> FaceExpressionResidualModel:
     expression = TinyExpressionEncoder()
     classifier = nn.Linear(6, 8)
     torch.manual_seed(seed)
@@ -31,7 +34,7 @@ def hybrid_model(seed: int = 17) -> FaceExpressionResidualModel:
         expression_classifier=classifier,
         expression_feature_dim=6,
         visual_encoder=FakeVisual(),
-        task_sizes=(2, 1),
+        task_sizes=task_sizes,
         num_selectors=2,
         num_prompts=2,
         num_prompt_layers=1,
@@ -91,6 +94,29 @@ class FaceExpressionResidualTest(unittest.TestCase):
         self.assertTrue(residual <= set(map(id, model_parameters)))
         self.assertFalse(residual.intersection(map(id, adapter_parameters)))
         self.assertEqual(groups[-2]["lr"], 4e-4)
+
+    def test_dual_face_batch_is_not_treated_as_selector_conditioning(self) -> None:
+        model = hybrid_model(task_sizes=TASK_SIZES)
+        inputs = {
+            "clip": torch.randn(2, 3, 4, 4),
+            "expression": torch.randn(2, 3, 4, 4),
+        }
+        targets = torch.tensor(
+            [[1, 0, 1, 0, 1], [0, 1, 0, 1, 0]], dtype=torch.float32
+        )
+        items = [
+            ({name: values[index] for name, values in inputs.items()}, targets[index])
+            for index in range(len(targets))
+        ]
+        loader = DataLoader(items, batch_size=2)
+        history = train_task(
+            model, loader, loader, torch.device("cpu"), task_id=0, epochs=1,
+            learning_rate=1e-3, weight_decay=0.0, temperature=1.0, amp=False,
+            adapter_learning_rate=4e-4, loss_routing="adapter_asl",
+            view_fusion_learning_rate=4e-4,
+        )
+        self.assertEqual(len(history), 1)
+        self.assertNotIn("selector_condition_valid_fraction", history[0])
 
     def test_dual_transform_keeps_two_views_and_invalid_placeholders(self) -> None:
         transform = DualFaceTransform(train=False)

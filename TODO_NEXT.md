@@ -8,8 +8,8 @@
 3. 191项完整单测与真实双encoder GPU smoke已通过；零残差误差`1.55e-7`，两条loss梯度有限且路由
    正确，冻结主干无梯度。
 4. 唯一batch `face_expression_residual_seed0_20260913_143719`已在tmux
-   `ml_face_expr_residual_143719`排队；launcher等待任一GPU达到8GiB空闲后自动运行完整8-task
-   validation，固定R1 beta0.20、不存checkpoint、不访问test。
+   `ml_face_expr_residual_143719`用GPU5/6GiB门槛启动；首batch在优化前暴露dict输入路由误判，
+   修复及回归测试完成后重启完整8-task validation。仍固定R1 beta0.20、不存checkpoint、不访问test。
 5. 只有可靠Face与固定R1 final mAP均至少+0.05才补seed1/2；否则结束Face专用表征路线。
 
 ## 当前执行：Face表情预训练专用表征（2026-09-12）

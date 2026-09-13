@@ -17,6 +17,9 @@ AffectNet与CLIP主干无梯度。当前8卡仅约6.4GiB空闲，launcher改为�
 避免与现有任务叠加导致OOM。唯一batch为`face_expression_residual_seed0_20260913_143719`，
 tmux为`ml_face_expr_residual_143719`，结果根目录为
 `/mnt/haoyuan/workspace/emotic_benchmark_runs/multi_lane_face_expression_residual_v0.1/face_expression_residual_seed0_20260913_143719`。
+用户确认6.3--6.5GiB可叠加后改用GPU5/6GiB门槛立即启动；首batch在优化前暴露通用训练循环
+将所有dict输入误当成Selector conditioning。已改为仅在存在`condition_valid`时统计该路径，
+并增加双Face dict batch完整训练回归测试；失败运行未执行优化、未读test。
 
 ## 2026-09-12：实现Face表情预训练专用表征
 

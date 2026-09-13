@@ -1142,7 +1142,7 @@ def train_task(
                 and completed_task_updates >= optimizer_updates_per_task
             ):
                 break
-            if isinstance(images, dict):
+            if isinstance(images, dict) and "condition_valid" in images:
                 condition_samples += len(images["condition_valid"])
                 condition_valid_total += float(images["condition_valid"].sum())
                 condition_visible_total += float(images["bbox"][:, 4].sum())
