@@ -1,5 +1,17 @@
 # 项目上下文
 
+## 2026-09-13：实现OOF跨视图教师蒸馏Full lane
+
+创建`exp/oof-cross-view-distillation`，复用已有三折image-group OOF Person/Face预测，不重训
+教师。新增训练batch软目标和严格OOF样本ID/标签/类别/覆盖审计；主模型损失固定为
+`0.8 * hard BCE + 0.2 * OOF soft BCE`，两项都使用legacy full-zero视图，Adapter仍只使用
+真实标签ASL 9.8/0/0.05。
+
+首轮seed0完整8-task validation比较D0 fresh Full、D1 Person OOF teacher、D2 Person+Face OOF
+teacher。D2在可靠Face上按锁定R1辅助比例`4/9:5/9`合成，无效Face回退Person。候选只有
+同时满足Full final `+0.05`、Full average不降、锁定R1 final `+0.05`才补seed1/2；本阶段
+禁止test。详见`docs/oof_cross_view_distillation.md`。
+
 ## 2026-09-13：CLIP Face + AffectNet补充残差失败，Face专用表征路线结束
 
 seed0完整8-task validation batch `face_expression_residual_seed0_20260913_143719_retry1`完成：

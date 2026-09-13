@@ -1,5 +1,14 @@
 # 工作日志
 
+## 2026-09-13：开始OOF跨视图教师蒸馏Full lane
+
+- 新建`exp/oof-cross-view-distillation`；四份用户未跟踪Adapter调参文档保持未修改。
+- 服务器旧OOF产物审计为3 folds x 3 views x 8 task scores，9个source完整，可直接复用。
+- 训练循环增加仅主参数使用的OOF软BCE，与硬BCE固定`0.20/0.80`混合；Adapter路由保持
+  hard-label ASL。历史无蒸馏调用默认mix0，兼容不变。
+- 新增OOF teacher bank、Full蒸馏runner、D0/D1/D2三卡launcher、锁定R1比较器、回归测试和
+  协议文档。当前尚未提交、未运行服务器测试或启动实验。
+
 ## 2026-09-13：同步并分析CLIP Face + AffectNet补充残差
 
 - batch完成240 epochs/10,980 updates/0 skipped，exit0，无OOM/NaN，test未访问。

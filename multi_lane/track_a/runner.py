@@ -356,6 +356,29 @@ def compute_training_loss(
     )
 
 
+def compute_oof_distillation_loss(
+    logits: torch.Tensor,
+    teacher_probabilities: torch.Tensor,
+    current_class_indices: Sequence[int],
+    temperature: float,
+    loss_mode: str,
+) -> torch.Tensor:
+    """BCE against leakage-free soft targets on the historical loss view."""
+    if not torch.isfinite(teacher_probabilities).all():
+        raise FloatingPointError("OOF teacher probabilities contain non-finite values")
+    if bool((teacher_probabilities < 0).any()) or bool(
+        (teacher_probabilities > 1).any()
+    ):
+        raise ValueError("OOF teacher probabilities must be in [0, 1]")
+    return compute_training_loss(
+        logits,
+        teacher_probabilities,
+        current_class_indices,
+        temperature,
+        loss_mode,
+    )
+
+
 def training_loss_view(
     logits: torch.Tensor,
     current_targets: torch.Tensor,
@@ -1054,6 +1077,7 @@ def train_task(
     selector_condition_learning_rate: float = 4e-4,
     view_fusion_learning_rate: float = 4e-4,
     view_auxiliary_loss_weight: float = 0.0,
+    oof_distillation_mix: float = 0.0,
 ) -> List[Dict[str, float]]:
     if loss_routing not in {
         "joint_bce", "model_asl", "adapter_asl", "both_asl"
@@ -1075,6 +1099,8 @@ def train_task(
         raise ValueError("View auxiliary loss weight must be in [0, 1]")
     if model.view_fusion == "disabled" and view_auxiliary_loss_weight != 0:
         raise ValueError("View auxiliary supervision requires enabled view fusion")
+    if not math.isfinite(oof_distillation_mix) or not 0 <= oof_distillation_mix < 1:
+        raise ValueError("OOF distillation mix must be finite and in [0, 1)")
     model_parameters, adapter_parameters, optimizer_groups = build_optimizer_groups(
         model=model,
         weight_decay=weight_decay,
@@ -1118,6 +1144,8 @@ def train_task(
         adapter_base_loss_total = 0.0
         adapter_regularization_total = 0.0
         adapter_regularization_metric_total = 0.0
+        supervised_bce_total = 0.0
+        oof_distillation_total = 0.0
         batches = 0
         optimizer_steps = 0
         skipped_steps = 0
@@ -1136,7 +1164,15 @@ def train_task(
             float(optimizer.param_groups[2]["lr"])
             if model.selector_conditioner is not None else None
         )
-        for images, current_targets in loader:
+        for batch in loader:
+            if not isinstance(batch, (tuple, list)) or len(batch) not in (2, 3):
+                raise ValueError("Training batch must contain two or three fields")
+            images, current_targets = batch[:2]
+            teacher_probabilities = batch[2] if len(batch) == 3 else None
+            if (teacher_probabilities is None) != (oof_distillation_mix == 0):
+                raise ValueError(
+                    "OOF teacher batches and distillation mix must be enabled together"
+                )
             if (
                 optimizer_updates_per_task is not None
                 and completed_task_updates >= optimizer_updates_per_task
@@ -1148,18 +1184,22 @@ def train_task(
                 condition_visible_total += float(images["bbox"][:, 4].sum())
             images = move_model_inputs(images, device)
             current_targets = current_targets.to(device, non_blocking=True).float()
+            if teacher_probabilities is not None:
+                teacher_probabilities = teacher_probabilities.to(
+                    device, non_blocking=True
+                ).float()
             optimizer.zero_grad(set_to_none=True)
             with torch.cuda.amp.autocast(enabled=amp):
                 logits, view_logits = model.current_all_logits_with_views(images)
-                bce_loss = compute_training_loss(
+                supervised_bce_loss = compute_training_loss(
                     logits,
                     current_targets,
                     current,
                     temperature,
                     loss_mode,
                 )
-                bce_loss = add_view_auxiliary_loss(
-                    bce_loss,
+                supervised_bce_loss = add_view_auxiliary_loss(
+                    supervised_bce_loss,
                     view_logits,
                     images,
                     current_targets,
@@ -1168,6 +1208,19 @@ def train_task(
                     loss_mode,
                     view_auxiliary_loss_weight,
                     "bce",
+                )
+                oof_distillation_loss = logits.new_zeros(())
+                if teacher_probabilities is not None:
+                    oof_distillation_loss = compute_oof_distillation_loss(
+                        logits,
+                        teacher_probabilities,
+                        current,
+                        temperature,
+                        loss_mode,
+                    )
+                bce_loss = (
+                    (1.0 - oof_distillation_mix) * supervised_bce_loss
+                    + oof_distillation_mix * oof_distillation_loss
                 )
                 asl_loss = None
                 if loss_routing != "joint_bce":
@@ -1272,6 +1325,8 @@ def train_task(
             adapter_regularization_metric_total += float(
                 regularization_metric.detach().cpu()
             )
+            supervised_bce_total += float(supervised_bce_loss.detach().cpu())
+            oof_distillation_total += float(oof_distillation_loss.detach().cpu())
             batches += 1
             fusion_means = model.fusion_weight_means()
             if fusion_means is not None:
@@ -1295,6 +1350,9 @@ def train_task(
             "adapter_regularization_metric": (
                 adapter_regularization_metric_total / batches
             ),
+            "supervised_bce_loss": supervised_bce_total / batches,
+            "oof_distillation_loss": oof_distillation_total / batches,
+            "oof_distillation_mix": float(oof_distillation_mix),
             "adapter_regularization_weight": (
                 regularization_weight if regularization_weight is not None else 0.0
             ),

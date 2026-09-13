@@ -1,16 +1,16 @@
 # 下一步任务
 
-## 下一候选：OOF跨视图教师蒸馏Full lane（未启动）
+## 当前执行：OOF跨视图教师蒸馏Full lane
 
 1. Face表情预训练projection、Adapter和CLIP+AffectNet残差均未提高可靠Face或R1；停止该路线，
    不补seed1/2、不test、不再调rank/scale/LR。
-2. 保持旧CLIP Face和固定R1不变；复用已有image-group OOF Person/Face scores和稳定sample ID。
-3. 只对每task当前新类构造强正则软教师，与真实BCE/Adapter ASL共同训练Full lane；旧task
+2. 保持旧CLIP Face和固定R1不变；已审计现有image-group OOF为9个完整source，不重训教师。
+3. 只对每task当前新类构造软教师，固定硬BCE/软BCE=`0.80/0.20`；Adapter ASL不变，旧task
    selectors/prompts/head/Adapter与蒸馏目标都不再改动。
 4. seed0完整8-task validation最小比较：D0 fresh Full champion、D1 Person OOF teacher、
    D2 Person+Face OOF teacher。
-5. 先要求Full standalone final/average mAP高于D0，再将对应Full scores代入锁定R1检查是否继续
-   提高；失败时不扩大蒸馏权重网格。
+5. 选择门槛固定为Full final至少`+0.05`、Full average不降、锁定R1 final至少`+0.05`。
+   下一步本地审查后提交推送，服务器新建clean worktree，全测和GPU smoke通过后三卡并行；禁止test。
 
 ## 当前执行：CLIP Face + AffectNet补充残差（2026-09-13）
 
