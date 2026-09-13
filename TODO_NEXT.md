@@ -1139,3 +1139,12 @@ VOC 对照实验，不应在现阶段合并到 `main`。
     本轮停止，不继续扩大MLP、不放宽门槛。结果/192份gate states/日志已同步并通过哈希审计。
 58. 若未来继续研究，另立阶段处理小样本calibration泛化和当前task更新对旧类排序的影响；当前保留
     固定Full0.80/Person0.20。不将未胜出的门控或validation指标描述为正式test新冠军。
+-
+59. 提交并推送`exp/three-architecture-locked-test`，服务器先审计全部worktree并创建新的独立clean
+    worktree；禁止修改`multi-lane-main-test-only`及任何已有实验工作树。
+60. 在服务器`ddp`环境运行完整单测；随后分别对J0、A2执行真实EMOTIC task0/1epoch test-score-dump
+    GPU smoke，并对C2执行锁定状态/descriptor/R1复现只读smoke。任一失败不得启动正式批次。
+61. smoke通过后确认7张卡各至少9GiB空闲，GPU0--5并行J0/A2×seed0/1/2六组完整test，GPU6并行
+    C2三种子离线评估。允许与其他任务共卡，但首轮后必须复查显存、skipped steps和错误日志。
+62. 完成后统一报告R1、C2、J0、A2的final/average mAP、cF1/oF1、forgetting三种子均值±样本标准差；
+    明确这些是validation锁定后的探索性横向test补测，不基于test继续调参。

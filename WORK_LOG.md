@@ -3634,3 +3634,14 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
   降低后的advance规则为C2相对C0/C1均至少+0.05 final mAP，并通过两类以上和80%最大贡献占比检查。
 - 新增4项初始化、Face mask、类别隔离和rank2零初始化回归，以及单GPU安全launcher和协议文档。
   本地Python编译、shell语法和diff检查通过；完整依赖测试与真实数据运行待服务器执行。
+-
+## 2026-09-14：准备C2/J0/A2锁定test横向补测
+
+- 从`exp/oof-advantage-ranking-distillation`创建`exp/three-architecture-locked-test`；保留既有4份
+  未跟踪调参文档和`tmp/`，未纳入本次提交。
+- 新增C2 test evaluator：校验validation selection SHA-256、逐task state SHA、test descriptor/
+  Face manifest与三种子固定R1源；只评估唯一best C2，并输出逐seed、逐task、逐类权重和聚合指标。
+- 新增J0/A2 seed0/1/2锁定test runner、7卡并行launcher和统一汇总器。6个训练进程分配GPU0--5，
+  C2只读评估分配GPU6；只设显存余量门槛，不要求GPU空闲，以支持用户指定的显存叠加运行。
+- 本地系统Python缺少numpy/torch，依赖型单测留待服务器`ddp`环境；Python源码静态编译、shell
+  语法、diff检查需在提交前完成。尚未启动服务器实验。

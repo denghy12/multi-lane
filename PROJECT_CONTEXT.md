@@ -1952,3 +1952,18 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   提高超过0.01，且单一类别不超过全部正增益的80%。全部满足才进入seed1/2，当前阶段禁止test。
 - 实现、测试、单GPU launcher和协议见`docs/class_aware_oof_stacking.md`。下一步Git-only同步服务器
   独立worktree，运行完整单测和真实OOF短smoke，通过后执行唯一seed0完整validation选择。
+-
+## 2026-09-14 validation锁定结构的横向test补测
+
+- 用户为组会横向比较明确要求补齐仅做过validation的最佳结构。固定R1已有seed0/1/2正式test
+  `33.0119±0.3038`，不重复训练；本轮新增C2、J0、A2的锁定test，禁止在test搜索权重或参数。
+- C2复用`class_aware_oof_seed0_20260911_002`由seed0三折image-group OOF选出的
+  `C2_rank2_prior10p0`及其8个task快照，并把同一锁定stacker应用到三个seed的独立专家test预测。
+  该项是探索性跨seed泛化评估，不重新训练C2，也不把test结果用于回选。
+- J0/A2各从头运行seed0/1/2完整8-task test：30 epochs/task、batch64、main LR0.0125、per-task
+  cosine min0无warmup、CLIP normalization、legacy crop、Image-token layer1/b32/LR4e-4/scale0.1/
+  ReLU/independent、主BCE+Adapter ASL9.8/0/0.05、AMP/TF32开启。J0为固定三路特征融合+0.1
+  辅助监督；A2为Full恒1的Person/Face taskwise零初始化残差、aux loss0。
+- 六组训练不保存checkpoint，保存`evaluation_scores`用于复核；结果写入服务器
+  `emotic_benchmark_runs/multi_lane_locked_architecture_test_v0.1/`，日志、状态和综合汇总写入当前
+  worktree的`logs/output/emotic_track_a_locked_architecture_test/`。启动前须完整单测及真实GPU smoke。

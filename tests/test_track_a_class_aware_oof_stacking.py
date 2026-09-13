@@ -9,11 +9,23 @@ from multi_lane.track_a.class_aware_oof_stacking import (
     ClassAwareStacker,
     _named_final_ap_gains,
 )
+from multi_lane.track_a.evaluate_class_aware_oof_test import _select_locked_c2
 from multi_lane.track_a.runner import CLASS_ORDER
 from multi_lane.track_a.three_view_router import INVALID_PRIOR, VALID_PRIOR
 
 
 class ClassAwareOofStackingTest(unittest.TestCase):
+    def test_test_evaluator_accepts_only_validation_locked_rank_two_candidate(self) -> None:
+        selection = {
+            "selection_split": "val",
+            "test_accessed": False,
+            "best_C2": {"family": "C2", "rank": 2, "tasks": [{}] * 8},
+        }
+        self.assertIs(_select_locked_c2(selection), selection["best_C2"])
+        selection["test_accessed"] = True
+        with self.assertRaisesRegex(ValueError, "validation-only"):
+            _select_locked_c2(selection)
+
     def test_bias_only_initialization_is_exact_r1_and_masks_face(self) -> None:
         model = ClassAwareStacker(classes=5)
         class_ids = torch.tensor([1, 3], dtype=torch.long)
