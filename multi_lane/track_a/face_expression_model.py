@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import importlib
+import copy
 import sys
 from typing import Iterable, Optional, Sequence, Tuple
 
@@ -30,6 +31,15 @@ def _install_timm_checkpoint_compatibility_aliases() -> None:
 
 
 def load_frozen_emotieff_encoder(checkpoint: Path) -> Tuple[nn.Module, int]:
+    model, _, feature_dim, _ = load_frozen_emotieff_encoder_with_classifier(
+        checkpoint
+    )
+    return model, feature_dim
+
+
+def load_frozen_emotieff_encoder_with_classifier(
+    checkpoint: Path,
+) -> Tuple[nn.Module, nn.Linear, int, int]:
     checkpoint = checkpoint.expanduser().resolve()
     if not checkpoint.is_file():
         raise FileNotFoundError(f"Missing EmotiEffLib checkpoint: {checkpoint}")
@@ -52,10 +62,14 @@ def load_frozen_emotieff_encoder(checkpoint: Path) -> Tuple[nn.Module, int]:
     if not isinstance(classifier, nn.Linear) or classifier.out_features not in (7, 8, 10):
         raise TypeError("Checkpoint is not a supported EmotiEffLib emotion model")
     feature_dim = int(classifier.in_features)
+    class_count = int(classifier.out_features)
+    frozen_classifier = copy.deepcopy(classifier)
+    frozen_classifier.requires_grad_(False)
+    frozen_classifier.eval()
     model.classifier = nn.Identity()
     model.requires_grad_(False)
     model.eval()
-    return model, feature_dim
+    return model, frozen_classifier, feature_dim, class_count
 
 
 class TaskFeatureAdapterBank(nn.Module):

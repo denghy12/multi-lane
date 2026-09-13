@@ -1,5 +1,16 @@
 # 项目上下文
 
+## 2026-09-13：实现CLIP Face + AffectNet补充残差
+
+从`376885a`创建`codex/face-expression-residual-validation`。上一轮AffectNet完全替换CLIP Face失败后，
+本轮保留旧CLIP Face输入、MULTI-LANE Selector、Image-token Adapter和head；同一目标脸另做五点对齐
+AffectNet输入。冻结1280维embedding和8类logits分别LayerNorm后拼接，经每task独立、末层零初始化的
+rank32投影，以固定scale0.1写入CLIP Face最终表征。残差用BCE/LR4e-4，CLIP Adapter继续ASL/LR4e-4。
+
+只运行一个seed0完整8-task validation，固定R1 beta0.20、不存checkpoint、不访问test。可靠Face与
+固定R1 final mAP必须均相对旧CLIP Face至少+0.05才继续；详见
+`docs/face_expression_residual_validation.md`。
+
 ## 2026-09-12：实现Face表情预训练专用表征
 
 创建`codex/face-expression-pretrained-validation`，停止Router与基础Face输入超参搜索。新增manifest

@@ -1,5 +1,14 @@
 # 下一步任务
 
+## 当前执行：CLIP Face + AffectNet补充残差（2026-09-13）
+
+1. 新分支只实现一个混合候选：旧CLIP Face主路径不变，冻结AffectNet embedding+8类logits通过
+   task-specific零初始化rank32、scale0.1残差补入最终Face表征。
+2. 本地静态检查后提交推送；服务器必须创建新独立clean worktree，不触碰主工作树和test-only。
+3. 依次运行完整单测、真实双输入一致性与旧CLIP零残差等价检查、双encoder GPU smoke。
+4. 通过后运行唯一seed0完整8-task validation，固定R1 beta0.20、不存checkpoint、不访问test。
+5. 只有可靠Face与固定R1 final mAP均至少+0.05才补seed1/2；否则结束Face专用表征路线。
+
 ## 当前执行：Face表情预训练专用表征（2026-09-12）
 
 1. 官方EmotiEffLib AffectNet EfficientNet-B0权重已锁定，SHA-256为

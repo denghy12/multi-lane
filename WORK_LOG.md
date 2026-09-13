@@ -1,5 +1,13 @@
 # 工作日志
 
+## 2026-09-13：开始CLIP Face + AffectNet补充残差
+
+- 创建`codex/face-expression-residual-validation`，不修改或暂存四份用户未跟踪的Adapter调参文档。
+- 数据层为同一目标Face提供旧CLIP margin0.15 letterbox和五点对齐AffectNet输入，水平翻转严格同步。
+- 模型保留完整CLIP Face主路径；冻结AffectNet embedding+8类logits经task-specific rank32零初始化
+  残差补入lane特征，旧task模块冻结，残差归BCE/LR4e-4，CLIP Adapter仍归ASL/LR4e-4。
+- 新增单候选runner、launcher、回归测试与协议文档；仍只允许seed0 validation和固定R1 beta0.20。
+
 ## 2026-09-12：开始Face表情预训练专用表征
 
 - 新分支`codex/face-expression-pretrained-validation`。

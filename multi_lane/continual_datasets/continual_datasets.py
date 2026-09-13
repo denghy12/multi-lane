@@ -928,17 +928,25 @@ class EMOTIC(torch.utils.data.Dataset):
         face_min_training_short_side=0.0,
         face_min_training_score=0.0,
         face_alignment='none',
+        face_dual_transform=None,
     ):
         self.root = os.path.expanduser(root)
         self.transform = transform
         self.paired_transform = paired_transform
         self.multi_view_transform = multi_view_transform
+        self.face_dual_transform = face_dual_transform
         if paired_transform is not None and multi_view_transform is not None:
             raise ValueError('EMOTIC paired and multi-view transforms are mutually exclusive.')
         if paired_transform is not None and input_mode != 'full':
             raise ValueError('Paired EMOTIC inputs require input_mode=full.')
         if multi_view_transform is not None and input_mode != 'full':
             raise ValueError('Multi-view EMOTIC inputs require input_mode=full.')
+        if face_dual_transform is not None and input_mode != 'face_crop':
+            raise ValueError('Dual Face EMOTIC inputs require input_mode=face_crop.')
+        if face_dual_transform is not None and (
+                paired_transform is not None or multi_view_transform is not None
+        ):
+            raise ValueError('Dual Face inputs cannot use paired or multi-view transforms.')
         self.train = train
         self.splits = ['train'] if self.train else list(eval_splits)
         self.path = os.path.join(self.root, 'EMOTIC')
@@ -1087,7 +1095,11 @@ class EMOTIC(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         img_path = self.file_paths[idx]
         img = Image.open(img_path).convert("RGB")
-        if getattr(self, 'multi_view_transform', None) is not None:
+        if getattr(self, 'face_dual_transform', None) is not None:
+            img = self.face_dual_transform(
+                img, self.face_records[idx], self.face_training_valid[idx]
+            )
+        elif getattr(self, 'multi_view_transform', None) is not None:
             img = self.multi_view_transform(
                 img,
                 self.body_bboxes[idx],
