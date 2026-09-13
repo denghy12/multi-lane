@@ -1,5 +1,13 @@
 # 项目上下文
 
+## 2026-09-13：开始OOF优势限定排序蒸馏
+
+从`83cceb2`新建`exp/oof-advantage-ranking-distillation`，仅实现一组E1 seed0 validation。
+hard BCE恢复1.0，Adapter hard-label ASL不变；每个hard batch64附加一个确定性Full视图
+pair batch16，pairwise logistic loss权重0.05。仅启用13个R1-Full OOF AP三折一致提升类别，
+且pair必须满足Full OOF排错、R1 OOF纠正。task2/6无合格类，严格回退原训练。
+详见`docs/oof_advantage_ranking_distillation.md`。
+
 ## 2026-09-13：D3 OOF R1教师直接BCE蒸馏失败
 
 D3 batch `oof_r1_teacher_seed0_20260913_192759`完成240 epochs/13,950 updates/0 skipped，

@@ -379,6 +379,20 @@ def compute_oof_distillation_loss(
     )
 
 
+def compute_pairwise_ranking_loss(
+    positive_logits: torch.Tensor,
+    negative_logits: torch.Tensor,
+) -> torch.Tensor:
+    """Logistic loss for OOF-audited positive/negative ranking corrections."""
+    if positive_logits.ndim != 1 or positive_logits.shape != negative_logits.shape:
+        raise ValueError("Pairwise ranking logits must be matching vectors")
+    if not torch.isfinite(positive_logits).all() or not torch.isfinite(
+        negative_logits
+    ).all():
+        raise FloatingPointError("Pairwise ranking logits contain non-finite values")
+    return F.softplus(negative_logits.float() - positive_logits.float()).mean()
+
+
 def training_loss_view(
     logits: torch.Tensor,
     current_targets: torch.Tensor,
@@ -1078,6 +1092,8 @@ def train_task(
     view_fusion_learning_rate: float = 4e-4,
     view_auxiliary_loss_weight: float = 0.0,
     oof_distillation_mix: float = 0.0,
+    ranking_loader: Optional[DataLoader] = None,
+    ranking_loss_weight: float = 0.0,
 ) -> List[Dict[str, float]]:
     if loss_routing not in {
         "joint_bce", "model_asl", "adapter_asl", "both_asl"
@@ -1101,6 +1117,12 @@ def train_task(
         raise ValueError("View auxiliary supervision requires enabled view fusion")
     if not math.isfinite(oof_distillation_mix) or not 0 <= oof_distillation_mix < 1:
         raise ValueError("OOF distillation mix must be finite and in [0, 1)")
+    if not math.isfinite(ranking_loss_weight) or ranking_loss_weight < 0:
+        raise ValueError("Ranking loss weight must be finite and non-negative")
+    if (ranking_loader is None) != (ranking_loss_weight == 0):
+        raise ValueError("Ranking loader and positive ranking loss weight must be enabled together")
+    if ranking_loader is not None and len(ranking_loader) < epochs * len(loader):
+        raise ValueError("Ranking loader does not cover every epoch/update batch")
     model_parameters, adapter_parameters, optimizer_groups = build_optimizer_groups(
         model=model,
         weight_decay=weight_decay,
@@ -1132,6 +1154,7 @@ def train_task(
     regularization_reference_calibration_total = 0.0
     regularization_calibration_samples = 0
     regularization_weight: Optional[float] = None
+    ranking_iterator = iter(ranking_loader) if ranking_loader is not None else None
     epoch = 0
     while (
         completed_task_updates < optimizer_updates_per_task
@@ -1146,6 +1169,7 @@ def train_task(
         adapter_regularization_metric_total = 0.0
         supervised_bce_total = 0.0
         oof_distillation_total = 0.0
+        ranking_loss_total = 0.0
         batches = 0
         optimizer_steps = 0
         skipped_steps = 0
@@ -1222,6 +1246,42 @@ def train_task(
                     (1.0 - oof_distillation_mix) * supervised_bce_loss
                     + oof_distillation_mix * oof_distillation_loss
                 )
+                ranking_loss = logits.new_zeros(())
+                if ranking_iterator is not None:
+                    try:
+                        positive_images, negative_images, ranking_classes = next(
+                            ranking_iterator
+                        )
+                    except StopIteration as error:
+                        raise RuntimeError("Ranking loader ended before hard-label training") from error
+                    positive_images = move_model_inputs(positive_images, device)
+                    negative_images = move_model_inputs(negative_images, device)
+                    ranking_classes = ranking_classes.to(
+                        device, non_blocking=True
+                    ).long()
+                    if (
+                        not isinstance(positive_images, torch.Tensor)
+                        or not isinstance(negative_images, torch.Tensor)
+                        or positive_images.shape != negative_images.shape
+                        or ranking_classes.shape != (len(positive_images),)
+                    ):
+                        raise ValueError("Invalid OOF ranking batch")
+                    ranking_images = torch.cat(
+                        (positive_images, negative_images), dim=0
+                    )
+                    ranking_logits, _ = model.current_all_logits_with_views(
+                        ranking_images
+                    )
+                    pair_count = len(positive_images)
+                    positive_pair_logits = ranking_logits[:pair_count].gather(
+                        1, ranking_classes[:, None]
+                    ).squeeze(1)
+                    negative_pair_logits = ranking_logits[pair_count:].gather(
+                        1, ranking_classes[:, None]
+                    ).squeeze(1)
+                    ranking_loss = compute_pairwise_ranking_loss(
+                        positive_pair_logits, negative_pair_logits
+                    )
                 asl_loss = None
                 if loss_routing != "joint_bce":
                     asl_loss = compute_asymmetric_training_loss(
@@ -1255,6 +1315,7 @@ def train_task(
                     if loss_routing in {"model_asl", "both_asl"}
                     else bce_loss
                 )
+                model_loss = model_loss + ranking_loss_weight * ranking_loss
                 adapter_base_loss = (
                     asl_loss
                     if loss_routing in {"adapter_asl", "both_asl"}
@@ -1292,6 +1353,7 @@ def train_task(
                 same_objective=(
                     loss_routing in {"joint_bce", "both_asl"}
                     and adapter_regularization == "none"
+                    and ranking_loader is None
                 ),
             )
             scaler.step(optimizer)
@@ -1327,6 +1389,7 @@ def train_task(
             )
             supervised_bce_total += float(supervised_bce_loss.detach().cpu())
             oof_distillation_total += float(oof_distillation_loss.detach().cpu())
+            ranking_loss_total += float(ranking_loss.detach().cpu())
             batches += 1
             fusion_means = model.fusion_weight_means()
             if fusion_means is not None:
@@ -1353,6 +1416,8 @@ def train_task(
             "supervised_bce_loss": supervised_bce_total / batches,
             "oof_distillation_loss": oof_distillation_total / batches,
             "oof_distillation_mix": float(oof_distillation_mix),
+            "pairwise_ranking_loss": ranking_loss_total / batches,
+            "pairwise_ranking_loss_weight": float(ranking_loss_weight),
             "adapter_regularization_weight": (
                 regularization_weight if regularization_weight is not None else 0.0
             ),

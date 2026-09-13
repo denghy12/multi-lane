@@ -1,5 +1,15 @@
 # 工作日志
 
+## 2026-09-13：开始OOF优势限定排序蒸馏
+
+- 新建`exp/oof-advantage-ranking-distillation`，四份用户未跟踪Adapter文档保持未修改。
+- 训练循环增加可选pairwise ranking loader；ranking梯度仅路由Full主参数，Adapter仍只接收
+  hard-label ASL，旧调用默认禁用ranking。
+- 新增三折类别优势审计、OOF纠错pair bank、均衡无重复pair dataset、E1 runner/比较器/
+  launcher、回归测试和协议文档。
+- 锁定hard batch64、pair batch16、ranking weight0.05，只做seed0 validation，失败则结束
+  OOF蒸馏路线。
+
 ## 2026-09-13：同步并分析D3 OOF R1教师结果
 
 - D3完成240 epochs、13,950 updates、0 skipped，exit0，无OOM/NaN/test访问。

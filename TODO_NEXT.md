@@ -7,8 +7,9 @@
    不再提供绝对概率目标。
 3. 仅对13个R1 OOF AP优势在3 folds一致的类别，使用“Full OOF排错且R1纠正”的
    正负样本对优化student logit排序。
-4. 排序分支使用确定性Full视图，hard BCE/ASL使用现有随机增强视图。先只运行seed0
-   validation；若仍不能通过三项门槛，正式结束OOF蒸馏路线。
+4. 排序分支使用确定性Full视图，hard BCE/ASL使用现有随机增强视图。已新建分支实现
+   E1，锁定pair batch16、weight0.05；下一步为审查、提交推送、服务器独立worktree全测
+   和GPU smoke，通过后只运行seed0 validation。若仍不能通过三项门槛，正式结束该路线。
 
 ## 已完成：更强的OOF R1集成教师
 
