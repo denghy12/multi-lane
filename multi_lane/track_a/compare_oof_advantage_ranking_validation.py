@@ -31,7 +31,14 @@ def compare(
     if mismatches:
         raise ValueError(f"D0/E1 locked configuration differs: {mismatches}")
     anchor_row = _row("D0", anchor[1], person, face, manifest)
-    candidate_row = _row("E1", candidate[1], person, face, manifest)
+    candidate_row = _row(
+        "E1",
+        candidate[1],
+        person,
+        face,
+        manifest,
+        allow_full_training_objective_difference=True,
+    )
     protocol = candidate_config.get("oof_advantage_ranking", {})
     if (
         candidate_row["distillation"] is not None

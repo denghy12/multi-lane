@@ -37,7 +37,11 @@ def _load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _validate_runs(full_run: Path, person_run: Path) -> Tuple[Dict, Dict]:
+def _validate_runs(
+    full_run: Path,
+    person_run: Path,
+    allow_full_training_objective_difference: bool = False,
+) -> Tuple[Dict, Dict]:
     full_config = _load_json(full_run / "config.json")
     person_config = _load_json(person_run / "config.json")
     full_summary = _load_json(full_run / "seed_summary.json")
@@ -61,6 +65,11 @@ def _validate_runs(full_run: Path, person_run: Path) -> Tuple[Dict, Dict]:
     if person_config.get("person_transform_mode") != "letterbox":
         raise ValueError("The person fusion input is not body-preserving letterbox")
     for field in COMMON_CONFIG_FIELDS:
+        if (
+            allow_full_training_objective_difference
+            and field == "model_parameter_objective"
+        ):
+            continue
         if full_config.get(field) != person_config.get(field):
             raise ValueError(f"Fusion runs differ on fixed config field {field}")
     return full_summary, person_summary

@@ -95,6 +95,7 @@ def _validate_face_run(
     manifest_root: Path,
     allow_face_training_budget_difference: bool = False,
     allow_face_representation_difference: bool = False,
+    allow_full_training_objective_difference: bool = False,
 ) -> Mapping[str, Any]:
     full_config = _load_json(full_run / "config.json")
     face_config = _load_json(face_run / "config.json")
@@ -109,6 +110,11 @@ def _validate_face_run(
     if face_config.get("face_manifest") != provenance:
         raise ValueError("Face run manifest provenance differs from the supplied audit")
     for field in COMMON_CONFIG_FIELDS:
+        if (
+            allow_full_training_objective_difference
+            and field == "model_parameter_objective"
+        ):
+            continue
         if allow_face_training_budget_difference and field in {
             "training_budget_mode", "epochs_per_task", "scheduler"
         }:
@@ -139,6 +145,7 @@ def fuse_face_endpoint_validation(
     betas: Sequence[float] = BETAS,
     allow_face_training_budget_difference: bool = False,
     allow_face_representation_difference: bool = False,
+    allow_full_training_objective_difference: bool = False,
     require_stage1_grid: bool = True,
 ) -> Dict[str, Any]:
     selected_betas = tuple(float(value) for value in betas)
@@ -146,13 +153,18 @@ def fuse_face_endpoint_validation(
         raise ValueError(f"Stage-1 beta grid is locked to {BETAS}")
     if not selected_betas or any(value not in BETAS for value in selected_betas):
         raise ValueError(f"Face beta values must be selected from {BETAS}")
-    full_summary, person_summary = _validate_runs(full_run, person_run)
+    full_summary, person_summary = _validate_runs(
+        full_run,
+        person_run,
+        allow_full_training_objective_difference,
+    )
     face_summary = _validate_face_run(
         full_run,
         face_run,
         manifest_root,
         allow_face_training_budget_difference,
         allow_face_representation_difference,
+        allow_full_training_objective_difference,
     )
     full_dumps, _ = validated_run_scores(full_run, "val")
     person_dumps, _ = validated_run_scores(person_run, "val")

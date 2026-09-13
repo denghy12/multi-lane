@@ -13,6 +13,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from test_track_a_reproduction import FakeVisual
 from multi_lane.track_a.compare_oof_advantage_ranking_validation import compare
+from multi_lane.track_a.fuse_validation_scores import _validate_runs
 from multi_lane.track_a.model import MultiLaneModel
 from multi_lane.track_a.oof_advantage_ranking import CorrectedPairDataset, TaskPairTable
 from multi_lane.track_a.runner import (
@@ -85,6 +86,40 @@ class OOFAdvantagePairTest(unittest.TestCase):
 
 
 class OOFAdvantageComparisonTest(unittest.TestCase):
+    def test_fusion_allows_only_explicit_training_objective_difference(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            shared = {
+                "input_normalization": "clip",
+                "reporting_split": "val",
+                "save_evaluation_scores": True,
+            }
+            for name, mode, objective in (
+                ("full", "full", "hard_bce_plus_oof_pairwise_ranking"),
+                ("person", "person_crop", "bce"),
+            ):
+                run = root / name
+                run.mkdir()
+                config = {
+                    **shared,
+                    "input_mode": mode,
+                    "model_parameter_objective": objective,
+                }
+                if name == "person":
+                    config["person_transform_mode"] = "letterbox"
+                (run / "config.json").write_text(json.dumps(config))
+                (run / "seed_summary.json").write_text(json.dumps({
+                    "status": "complete",
+                    "task_metrics": [{} for _ in TASK_SIZES],
+                }))
+            with self.assertRaisesRegex(ValueError, "model_parameter_objective"):
+                _validate_runs(root / "full", root / "person")
+            _validate_runs(
+                root / "full",
+                root / "person",
+                allow_full_training_objective_difference=True,
+            )
+
     @patch("multi_lane.track_a.compare_oof_advantage_ranking_validation._row")
     def test_gate_requires_all_three_metrics(self, row) -> None:
         row.side_effect = [
