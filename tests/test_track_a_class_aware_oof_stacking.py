@@ -26,6 +26,15 @@ class ClassAwareOofStackingTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "validation-only"):
             _select_locked_c2(selection)
 
+    def test_test_evaluator_rejects_non_rank_two_candidate(self) -> None:
+        selection = {
+            "selection_split": "val",
+            "test_accessed": False,
+            "best_C2": {"family": "C2", "rank": 1, "tasks": [{}] * 8},
+        }
+        with self.assertRaisesRegex(ValueError, "validation-only"):
+            _select_locked_c2(selection)
+
     def test_bias_only_initialization_is_exact_r1_and_masks_face(self) -> None:
         model = ClassAwareStacker(classes=5)
         class_ids = torch.tensor([1, 3], dtype=torch.long)

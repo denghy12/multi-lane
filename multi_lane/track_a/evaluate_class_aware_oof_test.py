@@ -78,7 +78,9 @@ def evaluate(
         raise ValueError("Validation C2 selection hash differs")
     selection = _read_json(selection_path)
     candidate = _select_locked_c2(selection)
-    states = _candidate_states(selection_path.parent, candidate)
+    candidate_with_schema = dict(candidate)
+    candidate_with_schema["feature_names"] = selection["protocol"]["feature_names"]
+    states = _candidate_states(selection_path.parent, candidate_with_schema)
     fixed = _read_json(fixed_test_summary)
     if fixed.get("search_performed_on_test") is not False:
         raise ValueError("Fixed R1 test provenance differs")

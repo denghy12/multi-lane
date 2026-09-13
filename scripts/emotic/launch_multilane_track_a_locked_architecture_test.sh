@@ -6,7 +6,7 @@ cd "${ROOT}"
 
 PYTHON="${PYTHON:-/opt/conda/envs/ddp/bin/python}"
 DATA_ROOT="${DATA_ROOT:-/mnt/haoyuan/workspace/multi-lane-main/datasets/EMOTIC}"
-FACE_MANIFEST_ROOT="${FACE_MANIFEST_ROOT:-/mnt/haoyuan/workspace/multi-lane-main-face-manifest/output/emotic_face_manifest/face_manifest_audit_v1_20260908}"
+FACE_MANIFEST_ROOT="${FACE_MANIFEST_ROOT:-/mnt/haoyuan/workspace/emotic_benchmark_runs/multi_lane_face_test_manifest_v0.1/face_manifest_train_val_test_v1_20260909}"
 C2_SELECTION="${C2_SELECTION:-/mnt/haoyuan/workspace/multi-lane-main-class-aware-oof-stacking/output/emotic_track_a_class_aware_oof/class_aware_oof_seed0_20260911_002/validation_selection.json}"
 C2_SELECTION_SHA256="${C2_SELECTION_SHA256:-3fdab45e10dd68975c51b2f318d767af0392e661d7b10d281b65db1f9d3edae0}"
 TEST_DESCRIPTORS="${TEST_DESCRIPTORS:-/mnt/haoyuan/workspace/emotic_benchmark_runs/multi_lane_taskwise_three_view_router_v0.1/taskwise_three_view_router_20260909_233435/test_descriptors}"
