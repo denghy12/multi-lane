@@ -1,5 +1,14 @@
 # 工作日志
 
+## 2026-09-13：同步并分析D3 OOF R1教师结果
+
+- D3完成240 epochs、13,950 updates、0 skipped，exit0，无OOM/NaN/test访问。
+- 19个结果与日志文件已同步到本地，共1.7MB，逐文件SHA-256一致。
+- Full final/average/固定R1 final相对D0为`-0.1689/-0.4322/-0.3271`，三项门槛均失败。
+  停止raw-probability BCE蒸馏和mix搜索，不补seed1/2、不test。
+- 逐折逐类OOF审计确认13/26类的R1优势三折一致，每个合格类有约1万至114万个
+  R1纠正Full错序的正负样本对。若继续，仅值得尝试优势限定的排序蒸馏。
+
 ## 2026-09-13：开始D3 OOF固定R1集成教师
 
 - 新建`exp/oof-r1-teacher-distillation`，不暂存四份用户未跟踪Adapter文档。

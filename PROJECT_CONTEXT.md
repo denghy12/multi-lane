@@ -1,5 +1,16 @@
 # 项目上下文
 
+## 2026-09-13：D3 OOF R1教师直接BCE蒸馏失败
+
+D3 batch `oof_r1_teacher_seed0_20260913_192759`完成240 epochs/13,950 updates/0 skipped，
+无OOM/NaN/test访问。Full final/average/固定R1 final相对D0为
+`-0.1689/-0.4322/-0.3271`，三项门槛均失败，不补seed1/2、不test。
+
+强教师仍失败说明瓶颈在raw-probability BCE与mAP排序/随机裁剪不匹配，不再搜索mix。
+若最后保留一次OOF教师尝试，应仅对13个三折优势一致类别、仅对R1纠正Full排序的
+样本对增加小型排序损失，hard BCE保持1.0不稀释。详见
+`docs/oof_r1_teacher_distillation_results_20260913.md`。
+
 ## 2026-09-13：开始D3 OOF固定R1集成教师
 
 从`1640c50`新建`exp/oof-r1-teacher-distillation`，仅增加D3 seed0 validation。

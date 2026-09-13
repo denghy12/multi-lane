@@ -1,6 +1,16 @@
 # 下一步任务
 
-## 下一候选：更强的OOF R1集成教师
+## 候选：OOF优势限定的排序蒸馏
+
+1. D3直接软概率BCE蒸馏已失败；不补seed1/2、不test、不搜索更多mix。
+2. 如果继续OOF教师路线，hard BCE恢复权重1.0，Adapter hard-label ASL不变；跨视图教师
+   不再提供绝对概率目标。
+3. 仅对13个R1 OOF AP优势在3 folds一致的类别，使用“Full OOF排错且R1纠正”的
+   正负样本对优化student logit排序。
+4. 排序分支使用确定性Full视图，hard BCE/ASL使用现有随机增强视图。先只运行seed0
+   validation；若仍不能通过三项门槛，正式结束OOF蒸馏路线。
+
+## 已完成：更强的OOF R1集成教师
 
 1. D1/D2 seed0 validation已完成但未通过门槛；不补seed1/2、不运行test。
 2. 不直接搜索distillation mix。Person和Person+Face OOF在8 tasks均弱于Full OOF，
@@ -8,11 +18,11 @@
 3. 已新建实验分支并实现D3：无泄漏固定R1 OOF教师，mix0.20、Full主路、Adapter ASL、
    seed0完整8-task validation和选择门槛均不变。实现已推送，服务器独立worktree的
    199项全测和真实OOF/GPU smoke已通过。D3 batch `oof_r1_teacher_seed0_20260913_192759`
-   正在GPU3运行；完成后自动对比已有D0，禁止test。
-4. D3若失败，停止全样本直接概率BCE蒸馏；不搜索更多mix。只在有明确OOF优势信号时，
-   才考虑受约束样本/类别蒸馏掩码。
+   已完成，三项门槛分别为`-0.1689/-0.4322/-0.3271`，禁止test。
+4. D3失败后已停止全样本直接概率BCE蒸馏，不搜索更多mix。仅保留上方受约束
+   排序蒸馏作为最后候选。
 
-## 当前执行：OOF跨视图教师蒸馏Full lane
+## 已完成：OOF跨视图教师蒸馏Full lane
 
 1. Face表情预训练projection、Adapter和CLIP+AffectNet残差均未提高可靠Face或R1；停止该路线，
    不补seed1/2、不test、不再调rank/scale/LR。
@@ -23,8 +33,8 @@
    D2 Person+Face OOF teacher。
 5. 选择门槛固定为Full final至少`+0.05`、Full average不降、锁定R1 final至少`+0.05`。
    实现与preflight记录已推送，服务器独立clean worktree的197项全测和真实
-   OOF/GPU smoke已通过。batch `oof_distillation_seed0_20260913_230500`正在GPU0/1/2并行
-   D0/D1/D2；完成后自动生成锁定R1比较，仍禁止test。
+   OOF/GPU smoke已通过。batch `oof_distillation_seed0_20260913_230500`已完成；D1/D2均未
+   通过门槛，不补seed1/2、不test。
 
 ## 当前执行：CLIP Face + AffectNet补充残差（2026-09-13）
 
