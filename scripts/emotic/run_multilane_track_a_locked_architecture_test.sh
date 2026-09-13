@@ -14,6 +14,8 @@ DATA_ROOT="${DATA_ROOT:-/mnt/haoyuan/workspace/multi-lane-main/datasets/EMOTIC}"
 CLIP_CHECKPOINT="${CLIP_CHECKPOINT:-/mnt/haoyuan/workspace/CODE_DDP-benchmark/pretrained/clip/ViT-B-16.pt}"
 FACE_MANIFEST_ROOT="${FACE_MANIFEST_ROOT:-/mnt/haoyuan/workspace/multi-lane-main-face-manifest/output/emotic_face_manifest/face_manifest_audit_v1_20260908}"
 LOG_DIR="${LOG_DIR:-${ROOT}/logs/emotic_track_a_locked_architecture_test}"
+EPOCHS="${EPOCHS:-30}"
+MAX_TASKS="${MAX_TASKS:-8}"
 
 case "${METHOD}" in
   J0) fusion_mode=fixed_three_view; auxiliary=0.1; residual=0.1 ;;
@@ -33,14 +35,14 @@ done
 [[ -z "$(git status --porcelain)" ]] || { echo "Locked test requires a clean Git worktree" >&2; exit 2; }
 mkdir -p "${OUTPUT_BASE}" "${LOG_DIR}"
 
-echo "Locked architecture test: method=${METHOD} mode=${fusion_mode} seed=${SEED} gpu=${GPU} dataset=EMOTIC tasks=8 epochs=30 batch=64 main_lr=0.0125 cosine_min0_nowarmup full_legacy+person_margin15_letterbox+face_reliable_letterbox normalization=clip layer=1 b32 adapter_lr=4e-4 scale0.1 relu independent main=BCE adapter=ASL9.8/0/0.05 view_hidden=16 view_lr=4e-4 view_aux=${auxiliary} view_residual=${residual} AMP/TF32=on reporting=test score_dump=on checkpoint=off test_search=forbidden"
+echo "Locked architecture test: method=${METHOD} mode=${fusion_mode} seed=${SEED} gpu=${GPU} dataset=EMOTIC tasks=${MAX_TASKS} epochs=${EPOCHS} batch=64 main_lr=0.0125 cosine_min0_nowarmup full_legacy+person_margin15_letterbox+face_reliable_letterbox normalization=clip layer=1 b32 adapter_lr=4e-4 scale0.1 relu independent main=BCE adapter=ASL9.8/0/0.05 view_hidden=16 view_lr=4e-4 view_aux=${auxiliary} view_residual=${residual} AMP/TF32=on reporting=test score_dump=on checkpoint=off test_search=forbidden"
 
 CUDA_VISIBLE_DEVICES="${GPU}" "${PYTHON}" -m multi_lane.track_a.runner \
   --seed "${SEED}" \
   --data-root "${DATA_ROOT}" \
   --clip-checkpoint "${CLIP_CHECKPOINT}" \
   --output-root "${RUN_ROOT}" \
-  --epochs 30 \
+  --epochs "${EPOCHS}" \
   --scheduler-mode cosine \
   --scheduler-min-lr-ratio 0 \
   --scheduler-warmup-ratio 0 \
@@ -85,7 +87,7 @@ CUDA_VISIBLE_DEVICES="${GPU}" "${PYTHON}" -m multi_lane.track_a.runner \
   --adapter-regularization none \
   --save-evaluation-scores \
   --evaluation-score-purpose fixed_test_fusion \
-  --max-tasks 8 \
+  --max-tasks "${MAX_TASKS}" \
   --reporting-split test \
   2>&1 | tee "${LOG_PATH}"
 
