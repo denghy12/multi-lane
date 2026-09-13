@@ -1967,3 +1967,6 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - 六组训练不保存checkpoint，保存`evaluation_scores`用于复核；结果写入服务器
   `emotic_benchmark_runs/multi_lane_locked_architecture_test_v0.1/`，日志、状态和综合汇总写入当前
   worktree的`logs/output/emotic_track_a_locked_architecture_test/`。启动前须完整单测及真实GPU smoke。
+- 服务器独立worktree已Git-only同步至`42d0785`；206项完整单测通过。J0/A2真实EMOTIC task0、
+  1 epoch、test score-dump smoke均完成，C2锁定状态、descriptor、Face mask及三种子R1复现通过。
+  C2只读test预结果为`33.0153±0.3074`，相对R1均值仅`+0.0034`；该值不用于回选参数。

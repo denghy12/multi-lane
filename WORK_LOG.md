@@ -3645,3 +3645,7 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
   C2只读评估分配GPU6；只设显存余量门槛，不要求GPU空闲，以支持用户指定的显存叠加运行。
 - 本地系统Python缺少numpy/torch，依赖型单测留待服务器`ddp`环境；Python源码静态编译、shell
   语法、diff检查需在提交前完成。尚未启动服务器实验。
+- 初次smoke在训练前安全暴露两项schema适配：旧默认Face manifest不含test，C2的feature schema
+  位于顶层protocol而非候选摘要。改用既有R1正式test manifest并从锁定protocol注入schema，未改变模型。
+- 修复提交`42d0785`后服务器206项全测通过；J0/A2 task0一轮均完成、score dump齐全，C2对三种子
+  test只读评估通过。C2 final mAP=`33.0153±0.3074`，配对R1增益`+0.0034±0.0062`。

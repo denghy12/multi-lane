@@ -1148,3 +1148,5 @@ VOC 对照实验，不应在现阶段合并到 `main`。
     C2三种子离线评估。允许与其他任务共卡，但首轮后必须复查显存、skipped steps和错误日志。
 62. 完成后统一报告R1、C2、J0、A2的final/average mAP、cF1/oF1、forgetting三种子均值±样本标准差；
     明确这些是validation锁定后的探索性横向test补测，不基于test继续调参。
+63. 206项全测、J0/A2真实test-score-dump smoke及C2只读评估已通过；下一步直接启动唯一正式batch，
+    完成前不重复启动、不修改运行worktree。C2预结果已确认但仍由正式launcher写入统一控制目录。
