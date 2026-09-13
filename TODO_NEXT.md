@@ -1150,3 +1150,5 @@ VOC 对照实验，不应在现阶段合并到 `main`。
     明确这些是validation锁定后的探索性横向test补测，不基于test继续调参。
 63. 206项全测、J0/A2真实test-score-dump smoke及C2只读评估已通过；下一步直接启动唯一正式batch，
     完成前不重复启动、不修改运行worktree。C2预结果已确认但仍由正式launcher写入统一控制目录。
+64. 唯一batch`locked_architecture_test_20260914_013250`已启动并通过六组config/首轮/显存审计；当前
+    只等待J0/A2各三种子完成，不重复启动。结束后运行launcher自动汇总并同步小结果文件，不同步checkpoint。

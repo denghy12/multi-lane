@@ -3649,3 +3649,6 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
   位于顶层protocol而非候选摘要。改用既有R1正式test manifest并从锁定protocol注入schema，未改变模型。
 - 修复提交`42d0785`后服务器206项全测通过；J0/A2 task0一轮均完成、score dump齐全，C2对三种子
   test只读评估通过。C2 final mAP=`33.0153±0.3074`，配对R1增益`+0.0034±0.0062`。
+- 验证记录提交后服务器ff-only至`b1cddff`，正式batch`locked_architecture_test_20260914_013250`
+  在tmux `multilane_locked_arch_test_013250`启动。六个训练进程全部写出clean config并完成首轮
+  84 updates/skipped0；J0/A2分别约3.6/2.1GiB显存，无错误。C2统一控制结果已完成。

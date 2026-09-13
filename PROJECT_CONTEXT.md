@@ -1970,3 +1970,6 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - 服务器独立worktree已Git-only同步至`42d0785`；206项完整单测通过。J0/A2真实EMOTIC task0、
   1 epoch、test score-dump smoke均完成，C2锁定状态、descriptor、Face mask及三种子R1复现通过。
   C2只读test预结果为`33.0153±0.3074`，相对R1均值仅`+0.0034`；该值不用于回选参数。
+- 正式batch `locked_architecture_test_20260914_013250`已在clean提交`b1cddff`启动：GPU0--2运行
+  J0 seed0/1/2，GPU3--5运行A2 seed0/1/2，GPU6完成C2统一结果写入。六组首轮均84 updates、
+  skipped0；峰值显存约3.6GiB(J0)/2.1GiB(A2)，每卡仍余20GiB以上，无OOM或错误。
