@@ -1,6 +1,6 @@
 # 下一步任务
 
-## 当前执行：OOF优势限定的排序蒸馏
+## 已完成：OOF优势限定的排序蒸馏
 
 1. D3直接软概率BCE蒸馏已失败；不补seed1/2、不test、不搜索更多mix。
 2. 如果继续OOF教师路线，hard BCE恢复权重1.0，Adapter hard-label ASL不变；跨视图教师
@@ -10,10 +10,19 @@
 4. 排序分支使用确定性Full视图，hard BCE/ASL使用现有随机增强视图。E1已锁定pair batch16、
    weight0.05；实现提交`0c0b753`已推送，服务器独立clean worktree的203项全测和真实
    EMOTIC/OOF GPU smoke均通过。
-5. 唯一batch `oof_advantage_ranking_seed0_20260913_203305`正在GPU1/tmux
-   `ml_oof_rank_203305`运行seed0完整8-task validation；task0前4个epoch正常，无OOM/NaN。
-   等待完成后与既有D0比较Full final、Full average和固定R1 final三项门槛；若失败，正式结束
-   OOF蒸馏路线，不补seed1/2、不运行test。
+5. 唯一batch `oof_advantage_ranking_seed0_20260913_203305`已完成；Full final、Full average、
+   固定R1 final相对D0为`-2.6785/-3.2720/-2.0639`，三项门槛全部失败。
+6. 结果已同步并校验；不补seed1/2、不运行test，不再搜索ranking weight、pair batch、筛选阈值或
+   distillation mix。OOF蒸馏路线正式结束。
+
+## 下一候选：独立姿态/上半身Person专家
+
+1. 固定现有Full、Person、Face和R1权重，先不修改融合器。
+2. 阶段0只审计目标人物关键点覆盖、置信度、多人错配、上半身裁剪有效分辨率和各task正例覆盖。
+3. 审计通过后，seed0 validation比较旧Person锚点与一个轻量pose/上半身独立专家；优先使用
+   bbox归一化关键点或冻结pose-pretrained表示，避免再次重复通用CLIP Face路线。
+4. 新专家必须同时提高自身final/average mAP以及固定融合final mAP，才补seed1/2。失败则不扩网络，
+   回到固定R1正式冠军`33.0119 ± 0.3038`整理消融与论文结论。
 
 ## 已完成：更强的OOF R1集成教师
 

@@ -1,6 +1,6 @@
 # 项目上下文
 
-## 2026-09-13：开始OOF优势限定排序蒸馏
+## 2026-09-13：OOF优势限定排序蒸馏失败，OOF蒸馏路线结束
 
 从`83cceb2`新建`exp/oof-advantage-ranking-distillation`，仅实现一组E1 seed0 validation。
 hard BCE恢复1.0，Adapter hard-label ASL不变；每个hard batch64附加一个确定性Full视图
@@ -12,8 +12,15 @@ pair batch16，pairwise logistic loss权重0.05。仅启用13个R1-Full OOF AP�
 `/mnt/haoyuan/workspace/multi-lane-main-oof-advantage-ranking`完成203项全测；真实EMOTIC/OOF
 GPU smoke确认13类及pair bank符合预注册审计，hard BCE、ranking loss和Adapter ASL均有限，
 1 update/0 skipped，CLIP冻结，峰值显存约1587MiB。唯一batch
-`oof_advantage_ranking_seed0_20260913_203305`已在GPU1、tmux `ml_oof_rank_203305`启动。
-已完成task0前4个epoch，每epoch约16.3--17.0秒，loss有限、无OOM；未访问test且禁存checkpoint。
+`oof_advantage_ranking_seed0_20260913_203305`完成240 epochs/13,950 updates/0 skipped，无OOM、
+NaN、checkpoint或test访问。Full final/average/固定R1 final相对D0为
+`-2.6785/-3.2720/-2.0639`，全部门槛失败。13个受ranking监督类final AP平均下降`3.8765`，
+且ranking loss明显收敛，说明发生pair-bank过拟合而不是目标未优化。
+
+自动比较器的专家训练目标一致性检查已修正，只允许E1的Full目标来源标签差异；数据、seed、任务、
+预处理和评估约束仍严格检查，服务器204项全测通过。结果已同步本地并逐文件SHA-256一致。按预注册
+规则不补seed1/2、不test、不搜索ranking/mix，正式结束OOF蒸馏路线。详见
+`docs/oof_advantage_ranking_results_20260913.md`。
 
 ## 2026-09-13：D3 OOF R1教师直接BCE蒸馏失败
 

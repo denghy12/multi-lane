@@ -1,5 +1,17 @@
 # 工作日志
 
+## 2026-09-13：同步并分析OOF优势限定排序蒸馏
+
+- E1完成240 epochs、13,950 updates、0 skipped，无OOM/NaN、checkpoint或test访问。
+- 训练后比较器因E1与旧Person/Face的目标来源标签不同而拒绝融合；修复仅放宽
+  `model_parameter_objective/adapter_parameter_objective`，其他协议仍严格核对，服务器204项全测通过。
+- 修复后Full final/average/固定R1 final相对D0为`-2.6785/-3.2720/-2.0639`，三项门槛全部失败。
+- 13个受监督类final AP平均下降`3.8765`，未受监督类下降`1.4805`；ranking loss却在多数task
+  降至约`0.02--0.06`，确认是pair-bank泛化失败而非排序目标未收敛。
+- 12个run结果文件、控制文件和日志已同步；run文件逐一SHA-256一致，总计约1.7MB，无checkpoint。
+- 按预注册规则停止OOF蒸馏：不调weight/pair/mix，不补seed1/2、不test。下一候选应新增真正互补的
+  独立专家，优先审计pose/上半身Person信息，而不是继续把多视图蒸馏进Full。
+
 ## 2026-09-13：开始OOF优势限定排序蒸馏
 
 - 新建`exp/oof-advantage-ranking-distillation`，四份用户未跟踪Adapter文档保持未修改。
