@@ -6,6 +6,10 @@
 可靠Face的OOF教师固定为`[0.64,0.16,0.20]`，无效Face为`[0.80,0.20,0]`；
 mix仍为0.20，其他Full/Adapter/训练设置与D0/D2完全一致。仅对比已有D0，
 禁止test，详见`docs/oof_r1_teacher_distillation.md`。
+实现提交`b57f900`已推送，服务器独立worktree
+`/mnt/haoyuan/workspace/multi-lane-main-oof-r1-teacher`的199项全测通过。真实OOF/GPU smoke确认
+8-task覆盖一致、R1重建误差为0、三项loss有限。batch
+`oof_r1_teacher_seed0_20260913_192759`已在GPU3启动并进入task0训练。
 
 ## 2026-09-13：OOF跨视图蒸馏D1/D2未通过门槛
 

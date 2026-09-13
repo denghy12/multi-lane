@@ -6,8 +6,9 @@
 2. 不直接搜索distillation mix。Person和Person+Face OOF在8 tasks均弱于Full OOF，
    固定0.20权重对早期类别造成广泛损失。
 3. 已新建实验分支并实现D3：无泄漏固定R1 OOF教师，mix0.20、Full主路、Adapter ASL、
-   seed0完整8-task validation和选择门槛均不变。下一步为本地审查、提交推送、服务器独立
-   worktree全测与GPU smoke，通过后只运行D3。
+   seed0完整8-task validation和选择门槛均不变。实现已推送，服务器独立worktree的
+   199项全测和真实OOF/GPU smoke已通过。D3 batch `oof_r1_teacher_seed0_20260913_192759`
+   正在GPU3运行；完成后自动对比已有D0，禁止test。
 4. D3若失败，停止全样本直接概率BCE蒸馏；不搜索更多mix。只在有明确OOF优势信号时，
    才考虑受约束样本/类别蒸馏掩码。
 

@@ -6,6 +6,12 @@
 - OOF teacher bank增加锁定R1模式，可靠/无效Face分别使用`[.64,.16,.20]`/
   `[.80,.20,0]`；增加D3专用比较器、单组launcher、回归测试和协议文档。
 - D3仅复用已有D0作为锚点，不重跑D0/D1/D2，不搜索mix，禁止test。
+- 实现提交`b57f900`已推送；服务器创建新独立worktree，199项全测通过。
+- 真实OOF R1/GPU smoke确认task样本数`[5353,4394,861,9931,4352,2536,627,1526]`、
+  逐样本权重重建最大误差0，硬BCE/教师BCE/Adapter ASL均有限，1 update、0 skipped，
+  峰值显存约572MiB。
+- batch `oof_r1_teacher_seed0_20260913_192759`已在GPU3/tmux `ml_oof_r1_192759`启动；
+  task0前3 epochs正常，每epoch约13秒，启动后仍余约4.2GiB，无OOM/NaN。
 
 ## 2026-09-13：同步并分析OOF跨视图蒸馏结果
 
