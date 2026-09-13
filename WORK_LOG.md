@@ -14,6 +14,12 @@
 - 服务器独立worktree完成187项全测；五点审计train/val覆盖99.968%/100%、变换失败0，仅4个train
   样本回退。官方checkpoint输出1280维有限特征且参数全冻结；真实4样本projection和Adapter单步GPU
   smoke通过，loss有限，峰值显存分别约190/194MiB。
+- 正式batch`face_expression_seed0_20260912_1405`已在GPU0/1启动，tmux为
+  `multilane_face_expression_20260912_1405`；两组task0 epoch1均完成64 updates、0 skipped，loss
+  有限且仍有约11GiB/卡空闲。launcher将在两组完成后自动执行固定beta0.20比较。
+- batch已完整结束：两组各240 epochs、10,980 updates、0 skipped。projection/Adapter可靠Face为
+  `35.7820/35.1329`，固定R1为`43.3234/43.2659`，均低旧锚点`36.3096/43.5812`；不补seed1/2、
+  不test。34个服务器产物已同步，组合SHA-256为`69a7faf5...108f7994`，详见结果文档。
 
 ## 2026-09-12：同步并分析Face等更新量结果
 

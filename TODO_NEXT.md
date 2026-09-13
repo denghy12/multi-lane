@@ -7,10 +7,11 @@
 2. 已提交推送并创建服务器独立clean worktree；187项完整单测与五点审计通过。
 3. 官方checkpoint、真实五点对齐dataset及projection/Adapter GPU smoke均通过，0非有限值，峰值不足
    200MiB。
-4. 下一步两张GPU并行seed0完整8-task validation：task-specific Linear投影和task-specific b32
-   Adapter；不访问test、不保存checkpoint。
-5. 自动按锁定R1 beta0.20比较。可靠Face与R1 final validation mAP必须各提高至少0.05才补
-   seed1/2；否则停止该encoder候选，不改变融合器或Face输入阈值。
+4. 唯一batch已完成：projection/Adapter固定R1为`43.3234/43.2659`，均低旧CLIP Face锚点
+   `43.5812`；可靠Face也分别下降0.5276/1.1767。双门槛失败，不补seed1/2、不test。
+5. 不扩大pooled-feature Adapter。若继续Face路线，只运行一个“旧CLIP Face主路径+AffectNet冻结特征
+   零初始化task-specific残差”seed0 validation候选；仍须可靠Face和固定R1各至少+0.05，否则结束
+   Face专用表征路线。
 
 ## 下一阶段：Face表情预训练专用表征（2026-09-12）
 

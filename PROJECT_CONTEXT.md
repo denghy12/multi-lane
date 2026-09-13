@@ -19,6 +19,12 @@ Adapter LR4e-4、cosine min0、无warmup、AMP/TF32，不存checkpoint、不访�
 覆盖为99.968%/100%，仅4个train样本回退，变换失败0；真实4样本projection/Adapter GPU训练步均
 有限，峰值显存分别190/194MiB。
 
+唯一正式batch `face_expression_seed0_20260912_1405`完整结束。projection/Adapter均完成240 epochs、
+10,980 updates、0 skipped，无OOM/NaN/checkpoint/test。旧CLIP Face、projection、Adapter的可靠Face
+final val mAP为`36.3096/35.7820/35.1329`，固定R1为`43.5812/43.3234/43.2659`；最佳projection
+仍相对锚点下降`-0.5276/-0.2578`，双`+0.05`门槛失败，不补seed1/2、不test。完整结果见
+`docs/face_expression_pretrained_results_20260913.md`。
+
 ## 2026-09-12：reliable_m15等更新量实验完成，基础Face输入路线停止
 
 唯一batch `face_reliable_equal_updates_seed0_20260911_094039`完整结束：逐task实际updates严格等于
