@@ -7,7 +7,10 @@
 - 训练循环增加仅主参数使用的OOF软BCE，与硬BCE固定`0.20/0.80`混合；Adapter路由保持
   hard-label ASL。历史无蒸馏调用默认mix0，兼容不变。
 - 新增OOF teacher bank、Full蒸馏runner、D0/D1/D2三卡launcher、锁定R1比较器、回归测试和
-  协议文档。当前尚未提交、未运行服务器测试或启动实验。
+  协议文档；提交`a3f7ee7`已推送。首次全测仅暴露单测将teacher batch误用为val batch，
+  修正测试提交`f3f978c`后服务器196项全部通过，业务runner原本即使用标准val batch。
+- 真实三折OOF完整性审计与真实CLIP GPU smoke通过：硬/软BCE、Adapter ASL、两参数组梯度
+  均有限非零，冻结主干无梯度，峰值显存约572MiB。下一步提交审计记录并启动三组validation。
 
 ## 2026-09-13：同步并分析CLIP Face + AffectNet补充残差
 

@@ -10,7 +10,8 @@
 4. seed0完整8-task validation最小比较：D0 fresh Full champion、D1 Person OOF teacher、
    D2 Person+Face OOF teacher。
 5. 选择门槛固定为Full final至少`+0.05`、Full average不降、锁定R1 final至少`+0.05`。
-   下一步本地审查后提交推送，服务器新建clean worktree，全测和GPU smoke通过后三卡并行；禁止test。
+   实现已推送，服务器新建clean worktree，196项全测和真实OOF/GPU smoke已通过。下一步
+   提交preflight记录并在三卡并行D0/D1/D2；禁止test。
 
 ## 当前执行：CLIP Face + AffectNet补充残差（2026-09-13）
 

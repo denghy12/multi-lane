@@ -12,6 +12,11 @@ teacher。D2在可靠Face上按锁定R1辅助比例`4/9:5/9`合成，无效Face�
 同时满足Full final `+0.05`、Full average不降、锁定R1 final `+0.05`才补seed1/2；本阶段
 禁止test。详见`docs/oof_cross_view_distillation.md`。
 
+服务器独立worktree `/mnt/haoyuan/workspace/multi-lane-main-oof-distillation`已创建，实现提交
+`a3f7ee7`与测试修正`f3f978c`已同步。196项全测通过。真实OOF审计确认8个task覆盖
+`[5353,4394,861,9931,4352,2536,627,1526]`与Full训练池一致；真实4样本GPU smoke的
+硬BCE/软BCE/Adapter ASL及主参数/Adapter梯度均非零有限，CLIP冻结，峰值显存约572MiB。
+
 ## 2026-09-13：CLIP Face + AffectNet补充残差失败，Face专用表征路线结束
 
 seed0完整8-task validation batch `face_expression_residual_seed0_20260913_143719_retry1`完成：

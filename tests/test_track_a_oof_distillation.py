@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import types
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
@@ -10,6 +11,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from test_track_a_reproduction import FakeVisual
 from multi_lane.track_a.model import MultiLaneModel
+from multi_lane.track_a.compare_oof_distillation_validation import compare
 from multi_lane.track_a.oof_distillation import (
     OOFTeacherBank,
     OOFTeacherLabelView,
@@ -144,6 +146,35 @@ class OOFTrainingLossTest(unittest.TestCase):
         self.assertEqual(history[0]["oof_distillation_mix"], 0.2)
         self.assertGreater(history[0]["oof_distillation_loss"], 0)
         self.assertGreater(history[0]["supervised_bce_loss"], 0)
+
+
+class OOFComparisonTest(unittest.TestCase):
+    @patch("multi_lane.track_a.compare_oof_distillation_validation._row")
+    def test_eligibility_precedes_raw_metric_ranking(self, row) -> None:
+        row.side_effect = [
+            {
+                "name": "D0", "distillation": None,
+                "full_metrics": {"final_mAP": 10.0, "average_mAP": 20.0},
+                "locked_R1_metrics": {"final_mAP": 30.0},
+            },
+            {
+                "name": "D1", "distillation": {"mode": "person", "mix": 0.2},
+                "full_metrics": {"final_mAP": 10.1, "average_mAP": 20.1},
+                "locked_R1_metrics": {"final_mAP": 30.06},
+            },
+            {
+                "name": "D2", "distillation": {"mode": "person_face", "mix": 0.2},
+                "full_metrics": {"final_mAP": 10.2, "average_mAP": 19.9},
+                "locked_R1_metrics": {"final_mAP": 30.2},
+            },
+        ]
+        result = compare(
+            ("D0", Path("d0")), (("D1", Path("d1")), ("D2", Path("d2"))),
+            Path("person"), Path("face"), Path("manifest"),
+        )
+        self.assertEqual(result["winner"]["name"], "D1")
+        self.assertTrue(result["winner"]["eligible"])
+        self.assertFalse(result["candidates"][1]["eligible"])
 
 
 if __name__ == "__main__":
