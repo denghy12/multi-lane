@@ -5,7 +5,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${ROOT}"
 PYTHON="${PYTHON:-/opt/conda/envs/ddp/bin/python}"
 EXPECTED_SHA256="${EXPECTED_SHA256:?EXPECTED_SHA256 is required}"
-GPU="${GPU:-0}"
+GPU="${GPU:-}"
+GPU_CANDIDATES=( ${GPU_CANDIDATES:-0 1 2 3 4 5 6 7} )
+MIN_FREE_MIB="${MIN_FREE_MIB:-8000}"
+WAIT_SECONDS="${WAIT_SECONDS:-30}"
 BATCH_ID="${BATCH_ID:-face_expression_residual_seed0_$(date +%Y%m%d_%H%M%S)}"
 RESULT_BASE="${RESULT_BASE:-/mnt/haoyuan/workspace/emotic_benchmark_runs/multi_lane_face_expression_residual_v0.1/${BATCH_ID}}"
 CONTROL_DIR="${ROOT}/output/emotic_track_a_face_expression_residual/${BATCH_ID}"
@@ -22,8 +25,21 @@ RUN_ROOT="${RESULT_BASE}/${RUN_ID}"
 for source in "${FULL_RUN}" "${PERSON_RUN}" "${ANCHOR_FACE}"; do
   [[ -f "${source}/seed_summary.json" ]] || { echo "Missing source: ${source}" >&2; exit 2; }
 done
+while [[ -z "${GPU}" ]]; do
+  for candidate in "${GPU_CANDIDATES[@]}"; do
+    free_mib="$(nvidia-smi -i "${candidate}" --query-gpu=memory.free --format=csv,noheader,nounits | tr -d ' ')"
+    if [[ "${free_mib}" -ge "${MIN_FREE_MIB}" ]]; then
+      GPU="${candidate}"
+      break
+    fi
+  done
+  if [[ -z "${GPU}" ]]; then
+    echo "Waiting for a GPU with at least ${MIN_FREE_MIB} MiB free"
+    sleep "${WAIT_SECONDS}"
+  fi
+done
 free_mib="$(nvidia-smi -i "${GPU}" --query-gpu=memory.free --format=csv,noheader,nounits | tr -d ' ')"
-[[ "${free_mib}" -ge 8000 ]] || { echo "GPU ${GPU} has only ${free_mib} MiB free" >&2; exit 2; }
+[[ "${free_mib}" -ge "${MIN_FREE_MIB}" ]] || { echo "GPU ${GPU} has only ${free_mib} MiB free" >&2; exit 2; }
 mkdir -p "${RESULT_BASE}" "${CONTROL_DIR}/status" "${LOG_DIR}"
 printf 'variant\tgpu\tseed\trun\ttest_access\n' > "${CONTROL_DIR}/manifest.tsv"
 printf 'clip_plus_expression_residual\t%s\t0\t%s\tforbidden\n' "${GPU}" "${RUN_ROOT}" >> "${CONTROL_DIR}/manifest.tsv"

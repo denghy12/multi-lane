@@ -7,6 +7,9 @@
 - 模型保留完整CLIP Face主路径；冻结AffectNet embedding+8类logits经task-specific rank32零初始化
   残差补入lane特征，旧task模块冻结，残差归BCE/LR4e-4，CLIP Adapter仍归ASL/LR4e-4。
 - 新增单候选runner、launcher、回归测试与协议文档；仍只允许seed0 validation和固定R1 beta0.20。
+- 服务器新建独立worktree且191项全测通过。真实64样本双输入GPU smoke确认零残差与纯CLIP最大误差
+  `1.55e-7`，FP32和AMP的Adapter ASL梯度均非零，残差BCE梯度非零，两个冻结encoder无梯度。
+- 8卡当时均约6.4GiB空闲；为避免OOM，launcher增加8GiB显存门槛的自动排队，不抢占现有训练。
 
 ## 2026-09-12：开始Face表情预训练专用表征
 

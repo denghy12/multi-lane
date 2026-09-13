@@ -5,8 +5,10 @@
 1. 新分支只实现一个混合候选：旧CLIP Face主路径不变，冻结AffectNet embedding+8类logits通过
    task-specific零初始化rank32、scale0.1残差补入最终Face表征。
 2. 本地静态检查后提交推送；服务器必须创建新独立clean worktree，不触碰主工作树和test-only。
-3. 依次运行完整单测、真实双输入一致性与旧CLIP零残差等价检查、双encoder GPU smoke。
-4. 通过后运行唯一seed0完整8-task validation，固定R1 beta0.20、不存checkpoint、不访问test。
+3. 191项完整单测与真实双encoder GPU smoke已通过；零残差误差`1.55e-7`，两条loss梯度有限且路由
+   正确，冻结主干无梯度。
+4. 当前GPU均只有约6.4GiB空闲；launcher等待任一卡达到8GiB后自动运行唯一seed0完整8-task
+   validation，固定R1 beta0.20、不存checkpoint、不访问test。
 5. 只有可靠Face与固定R1 final mAP均至少+0.05才补seed1/2；否则结束Face专用表征路线。
 
 ## 当前执行：Face表情预训练专用表征（2026-09-12）

@@ -120,7 +120,7 @@ class FaceExpressionResidualModel(MultiLaneModel):
         descriptor = self._expression_descriptor(images["expression"])
         lane_ids = self._lane_ids(all_seen_lanes)
         residual = self.expression_residual_bank(descriptor, lane_ids)
-        # The zero-initialized branch must be bitwise identical to the old
+        # The zero-initialized branch is mathematically identical to the old
         # normalized CLIP Face lane at initialization.  Its fixed 0.1 scale
         # bounds the later departure without renormalizing the anchor.
         return clip_features + residual

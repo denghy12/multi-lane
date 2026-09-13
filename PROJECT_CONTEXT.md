@@ -11,6 +11,11 @@ rank32投影，以固定scale0.1写入CLIP Face最终表征。残差用BCE/LR4e-
 固定R1 final mAP必须均相对旧CLIP Face至少+0.05才继续；详见
 `docs/face_expression_residual_validation.md`。
 
+服务器独立worktree已固定`023104d`，191项完整单测通过。真实64样本双encoder GPU前后向通过：
+零残差与纯CLIP lane最大绝对误差`1.55e-7`；FP32/AMP下Image-token Adapter ASL梯度均非零且有限，
+AffectNet与CLIP主干无梯度。当前8卡仅约6.4GiB空闲，launcher改为等待任一卡达到8GiB后自动启动，
+避免与现有任务叠加导致OOM。
+
 ## 2026-09-12：实现Face表情预训练专用表征
 
 创建`codex/face-expression-pretrained-validation`，停止Router与基础Face输入超参搜索。新增manifest
