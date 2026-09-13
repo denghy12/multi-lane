@@ -20,6 +20,9 @@ tmux为`ml_face_expr_residual_143719`，结果根目录为
 用户确认6.3--6.5GiB可叠加后改用GPU5/6GiB门槛立即启动；首batch在优化前暴露通用训练循环
 将所有dict输入误当成Selector conditioning。已改为仅在存在`condition_valid`时统计该路径，
 并增加双Face dict batch完整训练回归测试；失败运行未执行优化、未读test。
+修复提交`fe054d5`在服务器192项全测通过。干净重试batch
+`face_expression_residual_seed0_20260913_143719_retry1`已在GPU5启动；训练后剩余3.8GiB，task0前3个
+epoch均64 updates、0 skipped，loss与Adapter loss均有限。tmux为`ml_face_expr_residual_retry1`。
 
 ## 2026-09-12：实现Face表情预训练专用表征
 

@@ -15,6 +15,9 @@
   `ml_face_expr_residual_143719`；当时8卡均不足8GiB空闲，任务正安全排队，未加载模型也未访问test。
 - 按用户确认降低至6GiB并在GPU5启动后，首batch在优化前因dict路由误判缺少
   `condition_valid`退出。修复为显式key检测并新增双Face batch训练回归测试；无部分训练产物。
+- 修复提交`fe054d5`服务器192项全测通过。干净重试batch
+  `face_expression_residual_seed0_20260913_143719_retry1`已在GPU5正常运行；前3 epochs均64 updates、
+  0 skipped，loss有限，显存峰值尚有约3.8GiB余量，未OOM。
 
 ## 2026-09-12：开始Face表情预训练专用表征
 
