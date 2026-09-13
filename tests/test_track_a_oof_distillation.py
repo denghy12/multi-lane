@@ -130,8 +130,12 @@ class OOFTrainingLossTest(unittest.TestCase):
         loader = DataLoader(
             TensorDataset(images, targets, teacher), batch_size=2
         )
+        validation_loader = DataLoader(
+            TensorDataset(images, targets), batch_size=2
+        )
         history = train_task(
-            model, loader, loader, torch.device("cpu"), task_id=0, epochs=1,
+            model, loader, validation_loader, torch.device("cpu"),
+            task_id=0, epochs=1,
             learning_rate=1e-3, weight_decay=0.0, temperature=1.0, amp=False,
             adapter_learning_rate=4e-4, loss_routing="adapter_asl",
             oof_distillation_mix=0.2,
