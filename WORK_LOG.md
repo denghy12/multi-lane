@@ -9,6 +9,12 @@
   launcher、回归测试和协议文档。
 - 锁定hard batch64、pair batch16、ranking weight0.05，只做seed0 validation，失败则结束
   OOF蒸馏路线。
+- 实现提交`0c0b753`已推送；服务器新建独立clean worktree，项目203项完整单测通过。
+- 真实EMOTIC/OOF GPU smoke确认task0--7合格类别分别为`[2,3,0,3,2,2,0,1]`，真实pair bank、
+  hard BCE、pairwise ranking和Adapter ASL均有限；1 update、0 skipped，峰值显存约1587MiB。
+- 唯一seed0 validation batch `oof_advantage_ranking_seed0_20260913_203305`已在GPU1/tmux
+  `ml_oof_rank_203305`启动；task0前4个epoch正常，每epoch约16.3--17.0秒，无OOM/NaN，
+  test与checkpoint保持禁用。
 
 ## 2026-09-13：同步并分析D3 OOF R1教师结果
 

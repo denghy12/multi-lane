@@ -1,15 +1,19 @@
 # 下一步任务
 
-## 候选：OOF优势限定的排序蒸馏
+## 当前执行：OOF优势限定的排序蒸馏
 
 1. D3直接软概率BCE蒸馏已失败；不补seed1/2、不test、不搜索更多mix。
 2. 如果继续OOF教师路线，hard BCE恢复权重1.0，Adapter hard-label ASL不变；跨视图教师
    不再提供绝对概率目标。
 3. 仅对13个R1 OOF AP优势在3 folds一致的类别，使用“Full OOF排错且R1纠正”的
    正负样本对优化student logit排序。
-4. 排序分支使用确定性Full视图，hard BCE/ASL使用现有随机增强视图。已新建分支实现
-   E1，锁定pair batch16、weight0.05；下一步为审查、提交推送、服务器独立worktree全测
-   和GPU smoke，通过后只运行seed0 validation。若仍不能通过三项门槛，正式结束该路线。
+4. 排序分支使用确定性Full视图，hard BCE/ASL使用现有随机增强视图。E1已锁定pair batch16、
+   weight0.05；实现提交`0c0b753`已推送，服务器独立clean worktree的203项全测和真实
+   EMOTIC/OOF GPU smoke均通过。
+5. 唯一batch `oof_advantage_ranking_seed0_20260913_203305`正在GPU1/tmux
+   `ml_oof_rank_203305`运行seed0完整8-task validation；task0前4个epoch正常，无OOM/NaN。
+   等待完成后与既有D0比较Full final、Full average和固定R1 final三项门槛；若失败，正式结束
+   OOF蒸馏路线，不补seed1/2、不运行test。
 
 ## 已完成：更强的OOF R1集成教师
 

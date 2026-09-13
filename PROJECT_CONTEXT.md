@@ -8,6 +8,13 @@ pair batch16，pairwise logistic loss权重0.05。仅启用13个R1-Full OOF AP�
 且pair必须满足Full OOF排错、R1 OOF纠正。task2/6无合格类，严格回退原训练。
 详见`docs/oof_advantage_ranking_distillation.md`。
 
+实现提交`0c0b753`已推送。服务器独立clean worktree
+`/mnt/haoyuan/workspace/multi-lane-main-oof-advantage-ranking`完成203项全测；真实EMOTIC/OOF
+GPU smoke确认13类及pair bank符合预注册审计，hard BCE、ranking loss和Adapter ASL均有限，
+1 update/0 skipped，CLIP冻结，峰值显存约1587MiB。唯一batch
+`oof_advantage_ranking_seed0_20260913_203305`已在GPU1、tmux `ml_oof_rank_203305`启动。
+已完成task0前4个epoch，每epoch约16.3--17.0秒，loss有限、无OOM；未访问test且禁存checkpoint。
+
 ## 2026-09-13：D3 OOF R1教师直接BCE蒸馏失败
 
 D3 batch `oof_r1_teacher_seed0_20260913_192759`完成240 epochs/13,950 updates/0 skipped，
