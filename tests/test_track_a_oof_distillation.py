@@ -16,6 +16,8 @@ from multi_lane.track_a.oof_distillation import (
     OOFTeacherBank,
     OOFTeacherLabelView,
     PERSON_FACE_WEIGHTS,
+    R1_INVALID_FACE_WEIGHTS,
+    R1_RELIABLE_WEIGHTS,
 )
 from multi_lane.track_a.runner import (
     TASK_SIZES,
@@ -100,6 +102,29 @@ class OOFTeacherBankTest(unittest.TestCase):
             np.testing.assert_allclose(
                 task.probabilities[source.sample_ids[task_id]], 0.2
             )
+
+    @patch("multi_lane.track_a.oof_distillation.load_face_metadata")
+    @patch("multi_lane.track_a.oof_distillation.load_oof_tasks")
+    def test_r1_teacher_uses_locked_reliable_and_fallback_weights(
+        self, load_tasks, load_face
+    ) -> None:
+        load_tasks.return_value = fake_oof_tasks()
+        load_face.return_value = self._face()
+        source = FakeSource()
+        bank = OOFTeacherBank("oof", "manifest", source, "r1")
+        reliable = bank.tasks[0].probabilities[source.sample_ids[0]]
+        invalid = bank.tasks[1].probabilities[source.sample_ids[1]]
+        np.testing.assert_allclose(
+            reliable,
+            R1_RELIABLE_WEIGHTS[0] * 0.4
+            + R1_RELIABLE_WEIGHTS[1] * 0.2
+            + R1_RELIABLE_WEIGHTS[2] * 0.8,
+        )
+        np.testing.assert_allclose(
+            invalid,
+            R1_INVALID_FACE_WEIGHTS[0] * 0.4
+            + R1_INVALID_FACE_WEIGHTS[1] * 0.2,
+        )
 
 
 class OOFTrainingLossTest(unittest.TestCase):

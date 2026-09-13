@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${ROOT}"
 
 GPU="${GPU:?GPU is required}"
-VARIANT="${VARIANT:?VARIANT must be D0, D1, or D2}"
+VARIANT="${VARIANT:?VARIANT must be D0, D1, D2, or D3}"
 RUN_ID="${RUN_ID:?RUN_ID is required}"
 OUTPUT_BASE="${OUTPUT_BASE:?OUTPUT_BASE is required}"
 PYTHON="${PYTHON:-/opt/conda/envs/ddp/bin/python}"
@@ -45,9 +45,10 @@ case "${VARIANT}" in
       --adapter-regularization none --reporting-split val \
       2>&1 | tee "${LOG_DIR}/${RUN_ID}.log"
     ;;
-  D1|D2)
+  D1|D2|D3)
     mode=person
     [[ "${VARIANT}" == D2 ]] && mode=person_face
+    [[ "${VARIANT}" == D3 ]] && mode=r1
     CUDA_VISIBLE_DEVICES="${GPU}" "${PYTHON}" \
       -m multi_lane.track_a.oof_distillation_runner \
       "${common[@]}" --mode "${mode}" --oof-root "${OOF_ROOT}" \

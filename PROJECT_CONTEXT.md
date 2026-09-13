@@ -1,5 +1,12 @@
 # 项目上下文
 
+## 2026-09-13：开始D3 OOF固定R1集成教师
+
+从`1640c50`新建`exp/oof-r1-teacher-distillation`，仅增加D3 seed0 validation。
+可靠Face的OOF教师固定为`[0.64,0.16,0.20]`，无效Face为`[0.80,0.20,0]`；
+mix仍为0.20，其他Full/Adapter/训练设置与D0/D2完全一致。仅对比已有D0，
+禁止test，详见`docs/oof_r1_teacher_distillation.md`。
+
 ## 2026-09-13：OOF跨视图蒸馏D1/D2未通过门槛
 
 batch `oof_distillation_seed0_20260913_230500`的D0/D1/D2均正常完成，未访问test。

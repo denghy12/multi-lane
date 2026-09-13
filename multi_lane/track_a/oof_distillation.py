@@ -14,8 +14,10 @@ from .three_view_oof_router import load_oof_tasks
 from .three_view_router import load_face_metadata
 
 
-DISTILLATION_MODES = ("person", "person_face")
+DISTILLATION_MODES = ("person", "person_face", "r1")
 PERSON_FACE_WEIGHTS = (4.0 / 9.0, 5.0 / 9.0)
+R1_RELIABLE_WEIGHTS = (0.64, 0.16, 0.20)
+R1_INVALID_FACE_WEIGHTS = (0.80, 0.20, 0.0)
 
 
 @dataclass(frozen=True)
@@ -57,7 +59,7 @@ class OOFTeacherBank:
     def _prepare_task(
         self, task_id, task, source, source_index_by_id, face
     ) -> TaskTeacher:
-        sample_ids, targets, _, person, face_probabilities = task
+        sample_ids, targets, full, person, face_probabilities = task
         current = task_indices(task_id)
         expected_indices = [
             index for index, target in enumerate(source.targets)
@@ -67,10 +69,11 @@ class OOFTeacherBank:
         if set(sample_ids.tolist()) != set(expected_ids) or len(sample_ids) != len(expected_ids):
             raise ValueError(f"OOF task{task_id} does not exactly cover the Full fit pool")
         current_targets = targets[:, list(current)].astype(np.float32)
+        full = full[:, list(current)].astype(np.float32)
         person = person[:, list(current)].astype(np.float32)
         face_probabilities = face_probabilities[:, list(current)].astype(np.float32)
         if not (
-            current_targets.shape == person.shape == face_probabilities.shape
+            current_targets.shape == full.shape == person.shape == face_probabilities.shape
             and current_targets.shape == (len(sample_ids), len(current))
         ):
             raise ValueError(f"OOF task{task_id} teacher shapes differ")
@@ -82,6 +85,15 @@ class OOFTeacherBank:
             person_weight, face_weight = PERSON_FACE_WEIGHTS
             teacher[reliable] = (
                 person_weight * person[reliable]
+                + face_weight * face_probabilities[reliable]
+            )
+        elif self.mode == "r1":
+            full_weight, person_weight, _ = R1_INVALID_FACE_WEIGHTS
+            teacher = full_weight * full + person_weight * person
+            full_weight, person_weight, face_weight = R1_RELIABLE_WEIGHTS
+            teacher[reliable] = (
+                full_weight * full[reliable]
+                + person_weight * person[reliable]
                 + face_weight * face_probabilities[reliable]
             )
         if not np.isfinite(teacher).all() or (teacher < 0).any() or (teacher > 1).any():
@@ -111,7 +123,15 @@ class OOFTeacherBank:
             "person_face_weights_on_reliable": (
                 list(PERSON_FACE_WEIGHTS) if self.mode == "person_face" else None
             ),
-            "invalid_face_fallback": "person_only",
+            "R1_reliable_weights": (
+                list(R1_RELIABLE_WEIGHTS) if self.mode == "r1" else None
+            ),
+            "R1_invalid_face_weights": (
+                list(R1_INVALID_FACE_WEIGHTS) if self.mode == "r1" else None
+            ),
+            "invalid_face_fallback": (
+                "locked_full_person" if self.mode == "r1" else "person_only"
+            ),
             "tasks": [
                 {
                     "task_id": task_id,

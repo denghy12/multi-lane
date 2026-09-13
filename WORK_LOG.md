@@ -1,5 +1,12 @@
 # 工作日志
 
+## 2026-09-13：开始D3 OOF固定R1集成教师
+
+- 新建`exp/oof-r1-teacher-distillation`，不暂存四份用户未跟踪Adapter文档。
+- OOF teacher bank增加锁定R1模式，可靠/无效Face分别使用`[.64,.16,.20]`/
+  `[.80,.20,0]`；增加D3专用比较器、单组launcher、回归测试和协议文档。
+- D3仅复用已有D0作为锚点，不重跑D0/D1/D2，不搜索mix，禁止test。
+
 ## 2026-09-13：同步并分析OOF跨视图蒸馏结果
 
 - D0/D1/D2均完成240 epochs、13,950 updates、0 skipped，exit0，无OOM/NaN/test访问。
