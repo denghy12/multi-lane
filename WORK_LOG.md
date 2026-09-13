@@ -10,6 +10,9 @@
 - 服务器新建独立worktree且191项全测通过。真实64样本双输入GPU smoke确认零残差与纯CLIP最大误差
   `1.55e-7`，FP32和AMP的Adapter ASL梯度均非零，残差BCE梯度非零，两个冻结encoder无梯度。
 - 8卡当时均约6.4GiB空闲；为避免OOM，launcher增加8GiB显存门槛的自动排队，不抢占现有训练。
+- 代码/排队修正已提交推送至`7840aac`，服务器fast-forward后191项全测再次通过。
+- 唯一seed0 validation batch `face_expression_residual_seed0_20260913_143719`已进入tmux
+  `ml_face_expr_residual_143719`；当时8卡均不足8GiB空闲，任务正安全排队，未加载模型也未访问test。
 
 ## 2026-09-12：开始Face表情预训练专用表征
 

@@ -7,7 +7,8 @@
 2. 本地静态检查后提交推送；服务器必须创建新独立clean worktree，不触碰主工作树和test-only。
 3. 191项完整单测与真实双encoder GPU smoke已通过；零残差误差`1.55e-7`，两条loss梯度有限且路由
    正确，冻结主干无梯度。
-4. 当前GPU均只有约6.4GiB空闲；launcher等待任一卡达到8GiB后自动运行唯一seed0完整8-task
+4. 唯一batch `face_expression_residual_seed0_20260913_143719`已在tmux
+   `ml_face_expr_residual_143719`排队；launcher等待任一GPU达到8GiB空闲后自动运行完整8-task
    validation，固定R1 beta0.20、不存checkpoint、不访问test。
 5. 只有可靠Face与固定R1 final mAP均至少+0.05才补seed1/2；否则结束Face专用表征路线。
 
