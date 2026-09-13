@@ -30,7 +30,7 @@ def _row(
     person: Path,
     face: Path,
     manifest: Path,
-    allow_full_training_objective_difference: bool = False,
+    allow_full_objective_provenance_difference: bool = False,
 ) -> Dict[str, Any]:
     summary = _read(full / "seed_summary.json")
     config = _read(full / "config.json")
@@ -42,8 +42,8 @@ def _row(
         face,
         manifest,
         betas=(0.20,),
-        allow_full_training_objective_difference=(
-            allow_full_training_objective_difference
+        allow_full_objective_provenance_difference=(
+            allow_full_objective_provenance_difference
         ),
         require_stage1_grid=False,
     )

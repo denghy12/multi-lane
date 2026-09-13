@@ -40,7 +40,7 @@ def _load_json(path: Path) -> Any:
 def _validate_runs(
     full_run: Path,
     person_run: Path,
-    allow_full_training_objective_difference: bool = False,
+    allow_full_objective_provenance_difference: bool = False,
 ) -> Tuple[Dict, Dict]:
     full_config = _load_json(full_run / "config.json")
     person_config = _load_json(person_run / "config.json")
@@ -66,8 +66,11 @@ def _validate_runs(
         raise ValueError("The person fusion input is not body-preserving letterbox")
     for field in COMMON_CONFIG_FIELDS:
         if (
-            allow_full_training_objective_difference
-            and field == "model_parameter_objective"
+            allow_full_objective_provenance_difference
+            and field in {
+                "model_parameter_objective",
+                "adapter_parameter_objective",
+            }
         ):
             continue
         if full_config.get(field) != person_config.get(field):

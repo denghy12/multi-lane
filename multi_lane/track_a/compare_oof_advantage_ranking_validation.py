@@ -37,7 +37,7 @@ def compare(
         person,
         face,
         manifest,
-        allow_full_training_objective_difference=True,
+        allow_full_objective_provenance_difference=True,
     )
     protocol = candidate_config.get("oof_advantage_ranking", {})
     if (

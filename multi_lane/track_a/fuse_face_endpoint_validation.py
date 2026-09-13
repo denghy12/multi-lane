@@ -95,7 +95,7 @@ def _validate_face_run(
     manifest_root: Path,
     allow_face_training_budget_difference: bool = False,
     allow_face_representation_difference: bool = False,
-    allow_full_training_objective_difference: bool = False,
+    allow_full_objective_provenance_difference: bool = False,
 ) -> Mapping[str, Any]:
     full_config = _load_json(full_run / "config.json")
     face_config = _load_json(face_run / "config.json")
@@ -111,8 +111,11 @@ def _validate_face_run(
         raise ValueError("Face run manifest provenance differs from the supplied audit")
     for field in COMMON_CONFIG_FIELDS:
         if (
-            allow_full_training_objective_difference
-            and field == "model_parameter_objective"
+            allow_full_objective_provenance_difference
+            and field in {
+                "model_parameter_objective",
+                "adapter_parameter_objective",
+            }
         ):
             continue
         if allow_face_training_budget_difference and field in {
@@ -145,7 +148,7 @@ def fuse_face_endpoint_validation(
     betas: Sequence[float] = BETAS,
     allow_face_training_budget_difference: bool = False,
     allow_face_representation_difference: bool = False,
-    allow_full_training_objective_difference: bool = False,
+    allow_full_objective_provenance_difference: bool = False,
     require_stage1_grid: bool = True,
 ) -> Dict[str, Any]:
     selected_betas = tuple(float(value) for value in betas)
@@ -156,7 +159,7 @@ def fuse_face_endpoint_validation(
     full_summary, person_summary = _validate_runs(
         full_run,
         person_run,
-        allow_full_training_objective_difference,
+        allow_full_objective_provenance_difference,
     )
     face_summary = _validate_face_run(
         full_run,
@@ -164,7 +167,7 @@ def fuse_face_endpoint_validation(
         manifest_root,
         allow_face_training_budget_difference,
         allow_face_representation_difference,
-        allow_full_training_objective_difference,
+        allow_full_objective_provenance_difference,
     )
     full_dumps, _ = validated_run_scores(full_run, "val")
     person_dumps, _ = validated_run_scores(person_run, "val")

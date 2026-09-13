@@ -104,6 +104,9 @@ class OOFAdvantageComparisonTest(unittest.TestCase):
                     **shared,
                     "input_mode": mode,
                     "model_parameter_objective": objective,
+                    "adapter_parameter_objective": (
+                        "hard_label_asl" if name == "full" else "asl"
+                    ),
                 }
                 if name == "person":
                     config["person_transform_mode"] = "letterbox"
@@ -117,7 +120,7 @@ class OOFAdvantageComparisonTest(unittest.TestCase):
             _validate_runs(
                 root / "full",
                 root / "person",
-                allow_full_training_objective_difference=True,
+                allow_full_objective_provenance_difference=True,
             )
 
     @patch("multi_lane.track_a.compare_oof_advantage_ranking_validation._row")
