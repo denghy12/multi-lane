@@ -1973,3 +1973,9 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - 正式batch `locked_architecture_test_20260914_013250`已在clean提交`b1cddff`启动：GPU0--2运行
   J0 seed0/1/2，GPU3--5运行A2 seed0/1/2，GPU6完成C2统一结果写入。六组首轮均84 updates、
   skipped0；峰值显存约3.6GiB(J0)/2.1GiB(A2)，每卡仍余20GiB以上，无OOM或错误。
+- 本批已结束并同步50个JSON/日志/状态文件，本地与服务器SHA-256全一致。final test mAP：固定R1
+  `33.0119±0.3038`、C2 `33.0153±0.3074`、J0 `32.1639±0.6258`、A2
+  `32.4201±0.1352`。C2相对R1仅`+0.0034`且三seed方向不一致，视为持平；J0/A2三seed均负。
+- A2 seed1在task3 epoch27发生一次AMP GradScaler skip，最终13,949而非13,950 updates；loss有限且
+  无OOM/NaN。仅占总预算0.0072%，不会解释A2相对R1的`-0.5918`，但正式归档应脚注或单独复跑。
+  完整报告见`output/emotic_track_a_locked_architecture_test/20260914_013250/analysis.md`。

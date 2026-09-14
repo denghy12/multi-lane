@@ -3652,3 +3652,8 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - 验证记录提交后服务器ff-only至`b1cddff`，正式batch`locked_architecture_test_20260914_013250`
   在tmux `multilane_locked_arch_test_013250`启动。六个训练进程全部写出clean config并完成首轮
   84 updates/skipped0；J0/A2分别约3.6/2.1GiB显存，无错误。C2统一控制结果已完成。
+- batch自动汇总正常结束；J0三seed和A2 seed0/2为240 epochs、13,950 updates、0 skipped。
+  A2 seed1为240 epochs、13,949 updates，在task3 epoch27有一次AMP scale下降，loss仍有限。
+- 三seedfinal mAP为R1/C2/J0/A2=`33.0119/33.0153/32.1639/32.4201`。C2配对增益
+  `+0.0094/-0.0030/+0.0038`，不具方向一致性；J0/A2在全部8个累计task均低于R1。
+- 仅同步JSON、日志和控制文件共50项约2.6MB，无checkpoint/score NPZ；远端与本地SHA-256逐项一致。
