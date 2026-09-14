@@ -495,7 +495,41 @@ def add_view_auxiliary_loss(
         raise ValueError("View auxiliary objective must be BCE or ASL")
     if not view_logits or weight == 0:
         return primary_loss
-    losses = []
+    losses = compute_view_objective_losses(
+        view_logits,
+        images,
+        current_targets,
+        current_class_indices,
+        temperature,
+        loss_mode,
+        objective,
+        gamma_neg,
+        gamma_pos,
+        clip,
+        eps,
+    )
+    if not losses:
+        return primary_loss
+    return primary_loss + float(weight) * torch.stack(list(losses.values())).mean()
+
+
+def compute_view_objective_losses(
+    view_logits: Dict[str, torch.Tensor],
+    images: object,
+    current_targets: torch.Tensor,
+    current_class_indices: Sequence[int],
+    temperature: float,
+    loss_mode: str,
+    objective: str,
+    gamma_neg: float = 9.8,
+    gamma_pos: float = 0.0,
+    clip: float = 0.05,
+    eps: float = 1e-8,
+) -> Dict[str, torch.Tensor]:
+    """Compute separately addressable Full/Person/Face hard-label losses."""
+    if objective not in {"bce", "asl"}:
+        raise ValueError("View objective must be BCE or ASL")
+    losses: Dict[str, torch.Tensor] = {}
     for name, logits in view_logits.items():
         mask = None
         if name == "face":
@@ -526,10 +560,134 @@ def add_view_auxiliary_loss(
                 clip,
                 eps,
             )
-        losses.append(loss)
-    if not losses:
-        return primary_loss
-    return primary_loss + float(weight) * torch.stack(losses).mean()
+        losses[name] = loss
+    return losses
+
+
+def _scaled_gradients(
+    loss: torch.Tensor,
+    parameters: Sequence[torch.nn.Parameter],
+    scaler: torch.cuda.amp.GradScaler,
+    retain_graph: bool,
+) -> Tuple[Optional[torch.Tensor], ...]:
+    if not parameters:
+        return ()
+    return torch.autograd.grad(
+        scaler.scale(loss),
+        tuple(parameters),
+        retain_graph=retain_graph,
+        allow_unused=True,
+    )
+
+
+def backward_dgl_training_losses(
+    representation_loss: torch.Tensor,
+    adapter_loss: torch.Tensor,
+    fusion_loss: torch.Tensor,
+    representation_parameters: Sequence[torch.nn.Parameter],
+    adapter_parameters: Sequence[torch.nn.Parameter],
+    prediction_parameters: Sequence[torch.nn.Parameter],
+    scaler: torch.cuda.amp.GradScaler,
+) -> None:
+    """Route unimodal objectives to representations and fused BCE to prediction.
+
+    Fusion receives detached view features in the model forward.  Explicit
+    parameter-targeted gradients provide the complementary DGL truncation:
+    unimodal losses pass through the shared head but cannot update it, while
+    the fused objective updates only the head/fusion parameter group.
+    """
+    groups = tuple(map(tuple, (
+        representation_parameters, adapter_parameters, prediction_parameters,
+    )))
+    identifiers = [id(parameter) for group in groups for parameter in group]
+    if len(identifiers) != len(set(identifiers)):
+        raise ValueError("DGL parameter groups must be disjoint")
+    losses = (representation_loss, adapter_loss, fusion_loss)
+    populated = [(loss, group) for loss, group in zip(losses, groups) if group]
+    for index, (loss, group) in enumerate(populated):
+        gradients = _scaled_gradients(
+            loss, group, scaler, retain_graph=index + 1 < len(populated)
+        )
+        for parameter, gradient in zip(group, gradients):
+            parameter.grad = gradient
+
+
+def _gradient_signature(
+    main_loss: torch.Tensor,
+    adapter_loss: torch.Tensor,
+    representation_parameters: Sequence[torch.nn.Parameter],
+    adapter_parameters: Sequence[torch.nn.Parameter],
+) -> Tuple[Tuple[Optional[torch.Tensor], ...], Tuple[Optional[torch.Tensor], ...]]:
+    main = torch.autograd.grad(
+        main_loss,
+        tuple(representation_parameters),
+        retain_graph=True,
+        allow_unused=True,
+    ) if representation_parameters else ()
+    adapter = torch.autograd.grad(
+        adapter_loss,
+        tuple(adapter_parameters),
+        retain_graph=True,
+        allow_unused=True,
+    ) if adapter_parameters else ()
+    return main, adapter
+
+
+def _gradient_norm_and_dot(
+    left: Tuple[Tuple[Optional[torch.Tensor], ...], ...],
+    right: Optional[Tuple[Tuple[Optional[torch.Tensor], ...], ...]] = None,
+) -> float:
+    total = None
+    right = left if right is None else right
+    for left_group, right_group in zip(left, right):
+        for left_gradient, right_gradient in zip(left_group, right_group):
+            if left_gradient is None or right_gradient is None:
+                continue
+            value = torch.sum(left_gradient.float() * right_gradient.float())
+            total = value if total is None else total + value
+    return 0.0 if total is None else float(total.detach().cpu())
+
+
+def view_gradient_audit(
+    fused_bce: torch.Tensor,
+    fused_asl: torch.Tensor,
+    view_bce: Dict[str, torch.Tensor],
+    view_asl: Dict[str, torch.Tensor],
+    representation_parameters: Sequence[torch.nn.Parameter],
+    adapter_parameters: Sequence[torch.nn.Parameter],
+) -> Dict[str, float]:
+    """Measure fused/view gradient norms and cosines on shared representations."""
+    if set(view_bce) != set(view_asl):
+        raise ValueError("BCE and ASL audit views differ")
+    signatures = {
+        "fused": _gradient_signature(
+            fused_bce, fused_asl, representation_parameters, adapter_parameters
+        )
+    }
+    for name in view_bce:
+        signatures[name] = _gradient_signature(
+            view_bce[name], view_asl[name],
+            representation_parameters, adapter_parameters,
+        )
+    norms = {
+        name: math.sqrt(max(0.0, _gradient_norm_and_dot(signature)))
+        for name, signature in signatures.items()
+    }
+    result: Dict[str, float] = {
+        f"gradient_norm_{name}": value for name, value in norms.items()
+    }
+    for name in view_bce:
+        denominator = norms["fused"] * norms[name]
+        result[f"gradient_cosine_fused_{name}"] = (
+            _gradient_norm_and_dot(signatures["fused"], signatures[name])
+            / denominator if denominator > 0 else 0.0
+        )
+        result[f"gradient_norm_ratio_fused_to_{name}"] = (
+            norms["fused"] / norms[name] if norms[name] > 0 else 0.0
+        )
+    if not all(math.isfinite(value) for value in result.values()):
+        raise FloatingPointError("Non-finite multi-view gradient audit")
+    return result
 
 
 def backward_routed_training_losses(
@@ -837,6 +995,124 @@ def evaluate(
     return compute_metrics(task_id, all_scores, all_targets, threshold)
 
 
+def evaluate_view_diagnostics(
+    model: MultiLaneModel,
+    loader: Iterable,
+    device: torch.device,
+    task_id: int,
+    threshold: float,
+    amp: bool,
+) -> Dict[str, object]:
+    """Evaluate standalone views, Router weights, and Full-relative pair flips."""
+    if model.view_fusion == "disabled":
+        raise ValueError("View diagnostics require enabled view fusion")
+    model.eval()
+    fused_rows: List[torch.Tensor] = []
+    branch_rows: Dict[str, List[torch.Tensor]] = {
+        name: [] for name in model.view_fusion_module.view_names
+    }
+    target_rows: List[torch.Tensor] = []
+    weight_rows: List[torch.Tensor] = []
+    reliable_rows: List[torch.Tensor] = []
+    with torch.no_grad():
+        for batch in loader:
+            if len(batch) not in (2, 3):
+                raise ValueError("Diagnostic batches must have two or three fields")
+            images, targets = batch[:2]
+            if isinstance(images, dict) and "face_reliable" in images:
+                reliable_rows.append(images["face_reliable"].to(dtype=torch.bool).cpu())
+            images = move_model_inputs(images, device)
+            with torch.cuda.amp.autocast(enabled=amp):
+                fused_logits, view_logits = model.seen_logits_with_views(images)
+            fused_rows.append(torch.sigmoid(fused_logits.float()).cpu())
+            for name, logits in view_logits.items():
+                branch_rows[name].append(torch.sigmoid(logits.float()).cpu())
+            weights = model.last_fusion_weights()
+            if weights is None:
+                raise RuntimeError("Enabled fusion did not expose weights")
+            weight_rows.append(weights.float().cpu())
+            target_rows.append(targets.float().cpu())
+    if not fused_rows:
+        raise RuntimeError("View diagnostic loader produced no samples")
+    fused = torch.cat(fused_rows)
+    targets = torch.cat(target_rows)
+    branches = {
+        name: torch.cat(rows) for name, rows in branch_rows.items()
+    }
+    weights = torch.cat(weight_rows)
+    metrics = {
+        "fused": asdict(compute_metrics(task_id, fused, targets, threshold)),
+        **{
+            name: asdict(compute_metrics(task_id, scores, targets, threshold))
+            for name, scores in branches.items()
+        },
+    }
+    if reliable_rows and "face" in branches:
+        reliable = torch.cat(reliable_rows)
+        if bool(reliable.any()):
+            metrics["face_reliable"] = asdict(compute_metrics(
+                task_id, branches["face"][reliable], targets[reliable], threshold
+            ))
+
+    lane_weight_stats = []
+    lane_ids = model._lane_ids(all_seen_lanes=True)
+    for lane_position, lane_id in enumerate(lane_ids):
+        row: Dict[str, object] = {"lane_id": int(lane_id)}
+        for view_position, name in enumerate(model.view_fusion_module.view_names):
+            values = weights[:, lane_position, view_position].numpy()
+            row[name] = {
+                "mean": float(np.mean(values)),
+                "std": float(np.std(values)),
+                "p05": float(np.quantile(values, 0.05)),
+                "p50": float(np.quantile(values, 0.50)),
+                "p95": float(np.quantile(values, 0.95)),
+            }
+        lane_weight_stats.append(row)
+
+    full = branches["full"].numpy()
+    fused_np = fused.numpy()
+    targets_np = targets.numpy()
+    pair_rows = []
+    corrected_total = damaged_total = comparable_total = 0
+    for class_index in range(targets_np.shape[1]):
+        positive = targets_np[:, class_index] > 0.5
+        negative = ~positive
+        full_margin = (
+            full[positive, class_index, None]
+            - full[negative, class_index][None, :]
+        )
+        fused_margin = (
+            fused_np[positive, class_index, None]
+            - fused_np[negative, class_index][None, :]
+        )
+        corrected = int(np.logical_and(full_margin <= 0, fused_margin > 0).sum())
+        damaged = int(np.logical_and(full_margin > 0, fused_margin <= 0).sum())
+        comparable = int(full_margin.size)
+        corrected_total += corrected
+        damaged_total += damaged
+        comparable_total += comparable
+        pair_rows.append({
+            "class_index": class_index,
+            "class_name": CLASS_ORDER[class_index],
+            "positive_negative_pairs": comparable,
+            "full_errors_corrected_by_fusion": corrected,
+            "full_correct_pairs_damaged_by_fusion": damaged,
+            "net_corrected_pairs": corrected - damaged,
+        })
+    return {
+        "task_id": task_id,
+        "metrics": metrics,
+        "lane_weight_stats": lane_weight_stats,
+        "pairwise_ranking_vs_full": {
+            "positive_negative_pairs": comparable_total,
+            "errors_corrected": corrected_total,
+            "correct_pairs_damaged": damaged_total,
+            "net_corrected_pairs": corrected_total - damaged_total,
+            "per_class": pair_rows,
+        },
+    }
+
+
 def current_validation_map(
     model: MultiLaneModel, loader: Iterable, device: torch.device, amp: bool
 ) -> float:
@@ -1091,6 +1367,9 @@ def train_task(
     selector_condition_learning_rate: float = 4e-4,
     view_fusion_learning_rate: float = 4e-4,
     view_auxiliary_loss_weight: float = 0.0,
+    view_gradient_routing: str = "joint",
+    view_dgl_unimodal_weight: float = 1.0,
+    view_gradient_audit_enabled: bool = False,
     oof_distillation_mix: float = 0.0,
     ranking_loader: Optional[DataLoader] = None,
     ranking_loss_weight: float = 0.0,
@@ -1115,6 +1394,25 @@ def train_task(
         raise ValueError("View auxiliary loss weight must be in [0, 1]")
     if model.view_fusion == "disabled" and view_auxiliary_loss_weight != 0:
         raise ValueError("View auxiliary supervision requires enabled view fusion")
+    if view_gradient_routing not in {"joint", "fusion_detach", "dgl"}:
+        raise ValueError("Unknown multi-view gradient routing mode")
+    if view_gradient_routing != "joint" and model.view_fusion == "disabled":
+        raise ValueError("View gradient routing requires enabled view fusion")
+    if model.detach_view_fusion_features != (view_gradient_routing != "joint"):
+        raise ValueError("Model feature detachment and gradient routing disagree")
+    if not math.isfinite(view_dgl_unimodal_weight) or view_dgl_unimodal_weight <= 0:
+        raise ValueError("DGL unimodal weight must be finite and positive")
+    if view_gradient_routing == "dgl" and (
+        loss_routing != "adapter_asl"
+        or view_auxiliary_loss_weight != 0
+        or adapter_regularization != "none"
+        or oof_distillation_mix != 0
+        or ranking_loader is not None
+    ):
+        raise ValueError(
+            "DGL requires Adapter-ASL, zero legacy auxiliary weight, and no "
+            "regularization/distillation/ranking"
+        )
     if not math.isfinite(oof_distillation_mix) or not 0 <= oof_distillation_mix < 1:
         raise ValueError("OOF distillation mix must be finite and in [0, 1)")
     if not math.isfinite(ranking_loss_weight) or ranking_loss_weight < 0:
@@ -1133,6 +1431,18 @@ def train_task(
     )
     if loss_routing in {"adapter_asl", "both_asl"} and not adapter_parameters:
         raise ValueError("Adapter ASL routing requires an enabled Adapter")
+    representation_parameters = tuple(model.representation_optimizer_parameters())
+    prediction_parameters = tuple(model.prediction_optimizer_parameters())
+    if view_gradient_routing == "dgl":
+        expected_model_parameters = {
+            id(parameter) for parameter in model_parameters
+        }
+        routed_model_parameters = {
+            id(parameter)
+            for parameter in (*representation_parameters, *prediction_parameters)
+        }
+        if expected_model_parameters != routed_model_parameters:
+            raise ValueError("DGL model parameter partition is incomplete")
     optimizer = torch.optim.Adam(optimizer_groups, lr=learning_rate)
     scheduler = build_learning_rate_scheduler(
         optimizer=optimizer,
@@ -1156,6 +1466,7 @@ def train_task(
     regularization_weight: Optional[float] = None
     ranking_iterator = iter(ranking_loader) if ranking_loader is not None else None
     epoch = 0
+    task_gradient_audit: Optional[Dict[str, float]] = None
     while (
         completed_task_updates < optimizer_updates_per_task
         if optimizer_updates_per_task is not None
@@ -1170,6 +1481,9 @@ def train_task(
         supervised_bce_total = 0.0
         oof_distillation_total = 0.0
         ranking_loss_total = 0.0
+        dgl_unimodal_bce_total = 0.0
+        dgl_unimodal_asl_total = 0.0
+        dgl_fusion_total = 0.0
         batches = 0
         optimizer_steps = 0
         skipped_steps = 0
@@ -1215,24 +1529,28 @@ def train_task(
             optimizer.zero_grad(set_to_none=True)
             with torch.cuda.amp.autocast(enabled=amp):
                 logits, view_logits = model.current_all_logits_with_views(images)
-                supervised_bce_loss = compute_training_loss(
+                fused_bce_loss = compute_training_loss(
                     logits,
                     current_targets,
                     current,
                     temperature,
                     loss_mode,
                 )
-                supervised_bce_loss = add_view_auxiliary_loss(
-                    supervised_bce_loss,
+                view_bce_losses = compute_view_objective_losses(
                     view_logits,
                     images,
                     current_targets,
                     current,
                     temperature,
                     loss_mode,
-                    view_auxiliary_loss_weight,
                     "bce",
                 )
+                supervised_bce_loss = fused_bce_loss
+                if view_bce_losses and view_auxiliary_loss_weight:
+                    supervised_bce_loss = supervised_bce_loss + (
+                        float(view_auxiliary_loss_weight)
+                        * torch.stack(list(view_bce_losses.values())).mean()
+                    )
                 oof_distillation_loss = logits.new_zeros(())
                 if teacher_probabilities is not None:
                     oof_distillation_loss = compute_oof_distillation_loss(
@@ -1283,33 +1601,37 @@ def train_task(
                         positive_pair_logits, negative_pair_logits
                     )
                 asl_loss = None
+                fused_asl_loss = compute_asymmetric_training_loss(
+                    logits,
+                    current_targets,
+                    current,
+                    temperature,
+                    loss_mode,
+                    gamma_neg=asl_gamma_neg,
+                    gamma_pos=asl_gamma_pos,
+                    clip=asl_clip,
+                    eps=asl_eps,
+                )
+                view_asl_losses = compute_view_objective_losses(
+                    view_logits,
+                    images,
+                    current_targets,
+                    current,
+                    temperature,
+                    loss_mode,
+                    "asl",
+                    asl_gamma_neg,
+                    asl_gamma_pos,
+                    asl_clip,
+                    asl_eps,
+                )
                 if loss_routing != "joint_bce":
-                    asl_loss = compute_asymmetric_training_loss(
-                        logits,
-                        current_targets,
-                        current,
-                        temperature,
-                        loss_mode,
-                        gamma_neg=asl_gamma_neg,
-                        gamma_pos=asl_gamma_pos,
-                        clip=asl_clip,
-                        eps=asl_eps,
-                    )
-                    asl_loss = add_view_auxiliary_loss(
-                        asl_loss,
-                        view_logits,
-                        images,
-                        current_targets,
-                        current,
-                        temperature,
-                        loss_mode,
-                        view_auxiliary_loss_weight,
-                        "asl",
-                        asl_gamma_neg,
-                        asl_gamma_pos,
-                        asl_clip,
-                        asl_eps,
-                    )
+                    asl_loss = fused_asl_loss
+                    if view_asl_losses and view_auxiliary_loss_weight:
+                        asl_loss = asl_loss + (
+                            float(view_auxiliary_loss_weight)
+                            * torch.stack(list(view_asl_losses.values())).mean()
+                        )
                 model_loss = (
                     asl_loss
                     if loss_routing in {"model_asl", "both_asl"}
@@ -1343,19 +1665,51 @@ def train_task(
                             regularization_metric * regularization_weight
                         )
                 adapter_loss = adapter_base_loss + regularization_loss
+                if view_gradient_audit_enabled and task_gradient_audit is None:
+                    task_gradient_audit = view_gradient_audit(
+                        fused_bce_loss,
+                        fused_asl_loss,
+                        view_bce_losses,
+                        view_asl_losses,
+                        representation_parameters,
+                        adapter_parameters,
+                    )
             scale_before = float(scaler.get_scale())
-            backward_routed_training_losses(
-                model_loss=model_loss,
-                adapter_loss=adapter_loss,
-                model_parameters=model_parameters,
-                adapter_parameters=adapter_parameters,
-                scaler=scaler,
-                same_objective=(
-                    loss_routing in {"joint_bce", "both_asl"}
-                    and adapter_regularization == "none"
-                    and ranking_loader is None
-                ),
-            )
+            if view_gradient_routing == "dgl":
+                if not view_bce_losses or not view_asl_losses:
+                    raise RuntimeError("DGL requires available view objectives")
+                unimodal_bce_loss = (
+                    float(view_dgl_unimodal_weight)
+                    * torch.stack(list(view_bce_losses.values())).mean()
+                )
+                unimodal_asl_loss = (
+                    float(view_dgl_unimodal_weight)
+                    * torch.stack(list(view_asl_losses.values())).mean()
+                )
+                backward_dgl_training_losses(
+                    representation_loss=unimodal_bce_loss,
+                    adapter_loss=unimodal_asl_loss,
+                    fusion_loss=fused_bce_loss,
+                    representation_parameters=representation_parameters,
+                    adapter_parameters=adapter_parameters,
+                    prediction_parameters=prediction_parameters,
+                    scaler=scaler,
+                )
+                model_loss = fused_bce_loss
+                adapter_loss = unimodal_asl_loss
+            else:
+                backward_routed_training_losses(
+                    model_loss=model_loss,
+                    adapter_loss=adapter_loss,
+                    model_parameters=model_parameters,
+                    adapter_parameters=adapter_parameters,
+                    scaler=scaler,
+                    same_objective=(
+                        loss_routing in {"joint_bce", "both_asl"}
+                        and adapter_regularization == "none"
+                        and ranking_loader is None
+                    ),
+                )
             scaler.step(optimizer)
             scaler.update()
             if float(scaler.get_scale()) >= scale_before:
@@ -1390,6 +1744,10 @@ def train_task(
             supervised_bce_total += float(supervised_bce_loss.detach().cpu())
             oof_distillation_total += float(oof_distillation_loss.detach().cpu())
             ranking_loss_total += float(ranking_loss.detach().cpu())
+            if view_gradient_routing == "dgl":
+                dgl_unimodal_bce_total += float(unimodal_bce_loss.detach().cpu())
+                dgl_unimodal_asl_total += float(unimodal_asl_loss.detach().cpu())
+                dgl_fusion_total += float(fused_bce_loss.detach().cpu())
             batches += 1
             fusion_means = model.fusion_weight_means()
             if fusion_means is not None:
@@ -1418,6 +1776,9 @@ def train_task(
             "oof_distillation_mix": float(oof_distillation_mix),
             "pairwise_ranking_loss": ranking_loss_total / batches,
             "pairwise_ranking_loss_weight": float(ranking_loss_weight),
+            "dgl_unimodal_bce_loss": dgl_unimodal_bce_total / batches,
+            "dgl_unimodal_asl_loss": dgl_unimodal_asl_total / batches,
+            "dgl_fusion_loss": dgl_fusion_total / batches,
             "adapter_regularization_weight": (
                 regularization_weight if regularization_weight is not None else 0.0
             ),
@@ -1443,6 +1804,8 @@ def train_task(
             means = fusion_weight_totals / fusion_weight_batches
             for name, value in zip(model.view_fusion_module.view_names, means):
                 row[f"fusion_weight_{name}"] = float(value)
+        if task_gradient_audit is not None and epoch == 0:
+            row.update(task_gradient_audit)
         history.append(row)
         print(
             f"task={task_id} cycle={epoch + 1} "
@@ -1608,6 +1971,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--view-fusion-learning-rate", type=float, default=4e-4)
     parser.add_argument("--view-residual-scale", type=float, default=0.1)
     parser.add_argument("--view-auxiliary-loss-weight", type=float, default=0.0)
+    parser.add_argument(
+        "--view-gradient-routing",
+        choices=("joint", "fusion_detach", "dgl"),
+        default="joint",
+    )
+    parser.add_argument("--view-dgl-unimodal-weight", type=float, default=1.0)
+    parser.add_argument("--view-gradient-audit", action="store_true")
+    parser.add_argument("--view-evaluation-diagnostics", action="store_true")
     parser.add_argument("--paired-full-person", action="store_true",
                         help="Also permit a paired-input, conditioning-disabled control.")
     parser.add_argument(
@@ -1772,6 +2143,25 @@ def main() -> None:
         raise ValueError("View auxiliary loss weight must be in [0, 1]")
     if args.view_fusion == "disabled" and args.view_auxiliary_loss_weight != 0:
         raise ValueError("View auxiliary supervision requires view fusion")
+    if args.view_gradient_routing != "joint" and args.view_fusion == "disabled":
+        raise ValueError("View gradient routing requires view fusion")
+    if args.view_gradient_routing == "dgl" and (
+        args.loss_routing != "adapter_asl"
+        or args.view_auxiliary_loss_weight != 0
+        or args.adapter_regularization != "none"
+        or args.oof_distillation_mix != 0
+        or args.ranking_loss_weight != 0
+    ):
+        raise ValueError(
+            "DGL requires Adapter-ASL and disables legacy auxiliary, "
+            "regularization, distillation, and ranking objectives"
+        )
+    if not math.isfinite(args.view_dgl_unimodal_weight) or args.view_dgl_unimodal_weight <= 0:
+        raise ValueError("DGL unimodal weight must be finite and positive")
+    if (args.view_gradient_audit or args.view_evaluation_diagnostics) and (
+        args.view_fusion == "disabled"
+    ):
+        raise ValueError("View diagnostics require enabled view fusion")
     if not math.isfinite(args.selector_condition_learning_rate) or args.selector_condition_learning_rate <= 0:
         raise ValueError("Selector condition learning rate must be finite and positive")
     if args.train_batch_size != 64:
@@ -1969,6 +2359,7 @@ def main() -> None:
         view_fusion=args.view_fusion,
         view_fusion_hidden_dim=args.view_fusion_hidden_dim,
         view_residual_scale=args.view_residual_scale,
+        detach_view_fusion_features=args.view_gradient_routing != "joint",
     ).float().to(device)
     model.visual_encoder.requires_grad_(False)
     model.assert_visual_frozen()
@@ -2305,6 +2696,18 @@ def main() -> None:
             "mean_over_available_views_face_strictly_reliable"
             if args.view_fusion != "disabled" else None
         ),
+        "view_gradient_routing": args.view_gradient_routing,
+        "view_fusion_features_detached": args.view_gradient_routing != "joint",
+        "view_dgl_unimodal_weight": (
+            args.view_dgl_unimodal_weight
+            if args.view_gradient_routing == "dgl" else None
+        ),
+        "view_gradient_audit": args.view_gradient_audit,
+        "view_gradient_audit_scope": (
+            "first_training_batch_per_task_shared_representation_BCE_plus_adapter_ASL"
+            if args.view_gradient_audit else None
+        ),
+        "view_evaluation_diagnostics": args.view_evaluation_diagnostics,
         "full_crop_mode": args.full_crop_mode,
         "selector_conditioning": args.selector_conditioning,
         "selector_condition_layers": list(args.selector_condition_layers),
@@ -2474,6 +2877,7 @@ def main() -> None:
     calibration_rows: List[TaskMetrics] = []
     calibration_counts: Dict[str, object] = {}
     training_history: Dict[str, object] = {}
+    view_diagnostics: Dict[str, object] = {}
     start = time.time()
     for task_id in range(args.max_tasks):
         print(f"begin_task={task_id}", flush=True)
@@ -2563,6 +2967,9 @@ def main() -> None:
             selector_condition_learning_rate=args.selector_condition_learning_rate,
             view_fusion_learning_rate=args.view_fusion_learning_rate,
             view_auxiliary_loss_weight=args.view_auxiliary_loss_weight,
+            view_gradient_routing=args.view_gradient_routing,
+            view_dgl_unimodal_weight=args.view_dgl_unimodal_weight,
+            view_gradient_audit_enabled=args.view_gradient_audit,
             loss_mode=args.training_loss_mode,
             loss_routing=args.loss_routing,
             asl_gamma_neg=args.asl_gamma_neg,
@@ -2596,6 +3003,15 @@ def main() -> None:
             ),
         )
         task_rows.append(row)
+        if args.view_evaluation_diagnostics:
+            view_diagnostics[str(task_id)] = evaluate_view_diagnostics(
+                model,
+                reporting_loader,
+                device,
+                task_id,
+                args.threshold,
+                amp,
+            )
         if calibration_loader is not None:
             calibration_row = evaluate(
                 model,
@@ -2635,6 +3051,11 @@ def main() -> None:
         (output / "training_history.json").write_text(
             json.dumps(training_history, indent=2) + "\n", encoding="utf-8"
         )
+        if view_diagnostics:
+            (output / "view_diagnostics.json").write_text(
+                json.dumps(view_diagnostics, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
         if calibration_rows:
             (output / "calibration_metrics.json").write_text(
                 json.dumps(

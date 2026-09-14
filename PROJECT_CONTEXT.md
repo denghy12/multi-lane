@@ -1979,3 +1979,17 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - A2 seed1在task3 epoch27发生一次AMP GradScaler skip，最终13,949而非13,950 updates；loss有限且
   无OOM/NaN。仅占总预算0.0072%，不会解释A2相对R1的`-0.5918`，但正式归档应脚注或单独复跑。
   完整报告见`output/emotic_track_a_locked_architecture_test/20260914_013250/analysis.md`。
+# 2026-09-14：开始共享多视图DGL梯度审计与G0/G1/G2
+
+- 从`exp/three-architecture-locked-test`的clean HEAD `cadb40b`创建
+  `exp/shared-multiview-dgl-audit`；保留四份用户未跟踪Adapter调参文档和`tmp/`，未纳入本实验。
+- 目标是在Full/Person/Face继续共享selectors/prompts/head/Image-token Adapter的前提下，区分普通
+  J0联合反传、仅截断融合到表示的梯度G1、以及单视图目标只更新表示且融合BCE只更新Head的完整G2。
+- runner新增`joint/fusion_detach/dgl`梯度模式、显式参数分组、可靠Face逐视图BCE/ASL、首batch逐task
+  梯度范数/余弦审计；评估新增三分支独立mAP、可靠Face、逐lane权重分布，以及融合相对Full纠正/破坏
+  的正负排序对统计。前向数值、固定R1特征权重和增量task冻结语义不变。
+- 新增三GPU seed0完整8-task validation launcher与严格汇总器。G0为fresh J0(aux0.1)，G1保持aux0.1
+  但detach融合输入，G2使用alpha1完整双向梯度隔离且关闭旧aux项。固定30 epochs/task、batch64、冠军
+  Adapter、主BCE+Adapter ASL、AMP/TF32、val-only、无checkpoint、禁止test。
+- 协议见`docs/shared_multiview_dgl_validation.md`。当前已完成本地py_compile、shell语法与diff检查；本地
+  无torch/pytest，完整测试和真实GPU smoke须在服务器`ddp`环境执行。

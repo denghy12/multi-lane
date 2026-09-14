@@ -11,8 +11,10 @@ from multi_lane.track_a.model import MultiLaneModel
 from multi_lane.track_a.paired_transforms import ThreeViewTransform
 from multi_lane.track_a.runner import (
     add_view_auxiliary_loss,
+    backward_dgl_training_losses,
     build_optimizer_groups,
     compute_training_loss,
+    view_gradient_audit,
 )
 from multi_lane.track_a.view_fusion import TaskwiseViewFusion
 
@@ -45,6 +47,72 @@ def three_view_batch(batch_size: int = 3):
 
 
 class TaskwiseViewFusionTest(unittest.TestCase):
+    def test_detached_fixed_fusion_preserves_branch_gradients_only(self) -> None:
+        torch.manual_seed(23)
+        model = MultiLaneModel(
+            FakeVisual(),
+            (5, 3),
+            num_selectors=2,
+            num_prompts=2,
+            num_prompt_layers=1,
+            adapter_mode="image_token",
+            adapter_layer_indices=(0,),
+            adapter_bottleneck_dim=3,
+            view_fusion="fixed_three_view",
+            view_fusion_hidden_dim=4,
+            detach_view_fusion_features=True,
+        )
+        model.activate_task(0)
+        fused, branches = model.current_all_logits_with_views(three_view_batch())
+        fused.sum().backward()
+        self.assertIsNotNone(model.head.weight.grad)
+        self.assertIsNone(model.selectors.grad)
+        self.assertTrue(all(
+            parameter.grad is None
+            for parameter in model.adapter_optimizer_parameters()
+        ))
+        model.zero_grad(set_to_none=True)
+        _, branches = model.current_all_logits_with_views(three_view_batch())
+        branches["full"].sum().backward()
+        self.assertIsNotNone(model.selectors.grad)
+
+    def test_dgl_backward_keeps_prediction_gradient_fusion_only(self) -> None:
+        representation = torch.nn.Parameter(torch.tensor(2.0))
+        adapter = torch.nn.Parameter(torch.tensor(3.0))
+        prediction = torch.nn.Parameter(torch.tensor(5.0))
+        representation_loss = representation * prediction
+        adapter_loss = adapter * prediction
+        fusion_loss = prediction.square()
+        scaler = torch.cuda.amp.GradScaler(enabled=False)
+        backward_dgl_training_losses(
+            representation_loss,
+            adapter_loss,
+            fusion_loss,
+            (representation,),
+            (adapter,),
+            (prediction,),
+            scaler,
+        )
+        self.assertEqual(float(representation.grad), 5.0)
+        self.assertEqual(float(adapter.grad), 5.0)
+        self.assertEqual(float(prediction.grad), 10.0)
+
+    def test_gradient_audit_reports_opposing_shared_gradients(self) -> None:
+        parameter = torch.nn.Parameter(torch.tensor([1.0, -1.0]))
+        fused = parameter.sum()
+        opposite = -parameter.sum()
+        aligned = 2 * parameter.sum()
+        audit = view_gradient_audit(
+            fused,
+            fused,
+            {"full": opposite, "person": aligned},
+            {"full": opposite, "person": aligned},
+            (parameter,),
+            (),
+        )
+        self.assertAlmostEqual(audit["gradient_cosine_fused_full"], -1.0)
+        self.assertAlmostEqual(audit["gradient_cosine_fused_person"], 1.0)
+
     def test_three_view_transform_emits_face_masks_and_aligned_tensors(self) -> None:
         transform = ThreeViewTransform(
             train=False,

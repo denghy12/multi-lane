@@ -3657,3 +3657,14 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - 三seedfinal mAP为R1/C2/J0/A2=`33.0119/33.0153/32.1639/32.4201`。C2配对增益
   `+0.0094/-0.0030/+0.0038`，不具方向一致性；J0/A2在全部8个累计task均低于R1。
 - 仅同步JSON、日志和控制文件共50项约2.6MB，无checkpoint/score NPZ；远端与本地SHA-256逐项一致。
+# 2026-09-14：实现Shared multi-view DGL阶段0/1
+
+- 新建分支`exp/shared-multiview-dgl-audit`，没有触碰已有未跟踪用户文档或`tmp/`。
+- `MultiLaneModel`支持仅对融合输入detach，并新增遵循task lane归属的fused/Full/Person/Face seen logits；
+  主参数拆成共享表示参数和Head/Fusion预测参数，但普通训练的优化器参数集合保持不变。
+- runner将逐视图BCE/ASL显式化；完整DGL通过`autograd.grad`把单视图BCE路由到selectors/prompts、
+  单视图ASL路由到当前Image-token Adapter、融合BCE路由到Head/Fusion，三个参数组严格互斥。
+- 新增每task首batch梯度范数/余弦与每task完整validation视图诊断，包括Face mask、权重分位数和相对
+  Full的正负样本对纠正/损伤；新增G0/G1/G2 runner、三卡launcher、严格汇总器和回归测试。
+- 静态编译、shell语法和`git diff --check`通过。本地运行单测因本机Python没有torch/pytest无法执行，
+  不是代码测试失败；下一步提交推送后在服务器独立worktree运行完整测试和三种真实GPU smoke。

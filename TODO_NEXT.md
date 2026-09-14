@@ -1154,3 +1154,14 @@ VOC 对照实验，不应在现阶段合并到 `main`。
     只等待J0/A2各三种子完成，不重复启动。结束后运行launcher自动汇总并同步小结果文件，不同步checkpoint。
 65. 横向test已完成：保留R1 `33.0119±0.3038`为实践冠军；C2仅高`0.0034`且seed方向不一致，按持平
     报告；J0/A2明确失败。若论文严格要求所有run零skip，仅复跑A2 seed1，否则不再调这三种融合结构。
+# Shared multi-view DGL阶段0/1
+
+1. 检查本地diff与新增测试后，仅提交本实验受控文件并推送`exp/shared-multiview-dgl-audit`；不得纳入
+   四份用户未跟踪Adapter文档或`tmp/`。
+2. 服务器先运行`git worktree list`并检查各worktree状态，创建新的独立DGL worktree；不得修改
+   `/mnt/haoyuan/workspace/multi-lane-main-test-only`，不得覆盖主工作树未提交内容。
+3. 在`ddp`环境运行完整单元测试；随后分别运行G0/G1/G2真实EMOTIC task0一轮GPU smoke，核对有限
+   loss、0 skipped、G0非零梯度审计、G1/G2融合到表示的梯度范数严格为0、Face mask和诊断文件。
+4. 全部通过后用三张空闲GPU并行启动唯一seed0完整8-task validation。输出到外部结果目录，日志和控制
+   文件进入`logs/output/emotic_track_a_shared_dgl`，不保存checkpoint、不访问test。
+5. 完成后按预注册四项门槛判断G2是否进入受约束动态Router；未通过则停止本共享DGL路线，不搜索alpha。

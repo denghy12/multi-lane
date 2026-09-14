@@ -48,6 +48,7 @@ class MultiLaneModel(nn.Module):
         view_fusion: str = "disabled",
         view_fusion_hidden_dim: int = 16,
         view_residual_scale: float = 0.1,
+        detach_view_fusion_features: bool = False,
     ) -> None:
         super().__init__()
         if not task_sizes or any(int(size) <= 0 for size in task_sizes):
@@ -197,6 +198,11 @@ class MultiLaneModel(nn.Module):
                 )
 
         self.view_fusion = view_fusion
+        self.detach_view_fusion_features = bool(detach_view_fusion_features)
+        if self.detach_view_fusion_features and view_fusion == "disabled":
+            raise ValueError(
+                "View-fusion feature detachment requires enabled view fusion"
+            )
         with torch.random.fork_rng(devices=[]):
             self.view_fusion_module = TaskwiseViewFusion(
                 len(self._task_sizes), self.output_dim, view_fusion,
@@ -543,8 +549,14 @@ class MultiLaneModel(nn.Module):
                 for name in self.view_fusion_module.view_names
             }
         lane_ids = self._lane_ids(all_seen_lanes)
+        fusion_features = (
+            {name: value.detach() for name, value in features.items()}
+            if self.detach_view_fusion_features
+            and not self.view_fusion_module.residual
+            else features
+        )
         fused, weights = self.view_fusion_module(
-            features, lane_ids, face_reliable
+            fusion_features, lane_ids, face_reliable
         )
         self._last_fusion_weights = weights.detach()
         return fused, features
@@ -563,6 +575,30 @@ class MultiLaneModel(nn.Module):
             self.head(fused)[:, 0],
             {name: self.head(value)[:, 0] for name, value in features.items()},
         )
+
+    def seen_logits_with_views(
+        self, images: ModelInputs
+    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+        """Return fused and per-view logits with task-lane class ownership."""
+        lane_ids = self._lane_ids(all_seen_lanes=True)
+        fused, features = self.encode_lanes_with_views(
+            images, all_seen_lanes=True
+        )
+        masks = self.task_class_mask[lane_ids].to(dtype=fused.dtype)
+
+        def combine(value: torch.Tensor) -> torch.Tensor:
+            logits = self.head(value)
+            combined = torch.sum(logits * masks.unsqueeze(0), dim=1)
+            return combined[:, : self.seen_classes]
+
+        return combine(fused), {
+            name: combine(value) for name, value in features.items()
+        }
+
+    def last_fusion_weights(self) -> Optional[torch.Tensor]:
+        if self._last_fusion_weights is None:
+            return None
+        return self._last_fusion_weights.detach()
 
     def fusion_weight_means(self) -> Optional[Tuple[float, ...]]:
         if self._last_fusion_weights is None:
@@ -603,10 +639,18 @@ class MultiLaneModel(nn.Module):
         yield from self.adapter_optimizer_parameters()
 
     def base_optimizer_parameters(self) -> Iterable[nn.Parameter]:
+        yield from self.representation_optimizer_parameters()
+        yield from self.prediction_optimizer_parameters()
+
+    def representation_optimizer_parameters(self) -> Iterable[nn.Parameter]:
+        """Shared trainable representation parameters, excluding Adapter."""
         yield self.selectors
         yield from self.prompts
-        yield from self.head.parameters()
         yield from self.conditioning_optimizer_parameters()
+
+    def prediction_optimizer_parameters(self) -> Iterable[nn.Parameter]:
+        """Classifier and view-fusion parameters optimized by fused DGL loss."""
+        yield from self.head.parameters()
         yield from self.fusion_optimizer_parameters()
 
     def conditioning_optimizer_parameters(self) -> Iterable[nn.Parameter]:
