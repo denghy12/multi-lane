@@ -3671,3 +3671,6 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - clean提交`aff1eee`已推送并在服务器新建独立worktree；210项`unittest discover`全通过。首次三卡
   smoke中G0/G1正常完成，G2在模型加载前触发不存在的CLI Namespace字段；修复仅移除main层冗余字段
   检查，`train_task`内部DGL互斥校验保持不变。
+- `ed17f45`同步后210项全测再次通过，G2真实task0 smoke完成84 updates/skipped0；G0/G1/G2均有完整
+  梯度和评估诊断。G0审计显示融合梯度相对Person/Face单视图梯度明显更大，G1/G2的融合表示梯度为0，
+  参数路由断言成立。三组task0一轮值不作实验选择，下一步在同一新提交启动fresh正式batch。

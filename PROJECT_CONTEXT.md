@@ -1996,3 +1996,7 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - 首次服务器210项`unittest`全测通过；G0/G1真实task0 smoke通过，G2在任何训练前因main入口错误
   引用了仅存在于内部`train_task`的蒸馏CLI字段而安全停止。已删除该无效入口检查；DGL内部仍严格
   拒绝蒸馏/ranking组合，需提交后重跑全测与G2 smoke。
+- 修复提交`ed17f45`已ff-only同步独立worktree，210项全测再次通过。G2真实task0一轮完成84 updates、
+  skipped0；三组均生成view diagnostics。G0融合梯度范数`0.000662`，对Full/Person/Face单视图范数比
+  `0.734/7.487/4.078`，余弦`0.432/0.091/0.165`；G1/G2因detach而融合到共享表示梯度精确为0。
+  task0 smoke G0/G1/G2 fused mAP约`39.7243/39.9594/41.5154`，仅证明路径可训练，不参与选择。

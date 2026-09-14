@@ -1167,3 +1167,5 @@ VOC 对照实验，不应在现阶段合并到 `main`。
 5. 完成后按预注册四项门槛判断G2是否进入受约束动态Router；未通过则停止本共享DGL路线，不搜索alpha。
 6. 首轮G0/G1 smoke已通过；先提交入口字段修复，服务器ff-only同步后重跑210项全测和G2 smoke，随后
    检查三组审计/诊断内容，再决定是否启动完整batch。
+7. 上述复验已完成且通过。提交smoke记录并ff-only同步后，确认GPU0/1/2空闲，在同一clean HEAD启动
+   唯一G0/G1/G2正式seed0 validation batch；不启动J1、不读取test。
