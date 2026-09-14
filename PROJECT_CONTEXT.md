@@ -2000,3 +2000,7 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   skipped0；三组均生成view diagnostics。G0融合梯度范数`0.000662`，对Full/Person/Face单视图范数比
   `0.734/7.487/4.078`，余弦`0.432/0.091/0.165`；G1/G2因detach而融合到共享表示梯度精确为0。
   task0 smoke G0/G1/G2 fused mAP约`39.7243/39.9594/41.5154`，仅证明路径可训练，不参与选择。
+- smoke记录提交`f83f648`已推送并ff-only同步。GPU0/1/2各约24GiB空闲时启动唯一完整batch
+  `shared_dgl_seed0_20260914_215006`，tmux `multilane_shared_dgl_215006`。三组config均为clean commit
+  `f83f648`、seed0、8 tasks、val-only、checkpoint off；routing/aux分别为
+  `joint/0.1`、`fusion_detach/0.1`、`dgl/0`，当前均已进入task0。

@@ -1169,3 +1169,5 @@ VOC 对照实验，不应在现阶段合并到 `main`。
    检查三组审计/诊断内容，再决定是否启动完整batch。
 7. 上述复验已完成且通过。提交smoke记录并ff-only同步后，确认GPU0/1/2空闲，在同一clean HEAD启动
    唯一G0/G1/G2正式seed0 validation batch；不启动J1、不读取test。
+8. 唯一batch`shared_dgl_seed0_20260914_215006`已启动；等待三组各完成240 epochs/13,950 updates，
+   然后同步小结果文件并运行严格汇总。期间不重复启动、不调整alpha、不运行动态Router或test。

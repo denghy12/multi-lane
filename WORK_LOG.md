@@ -3674,3 +3674,6 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - `ed17f45`同步后210项全测再次通过，G2真实task0 smoke完成84 updates/skipped0；G0/G1/G2均有完整
   梯度和评估诊断。G0审计显示融合梯度相对Person/Face单视图梯度明显更大，G1/G2的融合表示梯度为0，
   参数路由断言成立。三组task0一轮值不作实验选择，下一步在同一新提交启动fresh正式batch。
+- `f83f648`在服务器独立worktree启动batch`shared_dgl_seed0_20260914_215006`，GPU0/1/2并行
+  G0/G1/G2。三份config已核验同commit、seed0、8-task validation、无checkpoint/test，当前正常初始化
+  并进入task0；只等待该唯一batch，不重复启动。
