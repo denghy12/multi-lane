@@ -1165,3 +1165,5 @@ VOC 对照实验，不应在现阶段合并到 `main`。
 4. 全部通过后用三张空闲GPU并行启动唯一seed0完整8-task validation。输出到外部结果目录，日志和控制
    文件进入`logs/output/emotic_track_a_shared_dgl`，不保存checkpoint、不访问test。
 5. 完成后按预注册四项门槛判断G2是否进入受约束动态Router；未通过则停止本共享DGL路线，不搜索alpha。
+6. 首轮G0/G1 smoke已通过；先提交入口字段修复，服务器ff-only同步后重跑210项全测和G2 smoke，随后
+   检查三组审计/诊断内容，再决定是否启动完整batch。

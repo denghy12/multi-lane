@@ -3668,3 +3668,6 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
   Full的正负样本对纠正/损伤；新增G0/G1/G2 runner、三卡launcher、严格汇总器和回归测试。
 - 静态编译、shell语法和`git diff --check`通过。本地运行单测因本机Python没有torch/pytest无法执行，
   不是代码测试失败；下一步提交推送后在服务器独立worktree运行完整测试和三种真实GPU smoke。
+- clean提交`aff1eee`已推送并在服务器新建独立worktree；210项`unittest discover`全通过。首次三卡
+  smoke中G0/G1正常完成，G2在模型加载前触发不存在的CLI Namespace字段；修复仅移除main层冗余字段
+  检查，`train_task`内部DGL互斥校验保持不变。

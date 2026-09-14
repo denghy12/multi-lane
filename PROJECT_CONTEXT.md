@@ -1993,3 +1993,6 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   Adapter、主BCE+Adapter ASL、AMP/TF32、val-only、无checkpoint、禁止test。
 - 协议见`docs/shared_multiview_dgl_validation.md`。当前已完成本地py_compile、shell语法与diff检查；本地
   无torch/pytest，完整测试和真实GPU smoke须在服务器`ddp`环境执行。
+- 首次服务器210项`unittest`全测通过；G0/G1真实task0 smoke通过，G2在任何训练前因main入口错误
+  引用了仅存在于内部`train_task`的蒸馏CLI字段而安全停止。已删除该无效入口检查；DGL内部仍严格
+  拒绝蒸馏/ranking组合，需提交后重跑全测与G2 smoke。

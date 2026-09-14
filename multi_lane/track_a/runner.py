@@ -2149,8 +2149,6 @@ def main() -> None:
         args.loss_routing != "adapter_asl"
         or args.view_auxiliary_loss_weight != 0
         or args.adapter_regularization != "none"
-        or args.oof_distillation_mix != 0
-        or args.ranking_loss_weight != 0
     ):
         raise ValueError(
             "DGL requires Adapter-ASL and disables legacy auxiliary, "
