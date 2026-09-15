@@ -1,5 +1,14 @@
 # 项目上下文
 
+## P0差距第一批已完成并同步
+
+批次`p0_r1_gap_seed0_20260915_1640`完成240 epochs/13950 updates/0 skipped，精确复现P0 final 43.075407。
+报告见`docs/p0_r1_gap_results_20260915.md`。A：I-logit 43.445371、I-prob 43.581193、S-logit 43.075407、
+S-prob 42.823759，原差距拆为0.757435−0.251648。B仅替换Full得到ISS 43.721708；Full独立来源四种
+背景都更好，共享Face四种背景都更好，Body依赖Full背景。尚未确定参数模块层面的原因。
+自动分析原因AMP代数误差阈值失败，已修复为单独报告舍入误差并成功完成2000次bootstrap；分数本身一致。
+原差距95%图像组bootstrap区间跨0；仍须seed1/2验证。全部分数、compact状态和日志已同步本地，未启动第二批。
+
 ## 当前优先：解释P0相对R1的0.5058差距
 
 用户要求先定位原因，方案见`docs/p0_r1_gap_diagnostic_plan.md`。已在`exp/p0-r1-gap-diagnostic`实现第一批，

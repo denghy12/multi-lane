@@ -1,5 +1,11 @@
 # 下一步任务
 
+## P0第一批已完成：下一步围绕Full定位机制
+
+先阅读`docs/p0_r1_gap_results_20260915.md`。一次P0复现+A/B全部完成并同步；最清晰的来源差异是Full，
+共享Face有正向收益，Body与Full来源有交互。建议接下来仅做Full分类头独立的受控对照，再条件选择Full
+Adapter/Selector解绑；所有结论先以seed0定位，明确主效应再做seed1/2。尚未启动或实现第二批。
+
 ## 优先诊断：P0与R1差距（第一批已实现，待运行）
 
 依据`docs/p0_r1_gap_diagnostic_plan.md`，服务器完整单元测试与真实smoke均已通过；D0 P0 seed0 validation
