@@ -6,7 +6,9 @@
 - 模型新增`view_classifier_mode`：默认历史post-fusion共享head；诊断用shared-per-view和Full-private-per-view。
 - HF的Full head深拷贝共享head，不消耗额外RNG；固定权重融合三路logits，Body/Face继续使用共享head。
 - optimizer、参数统计、config与compact状态覆盖新增head；增加初始化/RNG、梯度隔离和optimizer覆盖测试。
-- 新增两组seed0 launcher、汇总器和`docs/full_private_head_diagnostic_plan_20260915.md`；尚未运行服务器验证。
+- 新增两组seed0 launcher、汇总器和`docs/full_private_head_diagnostic_plan_20260915.md`。
+- 服务器完整测试221/221通过。真实H0/HF task0/1epoch配对smoke各84 updates、0 skipped、2285个validation
+  样本；H0/HF分类参数分别13338/26676，compact仅HF含`full_view_head`，链路检查通过。
 
 ## P0第一批结果同步与分析
 

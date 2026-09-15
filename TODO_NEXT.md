@@ -2,8 +2,9 @@
 
 ## 当前：Full分类头独立seed0对照
 
-按`docs/full_private_head_diagnostic_plan_20260915.md`先运行H0共享逐路head与HF Full独立head。需先完成服务器
-单元测试和真实smoke，再启动两组8-task validation。判断规则通过才补seed1/2；当前不启动Adapter或Selector解绑。
+按`docs/full_private_head_diagnostic_plan_20260915.md`先运行H0共享逐路head与HF Full独立head。服务器221项
+单元测试和真实配对smoke已通过，下一步启动两组8-task validation。判断规则通过才补seed1/2；当前不启动
+Adapter或Selector解绑。
 
 ## P0第一批已完成：下一步围绕Full定位机制
 
