@@ -1309,7 +1309,7 @@ def build_optimizer_groups(
             "params": [model.selectors, *list(model.prompts)],
             "weight_decay": weight_decay,
         },
-        {"params": list(model.head.parameters()), "weight_decay": 0.0},
+        {"params": list(model.classifier_optimizer_parameters()), "weight_decay": 0.0},
     ]
     condition_parameters = list(model.conditioning_optimizer_parameters())
     if condition_parameters:
@@ -2193,6 +2193,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--view-evaluation-diagnostics", action="store_true")
     parser.add_argument(
+        "--view-classifier-mode",
+        choices=(
+            "shared_post_fusion", "shared_per_view", "full_private_per_view"
+        ),
+        default="shared_post_fusion",
+    )
+    parser.add_argument(
         "--save-view-evaluation-scores",
         action="store_true",
         help=(
@@ -2365,6 +2372,13 @@ def main() -> None:
         raise ValueError("View fusion and Selector conditioning are mutually exclusive")
     if args.view_fusion_hidden_dim <= 0:
         raise ValueError("View-fusion hidden dimension must be positive")
+    if (
+        args.view_classifier_mode != "shared_post_fusion"
+        and args.view_fusion != "fixed_three_view"
+    ):
+        raise ValueError(
+            "Per-view classification requires fixed three-view fusion"
+        )
     if not math.isfinite(args.view_fusion_learning_rate) or args.view_fusion_learning_rate <= 0:
         raise ValueError("View-fusion learning rate must be finite and positive")
     if not math.isfinite(args.view_residual_scale) or not 0 < args.view_residual_scale <= 1:
@@ -2632,11 +2646,14 @@ def main() -> None:
         view_fusion_hidden_dim=args.view_fusion_hidden_dim,
         view_residual_scale=args.view_residual_scale,
         detach_view_fusion_features=args.view_gradient_routing != "joint",
+        view_classifier_mode=args.view_classifier_mode,
     ).float().to(device)
     model.visual_encoder.requires_grad_(False)
     model.assert_visual_frozen()
     lane_parameters = model.selectors.numel() + sum(p.numel() for p in model.prompts)
-    classifier_parameters = sum(p.numel() for p in model.head.parameters())
+    classifier_parameters = sum(
+        p.numel() for p in model.classifier_optimizer_parameters()
+    )
     adapter_parameters = (
         model.adapter_bank.total_parameter_count()
         if model.adapter_bank is not None else 0
@@ -2930,6 +2947,15 @@ def main() -> None:
         ),
         "paired_full_person": paired_inputs,
         "view_fusion": args.view_fusion,
+        "view_classifier_mode": args.view_classifier_mode,
+        "view_classifier_fusion_level": (
+            "post_fusion_feature"
+            if args.view_classifier_mode == "shared_post_fusion"
+            else "fixed_weighted_per_view_logits"
+        ),
+        "full_private_classifier": (
+            args.view_classifier_mode == "full_private_per_view"
+        ),
         "view_fusion_level": (
             "normalized_task_lane_cls_features"
             if args.view_fusion != "disabled" else None

@@ -1,5 +1,13 @@
 # 工作日志
 
+## 实现Full分类头独立诊断
+
+- 从`97310fa`新建`exp/full-private-head-diagnostic`，保留用户未跟踪Adapter文档和`tmp/`。
+- 模型新增`view_classifier_mode`：默认历史post-fusion共享head；诊断用shared-per-view和Full-private-per-view。
+- HF的Full head深拷贝共享head，不消耗额外RNG；固定权重融合三路logits，Body/Face继续使用共享head。
+- optimizer、参数统计、config与compact状态覆盖新增head；增加初始化/RNG、梯度隔离和optimizer覆盖测试。
+- 新增两组seed0 launcher、汇总器和`docs/full_private_head_diagnostic_plan_20260915.md`；尚未运行服务器验证。
+
 ## P0第一批结果同步与分析
 
 - 同步batch `p0_r1_gap_seed0_20260915_1640`的结果、8份compact状态、分路NPZ和日志到本地。

@@ -1,5 +1,10 @@
 # 下一步任务
 
+## 当前：Full分类头独立seed0对照
+
+按`docs/full_private_head_diagnostic_plan_20260915.md`先运行H0共享逐路head与HF Full独立head。需先完成服务器
+单元测试和真实smoke，再启动两组8-task validation。判断规则通过才补seed1/2；当前不启动Adapter或Selector解绑。
+
 ## P0第一批已完成：下一步围绕Full定位机制
 
 先阅读`docs/p0_r1_gap_results_20260915.md`。一次P0复现+A/B全部完成并同步；最清晰的来源差异是Full，

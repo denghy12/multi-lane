@@ -1,5 +1,12 @@
 # 项目上下文
 
+## 当前执行：Full分类头独立诊断
+
+用户确认按第一批结果推进最小Full机制实验。新分支`exp/full-private-head-diagnostic`，方案见
+`docs/full_private_head_diagnostic_plan_20260915.md`。H0为共享head逐路logit融合，HF仅Full使用从共享head
+复制初始化的独立head，Body/Face仍共享原head；其余P0协议完全固定。先做seed0两组配对，明确主效应后才补
+seed1/2。已实现模型、runner参数、分数/compact导出、2000次bootstrap汇总及双GPUlauncher；尚待测试/smoke。
+
 ## P0差距第一批已完成并同步
 
 批次`p0_r1_gap_seed0_20260915_1640`完成240 epochs/13950 updates/0 skipped，精确复现P0 final 43.075407。

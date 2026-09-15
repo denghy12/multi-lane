@@ -8,6 +8,7 @@ copying, shared classifier, and concat inference remain method-specific.
 
 from __future__ import annotations
 
+import copy
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 import torch
@@ -50,6 +51,7 @@ class MultiLaneModel(nn.Module):
         view_fusion_hidden_dim: int = 16,
         view_residual_scale: float = 0.1,
         detach_view_fusion_features: bool = False,
+        view_classifier_mode: str = "shared_post_fusion",
     ) -> None:
         super().__init__()
         if not task_sizes or any(int(size) <= 0 for size in task_sizes):
@@ -92,6 +94,17 @@ class MultiLaneModel(nn.Module):
             raise ValueError("Invalid selector conditioning mode")
         if view_fusion not in TaskwiseViewFusion.MODES:
             raise ValueError("Invalid taskwise view-fusion mode")
+        if view_classifier_mode not in {
+            "shared_post_fusion", "shared_per_view", "full_private_per_view"
+        }:
+            raise ValueError("Invalid view classifier mode")
+        if (
+            view_classifier_mode != "shared_post_fusion"
+            and view_fusion != "fixed_three_view"
+        ):
+            raise ValueError(
+                "Per-view classification requires fixed three-view fusion"
+            )
         if view_fusion != "disabled" and selector_conditioning != "disabled":
             raise ValueError("View fusion and Selector conditioning are mutually exclusive")
         if selector_conditioning != "disabled" and (
@@ -158,6 +171,11 @@ class MultiLaneModel(nn.Module):
         self.head = nn.Linear(self.output_dim, self.num_classes)
         nn.init.trunc_normal_(self.head.weight, std=0.02)
         nn.init.zeros_(self.head.bias)
+        self.view_classifier_mode = view_classifier_mode
+        self.full_view_head = (
+            copy.deepcopy(self.head)
+            if view_classifier_mode == "full_private_per_view" else None
+        )
 
         mask = torch.zeros(len(self._task_sizes), self.num_classes)
         offset = 0
@@ -595,10 +613,39 @@ class MultiLaneModel(nn.Module):
     ]:
         """Return current logits and branch endpoints for gradient diagnostics."""
         fused, features = self.encode_lanes_with_views(images, all_seen_lanes=False)
+        view_lane_logits = {
+            name: self._head_for_view(name)(value)
+            for name, value in features.items()
+        }
+        if self.view_classifier_mode == "shared_post_fusion":
+            fused_lane_logits = self.head(fused)
+        else:
+            fused_lane_logits = self._fuse_view_lane_logits(view_lane_logits)
         return (
-            self.head(fused)[:, 0],
-            {name: self.head(value)[:, 0] for name, value in features.items()},
+            fused_lane_logits[:, 0],
+            {name: value[:, 0] for name, value in view_lane_logits.items()},
             features,
+        )
+
+    def _head_for_view(self, name: str) -> nn.Linear:
+        if name not in self.view_fusion_module.view_names:
+            raise ValueError(f"Unknown fused view: {name}")
+        if name == "full" and self.full_view_head is not None:
+            return self.full_view_head
+        return self.head
+
+    def _fuse_view_lane_logits(
+        self, view_lane_logits: Dict[str, torch.Tensor]
+    ) -> torch.Tensor:
+        weights = self._last_fusion_weights
+        if weights is None:
+            raise RuntimeError("Per-view logit fusion requires current weights")
+        names = self.view_fusion_module.view_names
+        if set(view_lane_logits) != set(names):
+            raise ValueError("Per-view logits do not match configured views")
+        stacked = torch.stack([view_lane_logits[name] for name in names], dim=2)
+        return torch.sum(
+            stacked * weights.unsqueeze(-1).to(dtype=stacked.dtype), dim=2
         )
 
     def seen_logits_with_views(
@@ -611,13 +658,20 @@ class MultiLaneModel(nn.Module):
         )
         masks = self.task_class_mask[lane_ids].to(dtype=fused.dtype)
 
-        def combine(value: torch.Tensor) -> torch.Tensor:
-            logits = self.head(value)
+        def combine(logits: torch.Tensor) -> torch.Tensor:
             combined = torch.sum(logits * masks.unsqueeze(0), dim=1)
             return combined[:, : self.seen_classes]
-
-        return combine(fused), {
-            name: combine(value) for name, value in features.items()
+        view_lane_logits = {
+            name: self._head_for_view(name)(value)
+            for name, value in features.items()
+        }
+        fused_lane_logits = (
+            self.head(fused)
+            if self.view_classifier_mode == "shared_post_fusion"
+            else self._fuse_view_lane_logits(view_lane_logits)
+        )
+        return combine(fused_lane_logits), {
+            name: combine(value) for name, value in view_lane_logits.items()
         }
 
     def last_fusion_weights(self) -> Optional[torch.Tensor]:
@@ -641,6 +695,12 @@ class MultiLaneModel(nn.Module):
     def lane_logits(
         self, images: ModelInputs, all_seen_lanes: bool
     ) -> torch.Tensor:
+        if self.view_classifier_mode != "shared_post_fusion":
+            _, features = self.encode_lanes_with_views(images, all_seen_lanes)
+            return self._fuse_view_lane_logits({
+                name: self._head_for_view(name)(value)
+                for name, value in features.items()
+            })
         return self.head(self.encode_lanes(images, all_seen_lanes))
 
     def current_logits(self, images: ModelInputs) -> torch.Tensor:
@@ -675,8 +735,13 @@ class MultiLaneModel(nn.Module):
 
     def prediction_optimizer_parameters(self) -> Iterable[nn.Parameter]:
         """Classifier and view-fusion parameters optimized by fused DGL loss."""
-        yield from self.head.parameters()
+        yield from self.classifier_optimizer_parameters()
         yield from self.fusion_optimizer_parameters()
+
+    def classifier_optimizer_parameters(self) -> Iterable[nn.Parameter]:
+        yield from self.head.parameters()
+        if self.full_view_head is not None:
+            yield from self.full_view_head.parameters()
 
     def conditioning_optimizer_parameters(self) -> Iterable[nn.Parameter]:
         if self.selector_conditioner is not None:

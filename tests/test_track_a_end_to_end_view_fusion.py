@@ -20,7 +20,9 @@ from multi_lane.track_a.runner import (
 from multi_lane.track_a.view_fusion import TaskwiseViewFusion
 
 
-def tiny_model(mode: str) -> MultiLaneModel:
+def tiny_model(
+    mode: str, view_classifier_mode: str = "shared_post_fusion"
+) -> MultiLaneModel:
     torch.manual_seed(19)
     model = MultiLaneModel(
         FakeVisual(),
@@ -33,6 +35,7 @@ def tiny_model(mode: str) -> MultiLaneModel:
         adapter_bottleneck_dim=3,
         view_fusion=mode,
         view_fusion_hidden_dim=4,
+        view_classifier_mode=view_classifier_mode,
     )
     model.activate_task(0)
     return model
@@ -48,6 +51,49 @@ def three_view_batch(batch_size: int = 3):
 
 
 class TaskwiseViewFusionTest(unittest.TestCase):
+    def test_full_private_head_copies_initialization_without_rng_drift(self) -> None:
+        torch.manual_seed(41)
+        shared = tiny_model("fixed_three_view", "shared_per_view")
+        shared_rng = torch.random.get_rng_state()
+        torch.manual_seed(41)
+        private = tiny_model("fixed_three_view", "full_private_per_view")
+        private_rng = torch.random.get_rng_state()
+        self.assertTrue(torch.equal(shared_rng, private_rng))
+        self.assertIsNot(private.head.weight, private.full_view_head.weight)
+        self.assertTrue(torch.equal(private.head.weight, private.full_view_head.weight))
+        self.assertTrue(torch.equal(private.head.bias, private.full_view_head.bias))
+        inputs = three_view_batch()
+        shared_logits, shared_views = shared.current_all_logits_with_views(inputs)
+        private_logits, private_views = private.current_all_logits_with_views(inputs)
+        self.assertTrue(torch.equal(shared_logits, private_logits))
+        for name in ("full", "person", "face"):
+            self.assertTrue(torch.equal(shared_views[name], private_views[name]))
+
+    def test_full_private_head_separates_full_from_person_face_gradients(self) -> None:
+        model = tiny_model("fixed_three_view", "full_private_per_view")
+        _, branches = model.current_all_logits_with_views(three_view_batch())
+        branches["full"].sum().backward()
+        self.assertIsNotNone(model.full_view_head.weight.grad)
+        self.assertIsNone(model.head.weight.grad)
+        model.zero_grad(set_to_none=True)
+        _, branches = model.current_all_logits_with_views(three_view_batch())
+        (branches["person"].sum() + branches["face"].sum()).backward()
+        self.assertIsNone(model.full_view_head.weight.grad)
+        self.assertIsNotNone(model.head.weight.grad)
+
+    def test_full_private_head_is_in_classifier_optimizer_group(self) -> None:
+        model = tiny_model("fixed_three_view", "full_private_per_view")
+        classifier = list(model.classifier_optimizer_parameters())
+        self.assertEqual(len(classifier), 4)
+        _, _, groups = build_optimizer_groups(
+            model, 0.0, adapter_learning_rate=4e-4
+        )
+        classifier_ids = {id(parameter) for parameter in classifier}
+        self.assertEqual(
+            classifier_ids,
+            {id(parameter) for parameter in groups[1]["params"]},
+        )
+
     def test_view_specialized_adapter_changes_only_selected_view(self) -> None:
         torch.manual_seed(29)
         model = MultiLaneModel(
