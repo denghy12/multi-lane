@@ -1,5 +1,22 @@
 # 项目上下文
 
+## 当前优先：解释P0相对R1的0.5058差距
+
+用户要求先定位原因，方案见`docs/p0_r1_gap_diagnostic_plan.md`，尚未实现或启动。
+核对历史来源：P0相对独立专家Full=-0.6982、Person=+1.4158、Face全量=+1.3868、可靠Face=+1.9182；
+不能用P2相对P0的全面退化解释此差距。R1 average mAP为50.7509。
+代码确认：共享线性head且融合后不再归一化，P0特征融合等价于固定logit融合；R1为概率融合。
+先复现一次P0保存compact状态与三路scores，再同预测比较融合运算和八种来源替换。剩余差距才进入head、
+Adapter、Selector/Prompt解绑及目标对照。独立Face训练valid非ambiguous与P0 strict reliable差异须独立审计。
+
+## 2026-09-15：融合文献与机制解释修正
+
+文献笔记见`docs/shared_view_fusion_literature_20260915.md`。候选为AdapterFusion两阶段组合、VLMo模块级共享、
+MBT瓶颈token交互，MISA作为共享/私有表示备选；均为待验证方向。此前“正余弦排除DGL”和“弱监督是主因”的
+解释过强：DGL也处理梯度幅度减弱，当前证据仅支持已测G2/P2未胜出；共享导致同质化尚未被证明。
+P2的Adapter余弦混合共享/专用参数，需分开分析。独立R1概率融合与P0特征融合还存在运算差异。
+本次只更新文献与上下文，未启动新训练。
+
 ## 2026-09-15：开始共享主体与视图专用Image-token Adapter阶段
 
 用户确认执行DGL诊断后的下一阶段。新建`exp/view-specialized-shared-adapter`，先验证少量
