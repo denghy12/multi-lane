@@ -100,3 +100,22 @@ launcher gate to 7,000 MiB free, 100% maximum utilization and one readiness
 check; the registered model and training configuration is unchanged. P0/P1/P2
 all completed epoch 0 with 84 optimizer updates, zero skipped updates, finite
 losses and no OOM. The batch remains validation-only and checkpoint-free.
+
+## Result
+
+The batch completed normally. P0/P1/P2 final validation mAP is
+`43.0754/42.7028/42.7961`, and average mAP is `49.9807/50.1309/49.7551`.
+P2 is `0.2793` below P0 final and fails all five registered checks. Relative to
+P0, its final Full/Person/Face/reliable-Face standalone mAP changes by
+`-0.1549/-0.1337/-0.3033/-0.7226`; only task 0 improves, while tasks 1--7 are
+all lower. Fixed fusion still improves over each method's Full view by
+`1.27--1.48`, so complementary evidence remains but P2 does not create stronger
+experts.
+
+Late cross-view gradient cosines sometimes weaken, but P2 records fewer
+negative cross-view cosines than P0 and still performs worse. The observed
+fused-to-unimodal norm ratios mainly track the fixed weights, while same-view
+gradient directions remain positive. This does not support DGL-style gradient
+conflict as the primary bottleneck. P2 therefore does not advance to dynamic
+routing, additional seeds or test. The synchronized local batch directory
+contains the full `analysis.md` report.

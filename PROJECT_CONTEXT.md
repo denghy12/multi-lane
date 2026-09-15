@@ -24,6 +24,15 @@ P0/P1/P2真实EMOTIC task0一轮smoke均完成84 updates、0 skipped，三组参
 落盘，commit、seed0、8-task validation、P0/P1/P2结构、无checkpoint/test均符合协议；首个epoch各完成
 84 updates、0 skipped，耗时38--39秒，loss有限。每卡训练后约用19.5GiB、仍余约4.5GiB，无OOM或错误。
 
+正式batch已完整结束：三组均240 epochs、13,950 updates、0 skipped，P0/P1/P2及汇总器exit0，未保存
+checkpoint或访问test。final/average validation mAP分别为P0 `43.0754/49.9807`、P1
+`42.7028/50.1309`、P2 `42.7961/49.7551`；P2比P0 final低`0.2793`，五项预注册门槛全部失败。
+P2相对P0的Full/Person/Face/可靠Face单路分别下降`0.1549/0.1337/0.3033/0.7226`，且task1--7
+累计mAP全部下降，没有建立更强的视图专家。固定融合仍比各自Full高`1.27--1.48`，说明互补性存在。
+早中晚梯度审计显示不均衡幅度主要跟随固定融合系数，同视图梯度保持正向；P2跨视图负余弦少于P0却
+性能更低，不支持DGL式冲突是主因。按协议停止本P2，不进Router、seed1/2或test。29个结果/控制/日志
+文件已同步且三组组合SHA-256与服务器一致；完整报告见本地batch目录的`analysis.md`。
+
 ## 2026-09-13：OOF优势限定排序蒸馏失败，OOF蒸馏路线结束
 
 从`83cceb2`新建`exp/oof-advantage-ranking-distillation`，仅实现一组E1 seed0 validation。

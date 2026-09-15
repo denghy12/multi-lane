@@ -17,6 +17,9 @@
    84 updates/0 skipped且无OOM。只监测该批次，不重复启动、不更新运行worktree。
 5. 只有P2 final相对P0/P1均至少+0.10、average与Standalone Full不低P0且缩小到独立R1的差距，
    才进入Selector-aware动态Router阶段；失败则根据路径诊断重新判断机制，不搜索bottleneck或LR。
+   正式结果P2 final=`42.7961`，比P0低`0.2793`，五项全部失败；本阶段已结束，不运行Router、seed1/2
+   或test。若继续共享路线，下一阶段先在相同结构对照下增强并平衡单视图监督，且分开记录共享Adapter
+   与三路delta的梯度和残差强度；只有单路专家确实增强后才训练Router。
 
 ## 已完成：OOF优势限定的排序蒸馏
 

@@ -31,6 +31,14 @@
 - 三份正式config均记录clean commit `10ef477`、seed0、固定融合、30 epochs/task、8 tasks、val-only、
   checkpoint关闭，Adapter维度分别为32/0、45/0、32/4。P0/P1/P2首个epoch均完成84 updates、
   0 skipped，loss有限，耗时38.2/38.1/39.3秒；每卡约4.5GiB显存余量，无OOM或错误。
+- batch已结束，P0/P1/P2及summary四个exit code均为0；每组240 epochs、13,950 updates、0 skipped。
+  15个结果、6个控制和8个日志文件已同步，本地与服务器三组组合SHA-256逐组一致。
+- final mAP为P0/P1/P2=`43.0754/42.7028/42.7961`，average为
+  `49.9807/50.1309/49.7551`。P2只在task0高P0 `0.1097`，task1--7全部负；最终Full、Person、Face和
+  可靠Face也全部低于P0，五项advance检查全失败，不补seed1/2或test。
+- P2的中后期跨视图负梯度余弦反而少于P0，同视图融合/单路梯度方向仍为正，性能却下降；因此当前证据
+  不支持DGL式梯度冲突是主要瓶颈。当前b32+b4设计结束；若继续共享模型，应先以平衡单路监督验证能否
+  建立专家，并把共享Adapter与各view delta梯度/残差强度分开记录，再讨论动态Router。
 
 ## 2026-09-13：同步并分析OOF优势限定排序蒸馏
 
