@@ -8,6 +8,7 @@
    worktree，不修改主工作树或`multi-lane-main-test-only`。
 3. 在`ddp`环境运行完整单测，再运行P0/P1/P2真实EMOTIC task0一轮GPU smoke；核对参数计数、
    view-specific梯度、路径审计9个采样点、有限loss、0 skipped、Face mask和view diagnostics。
+   首轮已训练通过但捕获Adapter路径审计AMP下溢；先提交诊断缩放修复，再重跑全测和smoke。
 4. smoke通过后用三张安全空闲GPU启动唯一seed0完整8-task validation；日志写入`./logs/`，控制文件
    写入`./output/`，大结果写入服务器外部结果目录，不保存checkpoint、不访问test。
 5. 只有P2 final相对P0/P1均至少+0.10、average与Standalone Full不低P0且缩小到独立R1的差距，

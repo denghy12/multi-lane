@@ -106,6 +106,12 @@ class TaskwiseViewFusionTest(unittest.TestCase):
                     f"path_gradient_{group}_{view}_fused_to_unimodal_ratio",
                     audit,
                 )
+                self.assertGreater(
+                    audit[f"path_gradient_{group}_{view}_fused_norm"], 0
+                )
+                self.assertGreater(
+                    audit[f"path_gradient_{group}_{view}_unimodal_norm"], 0
+                )
         self.assertTrue(all(torch.isfinite(torch.tensor(list(audit.values())))))
 
     def test_detached_fixed_fusion_preserves_branch_gradients_only(self) -> None:

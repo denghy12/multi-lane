@@ -11,6 +11,10 @@
   Selector/Prompt使用BCE，Adapter使用ASL，epoch0/14/29各聚合前三batch。
 - 新增三卡launcher、严格汇总器和预注册协议。当前本地py_compile、shell语法与diff检查通过；本机
   Python缺少torch/numpy，完整单测和真实GPU smoke将在服务器`ddp`环境执行。
+- `e5c52ca`已推送，服务器独立clean worktree完成213项全测。P0/P1/P2真实task0一轮均完成84
+  updates、0 skipped，参数计数正确；smoke同时发现AMP下Adapter分路径的二次VJP发生数值下溢，
+  审计值为0而训练梯度不受影响。当前修复为先按65536缩放诊断loss完成VJP、再以FP32还原梯度，
+  并增加各view×参数组非零回归断言；修复后须重跑全测和三组smoke。
 
 ## 2026-09-13：同步并分析OOF优势限定排序蒸馏
 

@@ -710,6 +710,19 @@ def view_path_gradient_audit(
     names = tuple(view_features)
     if set(names) != set(view_bce) or set(names) != set(view_asl):
         raise ValueError("Path audit views and objective views differ")
+    # The view endpoint is commonly float16 under AMP.  Scaling before the
+    # endpoint VJP prevents the smaller Adapter path from underflowing; the
+    # resulting parameter gradients are converted to float32 and unscaled
+    # before norms and cosines are calculated.
+    audit_scale = 65_536.0
+
+    def unscale(
+        gradients: Tuple[Optional[torch.Tensor], ...]
+    ) -> Tuple[Optional[torch.Tensor], ...]:
+        return tuple(
+            None if gradient is None else gradient.float() / audit_scale
+            for gradient in gradients
+        )
     parameter_groups = {
         "representation": tuple(representation_parameters),
         "adapter": tuple(adapter_parameters),
@@ -726,24 +739,24 @@ def view_path_gradient_audit(
         fused_paths = {}
         for name in names:
             endpoint_gradient = torch.autograd.grad(
-                fused_loss,
+                fused_loss * audit_scale,
                 view_features[name],
                 retain_graph=True,
                 allow_unused=False,
             )[0]
-            fused_path = torch.autograd.grad(
+            fused_path = unscale(torch.autograd.grad(
                 view_features[name],
                 parameters,
                 grad_outputs=endpoint_gradient,
                 retain_graph=True,
                 allow_unused=True,
-            )
-            unimodal = torch.autograd.grad(
-                unimodal_losses[name],
+            ))
+            unimodal = unscale(torch.autograd.grad(
+                unimodal_losses[name] * audit_scale,
                 parameters,
                 retain_graph=True,
                 allow_unused=True,
-            )
+            ))
             fused_paths[name] = fused_path
             fused_norm = math.sqrt(max(
                 0.0, _gradient_norm_and_dot((fused_path,))
