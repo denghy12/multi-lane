@@ -1171,3 +1171,8 @@ VOC 对照实验，不应在现阶段合并到 `main`。
    唯一G0/G1/G2正式seed0 validation batch；不启动J1、不读取test。
 8. 唯一batch`shared_dgl_seed0_20260914_215006`已启动；等待三组各完成240 epochs/13,950 updates，
    然后同步小结果文件并运行严格汇总。期间不重复启动、不调整alpha、不运行动态Router或test。
+9. batch已完整结束并完成SHA-256同步审计。G2 final mAP `42.4147`低同批G0 `43.0754`达
+   `0.6607`，average与Full单视图也下降，四项门槛全部失败；当前Shared-DGL实验到此停止。
+10. 不补G2 seed1/2或test，不搜索alpha，不启动动态Router。保留独立专家固定R1作为当前三视图
+    实践基线；若继续研究参数共享，须另立新阶段验证“冻结共享CLIP主干 + view-specific极小Adapter/
+    projection + 固定融合”，先证明部分共享结构本身超过普通共享G0，再讨论DGL或动态路由。

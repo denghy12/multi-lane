@@ -2004,3 +2004,12 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   `shared_dgl_seed0_20260914_215006`，tmux `multilane_shared_dgl_215006`。三组config均为clean commit
   `f83f648`、seed0、8 tasks、val-only、checkpoint off；routing/aux分别为
   `joint/0.1`、`fusion_detach/0.1`、`dgl/0`，当前均已进入task0。
+- batch已完成并同步；三组均为240 epochs、13,950 updates、0 skipped，无OOM/NaN且未访问test。
+  results/control/logs共29项逐文件SHA-256与服务器一致。G0/G1/G2 final validation mAP分别为
+  `43.0754/41.4177/42.4147`，average mAP为`49.9807/48.1986/49.3864`，forgetting为
+  `0.9672/0.9526/0.8232`。G2比G1恢复`+0.9970`，但仍比同批G0低`0.6607`，Standalone Full低
+  `0.8841`，四项预注册门槛全部失败，不进入动态Router、seed1/2或test。
+- G0八个task共24个fused-to-view余弦均为正，Full/Person/Face均值为`0.7835/0.6645/0.6497`；
+  task0对Person/Face的范数放大未持续到后续task。G2提高Person/可靠Face约`+0.55`并减少forgetting，
+  但牺牲主导Full并出现Suffering`+9.7569`与Sadness`-10.1794`的类别交换，当前证据不支持融合梯度
+  冲突是共享三视图性能差距的主因。完整结果写入`docs/shared_multiview_dgl_validation.md`。

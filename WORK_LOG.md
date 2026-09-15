@@ -3677,3 +3677,12 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - `f83f648`在服务器独立worktree启动batch`shared_dgl_seed0_20260914_215006`，GPU0/1/2并行
   G0/G1/G2。三份config已核验同commit、seed0、8-task validation、无checkpoint/test，当前正常初始化
   并进入task0；只等待该唯一batch，不重复启动。
+- 2026-09-15：G0/G1/G2均正常完成240 epochs与13,950 updates，0 skipped，无OOM/NaN；自动汇总退出码
+  为0。通过SCP同步15个结果、6个控制、7个worktree日志和1个外部launcher日志，四棵文件集合均
+  逐项SHA-256一致。
+- 同批final validation mAP：G0=`43.0754`、G1=`41.4177`、G2=`42.4147`。G2相对G1
+  `+0.9970`，说明只截断融合梯度而仍用0.1辅助监督会明显欠训练；但G2相对G0 final/average/Full
+  分别为`-0.6607/-0.5943/-0.8841`，距独立R1的差距也扩大，全部推进检查失败。
+- G0全task梯度审计没有负余弦，融合梯度也未持续大于单视图梯度；G2把Person和可靠Face各提高约
+  `0.54`且forgetting改善`0.1440`，却降低Full并造成Sadness/Suffering的大幅交换。按预注册规则
+  结束当前共享DGL路线：不跑seed1/2、test、alpha或动态Router。

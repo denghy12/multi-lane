@@ -99,3 +99,38 @@ the result.
 - Server results: `/mnt/haoyuan/workspace/emotic_benchmark_runs/multi_lane_shared_dgl_v0.1/`
 - Repository control/logs: `output/emotic_track_a_shared_dgl/` and
   `logs/emotic_track_a_shared_dgl/`
+
+## Completed result (2026-09-15)
+
+Batch `shared_dgl_seed0_20260914_215006` completed all three runs at clean
+commit `f83f648`. Every run completed 240 epochs and 13,950 optimizer updates
+with zero skipped steps, finite losses, no OOM, no checkpoint, and no test
+access. Synced result, control, and log files were verified byte-for-byte by
+SHA-256 against the server copies.
+
+| Method | Final mAP | Average mAP | Final cF1 | Final oF1 | Forgetting |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| G0 joint | **43.0754** | **49.9807** | **38.4596** | **58.6089** | 0.9672 |
+| G1 fusion detach | 41.4177 | 48.1986 | 37.5822 | 58.2764 | 0.9526 |
+| G2 full DGL | 42.4147 | 49.3864 | 37.1768 | 58.5254 | **0.8232** |
+
+G2 recovered `+0.9970` final mAP over the one-sided G1 ablation, confirming
+that strong per-view supervision is necessary after cutting the fused gradient.
+It nevertheless remained `-0.6607` below the same-batch G0, lost `-0.5943`
+average mAP, and reduced standalone Full final mAP by `-0.8841`. All four
+pre-registered advancement checks failed, so G2 does not advance to seed1/2,
+test, alpha tuning, or dynamic routing.
+
+The G0 audit found no negative fused-to-view gradient cosine on any of the eight
+tasks: mean cosine was `0.7835/0.6645/0.6497` for Full/Person/Face. The large
+task0 norm imbalance against Person and Face did not persist; median fused/view
+norm ratios over all tasks were `0.91/0.93/0.86`. This does not support
+persistent destructive fused-versus-view gradient conflict as the dominant
+failure mode of the current shared architecture.
+
+G2 improved standalone Person by `+0.5486`, reliable Face by `+0.5361`, and
+forgetting by `-0.1440`, but weakened the dominant Full lane. Its large
+`Suffering +9.7569` gain was offset by `Sadness -10.1794` and broader class
+losses. The evidence is therefore consistent with a stability/view-balancing
+trade-off rather than a net recognition gain. The independent fixed R1
+reference remains higher at `43.5812` validation mAP.
