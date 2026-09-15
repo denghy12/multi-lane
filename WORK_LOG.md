@@ -9,6 +9,8 @@
 - 新增两组seed0 launcher、汇总器和`docs/full_private_head_diagnostic_plan_20260915.md`。
 - 服务器完整测试221/221通过。真实H0/HF task0/1epoch配对smoke各84 updates、0 skipped、2285个validation
   样本；H0/HF分类参数分别13338/26676，compact仅HF含`full_view_head`，链路检查通过。
+- 正式batch`full_private_head_seed0_20260915_231942`以实验HEAD`87b406f`启动，分配GPU0/1。启动时8张GPU
+  均有既有任务，0/1空闲显存约6.3/6.4GiB，双GPUlauncher正在等待连续两次达到12GiB空闲且利用率不高于10%。
 
 ## P0第一批结果同步与分析
 

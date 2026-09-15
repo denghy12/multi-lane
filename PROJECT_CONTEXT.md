@@ -7,6 +7,8 @@
 复制初始化的独立head，Body/Face仍共享原head；其余P0协议完全固定。先做seed0两组配对，明确主效应后才补
 seed1/2。已实现模型、runner参数、分数/compact导出、2000次bootstrap汇总及双GPUlauncher。服务器完整测试
 221/221通过；H0/HF真实task0/1epoch配对smoke均完成84 updates、0 skipped，参数统计和compact状态符合预期。
+正式batch`full_private_head_seed0_20260915_231942`已于2026-09-15启动等待器，实验HEAD`87b406f`，目标GPU0/1；
+启动时服务器GPU均被现有任务占用，launcher将在显存和利用率连续两次满足门槛后自动并行运行H0/HF。
 
 ## P0差距第一批已完成并同步
 

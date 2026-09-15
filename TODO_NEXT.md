@@ -5,6 +5,8 @@
 按`docs/full_private_head_diagnostic_plan_20260915.md`先运行H0共享逐路head与HF Full独立head。服务器221项
 单元测试和真实配对smoke已通过，下一步启动两组8-task validation。判断规则通过才补seed1/2；当前不启动
 Adapter或Selector解绑。
+正式batch`full_private_head_seed0_20260915_231942`的launcher已运行，当前等待GPU0/1空闲；训练完成后将
+自动生成logit/概率融合、分路指标、head差异和2000次bootstrap汇总。
 
 ## P0第一批已完成：下一步围绕Full定位机制
 

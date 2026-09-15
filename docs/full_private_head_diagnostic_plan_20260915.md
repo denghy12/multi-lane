@@ -1,7 +1,8 @@
 # Full分类头独立诊断方案
 
-状态：已实现，服务器221项测试与H0/HF真实task0 smoke通过，等待正式运行。目标是在预测来源诊断指向Full后，
-判断Full与Body/Face共用分类头是否是性能损失的重要机制。
+状态：已实现，服务器221项测试与H0/HF真实task0 smoke通过；正式batch
+`full_private_head_seed0_20260915_231942`已启动等待GPU0/1。目标是在预测来源诊断指向Full后，判断
+Full与Body/Face共用分类头是否是性能损失的重要机制。
 
 ## 配对配置
 
