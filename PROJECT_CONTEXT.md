@@ -13,6 +13,12 @@ ASL的融合路径/单视图范数、比例、余弦和三路路径间余弦，�
 不足。只有P2 final分别超过P0/P1至少0.10、average与Standalone Full不低P0且缩小到独立R1的差距，
 才进入Selector-aware动态Router。协议见`docs/view_specialized_shared_adapter_validation.md`。
 
+实现提交`e5c52ca`及AMP诊断修复`32f8169`已推送。服务器新独立clean worktree完成213项全测；
+P0/P1/P2真实EMOTIC task0一轮smoke均完成84 updates、0 skipped，三组参数计数严格符合协议。
+修复后的3-batch审计中，共享表示的融合/单视图梯度范数比例约为Full/Person/Face
+`0.685/0.174/0.130`，Adapter约`0.682/0.168/0.123`，两组参数的全部view梯度非零有限。
+该结果只覆盖task0 epoch0，用于证明完整早中晚诊断值得执行，尚不作为DGL机制最终结论。
+
 ## 2026-09-13：OOF优势限定排序蒸馏失败，OOF蒸馏路线结束
 
 从`83cceb2`新建`exp/oof-advantage-ranking-distillation`，仅实现一组E1 seed0 validation。

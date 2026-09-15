@@ -114,6 +114,34 @@ class TaskwiseViewFusionTest(unittest.TestCase):
                 )
         self.assertTrue(all(torch.isfinite(torch.tensor(list(audit.values())))))
 
+    def test_fused_loss_updates_every_view_specific_adapter(self) -> None:
+        torch.manual_seed(31)
+        model = MultiLaneModel(
+            FakeVisual(),
+            (5, 3),
+            num_selectors=2,
+            num_prompts=2,
+            num_prompt_layers=1,
+            adapter_mode="image_token",
+            adapter_layer_indices=(0,),
+            adapter_bottleneck_dim=3,
+            adapter_view_bottleneck_dim=2,
+            view_fusion="fixed_three_view",
+            view_fusion_hidden_dim=4,
+        )
+        model.activate_task(0)
+        fused, _ = model.current_all_logits_with_views(three_view_batch())
+        fused.square().mean().backward()
+        for view in ("full", "person", "face"):
+            gradients = [
+                parameter.grad
+                for parameter in model.adapter_bank.view_active_parameters(view)
+            ]
+            self.assertTrue(any(
+                gradient is not None and bool(torch.count_nonzero(gradient))
+                for gradient in gradients
+            ))
+
     def test_detached_fixed_fusion_preserves_branch_gradients_only(self) -> None:
         torch.manual_seed(23)
         model = MultiLaneModel(

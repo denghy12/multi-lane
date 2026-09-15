@@ -15,6 +15,10 @@
   updates、0 skipped，参数计数正确；smoke同时发现AMP下Adapter分路径的二次VJP发生数值下溢，
   审计值为0而训练梯度不受影响。当前修复为先按65536缩放诊断loss完成VJP、再以FP32还原梯度，
   并增加各view×参数组非零回归断言；修复后须重跑全测和三组smoke。
+- `32f8169`修复后服务器213项全测通过；P0/P1/P2重试smoke均完成84 updates、0 skipped，三组
+  Adapter参数计数为49,952/69,933/70,700，3个审计batch的Selector/Prompt与Adapter三视图路径
+  梯度全部非零有限。task0 epoch0显示融合/单视图梯度比例在Full约0.68、Person约0.17、Face约
+  0.12--0.13，支持启动完整早中晚诊断，但不提前解释为全程梯度压制。
 
 ## 2026-09-13：同步并分析OOF优势限定排序蒸馏
 
