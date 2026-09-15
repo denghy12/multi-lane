@@ -25,6 +25,12 @@
 - 唯一正式batch为`view_specialized_adapter_seed0_20260915_104759`，tmux为
   `ml_view_adapter_104759`，运行代码固定`10ef477`。当前launcher处于资源等待循环，尚未创建三组
   正式run或占用显存；满足门槛后自动并行启动GPU0/1/2，不重复启动。
+- 用户确认约8GiB空闲可运行后，先核验三组config不存在、训练未启动，再停止仅等待资源的tmux并用
+  同一batch ID重启，临时覆盖门槛为7,000MiB/允许100%利用率/一次检查。首次重启因入口少了
+  `scripts/emotic/`前缀而在训练前安全退出；修正为实际脚本路径后启动，没有产生重复run。
+- 三份正式config均记录clean commit `10ef477`、seed0、固定融合、30 epochs/task、8 tasks、val-only、
+  checkpoint关闭，Adapter维度分别为32/0、45/0、32/4。P0/P1/P2首个epoch均完成84 updates、
+  0 skipped，loss有限，耗时38.2/38.1/39.3秒；每卡约4.5GiB显存余量，无OOM或错误。
 
 ## 2026-09-13：同步并分析OOF优势限定排序蒸馏
 

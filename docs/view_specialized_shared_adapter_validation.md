@@ -90,3 +90,13 @@ supported mechanism; they do not authorize post-hoc bottleneck or LR search.
 
 The batch launcher waits until all three selected GPUs have at least 12,000 MiB
 free and at most 10% utilization for two consecutive checks, 30 seconds apart.
+
+## Formal run status
+
+After the user confirmed that the observed per-GPU free memory was sufficient,
+the formal batch `view_specialized_adapter_seed0_20260915_104759` was started on
+GPUs 0/1/2 from clean commit `10ef477`. Only this invocation overrides the
+launcher gate to 7,000 MiB free, 100% maximum utilization and one readiness
+check; the registered model and training configuration is unchanged. P0/P1/P2
+all completed epoch 0 with 84 optimizer updates, zero skipped updates, finite
+losses and no OOM. The batch remains validation-only and checkpoint-free.
