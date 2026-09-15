@@ -8,6 +8,14 @@ BATCH_ID="${BATCH_ID:-view_specialized_adapter_seed0_$(date +%Y%m%d_%H%M%S)}"
 GPU_LIST="${GPU_LIST:-0,1,2}"
 IFS=',' read -r -a gpus <<< "${GPU_LIST}"
 [[ ${#gpus[@]} -eq 3 ]] || { echo "GPU_LIST must contain exactly three GPUs" >&2; exit 2; }
+[[ "$(printf '%s\n' "${gpus[@]}" | sort -u | wc -l)" -eq 3 ]] || {
+  echo "GPU_LIST must contain three distinct GPUs" >&2
+  exit 2
+}
+MIN_FREE_MIB="${MIN_FREE_MIB:-12000}"
+MAX_UTILIZATION="${MAX_UTILIZATION:-10}"
+READY_CHECKS="${READY_CHECKS:-2}"
+WAIT_SECONDS="${WAIT_SECONDS:-30}"
 RESULT_BASE="${RESULT_BASE:-/mnt/haoyuan/workspace/emotic_benchmark_runs/multi_lane_view_specialized_adapter_v0.1/${BATCH_ID}}"
 CONTROL_DIR="${ROOT}/output/emotic_track_a_view_specialized_adapter/${BATCH_ID}"
 LOG_DIR="${ROOT}/logs/emotic_track_a_view_specialized_adapter/${BATCH_ID}"
@@ -23,6 +31,29 @@ fusion=fixed reliable-Face weights, joint gradients, auxiliary0.1
 audit=epochs 0/14/29, first 3 batches; exact per-view fused-loss VJP versus unimodal gradient for representation BCE and Adapter ASL
 advance=P2 final >= P0+0.10 and P1+0.10; average and standalone Full not below P0; gap to independent R1 43.5812 shrinks
 EOF
+
+consecutive=0
+while (( consecutive < READY_CHECKS )); do
+  ready=1
+  for gpu in "${gpus[@]}"; do
+    snapshot="$(nvidia-smi -i "${gpu}" --query-gpu=memory.free,utilization.gpu --format=csv,noheader,nounits)"
+    IFS=',' read -r free_mib utilization <<< "${snapshot}"
+    free_mib="${free_mib// /}"
+    utilization="${utilization// /}"
+    echo "GPU ${gpu} free_mib=${free_mib} utilization=${utilization}"
+    if (( free_mib < MIN_FREE_MIB || utilization > MAX_UTILIZATION )); then
+      ready=0
+    fi
+  done
+  if (( ready )); then
+    consecutive=$((consecutive + 1))
+  else
+    consecutive=0
+  fi
+  if (( consecutive < READY_CHECKS )); then
+    sleep "${WAIT_SECONDS}"
+  fi
+done
 
 methods=(P0 P1 P2)
 pids=()

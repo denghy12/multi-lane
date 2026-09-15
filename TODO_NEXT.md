@@ -12,6 +12,7 @@
    修复后213项全测与三组重试smoke已通过；提交smoke记录并ff-only同步后即可检查GPU并启动正式批次。
 4. smoke通过后用三张安全空闲GPU启动唯一seed0完整8-task validation；日志写入`./logs/`，控制文件
    写入`./output/`，大结果写入服务器外部结果目录，不保存checkpoint、不访问test。
+   当前全部GPU繁忙；launcher按12,000MiB空闲、利用率不高于10%、连续两次的条件在tmux排队。
 5. 只有P2 final相对P0/P1均至少+0.10、average与Standalone Full不低P0且缩小到独立R1的差距，
    才进入Selector-aware动态Router阶段；失败则根据路径诊断重新判断机制，不搜索bottleneck或LR。
 

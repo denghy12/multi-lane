@@ -87,3 +87,6 @@ supported mechanism; they do not authorize post-hoc bottleneck or LR search.
 - Server results: `/mnt/haoyuan/workspace/emotic_benchmark_runs/multi_lane_view_specialized_adapter_v0.1/`
 - Repository control: `./output/emotic_track_a_view_specialized_adapter/`
 - Repository logs: `./logs/emotic_track_a_view_specialized_adapter/`
+
+The batch launcher waits until all three selected GPUs have at least 12,000 MiB
+free and at most 10% utilization for two consecutive checks, 30 seconds apart.
