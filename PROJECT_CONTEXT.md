@@ -2,12 +2,16 @@
 
 ## 当前优先：解释P0相对R1的0.5058差距
 
-用户要求先定位原因，方案见`docs/p0_r1_gap_diagnostic_plan.md`，尚未实现或启动。
+用户要求先定位原因，方案见`docs/p0_r1_gap_diagnostic_plan.md`。已在`exp/p0-r1-gap-diagnostic`实现第一批，
+尚未启动正式训练。
 核对历史来源：P0相对独立专家Full=-0.6982、Person=+1.4158、Face全量=+1.3868、可靠Face=+1.9182；
 不能用P2相对P0的全面退化解释此差距。R1 average mAP为50.7509。
 代码确认：共享线性head且融合后不再归一化，P0特征融合等价于固定logit融合；R1为概率融合。
 先复现一次P0保存compact状态与三路scores，再同预测比较融合运算和八种来源替换。剩余差距才进入head、
 Adapter、Selector/Prompt解绑及目标对照。独立Face训练valid非ambiguous与P0 strict reliable差异须独立审计。
+实现复用原P0既有诊断验证前向导出三路FP32 logits/概率、Face mask与IDs，并保存8个task compact状态；
+离线分析固定权重计算A四格、B八组合、边际/Shapley、可靠性子集、排序纠错/破坏和2000次原图组bootstrap。
+不搜索融合权重，不访问test，不包含第二批解绑。
 
 ## 2026-09-15：融合文献与机制解释修正
 

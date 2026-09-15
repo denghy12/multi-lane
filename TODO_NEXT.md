@@ -1,10 +1,10 @@
 # 下一步任务
 
-## 优先诊断：P0与R1差距（方案待实施）
+## 优先诊断：P0与R1差距（第一批已实现，待运行）
 
-依据`docs/p0_r1_gap_diagnostic_plan.md`先做D0一次P0复现，保存逐task compact状态与分路scores；
-D1保持预测不变比较logit/概率融合，D2固定概率规则做八种分支来源替换。根据残余差距再选择共享位置和目标诊断。
-本次为实验设计，不启动新训练；此前文献中的改进建议暂置于原因定位之后。
+依据`docs/p0_r1_gap_diagnostic_plan.md`，先在服务器对`exp/p0-r1-gap-diagnostic`运行完整单元测试与真实smoke，
+再启动一次D0 P0 seed0 validation复现；训练完成后launcher自动运行D1四格与D2八种来源替换分析。
+根据共同概率融合后的残余差距再选择共享位置和目标诊断；当前不实现或运行分类头、Adapter、Selector解绑。
 
 ## 待讨论：文献支持的共享与动态融合设计
 

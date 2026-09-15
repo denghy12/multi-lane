@@ -1108,44 +1108,98 @@ def evaluate_view_diagnostics(
     task_id: int,
     threshold: float,
     amp: bool,
+    score_output_path: Optional[Path] = None,
 ) -> Dict[str, object]:
     """Evaluate standalone views, Router weights, and Full-relative pair flips."""
     if model.view_fusion == "disabled":
         raise ValueError("View diagnostics require enabled view fusion")
     model.eval()
-    fused_rows: List[torch.Tensor] = []
-    branch_rows: Dict[str, List[torch.Tensor]] = {
+    fused_logit_rows: List[torch.Tensor] = []
+    fused_probability_rows: List[torch.Tensor] = []
+    branch_logit_rows: Dict[str, List[torch.Tensor]] = {
+        name: [] for name in model.view_fusion_module.view_names
+    }
+    branch_probability_rows: Dict[str, List[torch.Tensor]] = {
         name: [] for name in model.view_fusion_module.view_names
     }
     target_rows: List[torch.Tensor] = []
     weight_rows: List[torch.Tensor] = []
     reliable_rows: List[torch.Tensor] = []
+    sample_ids: List[str] = []
+    batch_lengths: List[int] = []
     with torch.no_grad():
         for batch in loader:
             if len(batch) not in (2, 3):
                 raise ValueError("Diagnostic batches must have two or three fields")
             images, targets = batch[:2]
+            batch_sample_ids = batch[2] if len(batch) == 3 else None
             if isinstance(images, dict) and "face_reliable" in images:
                 reliable_rows.append(images["face_reliable"].to(dtype=torch.bool).cpu())
             images = move_model_inputs(images, device)
             with torch.cuda.amp.autocast(enabled=amp):
                 fused_logits, view_logits = model.seen_logits_with_views(images)
-            fused_rows.append(torch.sigmoid(fused_logits.float()).cpu())
+            fused_logits_cpu = fused_logits.float().cpu()
+            fused_logit_rows.append(fused_logits_cpu)
+            fused_probability_rows.append(torch.sigmoid(fused_logits_cpu))
             for name, logits in view_logits.items():
-                branch_rows[name].append(torch.sigmoid(logits.float()).cpu())
+                logits_cpu = logits.float().cpu()
+                branch_logit_rows[name].append(logits_cpu)
+                branch_probability_rows[name].append(torch.sigmoid(logits_cpu))
             weights = model.last_fusion_weights()
             if weights is None:
                 raise RuntimeError("Enabled fusion did not expose weights")
             weight_rows.append(weights.float().cpu())
             target_rows.append(targets.float().cpu())
-    if not fused_rows:
+            batch_lengths.append(len(targets))
+            if batch_sample_ids is not None:
+                sample_ids.extend(str(value) for value in batch_sample_ids)
+    if not fused_logit_rows:
         raise RuntimeError("View diagnostic loader produced no samples")
-    fused = torch.cat(fused_rows)
+    fused_logits = torch.cat(fused_logit_rows)
+    fused = torch.cat(fused_probability_rows)
     targets = torch.cat(target_rows)
+    branch_logits = {
+        name: torch.cat(rows) for name, rows in branch_logit_rows.items()
+    }
     branches = {
-        name: torch.cat(rows) for name, rows in branch_rows.items()
+        name: torch.cat(rows) for name, rows in branch_probability_rows.items()
     }
     weights = torch.cat(weight_rows)
+    reliable = torch.cat(reliable_rows) if reliable_rows else None
+    if score_output_path is not None:
+        if not sample_ids:
+            raise RuntimeError("View score dumping requires stable sample IDs")
+        if reliable is None or "face" not in branches:
+            raise RuntimeError("Three-view score dumping requires a Face mask")
+        if len(sample_ids) != len(targets) or len(set(sample_ids)) != len(sample_ids):
+            raise ValueError("View score dump has invalid sample IDs")
+        arrays: Dict[str, np.ndarray] = {
+            "schema_version": np.asarray(1, dtype=np.int64),
+            "task_id": np.asarray(task_id, dtype=np.int64),
+            "sample_ids": np.asarray(sample_ids, dtype=np.str_),
+            "class_indices": np.arange(targets.shape[1], dtype=np.int64),
+            "targets": targets.numpy().astype(np.float32, copy=False),
+            "face_reliable": reliable.numpy().astype(np.bool_, copy=False),
+            "batch_lengths": np.asarray(batch_lengths, dtype=np.int64),
+            "probability_device": np.asarray("cpu"),
+            "probability_dtype": np.asarray("float32"),
+            "probability_operation": np.asarray("torch.sigmoid"),
+            "torch_version": np.asarray(str(torch.__version__)),
+            "fused_logits": fused_logits.numpy().astype(np.float32, copy=False),
+            "fused_probabilities": fused.numpy().astype(np.float32, copy=False),
+        }
+        for name in model.view_fusion_module.view_names:
+            arrays[f"{name}_logits"] = branch_logits[name].numpy().astype(
+                np.float32, copy=False
+            )
+            arrays[f"{name}_probabilities"] = branches[name].numpy().astype(
+                np.float32, copy=False
+            )
+        if not all(np.isfinite(value).all() for key, value in arrays.items()
+                   if key.endswith(("_logits", "_probabilities"))):
+            raise FloatingPointError("View score dump contains non-finite values")
+        score_output_path.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(score_output_path, **arrays)
     metrics = {
         "fused": asdict(compute_metrics(task_id, fused, targets, threshold)),
         **{
@@ -1153,8 +1207,7 @@ def evaluate_view_diagnostics(
             for name, scores in branches.items()
         },
     }
-    if reliable_rows and "face" in branches:
-        reliable = torch.cat(reliable_rows)
+    if reliable is not None and "face" in branches:
         if bool(reliable.any()):
             metrics["face_reliable"] = asdict(compute_metrics(
                 task_id, branches["face"][reliable], targets[reliable], threshold
@@ -2139,6 +2192,14 @@ def parse_args() -> argparse.Namespace:
         help="Number of leading batches sampled at every path-audit epoch.",
     )
     parser.add_argument("--view-evaluation-diagnostics", action="store_true")
+    parser.add_argument(
+        "--save-view-evaluation-scores",
+        action="store_true",
+        help=(
+            "Save fused and per-view validation logits/probabilities from the "
+            "existing view-diagnostic pass."
+        ),
+    )
     parser.add_argument("--paired-full-person", action="store_true",
                         help="Also permit a paired-input, conditioning-disabled control.")
     parser.add_argument(
@@ -2329,6 +2390,16 @@ def main() -> None:
         args.view_fusion == "disabled"
     ):
         raise ValueError("View diagnostics require enabled view fusion")
+    if args.save_view_evaluation_scores and (
+        not args.view_evaluation_diagnostics
+        or not args.save_evaluation_scores
+        or not three_view_fusion
+        or args.reporting_split != "val"
+    ):
+        raise ValueError(
+            "View score export requires three-view validation diagnostics and "
+            "ordinary validation score export"
+        )
     path_audit_enabled = args.view_path_gradient_audit_epochs is not None
     if path_audit_enabled != (args.view_path_gradient_audit_batches > 0):
         raise ValueError(
@@ -2531,6 +2602,8 @@ def main() -> None:
         (output / "calibration_scores").mkdir()
     if args.save_compact_checkpoints:
         (output / "compact_checkpoints").mkdir()
+    if args.save_view_evaluation_scores:
+        (output / "view_val_scores").mkdir()
 
     metadata = git_metadata(root)
     visual = load_openai_clip_visual(args.clip_checkpoint)
@@ -2918,6 +2991,7 @@ def main() -> None:
             if path_audit_enabled else None
         ),
         "view_evaluation_diagnostics": args.view_evaluation_diagnostics,
+        "save_view_evaluation_scores": args.save_view_evaluation_scores,
         "full_crop_mode": args.full_crop_mode,
         "selector_conditioning": args.selector_conditioning,
         "selector_condition_layers": list(args.selector_condition_layers),
@@ -3232,6 +3306,10 @@ def main() -> None:
                 task_id,
                 args.threshold,
                 amp,
+                score_output_path=(
+                    output / "view_val_scores" / f"task{task_id}.npz"
+                    if args.save_view_evaluation_scores else None
+                ),
             )
         if calibration_loader is not None:
             calibration_row = evaluate(

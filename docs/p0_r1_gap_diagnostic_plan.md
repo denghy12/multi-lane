@@ -1,6 +1,7 @@
 # P0与独立R1性能差距诊断方案
 
-状态：方案设计，未实现或启动新训练。目标是定位历史seed0 final validation差距0.505786，而不是筛选新冠军。
+状态：第一批已实现，等待服务器测试、smoke及正式seed0运行。目标是定位历史seed0 final validation差距0.505786，
+而不是筛选新冠军。
 
 ## 1. 已核对的事实
 
@@ -37,10 +38,12 @@ Adam每task重置，主LR0.0125，Adapter LR4e-4，cosine到0，无warmup/weight
 训练仍为固定logit等价融合损失加0.1倍有效单路损失均值。Full/Person/Face预处理和可靠阈值完全复现P0。
 可靠Face权重0.64/0.16/0.20，其余0.80/0.20/0。不改变训练融合以保持历史锚点。
 
-计划入口：新增诊断launcher调用`multi_lane.track_a.runner`的P0配置；具体CLI须实现后声明，本文不声称已有可运行入口。
+训练入口为`scripts/emotic/run_multilane_track_a_p0_gap_reproduction_val.sh`，整批入口为
+`scripts/emotic/launch_multilane_track_a_p0_r1_gap_diagnostic.sh`；离线A/B分析器为
+`python -m multi_lane.track_a.p0_r1_gap_diagnostic`。
 数据使用服务器已有EMOTIC、ViT-B-16.pt和face_manifest_audit_v1_20260908；实施时由配置指定输入路径并校验SHA。
 输出`./output/emotic_track_a_p0_r1_gap/<batch>/`，日志`./logs/emotic_track_a_p0_r1_gap/<batch>/`。
-新增产物：每task当前时点的compact可训练参数快照、validation三路原始FP32 logits/概率、标签、sample/image ID、
+新增产物：每task当前时点的compact可训练参数快照、validation三路原始FP32 logits/概率、标签、sample ID、
 Face有效标记、原融合输出；必要时保存lane表示以支持冻结表示probe。冻结CLIP不重复保存。
 快照必须涵盖该时点head与全部已见task状态，不能仅保存最终head代替历史task评估。
 梯度审计保持早中晚采样；诊断不改变optimizer梯度、随机数状态或数据顺序。先复核P0指标/训练历史再归因。
@@ -131,3 +134,14 @@ seed0用于定位该历史差距；只对明确的主效应与其基线补seed1/
 不能把诊断probe算作遵循原增量协议的新模型结果。
 
 本方案没有引入Router或新共享/私有损失。下一项实现应先让D0/D1/D2成为可复现的小批次，之后由结果选择诊断分支。
+
+## 6. 第一批实现清单
+
+- `runner`新增`--save-view-evaluation-scores`，复用既有`view_evaluation_diagnostics`验证前向，按原batch保存
+  fused及Full/Person/Face的FP32 logits和实际sigmoid概率、标签、sample ID、Face可靠mask与batch边界。
+- 分析器强制审计P0结构、8个task普通score与分路score的一致性、Face manifest mask及8份compact状态；
+  同时验证固定权重分路logit与模型原始fused logit的最大绝对误差。
+- A完整计算I-logit、I-prob、S-logit、S-prob四格；B固定概率规则计算八种I/S来源组合。
+- 输出累计/当前/旧类指标、逐类AP、遗忘、Face可靠/不可靠子集、置信分布与分支分歧、单路替换排序纠错/破坏、
+  三路边际效应和Shapley，以及最终task四项预声明差值的2000次原图组配对bootstrap。
+- 没有alpha/beta、温度或阈值搜索，没有访问test；没有实现或启动第二批模块解绑。

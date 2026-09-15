@@ -6,6 +6,12 @@
 - 核对历史三路：P0降低Full但提高Body/Face，修正了把P2相对P0的退化用于解释本差距的混淆。
 - 确认P0共享线性head下特征/logit融合等价，独立R1为概率融合；Face训练过滤和batch组织也存在混杂。
 - 方案先安排一次带scores/compact状态的P0复现及离线融合/来源替换，再条件执行模块解绑与训练目标对照。
+- 新建`exp/p0-r1-gap-diagnostic`：`runner`可在既有三视图诊断验证前向导出逐分支FP32 logits/概率、
+  fused输出、标签、ID及Face mask；未改变训练前向、loss或optimizer。
+- 新增P0复现脚本、单GPU整批launcher和离线A/B分析器。A为I/S×logit/probability四格；B为固定概率
+  融合下8种I/S来源组合，附边际/Shapley、子集/排序/分布诊断与2000次原图组bootstrap。
+- 新增单元测试覆盖固定mask权重、logit/probability差异、分路score round-trip及bootstrap确定性；
+  尚待服务器完整测试和真实smoke。
 
 ## 2026-09-15：共享视图融合论文检索
 
