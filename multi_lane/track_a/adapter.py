@@ -270,11 +270,90 @@ class TaskImageTokenAdapterBank(TaskLaneTransformerAdapterBank):
     they never replace the frozen CLIP residual stream.
     """
 
+    def __init__(
+        self,
+        *args,
+        view_bottleneck_dim: int = 0,
+        view_names: Sequence[str] = ("full", "person", "face"),
+        **kwargs,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        if int(view_bottleneck_dim) < 0:
+            raise ValueError("View-specific Adapter bottleneck must be non-negative")
+        names = tuple(str(name) for name in view_names)
+        if not names or len(set(names)) != len(names):
+            raise ValueError("View-specific Adapter names must be unique and non-empty")
+        self.view_bottleneck_dim = int(view_bottleneck_dim)
+        self.view_names = names
+        self.view_task_adapters = nn.ModuleList()
+        if self.view_bottleneck_dim:
+            for _ in range(self.num_tasks):
+                self.view_task_adapters.append(nn.ModuleDict({
+                    name: nn.ModuleDict({
+                        str(layer_id): TransformerBlockAdapter(
+                            hidden_dim=self.hidden_dim,
+                            bottleneck_dim=self.view_bottleneck_dim,
+                            activation=self.activation_name,
+                        )
+                        for layer_id in self.layer_indices
+                    })
+                    for name in self.view_names
+                }))
+        self.requires_grad_(False)
+
+    @property
+    def view_specialized(self) -> bool:
+        return self.view_bottleneck_dim > 0
+
+    def activate_task(self, task_id: int) -> None:
+        super().activate_task(task_id)
+        if self.view_specialized:
+            if task_id > 0 and self.task_initialization == "copy_previous":
+                self.view_task_adapters[task_id].load_state_dict(
+                    self.view_task_adapters[task_id - 1].state_dict()
+                )
+            self.view_task_adapters[task_id].requires_grad_(True)
+
+    def restore_task(self, task_id: int) -> None:
+        super().restore_task(task_id)
+        if self.view_specialized and task_id >= 0:
+            self.view_task_adapters[task_id].requires_grad_(True)
+
+    def active_parameters(self) -> Iterable[nn.Parameter]:
+        parameters = list(super().active_parameters())
+        if self.view_specialized and self.current_task_id >= 0:
+            parameters.extend(
+                self.view_task_adapters[self.current_task_id].parameters()
+            )
+        return iter(parameters)
+
+    def per_task_parameter_count(self, task_id: int = 0) -> int:
+        count = super().per_task_parameter_count(task_id)
+        if self.view_specialized:
+            count += sum(
+                parameter.numel()
+                for parameter in self.view_task_adapters[int(task_id)].parameters()
+            )
+        return count
+
+    def shared_active_parameters(self) -> Iterable[nn.Parameter]:
+        return TaskLaneTransformerAdapterBank.active_parameters(self)
+
+    def view_active_parameters(self, view_name: str) -> Iterable[nn.Parameter]:
+        if view_name not in self.view_names:
+            raise ValueError("Unknown Image-token Adapter view")
+        if not self.view_specialized or self.current_task_id < 0:
+            return iter(())
+        return iter(
+            self.view_task_adapters[self.current_task_id][view_name].parameters()
+        )
+
     def adapted_tokens_for_layer(
         self,
         layer_id: int,
         frozen_image_tokens: torch.Tensor,
         lane_ids: Sequence[int],
+        view_name: str = "full",
     ) -> torch.Tensor:
         if frozen_image_tokens.ndim != 3:
             raise ValueError("Image tokens must have shape [batch, tokens, width]")
@@ -282,6 +361,8 @@ class TaskImageTokenAdapterBank(TaskLaneTransformerAdapterBank):
             raise ValueError("Image-token width differs from adapter width")
         if not lane_ids:
             raise ValueError("At least one lane id is required")
+        if view_name not in self.view_names:
+            raise ValueError("Unknown Image-token Adapter view")
         expanded = frozen_image_tokens.unsqueeze(0).expand(
             len(lane_ids), -1, -1, -1
         )
@@ -292,10 +373,12 @@ class TaskImageTokenAdapterBank(TaskLaneTransformerAdapterBank):
             if not 0 <= int(task_id) < self.num_tasks:
                 raise ValueError("Lane id is outside the adapter bank")
             adapter = self.task_adapters[int(task_id)][str(layer_id)]
-            delta = (
-                self.residual_multiplier(int(task_id))
-                * adapter(frozen_image_tokens)
-            )
+            delta = adapter(frozen_image_tokens)
+            if self.view_specialized:
+                delta = delta + self.view_task_adapters[int(task_id)][view_name][
+                    str(layer_id)
+                ](frozen_image_tokens)
+            delta = self.residual_multiplier(int(task_id)) * delta
             adapted_tokens = frozen_image_tokens + delta
             if self.auxiliary_metric_mode == "residual_ratio":
                 frozen_float = frozen_image_tokens.float()

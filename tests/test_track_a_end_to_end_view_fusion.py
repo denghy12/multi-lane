@@ -15,6 +15,7 @@ from multi_lane.track_a.runner import (
     build_optimizer_groups,
     compute_training_loss,
     view_gradient_audit,
+    view_path_gradient_audit,
 )
 from multi_lane.track_a.view_fusion import TaskwiseViewFusion
 
@@ -47,6 +48,66 @@ def three_view_batch(batch_size: int = 3):
 
 
 class TaskwiseViewFusionTest(unittest.TestCase):
+    def test_view_specialized_adapter_changes_only_selected_view(self) -> None:
+        torch.manual_seed(29)
+        model = MultiLaneModel(
+            FakeVisual(),
+            (5, 3),
+            num_selectors=2,
+            num_prompts=2,
+            num_prompt_layers=1,
+            adapter_mode="image_token",
+            adapter_layer_indices=(0,),
+            adapter_bottleneck_dim=3,
+            adapter_view_bottleneck_dim=2,
+            view_fusion="fixed_three_view",
+            view_fusion_hidden_dim=4,
+        )
+        model.activate_task(0)
+        image = torch.randn(2, 3, 4, 4)
+        full_before = model._encode_single_lanes(image, False, "full")
+        person_before = model._encode_single_lanes(image, False, "person")
+        self.assertTrue(torch.equal(full_before, person_before))
+        person_adapter = model.adapter_bank.view_task_adapters[0]["person"]["0"]
+        with torch.no_grad():
+            person_adapter.up.bias.fill_(1.0)
+        full_after = model._encode_single_lanes(image, False, "full")
+        person_after = model._encode_single_lanes(image, False, "person")
+        self.assertTrue(torch.equal(full_before, full_after))
+        self.assertFalse(torch.equal(person_before, person_after))
+        self.assertEqual(model.adapter_bank.per_task_parameter_count(), 185)
+
+    def test_path_audit_separates_view_and_parameter_group(self) -> None:
+        model = tiny_model("fixed_three_view")
+        logits, view_logits, features = (
+            model.current_all_logits_with_view_features(three_view_batch())
+        )
+        fused_bce = logits.square().mean()
+        fused_asl = (logits - 0.25).square().mean()
+        view_bce = {
+            name: value.square().mean() for name, value in view_logits.items()
+        }
+        view_asl = {
+            name: (value - 0.25).square().mean()
+            for name, value in view_logits.items()
+        }
+        audit = view_path_gradient_audit(
+            fused_bce,
+            fused_asl,
+            view_bce,
+            view_asl,
+            features,
+            tuple(model.representation_optimizer_parameters()),
+            tuple(model.adapter_optimizer_parameters()),
+        )
+        for group in ("representation", "adapter"):
+            for view in ("full", "person", "face"):
+                self.assertIn(
+                    f"path_gradient_{group}_{view}_fused_to_unimodal_ratio",
+                    audit,
+                )
+        self.assertTrue(all(torch.isfinite(torch.tensor(list(audit.values())))))
+
     def test_detached_fixed_fusion_preserves_branch_gradients_only(self) -> None:
         torch.manual_seed(23)
         model = MultiLaneModel(

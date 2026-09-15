@@ -1,5 +1,18 @@
 # 项目上下文
 
+## 2026-09-15：开始共享主体与视图专用Image-token Adapter阶段
+
+用户确认执行DGL诊断后的下一阶段。新建`exp/view-specialized-shared-adapter`，先验证少量
+Full/Person/Face专用参数能否在共享CLIP、selectors、prompts和head内保留视图互补性，本阶段不引入
+动态Router或DGL。锁定seed0完整8-task validation三组：P0共享b32；P1参数量对照共享b45；P2共享
+b32加三路各b4。每task Adapter参数分别为49,952/69,933/70,700，P1/P2仅差1.10%。
+
+三组均使用固定可靠Face特征权重、joint gradient、0.1逐视图辅助监督及冠军BCE/Adapter-ASL协议。
+新增对每task epoch0/14/29各前三batch的分视图VJP梯度审计，分别报告Selector/Prompt BCE与Adapter
+ASL的融合路径/单视图范数、比例、余弦和三路路径间余弦，补足旧DGL只看task首batch合计共享梯度的
+不足。只有P2 final分别超过P0/P1至少0.10、average与Standalone Full不低P0且缩小到独立R1的差距，
+才进入Selector-aware动态Router。协议见`docs/view_specialized_shared_adapter_validation.md`。
+
 ## 2026-09-13：OOF优势限定排序蒸馏失败，OOF蒸馏路线结束
 
 从`83cceb2`新建`exp/oof-advantage-ranking-distillation`，仅实现一组E1 seed0 validation。

@@ -1,5 +1,17 @@
 # 工作日志
 
+## 2026-09-15：实现共享主体加视图专用Adapter阶段
+
+- 新建`exp/view-specialized-shared-adapter`，保留既有四份未跟踪Adapter文档和`tmp/`。
+- Image-token Adapter新增可选的Full/Person/Face task-specific低秩增量；P2使用共享b32加三路b4，
+  输出统一乘固定scale0.1。P1使用共享b45作为参数量匹配控制，P0保持共享b32。
+- 模型显式传递当前图像视图到Adapter；单视图和旧配置默认Full且保持原行为。新增参数计数、视图
+  隔离和梯度诊断回归测试。
+- 新增分路径梯度审计：从融合损失在各view endpoint的梯度做VJP，只回溯对应视图计算图；
+  Selector/Prompt使用BCE，Adapter使用ASL，epoch0/14/29各聚合前三batch。
+- 新增三卡launcher、严格汇总器和预注册协议。当前本地py_compile、shell语法与diff检查通过；本机
+  Python缺少torch/numpy，完整单测和真实GPU smoke将在服务器`ddp`环境执行。
+
 ## 2026-09-13：同步并分析OOF优势限定排序蒸馏
 
 - E1完成240 epochs、13,950 updates、0 skipped，无OOM/NaN、checkpoint或test访问。

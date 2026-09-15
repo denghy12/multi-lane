@@ -41,6 +41,7 @@ class MultiLaneModel(nn.Module):
         adapter_bottleneck_dims_per_task: Optional[Sequence[int]] = None,
         adapter_residual_gate_mode: str = "fixed",
         adapter_auxiliary_metric_mode: str = "none",
+        adapter_view_bottleneck_dim: int = 0,
         selector_conditioning: str = "disabled",
         selector_condition_layers: Sequence[int] = (1,),
         selector_condition_hidden_dim: int = 32,
@@ -60,6 +61,12 @@ class MultiLaneModel(nn.Module):
         if adapter_mode not in {"disabled", "task_lane", "image_token"}:
             raise ValueError(
                 "Adapter mode must be disabled, task_lane, or image_token"
+            )
+        if int(adapter_view_bottleneck_dim) < 0:
+            raise ValueError("View-specific Adapter bottleneck must be non-negative")
+        if adapter_view_bottleneck_dim and adapter_mode != "image_token":
+            raise ValueError(
+                "View-specific specialization requires Image-token Adapter mode"
             )
         required = (
             "conv1",
@@ -183,6 +190,10 @@ class MultiLaneModel(nn.Module):
                     bottleneck_dims_per_task=adapter_bottleneck_dims_per_task,
                     residual_gate_mode=adapter_residual_gate_mode,
                     auxiliary_metric_mode=adapter_auxiliary_metric_mode,
+                    **(
+                        {"view_bottleneck_dim": adapter_view_bottleneck_dim}
+                        if self.adapter_mode == "image_token" else {}
+                    ),
                 )
             self.adapter_bank = adapter_bank
 
@@ -360,6 +371,7 @@ class MultiLaneModel(nn.Module):
         person_tokens: Optional[torch.Tensor] = None,
         person_patch_mask: Optional[torch.Tensor] = None,
         condition_valid: Optional[torch.Tensor] = None,
+        image_view: str = "full",
     ) -> torch.Tensor:
         # The released block applies its first LayerNorm before both selector
         # aggregation and prompt attention.  Keep the residual stream itself
@@ -384,7 +396,7 @@ class MultiLaneModel(nn.Module):
         queries = selectors if query_delta is None else selectors + query_delta.to(selectors.dtype)
         if self.adapter_mode == "image_token" and self.adapter_runtime_enabled:
             selector_image_tokens = self.adapter_bank.adapted_tokens_for_layer(
-                layer_id, frozen_normalized_image, lane_ids
+                layer_id, frozen_normalized_image, lane_ids, image_view
             )
             similarity = torch.einsum(
                 "tbsc,tbnc->tbsn", queries, selector_image_tokens
@@ -425,7 +437,7 @@ class MultiLaneModel(nn.Module):
         return lane_tokens
 
     def _encode_single_lanes(
-        self, images: ModelInputs, all_seen_lanes: bool
+        self, images: ModelInputs, all_seen_lanes: bool, image_view: str = "full"
     ) -> torch.Tensor:
         lane_ids = self._lane_ids(all_seen_lanes)
         person_descriptor = None
@@ -481,6 +493,7 @@ class MultiLaneModel(nn.Module):
                 person_tokens,
                 paired["person_patch_mask"] if person_tokens is not None else None,
                 paired["condition_valid"] if person_tokens is not None else None,
+                image_view,
             )
             with torch.no_grad():
                 image_tokens = block(image_tokens.permute(1, 0, 2)).permute(
@@ -534,18 +547,20 @@ class MultiLaneModel(nn.Module):
                 with torch.no_grad():
                     features = {
                         name: self._encode_single_lanes(
-                            images[name], all_seen_lanes
+                            images[name], all_seen_lanes, image_view=name
                         )
                         for name in self.view_fusion_module.view_names[1:]
                     }
             finally:
                 self.set_adapter_runtime_enabled(adapter_runtime)
             features["full"] = self._encode_single_lanes(
-                images["full"], all_seen_lanes
+                images["full"], all_seen_lanes, image_view="full"
             )
         else:
             features = {
-                name: self._encode_single_lanes(images[name], all_seen_lanes)
+                name: self._encode_single_lanes(
+                    images[name], all_seen_lanes, image_view=name
+                )
                 for name in self.view_fusion_module.view_names
             }
         lane_ids = self._lane_ids(all_seen_lanes)
@@ -570,10 +585,20 @@ class MultiLaneModel(nn.Module):
     def current_all_logits_with_views(
         self, images: ModelInputs
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+        logits, view_logits, _ = self.current_all_logits_with_view_features(images)
+        return logits, view_logits
+
+    def current_all_logits_with_view_features(
+        self, images: ModelInputs
+    ) -> Tuple[
+        torch.Tensor, Dict[str, torch.Tensor], Dict[str, torch.Tensor]
+    ]:
+        """Return current logits and branch endpoints for gradient diagnostics."""
         fused, features = self.encode_lanes_with_views(images, all_seen_lanes=False)
         return (
             self.head(fused)[:, 0],
             {name: self.head(value)[:, 0] for name, value in features.items()},
+            features,
         )
 
     def seen_logits_with_views(

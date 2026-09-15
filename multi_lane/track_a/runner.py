@@ -690,6 +690,99 @@ def view_gradient_audit(
     return result
 
 
+def view_path_gradient_audit(
+    fused_bce: torch.Tensor,
+    fused_asl: torch.Tensor,
+    view_bce: Dict[str, torch.Tensor],
+    view_asl: Dict[str, torch.Tensor],
+    view_features: Dict[str, torch.Tensor],
+    representation_parameters: Sequence[torch.nn.Parameter],
+    adapter_parameters: Sequence[torch.nn.Parameter],
+) -> Dict[str, float]:
+    """Measure each fused-loss branch path against its unimodal gradient.
+
+    The model parameters are shared across views, so a direct gradient with
+    respect to them sums all three paths.  This routine first obtains the
+    fused-loss gradient at one view endpoint, then vector-Jacobian-products it
+    back through only that view graph.  Representation uses BCE and the active
+    Image-token Adapter uses ASL, matching the experiment's optimizer routing.
+    """
+    names = tuple(view_features)
+    if set(names) != set(view_bce) or set(names) != set(view_asl):
+        raise ValueError("Path audit views and objective views differ")
+    parameter_groups = {
+        "representation": tuple(representation_parameters),
+        "adapter": tuple(adapter_parameters),
+    }
+    losses = {
+        "representation": (fused_bce, view_bce),
+        "adapter": (fused_asl, view_asl),
+    }
+    result: Dict[str, float] = {}
+    for group_name, parameters in parameter_groups.items():
+        if not parameters:
+            continue
+        fused_loss, unimodal_losses = losses[group_name]
+        fused_paths = {}
+        for name in names:
+            endpoint_gradient = torch.autograd.grad(
+                fused_loss,
+                view_features[name],
+                retain_graph=True,
+                allow_unused=False,
+            )[0]
+            fused_path = torch.autograd.grad(
+                view_features[name],
+                parameters,
+                grad_outputs=endpoint_gradient,
+                retain_graph=True,
+                allow_unused=True,
+            )
+            unimodal = torch.autograd.grad(
+                unimodal_losses[name],
+                parameters,
+                retain_graph=True,
+                allow_unused=True,
+            )
+            fused_paths[name] = fused_path
+            fused_norm = math.sqrt(max(
+                0.0, _gradient_norm_and_dot((fused_path,))
+            ))
+            unimodal_norm = math.sqrt(max(
+                0.0, _gradient_norm_and_dot((unimodal,))
+            ))
+            denominator = fused_norm * unimodal_norm
+            prefix = f"path_gradient_{group_name}_{name}"
+            result[f"{prefix}_fused_norm"] = fused_norm
+            result[f"{prefix}_unimodal_norm"] = unimodal_norm
+            result[f"{prefix}_fused_to_unimodal_ratio"] = (
+                fused_norm / unimodal_norm if unimodal_norm > 0 else 0.0
+            )
+            result[f"{prefix}_cosine"] = (
+                _gradient_norm_and_dot((fused_path,), (unimodal,))
+                / denominator if denominator > 0 else 0.0
+            )
+        for left_index, left in enumerate(names):
+            for right in names[left_index + 1:]:
+                left_norm = math.sqrt(max(
+                    0.0, _gradient_norm_and_dot((fused_paths[left],))
+                ))
+                right_norm = math.sqrt(max(
+                    0.0, _gradient_norm_and_dot((fused_paths[right],))
+                ))
+                denominator = left_norm * right_norm
+                result[
+                    f"path_gradient_{group_name}_fused_cosine_{left}_{right}"
+                ] = (
+                    _gradient_norm_and_dot(
+                        (fused_paths[left],), (fused_paths[right],)
+                    ) / denominator if denominator > 0 else 0.0
+                )
+    if not all(math.isfinite(value) for value in result.values()):
+        raise FloatingPointError("Non-finite view-path gradient audit")
+    return result
+
+
 def backward_routed_training_losses(
     model_loss: torch.Tensor,
     adapter_loss: torch.Tensor,
@@ -1370,6 +1463,8 @@ def train_task(
     view_gradient_routing: str = "joint",
     view_dgl_unimodal_weight: float = 1.0,
     view_gradient_audit_enabled: bool = False,
+    view_path_gradient_audit_epochs: Sequence[int] = (),
+    view_path_gradient_audit_batches: int = 0,
     oof_distillation_mix: float = 0.0,
     ranking_loader: Optional[DataLoader] = None,
     ranking_loss_weight: float = 0.0,
@@ -1396,6 +1491,19 @@ def train_task(
         raise ValueError("View auxiliary supervision requires enabled view fusion")
     if view_gradient_routing not in {"joint", "fusion_detach", "dgl"}:
         raise ValueError("Unknown multi-view gradient routing mode")
+    if any(int(value) < 0 for value in view_path_gradient_audit_epochs):
+        raise ValueError("View-path audit epochs must be non-negative")
+    if view_path_gradient_audit_batches < 0:
+        raise ValueError("View-path audit batch count must be non-negative")
+    if bool(view_path_gradient_audit_epochs) != bool(view_path_gradient_audit_batches):
+        raise ValueError("View-path audit epochs and batch count must be enabled together")
+    if view_path_gradient_audit_epochs and (
+        view_gradient_routing != "joint"
+        or model.view_fusion != "fixed_three_view"
+    ):
+        raise ValueError(
+            "View-path gradient audit requires joint fixed three-view fusion"
+        )
     if view_gradient_routing != "joint" and model.view_fusion == "disabled":
         raise ValueError("View gradient routing requires enabled view fusion")
     if model.detach_view_fusion_features != (view_gradient_routing != "joint"):
@@ -1493,6 +1601,7 @@ def train_task(
             if adapter_parameters else None
         )
         epoch_start = time.time()
+        epoch_path_gradient_audits: List[Dict[str, float]] = []
         condition_samples = 0
         condition_valid_total = 0.0
         condition_visible_total = 0.0
@@ -1502,7 +1611,7 @@ def train_task(
             float(optimizer.param_groups[2]["lr"])
             if model.selector_conditioner is not None else None
         )
-        for batch in loader:
+        for batch_index, batch in enumerate(loader):
             if not isinstance(batch, (tuple, list)) or len(batch) not in (2, 3):
                 raise ValueError("Training batch must contain two or three fields")
             images, current_targets = batch[:2]
@@ -1528,7 +1637,9 @@ def train_task(
                 ).float()
             optimizer.zero_grad(set_to_none=True)
             with torch.cuda.amp.autocast(enabled=amp):
-                logits, view_logits = model.current_all_logits_with_views(images)
+                logits, view_logits, view_features = (
+                    model.current_all_logits_with_view_features(images)
+                )
                 fused_bce_loss = compute_training_loss(
                     logits,
                     current_targets,
@@ -1674,6 +1785,21 @@ def train_task(
                         representation_parameters,
                         adapter_parameters,
                     )
+                if (
+                    epoch in set(int(value) for value in view_path_gradient_audit_epochs)
+                    and batch_index < view_path_gradient_audit_batches
+                    and set(view_features) == set(view_bce_losses)
+                    and set(view_features) == set(view_asl_losses)
+                ):
+                    epoch_path_gradient_audits.append(view_path_gradient_audit(
+                        fused_bce_loss,
+                        fused_asl_loss,
+                        view_bce_losses,
+                        view_asl_losses,
+                        view_features,
+                        representation_parameters,
+                        adapter_parameters,
+                    ))
             scale_before = float(scaler.get_scale())
             if view_gradient_routing == "dgl":
                 if not view_bce_losses or not view_asl_losses:
@@ -1806,6 +1932,14 @@ def train_task(
                 row[f"fusion_weight_{name}"] = float(value)
         if task_gradient_audit is not None and epoch == 0:
             row.update(task_gradient_audit)
+        if epoch_path_gradient_audits:
+            row["path_gradient_audit_samples"] = float(
+                len(epoch_path_gradient_audits)
+            )
+            for key in epoch_path_gradient_audits[0]:
+                row[key] = sum(
+                    audit[key] for audit in epoch_path_gradient_audits
+                ) / len(epoch_path_gradient_audits)
         history.append(row)
         print(
             f"task={task_id} cycle={epoch + 1} "
@@ -1978,6 +2112,19 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--view-dgl-unimodal-weight", type=float, default=1.0)
     parser.add_argument("--view-gradient-audit", action="store_true")
+    parser.add_argument(
+        "--view-path-gradient-audit-epochs",
+        type=int,
+        nargs="+",
+        default=None,
+        help="Epoch indices for per-view fused-gradient path audits.",
+    )
+    parser.add_argument(
+        "--view-path-gradient-audit-batches",
+        type=int,
+        default=0,
+        help="Number of leading batches sampled at every path-audit epoch.",
+    )
     parser.add_argument("--view-evaluation-diagnostics", action="store_true")
     parser.add_argument("--paired-full-person", action="store_true",
                         help="Also permit a paired-input, conditioning-disabled control.")
@@ -2061,6 +2208,15 @@ def parse_args() -> argparse.Namespace:
         default="disabled",
     )
     parser.add_argument("--adapter-bottleneck-dim", type=int, default=64)
+    parser.add_argument(
+        "--adapter-view-bottleneck-dim",
+        type=int,
+        default=0,
+        help=(
+            "Optional per-view Full/Person/Face Image-token Adapter bottleneck "
+            "added to the shared task Adapter."
+        ),
+    )
     parser.add_argument(
         "--adapter-bottleneck-dims-per-task",
         type=int,
@@ -2160,6 +2316,28 @@ def main() -> None:
         args.view_fusion == "disabled"
     ):
         raise ValueError("View diagnostics require enabled view fusion")
+    path_audit_enabled = args.view_path_gradient_audit_epochs is not None
+    if path_audit_enabled != (args.view_path_gradient_audit_batches > 0):
+        raise ValueError(
+            "View-path audit epochs require a positive sampled batch count"
+        )
+    if path_audit_enabled:
+        if (
+            args.view_fusion != "fixed_three_view"
+            or args.view_gradient_routing != "joint"
+        ):
+            raise ValueError(
+                "View-path gradient audit requires joint fixed three-view fusion"
+            )
+        if any(
+            epoch < 0 or epoch >= args.epochs
+            for epoch in args.view_path_gradient_audit_epochs
+        ):
+            raise ValueError("View-path audit epoch is outside the training budget")
+        if len(set(args.view_path_gradient_audit_epochs)) != len(
+            args.view_path_gradient_audit_epochs
+        ):
+            raise ValueError("View-path audit epochs must be unique")
     if not math.isfinite(args.selector_condition_learning_rate) or args.selector_condition_learning_rate <= 0:
         raise ValueError("Selector condition learning rate must be finite and positive")
     if args.train_batch_size != 64:
@@ -2254,6 +2432,15 @@ def main() -> None:
             )
         if any(value <= 0 for value in args.adapter_bottleneck_dims_per_task):
             raise ValueError("Per-task Adapter bottleneck dimensions must be positive")
+    if args.adapter_view_bottleneck_dim < 0:
+        raise ValueError("View-specific Adapter bottleneck must be non-negative")
+    if args.adapter_view_bottleneck_dim and (
+        args.adapter_mode != "image_token"
+        or args.view_fusion != "fixed_three_view"
+    ):
+        raise ValueError(
+            "View-specific Image-token Adapter requires fixed three-view fusion"
+        )
     if args.adapter_weight_decay is not None and args.adapter_weight_decay < 0:
         raise ValueError("Adapter weight decay must be non-negative")
     if args.optimizer_updates_per_task is not None and args.optimizer_updates_per_task <= 0:
@@ -2350,6 +2537,7 @@ def main() -> None:
         adapter_bottleneck_dims_per_task=args.adapter_bottleneck_dims_per_task,
         adapter_residual_gate_mode=args.adapter_residual_gate_mode,
         adapter_auxiliary_metric_mode=args.adapter_regularization,
+        adapter_view_bottleneck_dim=args.adapter_view_bottleneck_dim,
         selector_conditioning=args.selector_conditioning,
         selector_condition_layers=args.selector_condition_layers,
         selector_condition_hidden_dim=args.selector_condition_hidden_dim,
@@ -2705,6 +2893,17 @@ def main() -> None:
             "first_training_batch_per_task_shared_representation_BCE_plus_adapter_ASL"
             if args.view_gradient_audit else None
         ),
+        "view_path_gradient_audit_epochs": (
+            list(args.view_path_gradient_audit_epochs)
+            if path_audit_enabled else None
+        ),
+        "view_path_gradient_audit_batches_per_epoch": (
+            args.view_path_gradient_audit_batches if path_audit_enabled else 0
+        ),
+        "view_path_gradient_audit_scope": (
+            "per_view_fused_loss_VJP_vs_unimodal_on_representation_BCE_and_adapter_ASL"
+            if path_audit_enabled else None
+        ),
         "view_evaluation_diagnostics": args.view_evaluation_diagnostics,
         "full_crop_mode": args.full_crop_mode,
         "selector_conditioning": args.selector_conditioning,
@@ -2801,6 +3000,11 @@ def main() -> None:
         "max_tasks": args.max_tasks,
         "adapter_mode": args.adapter_mode,
         "adapter_bottleneck_dim": args.adapter_bottleneck_dim,
+        "adapter_view_bottleneck_dim": args.adapter_view_bottleneck_dim,
+        "adapter_view_specialization": (
+            "shared_plus_full_person_face_task_specific_low_rank_delta"
+            if args.adapter_view_bottleneck_dim else "shared_only"
+        ),
         "adapter_bottleneck_dims_per_task": (
             list(args.adapter_bottleneck_dims_per_task)
             if args.adapter_bottleneck_dims_per_task is not None
@@ -2968,6 +3172,12 @@ def main() -> None:
             view_gradient_routing=args.view_gradient_routing,
             view_dgl_unimodal_weight=args.view_dgl_unimodal_weight,
             view_gradient_audit_enabled=args.view_gradient_audit,
+            view_path_gradient_audit_epochs=(
+                args.view_path_gradient_audit_epochs or ()
+            ),
+            view_path_gradient_audit_batches=(
+                args.view_path_gradient_audit_batches
+            ),
             loss_mode=args.training_loss_mode,
             loss_routing=args.loss_routing,
             asl_gamma_neg=args.asl_gamma_neg,

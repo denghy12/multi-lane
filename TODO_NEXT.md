@@ -1,5 +1,18 @@
 # 下一步任务
 
+## 当前执行：共享主体加视图专用Image-token Adapter
+
+1. P0/P1/P2分别锁定为共享b32、参数量匹配共享b45、共享b32加Full/Person/Face各b4；固定三路
+   特征融合、joint gradient和0.1逐视图辅助监督，不引入Router或DGL。
+2. 完成本地静态检查后只提交本实验文件并推送；服务器先审计全部worktree并创建新的独立clean
+   worktree，不修改主工作树或`multi-lane-main-test-only`。
+3. 在`ddp`环境运行完整单测，再运行P0/P1/P2真实EMOTIC task0一轮GPU smoke；核对参数计数、
+   view-specific梯度、路径审计9个采样点、有限loss、0 skipped、Face mask和view diagnostics。
+4. smoke通过后用三张安全空闲GPU启动唯一seed0完整8-task validation；日志写入`./logs/`，控制文件
+   写入`./output/`，大结果写入服务器外部结果目录，不保存checkpoint、不访问test。
+5. 只有P2 final相对P0/P1均至少+0.10、average与Standalone Full不低P0且缩小到独立R1的差距，
+   才进入Selector-aware动态Router阶段；失败则根据路径诊断重新判断机制，不搜索bottleneck或LR。
+
 ## 已完成：OOF优势限定的排序蒸馏
 
 1. D3直接软概率BCE蒸馏已失败；不补seed1/2、不test、不搜索更多mix。
