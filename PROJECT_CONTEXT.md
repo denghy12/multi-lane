@@ -18,6 +18,9 @@ P0/P1/P2真实EMOTIC task0一轮smoke均完成84 updates、0 skipped，三组参
 修复后的3-batch审计中，共享表示的融合/单视图梯度范数比例约为Full/Person/Face
 `0.685/0.174/0.130`，Adapter约`0.682/0.168/0.123`，两组参数的全部view梯度非零有限。
 该结果只覆盖task0 epoch0，用于证明完整早中晚诊断值得执行，尚不作为DGL机制最终结论。
+正式batch `view_specialized_adapter_seed0_20260915_104759`已在服务器clean `10ef477`的tmux
+`ml_view_adapter_104759`中排队。GPU0/1/2当前约7.9--8.3GiB空闲且利用率75%--100%，launcher尚未
+启动训练；它会等待三卡均至少12,000MiB空闲且利用率不高于10%连续两次后自动启动P0/P1/P2。
 
 ## 2026-09-13：OOF优势限定排序蒸馏失败，OOF蒸馏路线结束
 
