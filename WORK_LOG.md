@@ -11,7 +11,10 @@
 - 新增P0复现脚本、单GPU整批launcher和离线A/B分析器。A为I/S×logit/probability四格；B为固定概率
   融合下8种I/S来源组合，附边际/Shapley、子集/排序/分布诊断与2000次原图组bootstrap。
 - 新增单元测试覆盖固定mask权重、logit/probability差异、分路score round-trip及bootstrap确定性；
-  尚待服务器完整测试和真实smoke。
+  服务器`/opt/conda/envs/ddp/bin/python -m unittest discover -s tests -v`通过218/218。
+- 真实EMOTIC task0/1epoch smoke完成：84 updates、0 skipped、val 2285样本（可靠Face 1382）；普通评估与
+  诊断前向的fused logits/概率最大绝对误差均为0，按分路logit重建fused概率最大误差2.5326e-4；
+  task0 compact状态含41个张量。smoke仅验证链路，不作为性能结论。
 
 ## 2026-09-15：共享视图融合论文检索
 
