@@ -1,6 +1,7 @@
 # P0与独立R1性能差距诊断方案
 
-状态：第一批已实现，服务器218项测试与真实task0 smoke通过，等待正式seed0运行。目标是定位历史seed0 final validation差距0.505786，
+状态：第一批已实现，服务器218项测试与真实task0 smoke通过；正式batch`p0_r1_gap_seed0_20260915_1640`
+已在实验HEAD`79b86c6`启动。目标是定位历史seed0 final validation差距0.505786，
 而不是筛选新冠军。
 
 ## 1. 已核对的事实

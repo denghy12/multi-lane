@@ -15,6 +15,8 @@
 - 真实EMOTIC task0/1epoch smoke完成：84 updates、0 skipped、val 2285样本（可靠Face 1382）；普通评估与
   诊断前向的fused logits/概率最大绝对误差均为0，按分路logit重建fused概率最大误差2.5326e-4；
   task0 compact状态含41个张量。smoke仅验证链路，不作为性能结论。
+- 正式第一批于2026-09-15在服务器独立worktree启动：batch`p0_r1_gap_seed0_20260915_1640`、GPU0、
+  实验HEAD`79b86c6`。只运行一次P0 seed0 validation；launcher将在训练成功后自动执行A、B和2000次bootstrap。
 
 ## 2026-09-15：共享视图融合论文检索
 

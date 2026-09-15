@@ -13,7 +13,8 @@ Adapter、Selector/Prompt解绑及目标对照。独立Face训练valid非ambiguo
 离线分析固定权重计算A四格、B八组合、边际/Shapley、可靠性子集、排序纠错/破坏和2000次原图组bootstrap。
 不搜索融合权重，不访问test，不包含第二批解绑。
 服务器完整测试218/218通过；真实task0/1epoch smoke的普通/诊断fused分数逐元素一致，三路logit重建概率
-最大误差2.5326e-4，compact状态成功读取。正式8-task P0尚待启动。
+最大误差2.5326e-4，compact状态成功读取。正式8-task P0已于2026-09-15启动：batch
+`p0_r1_gap_seed0_20260915_1640`、GPU0、实验HEAD`79b86c6`；完成后自动运行A/B与2000次bootstrap。
 
 ## 2026-09-15：融合文献与机制解释修正
 

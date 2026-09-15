@@ -2,8 +2,8 @@
 
 ## 优先诊断：P0与R1差距（第一批已实现，待运行）
 
-依据`docs/p0_r1_gap_diagnostic_plan.md`，服务器完整单元测试与真实smoke均已通过；下一步启动一次D0 P0
-seed0 validation复现，训练完成后launcher自动运行D1四格与D2八种来源替换分析。
+依据`docs/p0_r1_gap_diagnostic_plan.md`，服务器完整单元测试与真实smoke均已通过；D0 P0 seed0 validation
+已以batch`p0_r1_gap_seed0_20260915_1640`启动，等待训练及自动D1四格/D2八种来源替换分析完成。
 根据共同概率融合后的残余差距再选择共享位置和目标诊断；当前不实现或运行分类头、Adapter、Selector解绑。
 
 ## 待讨论：文献支持的共享与动态融合设计
