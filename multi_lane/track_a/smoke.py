@@ -21,6 +21,13 @@ def main() -> None:
     parser.add_argument("--selector-conditioning", default="disabled",
                         choices=("disabled", "bbox", "person", "bbox_person",
                                  "person_patches"))
+    parser.add_argument("--selector-mode", default="shared",
+                        choices=("shared", "view_specific"))
+    parser.add_argument("--num-selectors", type=int, default=10)
+    parser.add_argument(
+        "--view-fusion", choices=("disabled", "fixed_three_view"),
+        default="disabled",
+    )
     parser.add_argument("--selector-condition-layers", type=int, nargs="+", default=(1,))
     parser.add_argument(
         "--adapter-mode",
@@ -86,6 +93,7 @@ def main() -> None:
     model = MultiLaneModel(
         visual,
         (5, 3, 3, 3, 3, 3, 3, 3),
+        num_selectors=args.num_selectors,
         adapter_mode=args.adapter_mode,
         adapter_bottleneck_dim=args.adapter_bottleneck_dim,
         adapter_layer_indices=tuple(args.adapter_layer_indices),
@@ -94,12 +102,16 @@ def main() -> None:
         adapter_bottleneck_dims_per_task=args.adapter_bottleneck_dims_per_task,
         adapter_residual_gate_mode=args.adapter_residual_gate_mode,
         adapter_auxiliary_metric_mode=args.adapter_regularization,
+        selector_mode=args.selector_mode,
         selector_conditioning=args.selector_conditioning,
         selector_condition_layers=args.selector_condition_layers,
+        view_fusion=args.view_fusion,
     ).float().cuda()
     model.activate_task(0)
     images = torch.randn(2, 3, 224, 224, device="cuda")
     if model.selector_conditioner is not None:
+        if args.view_fusion != "disabled":
+            raise ValueError("Selector conditioning and view fusion are mutually exclusive")
         images = {"full": images, "person": torch.flip(images, dims=(-1,)),
                   "bbox": torch.tensor([[.1, .1, .8, .9, 1, 1]], device="cuda").repeat(2, 1),
                   "person_patch_mask": torch.ones(2, 196, device="cuda"),
@@ -123,6 +135,13 @@ def main() -> None:
                 f"{'AMP' if amp else 'FP32'} tolerance: "
                 f"max_difference={selector_condition_max_initial_difference}"
             )
+    elif args.view_fusion == "fixed_three_view":
+        images = {
+            "full": images,
+            "person": torch.flip(images, dims=(-1,)),
+            "face": torch.rot90(images, 1, dims=(-2, -1)),
+            "face_reliable": torch.ones(2, dtype=torch.bool, device="cuda"),
+        }
     else:
         selector_condition_max_initial_difference = 0.0
     if model.adapter_bank is not None:
@@ -230,17 +249,25 @@ def main() -> None:
         seen = model.seen_logits(images)
     if tuple(seen.shape) != (2, 5) or not torch.isfinite(seen).all():
         raise RuntimeError("Concat inference smoke failed")
-    expected = 689178 + (
-        model.adapter_bank.per_task_parameter_count()
-        if model.adapter_bank is not None else 0
-    ) + sum(p.numel() for p in condition_parameters)
     trainable = sum(p.numel() for p in model.optimizer_parameters())
+    optimizer_ids = [id(p) for p in model.optimizer_parameters()]
+    if len(optimizer_ids) != len(set(optimizer_ids)):
+        raise RuntimeError("Optimizer parameter list contains duplicates")
+    expected = (
+        model.selectors.numel()
+        + sum(p.numel() for p in model.prompts)
+        + sum(p.numel() for p in model.classifier_optimizer_parameters())
+        + sum(p.numel() for p in condition_parameters)
+        + sum(p.numel() for p in model.fusion_optimizer_parameters())
+        + sum(p.numel() for p in adapter_parameters)
+    )
     if trainable != expected:
-        raise RuntimeError(f"Expected {expected} trainable parameters, got {trainable}")
+        raise RuntimeError(f"Optimizer parameter count mismatch: {trainable} != {expected}")
     print(
         "MULTI_LANE_TRACK_A_SMOKE_OK "
         f"adapter_mode={args.adapter_mode} task_init={args.adapter_task_init} "
-        f"selector_conditioning={args.selector_conditioning} "
+        f"selector_mode={args.selector_mode} selector_conditioning={args.selector_conditioning} "
+        f"view_fusion={args.view_fusion} "
         f"gate_mode={args.adapter_residual_gate_mode} "
         f"regularization={args.adapter_regularization}:"
         f"{args.adapter_regularization_fraction} "

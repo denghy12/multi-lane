@@ -2152,8 +2152,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--face-min-training-score", type=float, default=0.0)
     parser.add_argument("--face-color-jitter-strength", type=float, default=0.0)
     parser.add_argument("--face-color-jitter-probability", type=float, default=0.0)
+    parser.add_argument("--num-selectors", type=int, default=10)
     parser.add_argument("--selector-conditioning", choices=TaskSelectorConditioner.MODES,
                         default="disabled")
+    parser.add_argument(
+        "--selector-mode", choices=("shared", "view_specific"),
+        default="shared",
+        help=(
+            "Use one Selector bank for all views or one bank per Full/Person/Face "
+            "view. View-specific banks start from identical values."
+        ),
+    )
     parser.add_argument("--selector-condition-layers", type=int, nargs="+", default=(1,))
     parser.add_argument("--selector-condition-hidden-dim", type=int, default=32)
     parser.add_argument("--selector-condition-scale", type=float, default=0.1)
@@ -2387,6 +2396,8 @@ def main() -> None:
         raise ValueError("View auxiliary loss weight must be in [0, 1]")
     if args.view_fusion == "disabled" and args.view_auxiliary_loss_weight != 0:
         raise ValueError("View auxiliary supervision requires view fusion")
+    if args.num_selectors <= 0:
+        raise ValueError("Number of Selectors must be positive")
     if args.view_gradient_routing != "joint" and args.view_fusion == "disabled":
         raise ValueError("View gradient routing requires view fusion")
     if args.view_gradient_routing == "dgl" and (
@@ -2624,7 +2635,8 @@ def main() -> None:
     model = MultiLaneModel(
         visual_encoder=visual,
         task_sizes=TASK_SIZES,
-        num_selectors=10,
+        num_selectors=args.num_selectors,
+        selector_mode=args.selector_mode,
         num_prompts=10,
         num_prompt_layers=5,
         normalize="pre-head",
@@ -2673,6 +2685,8 @@ def main() -> None:
     fusion_parameters_per_task = model.view_fusion_module.parameter_count_per_task()
     print(
         f"trainable_parameters={lane_parameters + classifier_parameters + adapter_parameters_per_task + condition_parameters_per_task + fusion_parameters_per_task} "
+        f"selector_mode={model.selector_mode} selectors_total={model.selectors.numel()} "
+        f"selectors_per_task={model.selectors.numel() // model.num_tasks} "
         f"task_lane={lane_parameters} classifier={classifier_parameters} "
         f"adapter_total={adapter_parameters} "
         f"adapter_per_task={adapter_parameter_counts_per_task} "
@@ -3105,7 +3119,20 @@ def main() -> None:
         "tf32": tf32,
         "cudnn_benchmark": False,
         "cudnn_deterministic": True,
-        "num_selectors": 10,
+        "num_selectors": args.num_selectors,
+        "selector_mode": args.selector_mode,
+        "selector_view_names": list(model.selector_view_names),
+        "selector_parameters_total": model.selectors.numel(),
+        "selector_parameters_per_task": model.selectors.numel() // model.num_tasks,
+        "selector_initialization": (
+            "one_shared_bank_copied_to_full_person_face"
+            if args.selector_mode == "view_specific" else "orthogonal_shared_bank"
+        ),
+        "selector_task_semantics": (
+            "view_specific_bank_copied_per_view_from_previous_task"
+            if args.selector_mode == "view_specific"
+            else "shared_bank_copied_from_previous_task"
+        ),
         "num_prompts": 10,
         "num_prompt_layers": 5,
         "normalize": "pre-head",

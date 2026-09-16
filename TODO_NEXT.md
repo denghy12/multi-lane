@@ -1,5 +1,14 @@
 # 下一步任务
 
+## 当前进行：实现视图专用 Selector
+
+1. 分支为 `exp/view-specialized-selector`，实现已覆盖 `MultiLaneModel`、runner、compact state 和 smoke。
+2. 第一批计划为 S0 shared-10、S1 Full/Person/Face view-specific-10、S2 shared-30 容量对照；协议见
+   `docs/view_specialized_selector_validation.md`。
+3. 当前待完成：本地完整测试、提交受控代码、服务器 clean worktree 测试与 task0 smoke；通过后才启动 seed0
+   validation。此阶段不解冻 ViT、不启动动态 Router、不访问 test。
+4. 首次服务器测试发现新增测试的参数复制方式不兼容 PyTorch autograd，已修复，需重新推送并完成 225 项复测。
+
 ## 导师讨论材料
 
 当前关键实验的通俗版总结见`docs/three_view_shared_fusion_experiment_summary_for_advisor_20260916.md`。文档用于

@@ -98,6 +98,7 @@ def build_model(config: Mapping[str, Any], visual: torch.nn.Module) -> MultiLane
         visual_encoder=visual,
         task_sizes=TASK_SIZES,
         num_selectors=int(config["num_selectors"]),
+        selector_mode=str(config.get("selector_mode", "shared")),
         num_prompts=int(config["num_prompts"]),
         num_prompt_layers=int(config["num_prompt_layers"]),
         normalize=str(config["normalize"]),

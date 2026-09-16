@@ -1,5 +1,17 @@
 # 项目上下文
 
+## 2026-09-16：开始实现视图专用 Selector 实验
+
+用户确认按 Full/Person/Face 视图专用 Selector 方案开始修改。新分支为
+`exp/view-specialized-selector`。已在 `MultiLaneModel` 增加 `selector_mode=shared/view_specific`，视图专用模式使用
+`[task, view, selector, width]` 参数 bank，从同一共享初始化复制到三路，按视图选择并保持增量 task 隔离；默认
+`shared` 行为保持兼容。runner、compact 状态构建和 GPU smoke 已接入 `selector_mode` 及可配置
+`num_selectors`，新增视图专用 Selector 单测与预注册方案 `docs/view_specialized_selector_validation.md`。
+已完成本地提交并推送；尚未运行真实 GPU smoke 或正式实验。
+
+已提交并推送 `45a4bff` 后，服务器独立 worktree 的完整测试首次为 224/225；唯一失败是新增测试使用
+`copy.deepcopy` 复制带 autograd 的参数切片。该测试已改为 `detach().clone()`，待重新推送并复跑完整测试。
+
 ## 2026-09-16：新增导师讨论版实验总结
 
 新增`docs/three_view_shared_fusion_experiment_summary_for_advisor_20260916.md`，用通俗语言串联独立专家基线、

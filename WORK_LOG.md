@@ -1,5 +1,14 @@
 # 工作日志
 
+## 开始实现视图专用 Selector
+
+- 创建分支 `exp/view-specialized-selector`，保留原工作树中用户未提交的文档和 `tmp/`。
+- `MultiLaneModel` 新增 shared/view-specific Selector 模式；view-specific 模式初始化时复制同一 bank 到
+  Full/Person/Face，task 激活和 optimizer 只作用于当前 task 的对应参数。
+- runner、compact test state builder 和 smoke 新增 Selector 模式与 Selector 数量配置；默认 shared 模式不变。
+- 新增 `tests/test_track_a_view_specialized_selector.py` 和预注册实验文档；尚未运行真实 GPU smoke 或正式 batch。
+- 服务器首次完整测试为224/225；唯一失败来自测试中对参数切片使用 `copy.deepcopy`，已改为 `detach().clone()`，准备复跑。
+
 ## 整理导师讨论版三视图实验总结
 
 - 新增`docs/three_view_shared_fusion_experiment_summary_for_advisor_20260916.md`，去除P0/G0/HF等内部编号，

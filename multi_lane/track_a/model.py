@@ -32,6 +32,7 @@ class MultiLaneModel(nn.Module):
         num_selectors: int = 10,
         num_prompts: int = 10,
         num_prompt_layers: int = 5,
+        selector_mode: str = "shared",
         normalize: str = "pre-head",
         adapter_mode: str = "disabled",
         adapter_bottleneck_dim: int = 64,
@@ -58,6 +59,8 @@ class MultiLaneModel(nn.Module):
             raise ValueError("MULTI-LANE task sizes must be positive")
         if num_selectors <= 0 or num_prompts <= 0:
             raise ValueError("MULTI-LANE selector/prompt counts must be positive")
+        if selector_mode not in {"shared", "view_specific"}:
+            raise ValueError("MULTI-LANE selector mode must be shared or view_specific")
         if normalize not in {"none", "pre-head"}:
             raise ValueError("MULTI-LANE normalize must be none or pre-head")
         if adapter_mode not in {"disabled", "task_lane", "image_token"}:
@@ -141,6 +144,8 @@ class MultiLaneModel(nn.Module):
         self.num_heads = num_heads
         self.head_dim = width // num_heads
         self.num_selectors = int(num_selectors)
+        self.selector_mode = selector_mode
+        self.selector_view_names = ("full", "person", "face")
         self.num_prompts = int(num_prompts)
         self.num_prompt_layers = int(num_prompt_layers)
         self.normalize = normalize
@@ -149,10 +154,18 @@ class MultiLaneModel(nn.Module):
         self._task_sizes = tuple(int(size) for size in task_sizes)
         self._current_task_id = -1
 
+        # Draw one shared bank first in both modes.  In view-specific mode the
+        # three banks are exact copies at initialization, so the new pathway is
+        # numerically equivalent to the historical shared Selector before any
+        # optimization and does not consume extra global RNG state.
         selectors = torch.randn(
             len(self._task_sizes), self.num_selectors, self.width
         )
         nn.init.orthogonal_(selectors)
+        if selector_mode == "view_specific":
+            selectors = selectors.unsqueeze(1).expand(
+                -1, len(self.selector_view_names), -1, -1
+            ).clone()
         self.selectors = nn.Parameter(selectors)
 
         prompts = nn.ParameterList()
@@ -327,9 +340,13 @@ class MultiLaneModel(nn.Module):
         return [self._current_task_id]
 
     def _initial_lane_tokens(
-        self, batch_size: int, lane_ids: Sequence[int]
+        self, batch_size: int, lane_ids: Sequence[int], image_view: str = "full"
     ) -> torch.Tensor:
+        if image_view not in self.selector_view_names:
+            raise ValueError(f"Unknown Selector view: {image_view}")
         selector = self.selectors[list(lane_ids)]
+        if self.selector_mode == "view_specific":
+            selector = selector[:, self.selector_view_names.index(image_view)]
         selector = selector.unsqueeze(1).expand(-1, batch_size, -1, -1)
         cls = self.visual_encoder.class_embedding.to(selector.dtype)
         cls = cls.reshape(1, 1, 1, -1).expand(
@@ -491,7 +508,9 @@ class MultiLaneModel(nn.Module):
         if self.adapter_bank is not None:
             self.adapter_bank.reset_auxiliary_metrics()
         image_tokens = self._visual_tokens(images)
-        lane_tokens = self._initial_lane_tokens(images.shape[0], lane_ids)
+        lane_tokens = self._initial_lane_tokens(
+            images.shape[0], lane_ids, image_view=image_view
+        )
         for layer_id, block in enumerate(self.visual_encoder.transformer.resblocks):
             query_delta = None
             if (condition_enabled
