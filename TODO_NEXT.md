@@ -1,5 +1,10 @@
 # 下一步任务
 
+## 导师讨论材料
+
+当前关键实验的通俗版总结见`docs/three_view_shared_fusion_experiment_summary_for_advisor_20260916.md`。文档用于
+讨论现有证据、结论边界和下一步Full完整私有Adapter方案；不包含新的实验授权或启动状态。
+
 ## 已完成：Full分类头独立seed0对照
 
 按`docs/full_private_head_diagnostic_plan_20260915.md`先运行H0共享逐路head与HF Full独立head。服务器221项

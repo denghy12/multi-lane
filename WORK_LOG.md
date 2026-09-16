@@ -1,5 +1,13 @@
 # 工作日志
 
+## 整理导师讨论版三视图实验总结
+
+- 新增`docs/three_view_shared_fusion_experiment_summary_for_advisor_20260916.md`，去除P0/G0/HF等内部编号，
+  按“为什么做、怎么做、结果、说明什么”解释五组关键实验。
+- 汇总文档将当前定位表述为Full预测质量及Full-Body互补性问题，明确融合算子、Face和简单分类头拆分不是
+  主要原因，同时保留seed0与基线漂移限制。
+- 本次未改业务代码、配置或训练脚本，未运行新实验，因而没有新增日志或输出结果。
+
 ## 同步并分析Full分类头独立诊断
 
 - 正式batch`full_private_head_seed0_20260915_231942`完成；H0/HF/summary退出码均为0。两组各完成240

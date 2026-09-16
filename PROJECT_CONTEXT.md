@@ -1,5 +1,12 @@
 # 项目上下文
 
+## 2026-09-16：新增导师讨论版实验总结
+
+新增`docs/three_view_shared_fusion_experiment_summary_for_advisor_20260916.md`，用通俗语言串联独立专家基线、
+DGL式梯度隔离、视图专用小Adapter、融合公式对照、三路预测来源替换和Full独立分类头实验。文档明确区分
+已定位的Full预测/Full-Body互补性问题与尚未证明的共享表示同质化，并给出Full完整私有Adapter的下一步建议。
+本次只整理既有结果，未修改业务代码、未运行新实验。
+
 ## 2026-09-16：Full分类头独立诊断完成，直接拆head失败
 
 用户确认按第一批结果推进最小Full机制实验。新分支`exp/full-private-head-diagnostic`，方案见
