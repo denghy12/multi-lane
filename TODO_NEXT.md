@@ -1,24 +1,31 @@
 # 下一步任务
 
-## 当前：Full分类头独立seed0对照
+## 已完成：Full分类头独立seed0对照
 
 按`docs/full_private_head_diagnostic_plan_20260915.md`先运行H0共享逐路head与HF Full独立head。服务器221项
-单元测试和真实配对smoke已通过，下一步启动两组8-task validation。判断规则通过才补seed1/2；当前不启动
-Adapter或Selector解绑。
-正式batch`full_private_head_seed0_20260915_231942`的launcher已运行，当前等待GPU0/1空闲；训练完成后将
-自动生成logit/概率融合、分路指标、head差异和2000次bootstrap汇总。
+单元测试和真实配对smoke已通过，正式两组8-task validation也已完成。H0/HF logit final为
+`42.6627/41.1145`，HF低`1.5482`；Full单路低`1.3932`且其他两路也下降，所有advance检查失败。
+不补seed1/2、不test。H0比历史P0低0.4127，说明等价的逐路head改写在AMP长期训练中产生基线漂移；
+后续实验必须保留历史P0原前向。结果见`docs/full_private_head_results_20260916.md`。
 
-## P0第一批已完成：下一步围绕Full定位机制
+## 下一候选：保留P0原前向的Full完整私有Adapter
+
+若用户确认继续，先设计一组最小seed0 validation对照：基线严格复用历史P0“固定特征融合后过共享head”；
+实验组只让Full使用完整b32私有Image-token Adapter，Body/Face继续共享b32，Selector/Prompt/head、损失、
+Face mask、数据与优化协议不变。第一步只判断Full单路及融合是否同时恢复；出现明确正效应后再补等参数量
+全共享容量对照和seed1/2。若失败，再转向Full Selector/Prompt解绑。本项尚未实现或启动。
+
+## P0第一批已完成：预测来源已定位到Full
 
 先阅读`docs/p0_r1_gap_results_20260915.md`。一次P0复现+A/B全部完成并同步；最清晰的来源差异是Full，
-共享Face有正向收益，Body与Full来源有交互。建议接下来仅做Full分类头独立的受控对照，再条件选择Full
-Adapter/Selector解绑；所有结论先以seed0定位，明确主效应再做seed1/2。尚未启动或实现第二批。
+共享Face有正向收益，Body与Full来源有交互。Full分类头独立对照现已完成且明显退化，排除该最小候选；
+下一步条件候选为保留P0原前向的Full完整私有Adapter，再根据结果决定是否解绑Selector/Prompt。
 
-## 优先诊断：P0与R1差距（第一批已实现，待运行）
+## 已完成：P0与R1差距第一批诊断
 
 依据`docs/p0_r1_gap_diagnostic_plan.md`，服务器完整单元测试与真实smoke均已通过；D0 P0 seed0 validation
-已以batch`p0_r1_gap_seed0_20260915_1640`启动，等待训练及自动D1四格/D2八种来源替换分析完成。
-根据共同概率融合后的残余差距再选择共享位置和目标诊断；当前不实现或运行分类头、Adapter、Selector解绑。
+batch`p0_r1_gap_seed0_20260915_1640`及自动D1四格/D2八种来源替换已完成。融合运算已排除，预测来源差异
+主要落在Full；随后Full分类头解绑也已失败。当前按上节条件决定是否进入Full完整私有Adapter诊断。
 
 ## 待讨论：文献支持的共享与动态融合设计
 

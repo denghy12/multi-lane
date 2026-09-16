@@ -1,5 +1,19 @@
 # 工作日志
 
+## 同步并分析Full分类头独立诊断
+
+- 正式batch`full_private_head_seed0_20260915_231942`完成；H0/HF/summary退出码均为0。两组各完成240
+  epochs、13,950 updates、0 skipped，无OOM/NaN、checkpoint或test访问，服务器无残留训练进程。
+- 结果和日志已同步本地；`validation_summary.json`本地/服务器SHA-256同为
+  `73017155294c4ecd71238dd7cd39b2ee1dc9c5e1db920ff9c39cf3096aaf0913`。
+- H0/HF logit final为`42.6627/41.1145`，HF低`1.5482`；average低`1.9876`，Full单路低`1.3932`，
+  Person/Face/可靠Face也全部下降。HF-H0原图组bootstrap 95%区间`[-2.6199,-0.5365]`。
+- HF私有head与共享head最终weight cosine仅0.5853，说明head确实分化但方向有害；不支持“Full共享分类头是
+  主要瓶颈”。不补seed1/2或test。
+- H0相对历史P0低0.4127，未过0.10复现门槛；记录逐路head/AMP运算次序引起训练轨迹漂移的限制。
+  后续若测Full完整私有Adapter，应保留历史P0的特征融合后共享head路径，避免再次引入基线改写。
+- 新增`docs/full_private_head_results_20260916.md`，串联P0 A/B、DGL、专用小Adapter和本轮head证据。
+
 ## 实现Full分类头独立诊断
 
 - 从`97310fa`新建`exp/full-private-head-diagnostic`，保留用户未跟踪Adapter文档和`tmp/`。

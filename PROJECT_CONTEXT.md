@@ -1,14 +1,20 @@
 # 项目上下文
 
-## 当前执行：Full分类头独立诊断
+## 2026-09-16：Full分类头独立诊断完成，直接拆head失败
 
 用户确认按第一批结果推进最小Full机制实验。新分支`exp/full-private-head-diagnostic`，方案见
 `docs/full_private_head_diagnostic_plan_20260915.md`。H0为共享head逐路logit融合，HF仅Full使用从共享head
 复制初始化的独立head，Body/Face仍共享原head；其余P0协议完全固定。先做seed0两组配对，明确主效应后才补
 seed1/2。已实现模型、runner参数、分数/compact导出、2000次bootstrap汇总及双GPUlauncher。服务器完整测试
 221/221通过；H0/HF真实task0/1epoch配对smoke均完成84 updates、0 skipped，参数统计和compact状态符合预期。
-正式batch`full_private_head_seed0_20260915_231942`已于2026-09-15启动等待器，实验HEAD`87b406f`，目标GPU0/1；
-启动时服务器GPU均被现有任务占用，launcher将在显存和利用率连续两次满足门槛后自动并行运行H0/HF。
+正式batch`full_private_head_seed0_20260915_231942`已完成，实验HEAD`87b406f`。两组均240 epochs、13,950
+updates、0 skipped，H0/HF/summary退出码均为0，无checkpoint/test。H0/HF logit final为
+`42.6627/41.1145`，HF低`1.5482`；average低`1.9876`，Full单路低`1.3932`，Person/Face/可靠Face也全部
+下降。1705个原图组2000次bootstrap的HF-H0区间为`[-2.6199,-0.5365]`。HF head已明显分化
+（cosine 0.5853），故不能解释为未学开。直接Full独立分类head不受支持，不补seed1/2、不访问test。
+H0比历史P0低0.4127，未过0.10复现门槛；逐路head再融合与历史先融合特征再过head虽实数等价，但AMP训练
+轨迹发生漂移。因此H0/HF内部结论有效，不能将HF与历史P0作精确比较。完整报告见
+`docs/full_private_head_results_20260916.md`。结果与日志已同步，本地/服务器summary SHA-256一致。
 
 ## P0差距第一批已完成并同步
 
