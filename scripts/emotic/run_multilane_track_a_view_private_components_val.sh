@@ -23,6 +23,11 @@ case "${METHOD}" in
   P1) PROMPT_MODE=view_specific ADAPTER_VIEW_MODE=shared      ADAPTER_VIEW_DIM=0  CLASSIFIER_MODE=shared_post_fusion ;;
   P2) PROMPT_MODE=shared       ADAPTER_VIEW_MODE=independent ADAPTER_VIEW_DIM=32 CLASSIFIER_MODE=shared_post_fusion ;;
   P3) PROMPT_MODE=view_specific ADAPTER_VIEW_MODE=independent ADAPTER_VIEW_DIM=32 CLASSIFIER_MODE=shared_post_fusion ;;
+  F0) PROMPT_MODE=shared       ADAPTER_VIEW_MODE=shared      ADAPTER_VIEW_DIM=0  CLASSIFIER_MODE=shared_post_fusion ;;
+  F1) PROMPT_MODE=view_specific ADAPTER_VIEW_MODE=shared      ADAPTER_VIEW_DIM=0  CLASSIFIER_MODE=shared_post_fusion ;;
+  F2) PROMPT_MODE=shared       ADAPTER_VIEW_MODE=independent ADAPTER_VIEW_DIM=32 CLASSIFIER_MODE=shared_post_fusion ;;
+  F3) PROMPT_MODE=view_specific ADAPTER_VIEW_MODE=independent ADAPTER_VIEW_DIM=32 CLASSIFIER_MODE=shared_post_fusion ;;
+  S1) PROMPT_MODE=view_specific_full_face ADAPTER_VIEW_MODE=independent ADAPTER_VIEW_DIM=32 CLASSIFIER_MODE=shared_post_fusion ;;
   H0) PROMPT_MODE=shared       ADAPTER_VIEW_MODE=shared      ADAPTER_VIEW_DIM=0  CLASSIFIER_MODE=shared_per_view ;;
   H1) PROMPT_MODE=shared       ADAPTER_VIEW_MODE=shared      ADAPTER_VIEW_DIM=0  CLASSIFIER_MODE=private_per_view ;;
   H2) PROMPT_MODE=view_specific ADAPTER_VIEW_MODE=independent ADAPTER_VIEW_DIM=32 CLASSIFIER_MODE=shared_per_view ;;

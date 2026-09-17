@@ -24,8 +24,11 @@ def main() -> None:
     parser.add_argument("--selector-mode", default="shared",
                         choices=("shared", "view_specific"))
     parser.add_argument("--num-selectors", type=int, default=10)
-    parser.add_argument("--prompt-mode", default="shared",
-                        choices=("shared", "view_specific"))
+    parser.add_argument(
+        "--prompt-mode",
+        default="shared",
+        choices=("shared", "view_specific", "view_specific_full_face"),
+    )
     parser.add_argument(
         "--view-fusion", choices=("disabled", "fixed_three_view"),
         default="disabled",

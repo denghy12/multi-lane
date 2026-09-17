@@ -119,6 +119,30 @@ class ViewSpecializedSelectorTest(unittest.TestCase):
             torch.max((changed["person"] - actual_views["person"]).abs()).item(), 0
         )
 
+    def test_selective_prompt_keeps_person_shared_and_private_full_face(self) -> None:
+        torch.manual_seed(93)
+        shared = make_model(prompt_mode="shared")
+        torch.manual_seed(93)
+        selective = make_model(prompt_mode="view_specific_full_face")
+        shared.activate_task(0)
+        selective.activate_task(0)
+        inputs = view_batch()
+        with torch.no_grad():
+            _, expected, _ = shared.current_all_logits_with_view_features(inputs)
+            _, actual, _ = selective.current_all_logits_with_view_features(inputs)
+        for name in ("full", "person", "face"):
+            self.assertTrue(torch.equal(expected[name], actual[name]))
+        self.assertEqual(selective.prompts[0].ndim, 6)
+        with torch.no_grad():
+            # Selective layout is [Person-shared, Full-private, Face-private].
+            selective.prompts[0][0, 0].add_(0.1)
+            _, changed, _ = selective.current_all_logits_with_view_features(inputs)
+        self.assertTrue(torch.equal(changed["full"], actual["full"]))
+        self.assertTrue(torch.equal(changed["face"], actual["face"]))
+        self.assertGreater(
+            torch.max((changed["person"] - actual["person"]).abs()).item(), 0
+        )
+
     def test_independent_image_adapters_route_by_view(self) -> None:
         model = make_model(
             adapter_mode="image_token",

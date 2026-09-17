@@ -63,8 +63,11 @@ class MultiLaneModel(nn.Module):
             raise ValueError("MULTI-LANE selector/prompt counts must be positive")
         if selector_mode not in {"shared", "view_specific"}:
             raise ValueError("MULTI-LANE selector mode must be shared or view_specific")
-        if prompt_mode not in {"shared", "view_specific"}:
-            raise ValueError("MULTI-LANE prompt mode must be shared or view_specific")
+        if prompt_mode not in {"shared", "view_specific", "view_specific_full_face"}:
+            raise ValueError(
+                "MULTI-LANE prompt mode must be shared, view_specific, "
+                "or view_specific_full_face"
+            )
         if normalize not in {"none", "pre-head"}:
             raise ValueError("MULTI-LANE normalize must be none or pre-head")
         if adapter_mode not in {"disabled", "task_lane", "image_token"}:
@@ -188,7 +191,7 @@ class MultiLaneModel(nn.Module):
                 self.head_dim,
             )
             nn.init.orthogonal_(value)
-            if prompt_mode == "view_specific":
+            if prompt_mode in {"view_specific", "view_specific_full_face"}:
                 value = value.unsqueeze(1).expand(
                     -1, len(self.selector_view_names), -1, -1, -1, -1
                 ).clone()
@@ -312,7 +315,7 @@ class MultiLaneModel(nn.Module):
             with torch.no_grad():
                 self.selectors[task_id].copy_(self.selectors[task_id - 1])
                 for prompt in self.prompts:
-                    if self.prompt_mode == "view_specific":
+                    if self.prompt_mode in {"view_specific", "view_specific_full_face"}:
                         prompt[:, :, task_id].copy_(prompt[:, :, task_id - 1])
                     else:
                         prompt[:, task_id].copy_(prompt[:, task_id - 1])
@@ -407,12 +410,16 @@ class MultiLaneModel(nn.Module):
         query, key, value = qkv.unbind(0)
         if layer_id < self.num_prompt_layers:
             prompt = self.prompts[layer_id]
-            if self.prompt_mode == "view_specific":
+            if self.prompt_mode in {"view_specific", "view_specific_full_face"}:
                 if image_view not in self.selector_view_names:
                     raise ValueError(f"Unknown Prompt view: {image_view}")
-                prompt = prompt[
-                    :, self.selector_view_names.index(image_view), list(lane_ids)
-                ]
+                # Selective mode reserves bank 0 as the historical shared
+                # Person bank; Full and Face use private banks 1 and 2.
+                if self.prompt_mode == "view_specific_full_face":
+                    view_index = {"person": 0, "full": 1, "face": 2}[image_view]
+                else:
+                    view_index = self.selector_view_names.index(image_view)
+                prompt = prompt[:, view_index, list(lane_ids)]
             else:
                 prompt = prompt[:, list(lane_ids)]
             prompt = prompt.permute(0, 1, 3, 2, 4)

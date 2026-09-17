@@ -2177,8 +2177,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--face-color-jitter-probability", type=float, default=0.0)
     parser.add_argument("--num-selectors", type=int, default=10)
     parser.add_argument(
-        "--prompt-mode", choices=("shared", "view_specific"), default="shared",
-        help="Use one task Prompt bank for all views or one bank per view.",
+        "--prompt-mode",
+        choices=("shared", "view_specific", "view_specific_full_face"),
+        default="shared",
+        help=(
+            "Use one task Prompt bank for all views, one bank per view, or "
+            "a shared Person bank with private Full/Face banks."
+        ),
     )
     parser.add_argument("--selector-conditioning", choices=TaskSelectorConditioner.MODES,
                         default="disabled")
@@ -3175,6 +3180,25 @@ def main() -> None:
         ),
         "num_prompts": 10,
         "num_prompt_layers": 5,
+        "prompt_view_names": (
+            ["person_shared", "full_private", "face_private"]
+            if args.prompt_mode == "view_specific_full_face"
+            else list(model.selector_view_names)
+            if args.prompt_mode == "view_specific" else ["shared"]
+        ),
+        "prompt_initialization": (
+            "one_shared_bank_copied_to_person_shared_full_private_face_private"
+            if args.prompt_mode == "view_specific_full_face"
+            else "one_shared_bank_copied_per_view"
+            if args.prompt_mode == "view_specific" else "orthogonal_shared_bank"
+        ),
+        "prompt_task_semantics": (
+            "person_uses_shared_prompt_bank_full_and_face_use_private_banks"
+            if args.prompt_mode == "view_specific_full_face"
+            else "view_specific_bank_copied_per_view_from_previous_task"
+            if args.prompt_mode == "view_specific"
+            else "shared_bank_copied_from_previous_task"
+        ),
         "normalize": "pre-head",
         "head_mode": "concat",
         "max_tasks": args.max_tasks,
