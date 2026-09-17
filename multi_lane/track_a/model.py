@@ -33,6 +33,7 @@ class MultiLaneModel(nn.Module):
         num_prompts: int = 10,
         num_prompt_layers: int = 5,
         selector_mode: str = "shared",
+        prompt_mode: str = "shared",
         normalize: str = "pre-head",
         adapter_mode: str = "disabled",
         adapter_bottleneck_dim: int = 64,
@@ -44,6 +45,7 @@ class MultiLaneModel(nn.Module):
         adapter_residual_gate_mode: str = "fixed",
         adapter_auxiliary_metric_mode: str = "none",
         adapter_view_bottleneck_dim: int = 0,
+        adapter_view_mode: str = "shared",
         selector_conditioning: str = "disabled",
         selector_condition_layers: Sequence[int] = (1,),
         selector_condition_hidden_dim: int = 32,
@@ -61,6 +63,8 @@ class MultiLaneModel(nn.Module):
             raise ValueError("MULTI-LANE selector/prompt counts must be positive")
         if selector_mode not in {"shared", "view_specific"}:
             raise ValueError("MULTI-LANE selector mode must be shared or view_specific")
+        if prompt_mode not in {"shared", "view_specific"}:
+            raise ValueError("MULTI-LANE prompt mode must be shared or view_specific")
         if normalize not in {"none", "pre-head"}:
             raise ValueError("MULTI-LANE normalize must be none or pre-head")
         if adapter_mode not in {"disabled", "task_lane", "image_token"}:
@@ -69,6 +73,10 @@ class MultiLaneModel(nn.Module):
             )
         if int(adapter_view_bottleneck_dim) < 0:
             raise ValueError("View-specific Adapter bottleneck must be non-negative")
+        if adapter_view_mode not in {"shared", "independent"}:
+            raise ValueError("Image-token Adapter view mode must be shared or independent")
+        if adapter_view_mode == "independent" and int(adapter_view_bottleneck_dim) <= 0:
+            raise ValueError("Independent Adapter views require a positive view bottleneck")
         if adapter_view_bottleneck_dim and adapter_mode != "image_token":
             raise ValueError(
                 "View-specific specialization requires Image-token Adapter mode"
@@ -98,7 +106,8 @@ class MultiLaneModel(nn.Module):
         if view_fusion not in TaskwiseViewFusion.MODES:
             raise ValueError("Invalid taskwise view-fusion mode")
         if view_classifier_mode not in {
-            "shared_post_fusion", "shared_per_view", "full_private_per_view"
+            "shared_post_fusion", "shared_per_view", "full_private_per_view",
+            "private_per_view",
         }:
             raise ValueError("Invalid view classifier mode")
         if (
@@ -146,6 +155,7 @@ class MultiLaneModel(nn.Module):
         self.num_selectors = int(num_selectors)
         self.selector_mode = selector_mode
         self.selector_view_names = ("full", "person", "face")
+        self.prompt_mode = prompt_mode
         self.num_prompts = int(num_prompts)
         self.num_prompt_layers = int(num_prompt_layers)
         self.normalize = normalize
@@ -178,6 +188,10 @@ class MultiLaneModel(nn.Module):
                 self.head_dim,
             )
             nn.init.orthogonal_(value)
+            if prompt_mode == "view_specific":
+                value = value.unsqueeze(1).expand(
+                    -1, len(self.selector_view_names), -1, -1, -1
+                ).clone()
             prompts.append(nn.Parameter(value))
         self.prompts = prompts
 
@@ -185,6 +199,12 @@ class MultiLaneModel(nn.Module):
         nn.init.trunc_normal_(self.head.weight, std=0.02)
         nn.init.zeros_(self.head.bias)
         self.view_classifier_mode = view_classifier_mode
+        self.private_view_heads = nn.ModuleList()
+        if view_classifier_mode == "private_per_view":
+            # Keep the Full head in ``self.head`` for backward-compatible
+            # state names; Person and Face receive exact initialization copies.
+            for _ in self.selector_view_names[1:]:
+                self.private_view_heads.append(copy.deepcopy(self.head))
         self.full_view_head = (
             copy.deepcopy(self.head)
             if view_classifier_mode == "full_private_per_view" else None
@@ -223,6 +243,10 @@ class MultiLaneModel(nn.Module):
                     auxiliary_metric_mode=adapter_auxiliary_metric_mode,
                     **(
                         {"view_bottleneck_dim": adapter_view_bottleneck_dim}
+                        if self.adapter_mode == "image_token" else {}
+                    ),
+                    **(
+                        {"view_mode": adapter_view_mode}
                         if self.adapter_mode == "image_token" else {}
                     ),
                 )
@@ -288,7 +312,10 @@ class MultiLaneModel(nn.Module):
             with torch.no_grad():
                 self.selectors[task_id].copy_(self.selectors[task_id - 1])
                 for prompt in self.prompts:
-                    prompt[:, task_id].copy_(prompt[:, task_id - 1])
+                    if self.prompt_mode == "view_specific":
+                        prompt[:, :, task_id].copy_(prompt[:, :, task_id - 1])
+                    else:
+                        prompt[:, task_id].copy_(prompt[:, task_id - 1])
         if self.adapter_bank is not None:
             self.adapter_bank.activate_task(task_id)
         if self.selector_conditioner is not None:
@@ -360,6 +387,7 @@ class MultiLaneModel(nn.Module):
         task_tokens: torch.Tensor,
         lane_ids: Sequence[int],
         layer_id: int,
+        image_view: str = "full",
     ) -> torch.Tensor:
         task_count, batch, token_count, width = task_tokens.shape
         attention = block.attn
@@ -378,7 +406,15 @@ class MultiLaneModel(nn.Module):
         ).permute(3, 0, 1, 4, 2, 5)
         query, key, value = qkv.unbind(0)
         if layer_id < self.num_prompt_layers:
-            prompt = self.prompts[layer_id][:, list(lane_ids)]
+            prompt = self.prompts[layer_id]
+            if self.prompt_mode == "view_specific":
+                if image_view not in self.selector_view_names:
+                    raise ValueError(f"Unknown Prompt view: {image_view}")
+                prompt = prompt[
+                    :, self.selector_view_names.index(image_view), list(lane_ids)
+                ]
+            else:
+                prompt = prompt[:, list(lane_ids)]
             prompt = prompt.permute(0, 1, 3, 2, 4)
             prompt = prompt.unsqueeze(2).expand(-1, -1, batch, -1, -1, -1)
             key = torch.cat([prompt[0], key], dim=-2)
@@ -458,6 +494,7 @@ class MultiLaneModel(nn.Module):
             summarized,
             lane_ids,
             layer_id,
+            image_view=image_view,
         )
         # Released drop-and-replace: retain the attended CLS update and put the
         # selector tokens back before the residual addition.
@@ -649,6 +686,9 @@ class MultiLaneModel(nn.Module):
     def _head_for_view(self, name: str) -> nn.Linear:
         if name not in self.view_fusion_module.view_names:
             raise ValueError(f"Unknown fused view: {name}")
+        if self.view_classifier_mode == "private_per_view":
+            index = self.selector_view_names.index(name)
+            return self.head if index == 0 else self.private_view_heads[index - 1]
         if name == "full" and self.full_view_head is not None:
             return self.full_view_head
         return self.head
@@ -761,6 +801,8 @@ class MultiLaneModel(nn.Module):
         yield from self.head.parameters()
         if self.full_view_head is not None:
             yield from self.full_view_head.parameters()
+        if self.view_classifier_mode == "private_per_view":
+            yield from self.private_view_heads.parameters()
 
     def conditioning_optimizer_parameters(self) -> Iterable[nn.Parameter]:
         if self.selector_conditioner is not None:
@@ -777,6 +819,12 @@ class MultiLaneModel(nn.Module):
         names = ["selectors"]
         names.extend(f"prompts.{index}" for index in range(len(self.prompts)))
         names.extend(("head.weight", "head.bias"))
+        if self.view_classifier_mode == "private_per_view":
+            names.extend(
+                f"private_view_heads.{index}.{suffix}"
+                for index in range(len(self.private_view_heads))
+                for suffix in ("weight", "bias")
+            )
         if self.selector_conditioner is not None:
             names.extend(
                 f"selector_conditioner.{name}"

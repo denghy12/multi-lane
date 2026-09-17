@@ -2114,3 +2114,15 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   task0对Person/Face的范数放大未持续到后续task。G2提高Person/可靠Face约`+0.55`并减少forgetting，
   但牺牲主导Full并出现Suffering`+9.7569`与Sadness`-10.1794`的类别交换，当前证据不支持融合梯度
   冲突是共享三视图性能差距的主因。完整结果写入`docs/shared_multiview_dgl_validation.md`。
+
+## 2026-09-17：视图专用 Selector seed0 validation 已结束
+
+- 实验分支 `exp/view-specialized-selector`（`ce0dc19`）的 S0/S1/S2 在服务器 clean worktree 完成：均为 8 task × 30 epochs、13,950 updates、0 skipped，val-only、无 checkpoint、无 OOM/NaN/traceback。
+- 对照 S0(shared×10)、S1(view-specific×10/视图)、S2(shared×30) final/average mAP 为 `42.7525/49.6763`、`41.3856/47.7380`、`41.7839/48.9822`。S1 比 S0 final `-1.3669`，也比同容量 S2 `-0.3983`；S1 八个任务及 Full/Person/Face/reliable-Face 单路均低。
+- 按预注册规则停止该实现版本：不补 seed1/2、不进 test、不启动态 Router/ViT 解冻。15 份结果 JSON 和 5 份日志/控制文件已同步，逐文件 SHA-256 与服务器一致；详见 `output/emotic_track_a_view_specialized_selector/selector_validation_seed0_20260916/analysis.md`。
+
+## 2026-09-17：视图专用 Selector 工程审计结论
+
+- 对 S1 的实现审计已完成：225/225 单测通过；Person bank 单独扰动只改变 Person 分支，Full/Face 逐元素不变；三份 config 除 Selector 预期字段外一致；三组均 13,950 updates、0 skipped、无 OOM/NaN/traceback。因此没有发现 Selector 索引、初始化、任务复制或优化器接线错误。
+- S1 的下降更符合机制原因：S0 一套 Selector 同时接收三视图梯度，形成跨视图平均/正则化；S1 三个 bank 各自只接收单路梯度，与仍采用固定融合的结构组合后造成独立 bank 过拟合和特征失配。S1 task0 训练 loss 更低但 validation 更差，且一轮 smoke 的短期优势在30 epochs后反转。
+- S2 共享30 Selector也比S0差，说明增加容量本身无益；S1仍比同容量S2低，说明视图拆分有额外代价。详细证据见 `output/emotic_track_a_view_specialized_selector/selector_validation_seed0_20260916/analysis.md`。

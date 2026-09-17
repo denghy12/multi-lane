@@ -102,9 +102,9 @@ class PersonConditionedSelectorTest(unittest.TestCase):
         seen_queries = []
         original = model._prompt_attention
 
-        def capture(block, summarized, lane_ids, layer_id):
+        def capture(block, summarized, lane_ids, layer_id, **kwargs):
             seen_queries.append(summarized.detach().clone())
-            return original(block, summarized, lane_ids, layer_id)
+            return original(block, summarized, lane_ids, layer_id, **kwargs)
 
         with patch.object(model, "_prompt_attention", side_effect=capture):
             first = model.current_all_logits(inputs)

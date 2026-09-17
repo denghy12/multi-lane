@@ -2153,6 +2153,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--face-color-jitter-strength", type=float, default=0.0)
     parser.add_argument("--face-color-jitter-probability", type=float, default=0.0)
     parser.add_argument("--num-selectors", type=int, default=10)
+    parser.add_argument(
+        "--prompt-mode", choices=("shared", "view_specific"), default="shared",
+        help="Use one task Prompt bank for all views or one bank per view.",
+    )
     parser.add_argument("--selector-conditioning", choices=TaskSelectorConditioner.MODES,
                         default="disabled")
     parser.add_argument(
@@ -2204,7 +2208,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--view-classifier-mode",
         choices=(
-            "shared_post_fusion", "shared_per_view", "full_private_per_view"
+            "shared_post_fusion", "shared_per_view", "full_private_per_view",
+            "private_per_view",
         ),
         default="shared_post_fusion",
     )
@@ -2298,6 +2303,10 @@ def parse_args() -> argparse.Namespace:
         default="disabled",
     )
     parser.add_argument("--adapter-bottleneck-dim", type=int, default=64)
+    parser.add_argument(
+        "--adapter-view-mode", choices=("shared", "independent"), default="shared",
+        help="Share Image-token Adapters across views or use independent view banks.",
+    )
     parser.add_argument(
         "--adapter-view-bottleneck-dim",
         type=int,
@@ -2543,6 +2552,10 @@ def main() -> None:
             raise ValueError("Per-task Adapter bottleneck dimensions must be positive")
     if args.adapter_view_bottleneck_dim < 0:
         raise ValueError("View-specific Adapter bottleneck must be non-negative")
+    if args.adapter_view_mode == "independent" and args.adapter_view_bottleneck_dim <= 0:
+        raise ValueError("Independent Adapter views require a positive view bottleneck")
+    if args.adapter_view_mode == "independent" and args.adapter_mode != "image_token":
+        raise ValueError("Independent Adapter views require Image-token Adapter mode")
     if args.adapter_view_bottleneck_dim and (
         args.adapter_mode != "image_token"
         or args.view_fusion != "fixed_three_view"
@@ -2637,6 +2650,7 @@ def main() -> None:
         task_sizes=TASK_SIZES,
         num_selectors=args.num_selectors,
         selector_mode=args.selector_mode,
+        prompt_mode=args.prompt_mode,
         num_prompts=10,
         num_prompt_layers=5,
         normalize="pre-head",
@@ -2650,6 +2664,7 @@ def main() -> None:
         adapter_residual_gate_mode=args.adapter_residual_gate_mode,
         adapter_auxiliary_metric_mode=args.adapter_regularization,
         adapter_view_bottleneck_dim=args.adapter_view_bottleneck_dim,
+        adapter_view_mode=args.adapter_view_mode,
         selector_conditioning=args.selector_conditioning,
         selector_condition_layers=args.selector_condition_layers,
         selector_condition_hidden_dim=args.selector_condition_hidden_dim,
@@ -3121,6 +3136,7 @@ def main() -> None:
         "cudnn_deterministic": True,
         "num_selectors": args.num_selectors,
         "selector_mode": args.selector_mode,
+        "prompt_mode": args.prompt_mode,
         "selector_view_names": list(model.selector_view_names),
         "selector_parameters_total": model.selectors.numel(),
         "selector_parameters_per_task": model.selectors.numel() // model.num_tasks,
@@ -3141,7 +3157,10 @@ def main() -> None:
         "adapter_mode": args.adapter_mode,
         "adapter_bottleneck_dim": args.adapter_bottleneck_dim,
         "adapter_view_bottleneck_dim": args.adapter_view_bottleneck_dim,
+        "adapter_view_mode": args.adapter_view_mode,
         "adapter_view_specialization": (
+            "independent_full_person_face_task_specific_low_rank"
+            if args.adapter_view_mode == "independent" else
             "shared_plus_full_person_face_task_specific_low_rank_delta"
             if args.adapter_view_bottleneck_dim else "shared_only"
         ),

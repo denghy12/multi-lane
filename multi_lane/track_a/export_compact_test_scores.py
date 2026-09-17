@@ -101,6 +101,7 @@ def build_model(config: Mapping[str, Any], visual: torch.nn.Module) -> MultiLane
         selector_mode=str(config.get("selector_mode", "shared")),
         num_prompts=int(config["num_prompts"]),
         num_prompt_layers=int(config["num_prompt_layers"]),
+        prompt_mode=str(config.get("prompt_mode", "shared")),
         normalize=str(config["normalize"]),
         adapter_mode=str(config["adapter_mode"]),
         adapter_bottleneck_dim=int(config["adapter_bottleneck_dim"]),
@@ -111,12 +112,16 @@ def build_model(config: Mapping[str, Any], visual: torch.nn.Module) -> MultiLane
         adapter_bottleneck_dims_per_task=tuple(
             config["adapter_bottleneck_dims_per_task"]
         ),
+        adapter_view_bottleneck_dim=int(config.get("adapter_view_bottleneck_dim", 0)),
+        adapter_view_mode=str(config.get("adapter_view_mode", "shared")),
         adapter_residual_gate_mode=str(config["adapter_residual_gate_mode"]),
         adapter_auxiliary_metric_mode=str(config["adapter_regularization"]),
         selector_conditioning=str(config.get("selector_conditioning", "disabled")),
         selector_condition_layers=tuple(config.get("selector_condition_layers", (1,))),
         selector_condition_hidden_dim=int(config.get("selector_condition_hidden_dim", 32)),
         selector_condition_scale=float(config.get("selector_condition_scale", 0.1)),
+        view_fusion=str(config.get("view_fusion", "disabled")),
+        view_classifier_mode=str(config.get("view_classifier_mode", "shared_post_fusion")),
     )
 
 

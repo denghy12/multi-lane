@@ -8,7 +8,15 @@ from test_track_a_reproduction import FakeVisual
 from multi_lane.track_a.model import MultiLaneModel
 
 
-def make_model(selector_mode: str = "shared", num_selectors: int = 2) -> MultiLaneModel:
+def make_model(
+    selector_mode: str = "shared",
+    num_selectors: int = 2,
+    prompt_mode: str = "shared",
+    adapter_mode: str = "disabled",
+    adapter_view_mode: str = "shared",
+    adapter_view_bottleneck_dim: int = 0,
+    view_classifier_mode: str = "shared_post_fusion",
+) -> MultiLaneModel:
     return MultiLaneModel(
         FakeVisual(),
         (5, 3),
@@ -16,7 +24,14 @@ def make_model(selector_mode: str = "shared", num_selectors: int = 2) -> MultiLa
         num_prompts=2,
         num_prompt_layers=1,
         selector_mode=selector_mode,
+        prompt_mode=prompt_mode,
+        adapter_mode=adapter_mode,
+        adapter_bottleneck_dim=3,
+        adapter_layer_indices=(0,),
+        adapter_view_mode=adapter_view_mode,
+        adapter_view_bottleneck_dim=adapter_view_bottleneck_dim,
         view_fusion="fixed_three_view",
+        view_classifier_mode=view_classifier_mode,
     )
 
 
@@ -80,6 +95,61 @@ class ViewSpecializedSelectorTest(unittest.TestCase):
         specialized = make_model("view_specific", num_selectors=2)
         shared_wide = make_model("shared", num_selectors=6)
         self.assertEqual(specialized.selectors.numel(), shared_wide.selectors.numel())
+
+    def test_view_specific_prompts_initialize_like_shared_and_route_by_view(self) -> None:
+        torch.manual_seed(92)
+        shared = make_model(prompt_mode="shared")
+        torch.manual_seed(92)
+        specialized = make_model(prompt_mode="view_specific")
+        shared.activate_task(0)
+        specialized.activate_task(0)
+        inputs = view_batch()
+        with torch.no_grad():
+            _, shared_views, _ = shared.current_all_logits_with_view_features(inputs)
+            _, actual_views, _ = specialized.current_all_logits_with_view_features(inputs)
+        for name in ("full", "person", "face"):
+            self.assertTrue(torch.equal(shared_views[name], actual_views[name]))
+        self.assertEqual(specialized.prompts[0].ndim, 6)
+        with torch.no_grad():
+            specialized.prompts[0][0, 1].add_(0.1)
+            _, changed, _ = specialized.current_all_logits_with_view_features(inputs)
+        self.assertTrue(torch.equal(changed["full"], actual_views["full"]))
+        self.assertTrue(torch.equal(changed["face"], actual_views["face"]))
+        self.assertGreater(
+            torch.max((changed["person"] - actual_views["person"]).abs()).item(), 0
+        )
+
+    def test_independent_image_adapters_route_by_view(self) -> None:
+        model = make_model(
+            adapter_mode="image_token",
+            adapter_view_mode="independent",
+            adapter_view_bottleneck_dim=3,
+        )
+        model.activate_task(0)
+        inputs = view_batch()
+        with torch.no_grad():
+            _, before, _ = model.current_all_logits_with_view_features(inputs)
+            model.adapter_bank.view_task_adapters[0]["person"]["0"].up.weight.fill_(0.1)
+            _, after, _ = model.current_all_logits_with_view_features(inputs)
+        self.assertTrue(torch.equal(after["full"], before["full"]))
+        self.assertTrue(torch.equal(after["face"], before["face"]))
+        self.assertGreater(torch.max((after["person"] - before["person"]).abs()).item(), 0)
+        self.assertEqual(
+            model.adapter_bank.per_task_parameter_count(0),
+            sum(p.numel() for p in model.adapter_bank.view_task_adapters[0].parameters()),
+        )
+
+    def test_private_per_view_heads_are_copied_and_optimizer_unique(self) -> None:
+        model = make_model(view_classifier_mode="private_per_view")
+        model.activate_task(0)
+        self.assertEqual(len(model.private_view_heads), 2)
+        self.assertTrue(torch.equal(model.head.weight, model.private_view_heads[0].weight))
+        self.assertTrue(torch.equal(model.head.weight, model.private_view_heads[1].weight))
+        parameters = list(model.classifier_optimizer_parameters())
+        self.assertEqual(len({id(parameter) for parameter in parameters}), len(parameters))
+        logits, views, _ = model.current_all_logits_with_view_features(view_batch())
+        self.assertEqual(tuple(logits.shape), (3, 5))
+        self.assertEqual(set(views), {"full", "person", "face"})
 
 
 if __name__ == "__main__":

@@ -24,9 +24,16 @@ def main() -> None:
     parser.add_argument("--selector-mode", default="shared",
                         choices=("shared", "view_specific"))
     parser.add_argument("--num-selectors", type=int, default=10)
+    parser.add_argument("--prompt-mode", default="shared",
+                        choices=("shared", "view_specific"))
     parser.add_argument(
         "--view-fusion", choices=("disabled", "fixed_three_view"),
         default="disabled",
+    )
+    parser.add_argument(
+        "--view-classifier-mode",
+        choices=("shared_post_fusion", "shared_per_view", "full_private_per_view", "private_per_view"),
+        default="shared_post_fusion",
     )
     parser.add_argument("--selector-condition-layers", type=int, nargs="+", default=(1,))
     parser.add_argument(
@@ -35,6 +42,9 @@ def main() -> None:
         default="disabled",
     )
     parser.add_argument("--adapter-bottleneck-dim", type=int, default=64)
+    parser.add_argument("--adapter-view-mode", default="shared",
+                        choices=("shared", "independent"))
+    parser.add_argument("--adapter-view-bottleneck-dim", type=int, default=0)
     parser.add_argument(
         "--adapter-bottleneck-dims-per-task",
         type=int,
@@ -103,9 +113,13 @@ def main() -> None:
         adapter_residual_gate_mode=args.adapter_residual_gate_mode,
         adapter_auxiliary_metric_mode=args.adapter_regularization,
         selector_mode=args.selector_mode,
+        prompt_mode=args.prompt_mode,
         selector_conditioning=args.selector_conditioning,
         selector_condition_layers=args.selector_condition_layers,
         view_fusion=args.view_fusion,
+        view_classifier_mode=args.view_classifier_mode,
+        adapter_view_bottleneck_dim=args.adapter_view_bottleneck_dim,
+        adapter_view_mode=args.adapter_view_mode,
     ).float().cuda()
     model.activate_task(0)
     images = torch.randn(2, 3, 224, 224, device="cuda")

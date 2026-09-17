@@ -275,6 +275,7 @@ class TaskImageTokenAdapterBank(TaskLaneTransformerAdapterBank):
         *args,
         view_bottleneck_dim: int = 0,
         view_names: Sequence[str] = ("full", "person", "face"),
+        view_mode: str = "shared",
         **kwargs,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -284,6 +285,11 @@ class TaskImageTokenAdapterBank(TaskLaneTransformerAdapterBank):
         if not names or len(set(names)) != len(names):
             raise ValueError("View-specific Adapter names must be unique and non-empty")
         self.view_bottleneck_dim = int(view_bottleneck_dim)
+        if view_mode not in {"shared", "independent"}:
+            raise ValueError("Image-token Adapter view mode must be shared or independent")
+        if view_mode == "independent" and not self.view_bottleneck_dim:
+            raise ValueError("Independent Adapter views require a positive bottleneck")
+        self.view_mode = view_mode
         self.view_names = names
         self.view_task_adapters = nn.ModuleList()
         if self.view_bottleneck_dim:
@@ -299,6 +305,14 @@ class TaskImageTokenAdapterBank(TaskLaneTransformerAdapterBank):
                     })
                     for name in self.view_names
                 }))
+            if self.view_mode == "independent":
+                # All view branches start from the same weights.  This keeps
+                # the first optimization step free of view-specific RNG
+                # differences; specialization then comes only from gradients.
+                for task_adapters in self.view_task_adapters:
+                    source = task_adapters[self.view_names[0]].state_dict()
+                    for name in self.view_names[1:]:
+                        task_adapters[name].load_state_dict(source)
         self.requires_grad_(False)
 
     @property
@@ -307,6 +321,8 @@ class TaskImageTokenAdapterBank(TaskLaneTransformerAdapterBank):
 
     def activate_task(self, task_id: int) -> None:
         super().activate_task(task_id)
+        if self.view_mode == "independent":
+            self.task_adapters[task_id].requires_grad_(False)
         if self.view_specialized:
             if task_id > 0 and self.task_initialization == "copy_previous":
                 self.view_task_adapters[task_id].load_state_dict(
@@ -316,11 +332,16 @@ class TaskImageTokenAdapterBank(TaskLaneTransformerAdapterBank):
 
     def restore_task(self, task_id: int) -> None:
         super().restore_task(task_id)
+        if self.view_mode == "independent" and task_id >= 0:
+            self.task_adapters[task_id].requires_grad_(False)
         if self.view_specialized and task_id >= 0:
             self.view_task_adapters[task_id].requires_grad_(True)
 
     def active_parameters(self) -> Iterable[nn.Parameter]:
-        parameters = list(super().active_parameters())
+        parameters = (
+            [] if self.view_mode == "independent"
+            else list(super().active_parameters())
+        )
         if self.view_specialized and self.current_task_id >= 0:
             parameters.extend(
                 self.view_task_adapters[self.current_task_id].parameters()
@@ -328,7 +349,10 @@ class TaskImageTokenAdapterBank(TaskLaneTransformerAdapterBank):
         return iter(parameters)
 
     def per_task_parameter_count(self, task_id: int = 0) -> int:
-        count = super().per_task_parameter_count(task_id)
+        count = (
+            0 if self.view_mode == "independent"
+            else super().per_task_parameter_count(task_id)
+        )
         if self.view_specialized:
             count += sum(
                 parameter.numel()
@@ -336,7 +360,17 @@ class TaskImageTokenAdapterBank(TaskLaneTransformerAdapterBank):
             )
         return count
 
+    def total_parameter_count(self) -> int:
+        if self.view_mode == "independent":
+            return sum(
+                parameter.numel()
+                for parameter in self.view_task_adapters.parameters()
+            )
+        return super().total_parameter_count()
+
     def shared_active_parameters(self) -> Iterable[nn.Parameter]:
+        if self.view_mode == "independent":
+            return iter(())
         return TaskLaneTransformerAdapterBank.active_parameters(self)
 
     def view_active_parameters(self, view_name: str) -> Iterable[nn.Parameter]:
@@ -373,11 +407,16 @@ class TaskImageTokenAdapterBank(TaskLaneTransformerAdapterBank):
             if not 0 <= int(task_id) < self.num_tasks:
                 raise ValueError("Lane id is outside the adapter bank")
             adapter = self.task_adapters[int(task_id)][str(layer_id)]
-            delta = adapter(frozen_image_tokens)
-            if self.view_specialized:
-                delta = delta + self.view_task_adapters[int(task_id)][view_name][
+            if self.view_mode == "independent":
+                delta = self.view_task_adapters[int(task_id)][view_name][
                     str(layer_id)
                 ](frozen_image_tokens)
+            else:
+                delta = adapter(frozen_image_tokens)
+                if self.view_specialized:
+                    delta = delta + self.view_task_adapters[int(task_id)][view_name][
+                        str(layer_id)
+                    ](frozen_image_tokens)
             delta = self.residual_multiplier(int(task_id)) * delta
             adapted_tokens = frozen_image_tokens + delta
             if self.auxiliary_metric_mode == "residual_ratio":

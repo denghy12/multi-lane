@@ -3803,3 +3803,14 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - G0全task梯度审计没有负余弦，融合梯度也未持续大于单视图梯度；G2把Person和可靠Face各提高约
   `0.54`且forgetting改善`0.1440`，却降低Full并造成Sadness/Suffering的大幅交换。按预注册规则
   结束当前共享DGL路线：不跑seed1/2、test、alpha或动态Router。
+
+## 2026-09-17：同步并分析视图专用 Selector validation
+
+- 服务器 batch `selector_validation_seed0_20260916` 的 S0/S1/S2 自动完成，`validation_status.txt` 确认三组完成；每组240 epochs、13,950 updates、0 skipped。同步 15 个结果 JSON 与 5 个日志/控制文件到本地 `output/`、`logs/`，逐文件 SHA-256 完全一致，未传输 checkpoint。
+- S1(view-specific×10/视图) final/average mAP `41.3856/47.7380`，低 S0(shared×10) `1.3669/1.9383`，也低同参数量 S2(shared×30) `0.3983/1.2442`。S1每个累计 task 均低 S0，并使 Full/Person/Face/reliable-Face final mAP 分别降低 `1.3876/3.0040/2.6409/3.2301`。
+- 预注册晋级检查失败，结束本版“共享 encoder + 视图专用 Selector”路线；不运行 seed1/2、test 或后续动态 Router。完整分析：`output/emotic_track_a_view_specialized_selector/selector_validation_seed0_20260916/analysis.md`。
+
+## 2026-09-17：视图专用 Selector 工程审计
+
+- 完成严格路由回归：仅扰动 S1 Person Selector，Person 输出变化，Full/Face 输出最大绝对差为0；结合225/225全测、config差异审计和三组零skip完成记录，未发现工程接线错误。
+- 原因分析写入 validation report：S0共享 Selector持续获得三视图梯度并形成正耦合；S1 bank隔离使representation path cosine接近0，失去跨视图正则化。S1 task0训练loss降至0.6390但val mAP仅56.2591，30 epochs后相对S0下降1.3669；S2共享30也下降0.9686，支持容量/过拟合与固定融合失配解释。
