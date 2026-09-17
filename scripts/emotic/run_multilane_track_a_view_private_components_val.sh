@@ -11,6 +11,12 @@ RUN_ID="${RUN_ID:?RUN_ID must be set}"
 OUTPUT_BASE="${OUTPUT_BASE:?OUTPUT_BASE must be set}"
 LOG_DIR="${LOG_DIR:?LOG_DIR must be set}"
 GRADIENT_CLIP_NORM="${GRADIENT_CLIP_NORM:-0}"
+NO_AMP="${NO_AMP:-0}"
+
+precision_args=()
+if [[ "${NO_AMP}" == "1" ]]; then
+  precision_args+=(--no-amp)
+fi
 
 case "${METHOD}" in
   P0) PROMPT_MODE=shared       ADAPTER_VIEW_MODE=shared      ADAPTER_VIEW_DIM=0  CLASSIFIER_MODE=shared_post_fusion ;;
@@ -58,4 +64,5 @@ CUDA_VISIBLE_DEVICES="${GPU}" "${PYTHON}" -m multi_lane.track_a.runner \
   --gradient-clip-norm "${GRADIENT_CLIP_NORM}" \
   --view-classifier-mode "${CLASSIFIER_MODE}" \
   --reporting-split val \
+  "${precision_args[@]}" \
   > "${LOG_DIR}/${METHOD}.log" 2>&1

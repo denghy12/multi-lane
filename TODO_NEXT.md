@@ -1270,5 +1270,5 @@ VOC 对照实验，不应在现阶段合并到 `main`。
 ## P3稳定性修正版
 
 1. 在`exp/view-private-components-p3-stable`运行完整服务器单测和P3 task0 smoke。
-2. 用固定`gradient_clip_norm=1.0`运行P3 4-task稳定性检查；确认task3完成且无non-finite logits后，再启动8-task validation。
+2. 用固定`--no-amp`、`gradient_clip_norm=0`运行P3 4-task稳定性检查；确认task3完成且无non-finite logits后，再启动8-task validation。
 3. 只以完成且zero-skip的P3和P0/P1/P2做叠加效果分析；不因P3修正版直接访问test。

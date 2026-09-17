@@ -3838,3 +3838,5 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
   `--gradient-clip-norm 1.0`在`GradScaler.unscale_`后、optimizer step前作用于全部参数组，默认0保持旧行为。
 - P3的Prompt、独立Image-token Adapter、Selector、学习率、ASL、joint routing、AMP/TF32和固定融合均不变，
   只验证裁剪后P1/P2收益是否可叠加。实验协议见`docs/view_private_components_p3_stability_validation.md`。
+- 首次gradient-clip=1.0试跑仍在task3出现同样的134+32 skipped并于epoch18产生non-finite logits，
+  证明overflow发生在裁剪前；稳定版改为仅`--no-amp`的FP32控制，clip恢复0。

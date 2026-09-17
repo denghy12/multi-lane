@@ -2148,3 +2148,4 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   post-unscale global gradient clipping；P3验证固定阈值1.0，其他训练配置保持不变。
 - 目标是判断Prompt与独立Adapter的收益是否叠加。必须先完成服务器全测、P3 task0 smoke和4-task稳定性检查，
   再启动唯一8-task seed0 validation；不访问test。
+- gradient-clip=1.0试跑未能阻止AMP overflow；后续P3稳定验证只关闭AMP并保持其余配置不变，以隔离数值精度因素。

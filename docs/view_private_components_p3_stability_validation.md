@@ -4,12 +4,13 @@ This follow-up tests whether the P1 Prompt gain and P2 independent
 Image-token Adapter gain add when both are enabled. It starts from the locked
 P3 configuration on `exp/view-private-components-p3-stable`.
 
-The only training change is `--gradient-clip-norm 1.0`. Gradients are unscaled
-with `GradScaler.unscale_(optimizer)` and then globally clipped across all
-optimizer parameter groups before `scaler.step`. AMP/TF32, main LR 0.0125,
-Adapter LR 4e-4, ASL 9.8/0/0.05, joint routing, auxiliary view loss 0.1,
-30 epochs/task, batch 64, frozen CLIP, view-specific Selector x10, and fixed
-reliable-Face fusion remain unchanged. A zero value preserves the old behavior.
+The first trial added `--gradient-clip-norm 1.0`, but the failure occurs during
+AMP backpropagation before clipping can run. The actual stability control is
+therefore FP32 (`--no-amp`) with gradient clipping set to zero, isolating the
+precision change. Main LR 0.0125, Adapter LR 4e-4, ASL 9.8/0/0.05, joint
+routing, auxiliary view loss 0.1, 30 epochs/task, batch 64, frozen CLIP,
+view-specific Selector x10, and fixed reliable-Face fusion remain unchanged.
+A zero clip value preserves the old optimizer behavior.
 
 The run is validation-only on EMOTIC seed 0, all eight tasks, without test
 access or full checkpoints. It uses the existing
