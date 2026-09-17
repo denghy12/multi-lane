@@ -148,7 +148,10 @@ class ViewSpecializedSelectorTest(unittest.TestCase):
         parameters = list(model.classifier_optimizer_parameters())
         self.assertEqual(len({id(parameter) for parameter in parameters}), len(parameters))
         logits, views, _ = model.current_all_logits_with_view_features(view_batch())
-        self.assertEqual(tuple(logits.shape), (3, 5))
+        # ``current_all_logits_with_view_features`` preserves the historical
+        # all-class output contract; the training loss selects current-task
+        # columns using its ``current`` index list.
+        self.assertEqual(tuple(logits.shape), (3, 8))
         self.assertEqual(set(views), {"full", "person", "face"})
 
 

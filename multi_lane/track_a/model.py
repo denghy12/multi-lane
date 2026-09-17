@@ -190,7 +190,7 @@ class MultiLaneModel(nn.Module):
             nn.init.orthogonal_(value)
             if prompt_mode == "view_specific":
                 value = value.unsqueeze(1).expand(
-                    -1, len(self.selector_view_names), -1, -1, -1
+                    -1, len(self.selector_view_names), -1, -1, -1, -1
                 ).clone()
             prompts.append(nn.Parameter(value))
         self.prompts = prompts

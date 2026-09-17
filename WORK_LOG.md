@@ -3814,3 +3814,12 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 
 - 完成严格路由回归：仅扰动 S1 Person Selector，Person 输出变化，Full/Face 输出最大绝对差为0；结合225/225全测、config差异审计和三组零skip完成记录，未发现工程接线错误。
 - 原因分析写入 validation report：S0共享 Selector持续获得三视图梯度并形成正耦合；S1 bank隔离使representation path cosine接近0，失去跨视图正则化。S1 task0训练loss降至0.6390但val mAP仅56.2591，30 epochs后相对S0下降1.3669；S2共享30也下降0.9686，支持容量/过拟合与固定融合失配解释。
+
+## 2026-09-17：视图专用下游组件实验启动修复
+
+- 在`exp/view-private-components`上修复view-specific Prompt初始化的维度扩展错误；Prompt bank现为
+  `[key/value, view, task, prompt, head, head_dim]`，三路仍从同一共享初始化复制。
+- 修正新增回归测试对`current_all_logits_with_view_features`的输出契约断言：该接口保留全类别输出，
+  当前task列由训练loss按索引选择，因此task0输出为8类而不是5类。
+- 本地静态检查通过；服务器需在同一独立worktree重新运行完整单测和P1/P2/H1/H3代表性GPU smoke，
+  通过后启动P0--P3/H0--H3 seed0 validation。

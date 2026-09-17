@@ -2126,3 +2126,10 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - 对 S1 的实现审计已完成：225/225 单测通过；Person bank 单独扰动只改变 Person 分支，Full/Face 逐元素不变；三份 config 除 Selector 预期字段外一致；三组均 13,950 updates、0 skipped、无 OOM/NaN/traceback。因此没有发现 Selector 索引、初始化、任务复制或优化器接线错误。
 - S1 的下降更符合机制原因：S0 一套 Selector 同时接收三视图梯度，形成跨视图平均/正则化；S1 三个 bank 各自只接收单路梯度，与仍采用固定融合的结构组合后造成独立 bank 过拟合和特征失配。S1 task0 训练 loss 更低但 validation 更差，且一轮 smoke 的短期优势在30 epochs后反转。
 - S2 共享30 Selector也比S0差，说明增加容量本身无益；S1仍比同容量S2低，说明视图拆分有额外代价。详细证据见 `output/emotic_track_a_view_specialized_selector/selector_validation_seed0_20260916/analysis.md`。
+
+## 2026-09-17：视图专用下游组件实验
+
+- 分支`exp/view-private-components`扩展了Prompt、Image-token Adapter和分类head的视图独立模式，
+  用P0--P3/H0--H3验证S1下降是否来自下游共享；固定CLIP、Selector和三视图融合协议不变。
+- 修复Prompt view-specific bank初始化扩展维度，并将回归测试改为符合全类别logit接口的8类断言；
+  修复后须在服务器`ddp`环境完成完整单测和代表性GPU smoke再启动正式validation。
