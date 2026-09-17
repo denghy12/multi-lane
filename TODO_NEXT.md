@@ -1263,3 +1263,4 @@ VOC 对照实验，不应在现阶段合并到 `main`。
 3. smoke通过后启动唯一seed0的P0--P3/H0--H3 validation；结束后同步小结果文件并按预注册门槛分析，
    不访问test、不保存完整checkpoint。
 4. 先完成smoke入口变量修复后的四组AMP smoke；若均通过，再启动正式八组validation。
+5. 等待batch `view_private_components_seed0_20260917_102434`完成；同步P0--P3/H0--H3结果、日志和控制文件后再做预注册门槛分析。

@@ -3824,3 +3824,4 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - 本地静态检查通过；服务器需在同一独立worktree重新运行完整单测和P1/P2/H1/H3代表性GPU smoke，
   通过后启动P0--P3/H0--H3 seed0 validation。
 - AMP smoke还发现三视图未启用selector conditioning时`selector_condition_max_initial_difference`未初始化；已在smoke入口统一初始化为0，避免训练前打印阶段误退。
+- 36de565同步后服务器228项全测通过；P1/P2/H1/H3四组AMP/TF32 task0 smoke通过。正式batch `view_private_components_seed0_20260917_102434` 已在 tmux `multilane_view_private_102434` 用GPU0--7并行启动，首轮均84 updates、0 skipped、显存约3.5GiB/卡。

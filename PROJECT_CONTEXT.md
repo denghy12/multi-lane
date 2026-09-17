@@ -2134,3 +2134,4 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - 修复Prompt view-specific bank初始化扩展维度，并将回归测试改为符合全类别logit接口的8类断言；
   修复后须在服务器`ddp`环境完成完整单测和代表性GPU smoke再启动正式validation。
 - 代表性AMP smoke首次运行暴露smoke入口变量未初始化（模型未开始训练）；已修复并需重新执行四组smoke。
+- 服务器正式batch `view_private_components_seed0_20260917_102434` 已启动（commit `36de565`，tmux `multilane_view_private_102434`，GPU0--7）；首轮8组均84 updates、0 skipped，当前等待8-task validation完成。
