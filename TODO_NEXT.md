@@ -1266,3 +1266,9 @@ VOC 对照实验，不应在现阶段合并到 `main`。
 5. 等待batch `view_private_components_seed0_20260917_102434`完成；同步P0--P3/H0--H3结果、日志和控制文件后再做预注册门槛分析。
 
 6. batch已分析：不运行test，也不基于本批继续做后验调参。若用户希望确认“部分缓解”，另立并预注册P2固定配置的seed1/2复现；若研究all-private组合，先增加task3的参数/梯度有限性审计，再讨论学习率、AMP或裁剪策略。
+
+## P3稳定性修正版
+
+1. 在`exp/view-private-components-p3-stable`运行完整服务器单测和P3 task0 smoke。
+2. 用固定`gradient_clip_norm=1.0`运行P3 4-task稳定性检查；确认task3完成且无non-finite logits后，再启动8-task validation。
+3. 只以完成且zero-skip的P3和P0/P1/P2做叠加效果分析；不因P3修正版直接访问test。

@@ -3831,3 +3831,10 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - batch `view_private_components_seed0_20260917_102434` 已结束并同步；171份输出/日志逐文件SHA-256与服务器一致，未访问test、未保存完整checkpoint。P0/P1/P2/H0/H1完整完成240 epochs、13,950 updates且zero skip；H3有166 AMP skips并少166 updates，P3/H2在task3出现non-finite logits后安全停止，后三者不用于正式指标比较。
 - P0精确复现S1 (`41.3856`)；P1/P2/H0/H1 final mAP为`41.8436/42.2652/41.4274/41.5362`。P2相对P0 `+0.8796` final、`+0.9336` average，Full/Person/Face/reliable-Face均提高，八个累计task全正；1705原图组2000次配对bootstrap区间为`[+0.0403,+1.6639]`。
 - P2通过P0局部筛选，但距S0 shared Selector `42.7525`仍低`0.4873`，只恢复S1损失的64.3%，结论为部分缓解而非路线翻转。P1未过+0.50阈值；H0说明fusion placement影响极小，H1私有head降低Full；P3/H2/H3共同的task3 AMP instability说明不能以all-private组合继续选择。完整报告：`output/emotic_track_a_view_private_components/view_private_components_seed0_20260917_102434/analysis.md`。
+
+## 2026-09-17：P3稳定性修正版
+
+- 新分支`exp/view-private-components-p3-stable`针对P3 task3的AMP溢出增加可选全局梯度裁剪；
+  `--gradient-clip-norm 1.0`在`GradScaler.unscale_`后、optimizer step前作用于全部参数组，默认0保持旧行为。
+- P3的Prompt、独立Image-token Adapter、Selector、学习率、ASL、joint routing、AMP/TF32和固定融合均不变，
+  只验证裁剪后P1/P2收益是否可叠加。实验协议见`docs/view_private_components_p3_stability_validation.md`。

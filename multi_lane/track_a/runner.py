@@ -1534,6 +1534,7 @@ def train_task(
     oof_distillation_mix: float = 0.0,
     ranking_loader: Optional[DataLoader] = None,
     ranking_loss_weight: float = 0.0,
+    gradient_clip_norm: float = 0.0,
 ) -> List[Dict[str, float]]:
     if loss_routing not in {
         "joint_bce", "model_asl", "adapter_asl", "both_asl"
@@ -1591,6 +1592,8 @@ def train_task(
         raise ValueError("OOF distillation mix must be finite and in [0, 1)")
     if not math.isfinite(ranking_loss_weight) or ranking_loss_weight < 0:
         raise ValueError("Ranking loss weight must be finite and non-negative")
+    if not math.isfinite(gradient_clip_norm) or gradient_clip_norm < 0:
+        raise ValueError("Gradient clip norm must be finite and non-negative")
     if (ranking_loader is None) != (ranking_loss_weight == 0):
         raise ValueError("Ranking loader and positive ranking loss weight must be enabled together")
     if ranking_loader is not None and len(ranking_loader) < epochs * len(loader):
@@ -1902,6 +1905,20 @@ def train_task(
                         and ranking_loader is None
                     ),
                 )
+            if gradient_clip_norm > 0:
+                # GradScaler keeps gradients scaled until unscale_. Clip the
+                # complete optimizer parameter set after unscaling so the
+                # private Prompt+Adapter path cannot take one oversized joint
+                # update while retaining AMP/TF32 numerics.
+                scaler.unscale_(optimizer)
+                optimizer_parameters = [
+                    parameter
+                    for group in optimizer.param_groups
+                    for parameter in group["params"]
+                ]
+                torch.nn.utils.clip_grad_norm_(
+                    optimizer_parameters, max_norm=gradient_clip_norm
+                )
             scaler.step(optimizer)
             scaler.update()
             if float(scaler.get_scale()) >= scale_before:
@@ -2138,6 +2155,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--no-amp", action="store_true")
     parser.add_argument("--no-tf32", action="store_true")
+    parser.add_argument(
+        "--gradient-clip-norm",
+        type=float,
+        default=0.0,
+        help="Global post-unscale gradient norm cap; zero disables clipping.",
+    )
     parser.add_argument(
         "--input-mode", choices=("full", "person_crop", "face_crop"), default="full"
     )
@@ -3132,6 +3155,7 @@ def main() -> None:
         "train_crop_scale": [float(value) for value in args.train_crop_scale],
         "amp": amp,
         "tf32": tf32,
+        "gradient_clip_norm": args.gradient_clip_norm,
         "cudnn_benchmark": False,
         "cudnn_deterministic": True,
         "num_selectors": args.num_selectors,
@@ -3356,6 +3380,7 @@ def main() -> None:
                 args.scheduler_multistep_milestones
             ),
             scheduler_multistep_gamma=args.scheduler_multistep_gamma,
+            gradient_clip_norm=args.gradient_clip_norm,
         )
         row = evaluate(
             model,
