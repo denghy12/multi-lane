@@ -1264,3 +1264,5 @@ VOC 对照实验，不应在现阶段合并到 `main`。
    不访问test、不保存完整checkpoint。
 4. 先完成smoke入口变量修复后的四组AMP smoke；若均通过，再启动正式八组validation。
 5. 等待batch `view_private_components_seed0_20260917_102434`完成；同步P0--P3/H0--H3结果、日志和控制文件后再做预注册门槛分析。
+
+6. batch已分析：不运行test，也不基于本批继续做后验调参。若用户希望确认“部分缓解”，另立并预注册P2固定配置的seed1/2复现；若研究all-private组合，先增加task3的参数/梯度有限性审计，再讨论学习率、AMP或裁剪策略。

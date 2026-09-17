@@ -3825,3 +3825,9 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
   通过后启动P0--P3/H0--H3 seed0 validation。
 - AMP smoke还发现三视图未启用selector conditioning时`selector_condition_max_initial_difference`未初始化；已在smoke入口统一初始化为0，避免训练前打印阶段误退。
 - 36de565同步后服务器228项全测通过；P1/P2/H1/H3四组AMP/TF32 task0 smoke通过。正式batch `view_private_components_seed0_20260917_102434` 已在 tmux `multilane_view_private_102434` 用GPU0--7并行启动，首轮均84 updates、0 skipped、显存约3.5GiB/卡。
+
+## 2026-09-17：视图专用下游组件 seed-0 validation 结果
+
+- batch `view_private_components_seed0_20260917_102434` 已结束并同步；171份输出/日志逐文件SHA-256与服务器一致，未访问test、未保存完整checkpoint。P0/P1/P2/H0/H1完整完成240 epochs、13,950 updates且zero skip；H3有166 AMP skips并少166 updates，P3/H2在task3出现non-finite logits后安全停止，后三者不用于正式指标比较。
+- P0精确复现S1 (`41.3856`)；P1/P2/H0/H1 final mAP为`41.8436/42.2652/41.4274/41.5362`。P2相对P0 `+0.8796` final、`+0.9336` average，Full/Person/Face/reliable-Face均提高，八个累计task全正；1705原图组2000次配对bootstrap区间为`[+0.0403,+1.6639]`。
+- P2通过P0局部筛选，但距S0 shared Selector `42.7525`仍低`0.4873`，只恢复S1损失的64.3%，结论为部分缓解而非路线翻转。P1未过+0.50阈值；H0说明fusion placement影响极小，H1私有head降低Full；P3/H2/H3共同的task3 AMP instability说明不能以all-private组合继续选择。完整报告：`output/emotic_track_a_view_private_components/view_private_components_seed0_20260917_102434/analysis.md`。

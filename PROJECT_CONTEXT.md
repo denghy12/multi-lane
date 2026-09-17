@@ -2135,3 +2135,9 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   修复后须在服务器`ddp`环境完成完整单测和代表性GPU smoke再启动正式validation。
 - 代表性AMP smoke首次运行暴露smoke入口变量未初始化（模型未开始训练）；已修复并需重新执行四组smoke。
 - 服务器正式batch `view_private_components_seed0_20260917_102434` 已启动（commit `36de565`，tmux `multilane_view_private_102434`，GPU0--7）；首轮8组均84 updates、0 skipped，当前等待8-task validation完成。
+
+## 2026-09-17：视图专用下游组件 validation 结论
+
+- P0复现S1；P2（仅Image-token Adapter改为Full/Person/Face独立bank）是唯一完整通过局部筛选的arm：final/average mAP `42.2652/48.6716`，相对P0 `+0.8796/+0.9336`，所有单视图最终mAP均提升，且1705原图组bootstrap 95%区间为`[+0.0403,+1.6639]`。P2仅恢复S1相对S0损失64.3%，仍距S0 `0.4873`，不能称为shared-Selector问题已恢复。
+- Prompt独立P1只有`+0.4580` final，私有分类head没有弥补特征层瓶颈。Prompt+独立Adapter组合在task3出现AMP数值不稳定：P3和H2非有限logit退出，H3虽完成仍有166 skipped updates；不以这些结果选择后续方向。
+- 本批结果、失败日志和完整分析已本地同步且哈希一致，报告位于`output/emotic_track_a_view_private_components/view_private_components_seed0_20260917_102434/analysis.md`。

@@ -55,3 +55,20 @@ bank is excluded from optimization and reporting in that mode. The new
 - This seed-0 validation screen does not select test parameters. If a clear
   winner passes, repeat the locked configuration at seeds 1 and 2 before any
   test evaluation.
+
+## Outcome
+
+P0 reproduced S1 at 41.3856 final mAP. P2, which only replaces the shared
+Image-token Adapter with independent Full/Person/Face banks, completed cleanly
+at 42.2652 final and 48.6716 average mAP: `+0.8796/+0.9336` versus P0, with
+all four final view diagnostics improved. Its paired original-image bootstrap
+95% interval is `[+0.0403, +1.6639]`. It passes the P0 component screen but
+remains 0.4873 below S0's 42.7525, so it is partial mitigation rather than
+recovery.
+
+P1 gains only 0.4580 final mAP. H0 and H1 show that per-view logit fusion and
+private classification heads do not explain P2; H1 also lowers Full. P3 and
+H2 terminate in task 3 with non-finite ASL logits, while H3 completes with 166
+AMP-skipped updates. The all-private combination is numerically unstable under
+this locked joint-gradient protocol and is excluded from selection. The full
+report is in `output/emotic_track_a_view_private_components/view_private_components_seed0_20260917_102434/analysis.md`.
