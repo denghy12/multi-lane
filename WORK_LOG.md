@@ -3823,3 +3823,4 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
   当前task列由训练loss按索引选择，因此task0输出为8类而不是5类。
 - 本地静态检查通过；服务器需在同一独立worktree重新运行完整单测和P1/P2/H1/H3代表性GPU smoke，
   通过后启动P0--P3/H0--H3 seed0 validation。
+- AMP smoke还发现三视图未启用selector conditioning时`selector_condition_max_initial_difference`未初始化；已在smoke入口统一初始化为0，避免训练前打印阶段误退。

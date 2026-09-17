@@ -2133,3 +2133,4 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   用P0--P3/H0--H3验证S1下降是否来自下游共享；固定CLIP、Selector和三视图融合协议不变。
 - 修复Prompt view-specific bank初始化扩展维度，并将回归测试改为符合全类别logit接口的8类断言；
   修复后须在服务器`ddp`环境完成完整单测和代表性GPU smoke再启动正式validation。
+- 代表性AMP smoke首次运行暴露smoke入口变量未初始化（模型未开始训练）；已修复并需重新执行四组smoke。

@@ -1262,3 +1262,4 @@ VOC 对照实验，不应在现阶段合并到 `main`。
 2. 通过后运行P1/P2/H1/H3代表性task0 GPU smoke，核对有限loss、0 skipped、视图路由和诊断输出。
 3. smoke通过后启动唯一seed0的P0--P3/H0--H3 validation；结束后同步小结果文件并按预注册门槛分析，
    不访问test、不保存完整checkpoint。
+4. 先完成smoke入口变量修复后的四组AMP smoke；若均通过，再启动正式八组validation。

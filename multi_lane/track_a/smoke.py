@@ -123,6 +123,7 @@ def main() -> None:
     ).float().cuda()
     model.activate_task(0)
     images = torch.randn(2, 3, 224, 224, device="cuda")
+    selector_condition_max_initial_difference = 0.0
     if model.selector_conditioner is not None:
         if args.view_fusion != "disabled":
             raise ValueError("Selector conditioning and view fusion are mutually exclusive")
@@ -156,8 +157,6 @@ def main() -> None:
             "face": torch.rot90(images, 1, dims=(-2, -1)),
             "face_reliable": torch.ones(2, dtype=torch.bool, device="cuda"),
         }
-    else:
-        selector_condition_max_initial_difference = 0.0
     if model.adapter_bank is not None:
         for layer_index in args.adapter_layer_indices:
             if args.adapter_mode == "image_token":
