@@ -16,15 +16,20 @@ def make_model(
     adapter_view_mode: str = "shared",
     adapter_view_bottleneck_dim: int = 0,
     view_classifier_mode: str = "shared_post_fusion",
+    num_prompt_layers: int = 1,
+    prompt_private_layers: int = 1,
+    selector_view_residual_scale: float = 0.1,
 ) -> MultiLaneModel:
     return MultiLaneModel(
         FakeVisual(),
         (5, 3),
         num_selectors=num_selectors,
         num_prompts=2,
-        num_prompt_layers=1,
+        num_prompt_layers=num_prompt_layers,
         selector_mode=selector_mode,
+        selector_view_residual_scale=selector_view_residual_scale,
         prompt_mode=prompt_mode,
+        prompt_private_layers=prompt_private_layers,
         adapter_mode=adapter_mode,
         adapter_bottleneck_dim=3,
         adapter_layer_indices=(0,),
@@ -77,6 +82,52 @@ class ViewSpecializedSelectorTest(unittest.TestCase):
             self.assertGreater(
                 torch.count_nonzero(model.selectors.grad[:, view_index]).item(), 0
             )
+
+    def test_shared_selector_residual_starts_equal_and_routes_by_view(self) -> None:
+        torch.manual_seed(94)
+        shared = make_model("shared")
+        torch.manual_seed(94)
+        residual = make_model("shared_residual")
+        shared.activate_task(0)
+        residual.activate_task(0)
+        inputs = view_batch()
+        with torch.no_grad():
+            _, expected, _ = shared.current_all_logits_with_view_features(inputs)
+            _, actual, _ = residual.current_all_logits_with_view_features(inputs)
+        for name in ("full", "person", "face"):
+            self.assertTrue(torch.equal(expected[name], actual[name]))
+        self.assertTrue(torch.equal(
+            residual.selector_view_residuals,
+            torch.zeros_like(residual.selector_view_residuals),
+        ))
+        with torch.no_grad():
+            residual.selector_view_residuals[0, 1].add_(0.1)
+            _, changed, _ = residual.current_all_logits_with_view_features(inputs)
+        self.assertGreater(torch.max((changed["person"] - actual["person"]).abs()).item(), 0)
+        self.assertTrue(torch.equal(changed["full"], actual["full"]))
+        self.assertTrue(torch.equal(changed["face"], actual["face"]))
+
+    def test_late_prompt_residual_keeps_early_layers_shared(self) -> None:
+        model = make_model(
+            prompt_mode="late_view_residual_full_face",
+            num_prompt_layers=3,
+            prompt_private_layers=2,
+        )
+        model.activate_task(0)
+        inputs = view_batch()
+        with torch.no_grad():
+            _, before, _ = model.current_all_logits_with_view_features(inputs)
+            model.prompts[0][0, 1].add_(0.1)
+            model.prompts[1][0, 1].add_(0.1)
+            _, after, _ = model.current_all_logits_with_view_features(inputs)
+        self.assertTrue(torch.equal(after["person"], before["person"]))
+        self.assertTrue(torch.equal(after["full"], before["full"]))
+        self.assertTrue(torch.equal(after["face"], before["face"]))
+        with torch.no_grad():
+            model.prompts[2][0, 1].add_(0.1)
+            _, final, _ = model.current_all_logits_with_view_features(inputs)
+        self.assertGreater(torch.max((final["full"] - after["full"]).abs()).item(), 0)
+        self.assertTrue(torch.equal(final["person"], after["person"]))
 
     def test_task_activation_copies_each_view_and_freezes_previous_task(self) -> None:
         model = make_model("view_specific")

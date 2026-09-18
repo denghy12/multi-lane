@@ -1306,7 +1306,12 @@ def build_optimizer_groups(
     model_parameters = list(model.base_optimizer_parameters())
     optimizer_groups: List[Dict[str, object]] = [
         {
-            "params": [model.selectors, *list(model.prompts)],
+            "params": [
+                model.selectors,
+                *([model.selector_view_residuals]
+                  if model.selector_view_residuals is not None else []),
+                *list(model.prompts),
+            ],
             "weight_decay": weight_decay,
         },
         {"params": list(model.classifier_optimizer_parameters()), "weight_decay": 0.0},
@@ -1518,6 +1523,7 @@ def train_task(
     adapter_regularization: str = "none",
     adapter_regularization_fraction: float = 0.0,
     adapter_regularization_calibration_updates: int = 30,
+    selector_view_residual_regularization: float = 0.0,
     scheduler_mode: str = "cosine",
     scheduler_min_lr_ratio: float = 0.0,
     scheduler_warmup_ratio: float = 0.0,
@@ -1552,6 +1558,10 @@ def train_task(
         raise ValueError("Enabled Adapter regularization requires fraction in (0, 1]")
     if adapter_regularization_calibration_updates <= 0:
         raise ValueError("Adapter regularization calibration updates must be positive")
+    if not math.isfinite(selector_view_residual_regularization) or selector_view_residual_regularization < 0:
+        raise ValueError("Selector view residual regularization must be finite and non-negative")
+    if selector_view_residual_regularization > 0 and model.selector_view_residuals is None:
+        raise ValueError("Selector residual regularization requires shared_residual mode")
     if not math.isfinite(view_auxiliary_loss_weight) or not 0 <= view_auxiliary_loss_weight <= 1:
         raise ValueError("View auxiliary loss weight must be in [0, 1]")
     if model.view_fusion == "disabled" and view_auxiliary_loss_weight != 0:
@@ -1818,6 +1828,11 @@ def train_task(
                     else bce_loss
                 )
                 model_loss = model_loss + ranking_loss_weight * ranking_loss
+                selector_residual_loss = (
+                    selector_view_residual_regularization
+                    * model.selector_view_residual_metric()
+                )
+                model_loss = model_loss + selector_residual_loss
                 adapter_base_loss = (
                     asl_loss
                     if loss_routing in {"adapter_asl", "both_asl"}
@@ -2178,7 +2193,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-selectors", type=int, default=10)
     parser.add_argument(
         "--prompt-mode",
-        choices=("shared", "view_specific", "view_specific_full_face"),
+        choices=(
+            "shared", "view_specific", "view_specific_full_face",
+            "late_view_residual_full_face",
+        ),
         default="shared",
         help=(
             "Use one task Prompt bank for all views, one bank per view, or "
@@ -2188,12 +2206,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--selector-conditioning", choices=TaskSelectorConditioner.MODES,
                         default="disabled")
     parser.add_argument(
-        "--selector-mode", choices=("shared", "view_specific"),
+        "--selector-mode", choices=("shared", "view_specific", "shared_residual"),
         default="shared",
         help=(
             "Use one Selector bank for all views or one bank per Full/Person/Face "
             "view. View-specific banks start from identical values."
         ),
+    )
+    parser.add_argument("--selector-view-residual-scale", type=float, default=0.1)
+    parser.add_argument("--selector-view-residual-regularization", type=float, default=0.0)
+    parser.add_argument(
+        "--prompt-private-layers", type=int, default=2,
+        help="Number of final Prompt layers with Full/Face private residual banks.",
     )
     parser.add_argument("--selector-condition-layers", type=int, nargs="+", default=(1,))
     parser.add_argument("--selector-condition-hidden-dim", type=int, default=32)
@@ -2678,7 +2702,9 @@ def main() -> None:
         task_sizes=TASK_SIZES,
         num_selectors=args.num_selectors,
         selector_mode=args.selector_mode,
+        selector_view_residual_scale=args.selector_view_residual_scale,
         prompt_mode=args.prompt_mode,
+        prompt_private_layers=args.prompt_private_layers,
         num_prompts=10,
         num_prompt_layers=5,
         normalize="pre-head",
@@ -2706,6 +2732,8 @@ def main() -> None:
     model.visual_encoder.requires_grad_(False)
     model.assert_visual_frozen()
     lane_parameters = model.selectors.numel() + sum(p.numel() for p in model.prompts)
+    if model.selector_view_residuals is not None:
+        lane_parameters += model.selector_view_residuals.numel()
     classifier_parameters = sum(
         p.numel() for p in model.classifier_optimizer_parameters()
     )
@@ -3165,9 +3193,16 @@ def main() -> None:
         "cudnn_deterministic": True,
         "num_selectors": args.num_selectors,
         "selector_mode": args.selector_mode,
+        "selector_view_residual_scale": args.selector_view_residual_scale,
+        "selector_view_residual_regularization": args.selector_view_residual_regularization,
         "prompt_mode": args.prompt_mode,
+        "prompt_private_layers": args.prompt_private_layers,
         "selector_view_names": list(model.selector_view_names),
         "selector_parameters_total": model.selectors.numel(),
+        "selector_view_residual_parameters": (
+            model.selector_view_residuals.numel()
+            if model.selector_view_residuals is not None else 0
+        ),
         "selector_parameters_per_task": model.selectors.numel() // model.num_tasks,
         "selector_initialization": (
             "one_shared_bank_copied_to_full_person_face"
@@ -3176,25 +3211,33 @@ def main() -> None:
         "selector_task_semantics": (
             "view_specific_bank_copied_per_view_from_previous_task"
             if args.selector_mode == "view_specific"
+            else "shared_bank_plus_zero_initialized_view_residual_copied_per_task"
+            if args.selector_mode == "shared_residual"
             else "shared_bank_copied_from_previous_task"
         ),
         "num_prompts": 10,
         "num_prompt_layers": 5,
         "prompt_view_names": (
             ["person_shared", "full_private", "face_private"]
-            if args.prompt_mode == "view_specific_full_face"
+            if args.prompt_mode in {
+                "view_specific_full_face", "late_view_residual_full_face"
+            }
             else list(model.selector_view_names)
             if args.prompt_mode == "view_specific" else ["shared"]
         ),
         "prompt_initialization": (
             "one_shared_bank_copied_to_person_shared_full_private_face_private"
-            if args.prompt_mode == "view_specific_full_face"
+            if args.prompt_mode in {
+                "view_specific_full_face", "late_view_residual_full_face"
+            }
             else "one_shared_bank_copied_per_view"
             if args.prompt_mode == "view_specific" else "orthogonal_shared_bank"
         ),
         "prompt_task_semantics": (
             "person_uses_shared_prompt_bank_full_and_face_use_private_banks"
             if args.prompt_mode == "view_specific_full_face"
+            else "first_layers_shared_last_layers_full_face_private_person_shared"
+            if args.prompt_mode == "late_view_residual_full_face"
             else "view_specific_bank_copied_per_view_from_previous_task"
             if args.prompt_mode == "view_specific"
             else "shared_bank_copied_from_previous_task"
@@ -3396,6 +3439,9 @@ def main() -> None:
             adapter_regularization_fraction=args.adapter_regularization_fraction,
             adapter_regularization_calibration_updates=(
                 args.adapter_regularization_calibration_updates
+            ),
+            selector_view_residual_regularization=(
+                args.selector_view_residual_regularization
             ),
             scheduler_mode=args.scheduler_mode,
             scheduler_min_lr_ratio=args.scheduler_min_lr_ratio,

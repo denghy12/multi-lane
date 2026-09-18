@@ -21,13 +21,19 @@ def main() -> None:
     parser.add_argument("--selector-conditioning", default="disabled",
                         choices=("disabled", "bbox", "person", "bbox_person",
                                  "person_patches"))
-    parser.add_argument("--selector-mode", default="shared",
-                        choices=("shared", "view_specific"))
+    parser.add_argument(
+        "--selector-mode", default="shared",
+        choices=("shared", "view_specific", "shared_residual")
+    )
+    parser.add_argument("--selector-view-residual-scale", type=float, default=0.1)
     parser.add_argument("--num-selectors", type=int, default=10)
     parser.add_argument(
         "--prompt-mode",
         default="shared",
-        choices=("shared", "view_specific", "view_specific_full_face"),
+        choices=(
+            "shared", "view_specific", "view_specific_full_face",
+            "late_view_residual_full_face",
+        ),
     )
     parser.add_argument(
         "--view-fusion", choices=("disabled", "fixed_three_view"),
@@ -116,6 +122,7 @@ def main() -> None:
         adapter_residual_gate_mode=args.adapter_residual_gate_mode,
         adapter_auxiliary_metric_mode=args.adapter_regularization,
         selector_mode=args.selector_mode,
+        selector_view_residual_scale=args.selector_view_residual_scale,
         prompt_mode=args.prompt_mode,
         selector_conditioning=args.selector_conditioning,
         selector_condition_layers=args.selector_condition_layers,

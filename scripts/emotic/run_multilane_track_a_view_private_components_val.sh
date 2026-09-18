@@ -12,6 +12,9 @@ OUTPUT_BASE="${OUTPUT_BASE:?OUTPUT_BASE must be set}"
 LOG_DIR="${LOG_DIR:?LOG_DIR must be set}"
 GRADIENT_CLIP_NORM="${GRADIENT_CLIP_NORM:-0}"
 NO_AMP="${NO_AMP:-0}"
+SELECTOR_RESIDUAL_SCALE="${SELECTOR_RESIDUAL_SCALE:-0.1}"
+SELECTOR_RESIDUAL_REG="${SELECTOR_RESIDUAL_REG:-0}"
+PROMPT_PRIVATE_LAYERS="${PROMPT_PRIVATE_LAYERS:-2}"
 
 precision_args=()
 if [[ "${NO_AMP}" == "1" ]]; then
@@ -28,12 +31,18 @@ case "${METHOD}" in
   F2) PROMPT_MODE=shared       ADAPTER_VIEW_MODE=independent ADAPTER_VIEW_DIM=32 CLASSIFIER_MODE=shared_post_fusion ;;
   F3) PROMPT_MODE=view_specific ADAPTER_VIEW_MODE=independent ADAPTER_VIEW_DIM=32 CLASSIFIER_MODE=shared_post_fusion ;;
   S1) PROMPT_MODE=view_specific_full_face ADAPTER_VIEW_MODE=independent ADAPTER_VIEW_DIM=32 CLASSIFIER_MODE=shared_post_fusion ;;
+  R0) SELECTOR_MODE=shared          PROMPT_MODE=shared       ADAPTER_VIEW_MODE=shared ADAPTER_VIEW_DIM=0  CLASSIFIER_MODE=shared_post_fusion ;;
+  R1) SELECTOR_MODE=shared_residual PROMPT_MODE=shared       ADAPTER_VIEW_MODE=shared ADAPTER_VIEW_DIM=0  CLASSIFIER_MODE=shared_post_fusion ;;
+  R2) SELECTOR_MODE=shared          PROMPT_MODE=shared       ADAPTER_VIEW_MODE=shared ADAPTER_VIEW_DIM=32 CLASSIFIER_MODE=shared_post_fusion ;;
+  R3) SELECTOR_MODE=shared          PROMPT_MODE=late_view_residual_full_face ADAPTER_VIEW_MODE=shared ADAPTER_VIEW_DIM=0 CLASSIFIER_MODE=shared_post_fusion ;;
   H0) PROMPT_MODE=shared       ADAPTER_VIEW_MODE=shared      ADAPTER_VIEW_DIM=0  CLASSIFIER_MODE=shared_per_view ;;
   H1) PROMPT_MODE=shared       ADAPTER_VIEW_MODE=shared      ADAPTER_VIEW_DIM=0  CLASSIFIER_MODE=private_per_view ;;
   H2) PROMPT_MODE=view_specific ADAPTER_VIEW_MODE=independent ADAPTER_VIEW_DIM=32 CLASSIFIER_MODE=shared_per_view ;;
   H3) PROMPT_MODE=view_specific ADAPTER_VIEW_MODE=independent ADAPTER_VIEW_DIM=32 CLASSIFIER_MODE=private_per_view ;;
   *) echo "Unknown METHOD=${METHOD}" >&2; exit 2 ;;
 esac
+
+SELECTOR_MODE="${SELECTOR_MODE:-view_specific}"
 
 CUDA_VISIBLE_DEVICES="${GPU}" "${PYTHON}" -m multi_lane.track_a.runner \
   --seed 0 \
@@ -65,7 +74,9 @@ CUDA_VISIBLE_DEVICES="${GPU}" "${PYTHON}" -m multi_lane.track_a.runner \
   --adapter-residual-gate-mode fixed --adapter-activation relu \
   --adapter-learning-rate 0.0004 --adapter-weight-decay 0 \
   --adapter-task-init independent --adapter-regularization none \
-  --selector-mode view_specific --prompt-mode "${PROMPT_MODE}" --num-selectors 10 \
+  --selector-mode "${SELECTOR_MODE}" --selector-view-residual-scale "${SELECTOR_RESIDUAL_SCALE}" \
+  --selector-view-residual-regularization "${SELECTOR_RESIDUAL_REG}" \
+  --prompt-mode "${PROMPT_MODE}" --prompt-private-layers "${PROMPT_PRIVATE_LAYERS}" --num-selectors 10 \
   --gradient-clip-norm "${GRADIENT_CLIP_NORM}" \
   --view-classifier-mode "${CLASSIFIER_MODE}" \
   --reporting-split val \

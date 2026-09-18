@@ -33,7 +33,9 @@ class MultiLaneModel(nn.Module):
         num_prompts: int = 10,
         num_prompt_layers: int = 5,
         selector_mode: str = "shared",
+        selector_view_residual_scale: float = 0.1,
         prompt_mode: str = "shared",
+        prompt_private_layers: int = 2,
         normalize: str = "pre-head",
         adapter_mode: str = "disabled",
         adapter_bottleneck_dim: int = 64,
@@ -61,13 +63,23 @@ class MultiLaneModel(nn.Module):
             raise ValueError("MULTI-LANE task sizes must be positive")
         if num_selectors <= 0 or num_prompts <= 0:
             raise ValueError("MULTI-LANE selector/prompt counts must be positive")
-        if selector_mode not in {"shared", "view_specific"}:
-            raise ValueError("MULTI-LANE selector mode must be shared or view_specific")
-        if prompt_mode not in {"shared", "view_specific", "view_specific_full_face"}:
+        if selector_mode not in {"shared", "view_specific", "shared_residual"}:
+            raise ValueError(
+                "MULTI-LANE selector mode must be shared, view_specific, "
+                "or shared_residual"
+            )
+        if not 0 < float(selector_view_residual_scale) <= 1:
+            raise ValueError("Selector view residual scale must be in (0, 1]")
+        if prompt_mode not in {
+            "shared", "view_specific", "view_specific_full_face",
+            "late_view_residual_full_face",
+        }:
             raise ValueError(
                 "MULTI-LANE prompt mode must be shared, view_specific, "
-                "or view_specific_full_face"
+                "view_specific_full_face, or late_view_residual_full_face"
             )
+        if not 0 <= int(prompt_private_layers) <= int(num_prompt_layers):
+            raise ValueError("Prompt private layer count is invalid")
         if normalize not in {"none", "pre-head"}:
             raise ValueError("MULTI-LANE normalize must be none or pre-head")
         if adapter_mode not in {"disabled", "task_lane", "image_token"}:
@@ -158,7 +170,9 @@ class MultiLaneModel(nn.Module):
         self.num_selectors = int(num_selectors)
         self.selector_mode = selector_mode
         self.selector_view_names = ("full", "person", "face")
+        self.selector_view_residual_scale = float(selector_view_residual_scale)
         self.prompt_mode = prompt_mode
+        self.prompt_private_layers = int(prompt_private_layers)
         self.num_prompts = int(num_prompts)
         self.num_prompt_layers = int(num_prompt_layers)
         self.normalize = normalize
@@ -180,6 +194,13 @@ class MultiLaneModel(nn.Module):
                 -1, len(self.selector_view_names), -1, -1
             ).clone()
         self.selectors = nn.Parameter(selectors)
+        self.selector_view_residuals = (
+            nn.Parameter(torch.zeros(
+                len(self._task_sizes), len(self.selector_view_names),
+                self.num_selectors, self.width,
+            ))
+            if selector_mode == "shared_residual" else None
+        )
 
         prompts = nn.ParameterList()
         for _ in range(self.num_prompt_layers):
@@ -191,7 +212,10 @@ class MultiLaneModel(nn.Module):
                 self.head_dim,
             )
             nn.init.orthogonal_(value)
-            if prompt_mode in {"view_specific", "view_specific_full_face"}:
+            if prompt_mode in {
+                "view_specific", "view_specific_full_face",
+                "late_view_residual_full_face",
+            }:
                 value = value.unsqueeze(1).expand(
                     -1, len(self.selector_view_names), -1, -1, -1, -1
                 ).clone()
@@ -314,8 +338,15 @@ class MultiLaneModel(nn.Module):
         if task_id > 0:
             with torch.no_grad():
                 self.selectors[task_id].copy_(self.selectors[task_id - 1])
+                if self.selector_view_residuals is not None:
+                    self.selector_view_residuals[task_id].copy_(
+                        self.selector_view_residuals[task_id - 1]
+                    )
                 for prompt in self.prompts:
-                    if self.prompt_mode in {"view_specific", "view_specific_full_face"}:
+                    if self.prompt_mode in {
+                        "view_specific", "view_specific_full_face",
+                        "late_view_residual_full_face",
+                    }:
                         prompt[:, :, task_id].copy_(prompt[:, :, task_id - 1])
                     else:
                         prompt[:, task_id].copy_(prompt[:, task_id - 1])
@@ -377,6 +408,12 @@ class MultiLaneModel(nn.Module):
         selector = self.selectors[list(lane_ids)]
         if self.selector_mode == "view_specific":
             selector = selector[:, self.selector_view_names.index(image_view)]
+        elif self.selector_mode == "shared_residual":
+            selector = selector + self.selector_view_residual_scale * (
+                self.selector_view_residuals[
+                    list(lane_ids), self.selector_view_names.index(image_view)
+                ]
+            )
         selector = selector.unsqueeze(1).expand(-1, batch_size, -1, -1)
         cls = self.visual_encoder.class_embedding.to(selector.dtype)
         cls = cls.reshape(1, 1, 1, -1).expand(
@@ -410,15 +447,23 @@ class MultiLaneModel(nn.Module):
         query, key, value = qkv.unbind(0)
         if layer_id < self.num_prompt_layers:
             prompt = self.prompts[layer_id]
-            if self.prompt_mode in {"view_specific", "view_specific_full_face"}:
+            if self.prompt_mode in {
+                "view_specific", "view_specific_full_face",
+                "late_view_residual_full_face",
+            }:
                 if image_view not in self.selector_view_names:
                     raise ValueError(f"Unknown Prompt view: {image_view}")
                 # Selective mode reserves bank 0 as the historical shared
                 # Person bank; Full and Face use private banks 1 and 2.
-                if self.prompt_mode == "view_specific_full_face":
+                if self.prompt_mode in {
+                    "view_specific_full_face", "late_view_residual_full_face"
+                } and (
+                    self.prompt_mode == "view_specific_full_face"
+                    or layer_id >= self.num_prompt_layers - self.prompt_private_layers
+                ):
                     view_index = {"person": 0, "full": 1, "face": 2}[image_view]
                 else:
-                    view_index = self.selector_view_names.index(image_view)
+                    view_index = 0
                 prompt = prompt[:, view_index, list(lane_ids)]
             else:
                 prompt = prompt[:, list(lane_ids)]
@@ -758,6 +803,12 @@ class MultiLaneModel(nn.Module):
             )
         return self.adapter_bank.auxiliary_metric(mode)
 
+    def selector_view_residual_metric(self) -> torch.Tensor:
+        """Mean squared magnitude of optional view-specific Selector residuals."""
+        if self.selector_view_residuals is None:
+            return self.selectors.new_zeros(())
+        return self.selector_view_residuals.float().square().mean()
+
     def lane_logits(
         self, images: ModelInputs, all_seen_lanes: bool
     ) -> torch.Tensor:
@@ -796,6 +847,8 @@ class MultiLaneModel(nn.Module):
     def representation_optimizer_parameters(self) -> Iterable[nn.Parameter]:
         """Shared trainable representation parameters, excluding Adapter."""
         yield self.selectors
+        if self.selector_view_residuals is not None:
+            yield self.selector_view_residuals
         yield from self.prompts
         yield from self.conditioning_optimizer_parameters()
 
@@ -824,6 +877,8 @@ class MultiLaneModel(nn.Module):
 
     def optimizer_parameter_names(self) -> Tuple[str, ...]:
         names = ["selectors"]
+        if self.selector_view_residuals is not None:
+            names.append("selector_view_residuals")
         names.extend(f"prompts.{index}" for index in range(len(self.prompts)))
         names.extend(("head.weight", "head.bias"))
         if self.view_classifier_mode == "private_per_view":
