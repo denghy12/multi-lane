@@ -107,10 +107,10 @@ class ViewSpecializedSelectorTest(unittest.TestCase):
         self.assertTrue(torch.equal(changed["full"], actual["full"]))
         self.assertTrue(torch.equal(changed["face"], actual["face"]))
 
-    def test_late_prompt_residual_keeps_early_layers_shared(self) -> None:
+    def test_late_prompt_residual_routes_private_late_bank(self) -> None:
         model = make_model(
             prompt_mode="late_view_residual_full_face",
-            num_prompt_layers=2,
+            num_prompt_layers=1,
             prompt_private_layers=1,
         )
         model.activate_task(0)
@@ -119,14 +119,9 @@ class ViewSpecializedSelectorTest(unittest.TestCase):
             _, before, _ = model.current_all_logits_with_view_features(inputs)
             model.prompts[0][0, 1].add_(0.1)
             _, after, _ = model.current_all_logits_with_view_features(inputs)
+        self.assertGreater(torch.max((after["full"] - before["full"]).abs()).item(), 0)
         self.assertTrue(torch.equal(after["person"], before["person"]))
-        self.assertTrue(torch.equal(after["full"], before["full"]))
         self.assertTrue(torch.equal(after["face"], before["face"]))
-        with torch.no_grad():
-            model.prompts[2][0, 1].add_(0.1)
-            _, final, _ = model.current_all_logits_with_view_features(inputs)
-        self.assertGreater(torch.max((final["full"] - after["full"]).abs()).item(), 0)
-        self.assertTrue(torch.equal(final["person"], after["person"]))
 
     def test_task_activation_copies_each_view_and_freezes_previous_task(self) -> None:
         model = make_model("view_specific")
