@@ -203,7 +203,7 @@ class MultiLaneModel(nn.Module):
         )
 
         prompts = nn.ParameterList()
-        for _ in range(self.num_prompt_layers):
+        for layer_index in range(self.num_prompt_layers):
             value = torch.randn(
                 2,
                 len(self._task_sizes),
@@ -212,10 +212,11 @@ class MultiLaneModel(nn.Module):
                 self.head_dim,
             )
             nn.init.orthogonal_(value)
-            if prompt_mode in {
-                "view_specific", "view_specific_full_face",
-                "late_view_residual_full_face",
-            }:
+            late_private = (
+                prompt_mode == "late_view_residual_full_face"
+                and layer_index >= int(num_prompt_layers) - int(prompt_private_layers)
+            )
+            if prompt_mode in {"view_specific", "view_specific_full_face"} or late_private:
                 value = value.unsqueeze(1).expand(
                     -1, len(self.selector_view_names), -1, -1, -1, -1
                 ).clone()
@@ -343,10 +344,7 @@ class MultiLaneModel(nn.Module):
                         self.selector_view_residuals[task_id - 1]
                     )
                 for prompt in self.prompts:
-                    if self.prompt_mode in {
-                        "view_specific", "view_specific_full_face",
-                        "late_view_residual_full_face",
-                    }:
+                    if prompt.ndim == 6:
                         prompt[:, :, task_id].copy_(prompt[:, :, task_id - 1])
                     else:
                         prompt[:, task_id].copy_(prompt[:, task_id - 1])
@@ -447,22 +445,17 @@ class MultiLaneModel(nn.Module):
         query, key, value = qkv.unbind(0)
         if layer_id < self.num_prompt_layers:
             prompt = self.prompts[layer_id]
-            if self.prompt_mode in {
-                "view_specific", "view_specific_full_face",
-                "late_view_residual_full_face",
-            }:
+            if prompt.ndim == 6:
                 if image_view not in self.selector_view_names:
                     raise ValueError(f"Unknown Prompt view: {image_view}")
                 # Selective mode reserves bank 0 as the historical shared
                 # Person bank; Full and Face use private banks 1 and 2.
                 if self.prompt_mode == "view_specific":
                     view_index = self.selector_view_names.index(image_view)
-                elif self.prompt_mode == "view_specific_full_face":
+                elif self.prompt_mode in {
+                    "view_specific_full_face", "late_view_residual_full_face"
+                }:
                     view_index = {"person": 0, "full": 1, "face": 2}[image_view]
-                elif layer_id >= self.num_prompt_layers - self.prompt_private_layers:
-                    view_index = {"person": 0, "full": 1, "face": 2}[image_view]
-                else:
-                    view_index = 0
                 prompt = prompt[:, view_index, list(lane_ids)]
             else:
                 prompt = prompt[:, list(lane_ids)]
