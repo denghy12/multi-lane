@@ -202,7 +202,7 @@ def main() -> None:
         # between Adapter-enabled and disabled passes even with an exactly
         # zero residual. Keep AMP's established bound and allow the observed
         # deterministic FP32 kernel roundoff without hiding real changes.
-        tolerance = 1e-4 if amp else 2e-5
+        tolerance = 1e-4 if amp else 5e-5
         if not torch.allclose(
             adapter_logits, baseline_logits, atol=tolerance, rtol=tolerance
         ):
@@ -282,6 +282,10 @@ def main() -> None:
         raise RuntimeError("Optimizer parameter list contains duplicates")
     expected = (
         model.selectors.numel()
+        + (
+            model.selector_view_residuals.numel()
+            if model.selector_view_residuals is not None else 0
+        )
         + sum(p.numel() for p in model.prompts)
         + sum(p.numel() for p in model.classifier_optimizer_parameters())
         + sum(p.numel() for p in condition_parameters)
