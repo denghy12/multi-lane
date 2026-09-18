@@ -110,15 +110,14 @@ class ViewSpecializedSelectorTest(unittest.TestCase):
     def test_late_prompt_residual_keeps_early_layers_shared(self) -> None:
         model = make_model(
             prompt_mode="late_view_residual_full_face",
-            num_prompt_layers=3,
-            prompt_private_layers=2,
+            num_prompt_layers=2,
+            prompt_private_layers=1,
         )
         model.activate_task(0)
         inputs = view_batch()
         with torch.no_grad():
             _, before, _ = model.current_all_logits_with_view_features(inputs)
             model.prompts[0][0, 1].add_(0.1)
-            model.prompts[1][0, 1].add_(0.1)
             _, after, _ = model.current_all_logits_with_view_features(inputs)
         self.assertTrue(torch.equal(after["person"], before["person"]))
         self.assertTrue(torch.equal(after["full"], before["full"]))

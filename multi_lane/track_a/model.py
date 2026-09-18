@@ -35,7 +35,7 @@ class MultiLaneModel(nn.Module):
         selector_mode: str = "shared",
         selector_view_residual_scale: float = 0.1,
         prompt_mode: str = "shared",
-        prompt_private_layers: int = 2,
+        prompt_private_layers: int = 0,
         normalize: str = "pre-head",
         adapter_mode: str = "disabled",
         adapter_bottleneck_dim: int = 64,
@@ -455,12 +455,9 @@ class MultiLaneModel(nn.Module):
                     raise ValueError(f"Unknown Prompt view: {image_view}")
                 # Selective mode reserves bank 0 as the historical shared
                 # Person bank; Full and Face use private banks 1 and 2.
-                if self.prompt_mode in {
-                    "view_specific_full_face", "late_view_residual_full_face"
-                } and (
-                    self.prompt_mode == "view_specific_full_face"
-                    or layer_id >= self.num_prompt_layers - self.prompt_private_layers
-                ):
+                if self.prompt_mode in {"view_specific", "view_specific_full_face"}:
+                    view_index = {"person": 0, "full": 1, "face": 2}[image_view]
+                elif layer_id >= self.num_prompt_layers - self.prompt_private_layers:
                     view_index = {"person": 0, "full": 1, "face": 2}[image_view]
                 else:
                     view_index = 0
