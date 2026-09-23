@@ -680,6 +680,14 @@ class MultiLaneModel(nn.Module):
             images.shape[0], lane_ids, image_view=image_view
         )
         for layer_id, block in enumerate(self.visual_encoder.transformer.resblocks):
+            post_mode_last_layer = (
+                self.parax_runtime_enabled and self.parax_bank is not None
+                and self.parax_mode == "post"
+                and layer_id == len(self.visual_encoder.transformer.resblocks) - 1
+            )
+            if post_mode_last_layer:
+                with torch.no_grad():
+                    image_tokens = block(image_tokens.permute(1, 0, 2)).permute(1, 0, 2)
             if (self.parax_runtime_enabled and self.parax_bank is not None
                     and self.parax_mode != "post"
                     and layer_id > 0
@@ -695,8 +703,7 @@ class MultiLaneModel(nn.Module):
                     layer_id - 1, image_view, before_patch_tokens, patch_tokens, gates
                 )
             if (self.parax_runtime_enabled and self.parax_bank is not None
-                    and self.parax_mode == "post"
-                    and layer_id == len(self.visual_encoder.transformer.resblocks) - 1):
+                    and post_mode_last_layer):
                 patch_tokens = image_tokens[:, 1:]
                 before_patch_tokens = patch_tokens
                 patch_tokens, gates = self.parax_bank(
@@ -728,7 +735,9 @@ class MultiLaneModel(nn.Module):
                 paired["condition_valid"] if person_tokens is not None else None,
                 image_view,
             )
-            if not self.parax_runtime_enabled:
+            if post_mode_last_layer:
+                pass  # The frozen final CLIP block already ran before post-encoder ParaX.
+            elif not self.parax_runtime_enabled:
                 with torch.no_grad():
                     image_tokens = block(image_tokens.permute(1, 0, 2)).permute(
                         1, 0, 2

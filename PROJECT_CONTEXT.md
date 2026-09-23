@@ -1,5 +1,13 @@
 # 项目上下文
 
+## 2026-09-23：停止视图专用 Selector，评估 ParaX 动态参数路由
+
+用户确认停止个性化 Selector 路线，转而评估 ParaX（Parameters as Experts: Adapting Vision Models with Dynamic Parameter Routing）能否改善 Full/Person/Face 共享参数下的表征与融合。本轮只读检查当前代码和本地论文实现 `/Users/denghaoyuan/workspace/MyCode/ParaX-main`，未修改业务代码、配置或训练脚本，也未运行测试/实验。ParaX 原生 ViT 方案在每个 Transformer block 后对 patch tokens 施加输入条件化低秩残差，各层 Adapter 共享 expert-center 参数池，但各自 router 根据当前输入生成混合系数；CLS 不经过 ParaX。
+
+首选评估位置是冻结 CLIP 图像 token 流内部、目标 ViT block 输出之后及下一 block 之前，优先覆盖能被后续 Selector 读取的高层 blocks；而不是 `task_lane` Adapter（它修改任务 token）或当前 `image_token` Adapter（只改变 Selector 匹配/patch 汇聚输入，不把更新结果传入后续 CLIP block）。当前图像流的 `no_grad()` 以及 Selector 所读 image tokens 的 `detach()` 会切断 ParaX 梯度，若实现内部插入必须显式调整 autograd 路径，但冻结的 CLIP 权重仍可保持 `requires_grad=False`。ParaX 的类增量旧任务稳定性、level 与 task 的路由混淆、初始化输出偏离原基线均为待验证风险。
+
+研究建议先做 seed0 validation 分阶段对照：复现固定三视图融合基线；以冻结 backbone 上最终 tokens 的 ParaX adapter 作低风险位置对照；再测试 block 间 late ParaX（zero-based 8/9/10 等可被后续 Selector 使用的层），遵照论文共享 expert center、按输入动态路由，比较 token-only 与显式 level-conditioned routing。固定其余训练/数据/融合协议，观察分 view/task gate、梯度、残差幅度、参数量、旧 task 遗忘及每路/融合 mAP；出现稳定收益后再补参数量对照和 seed1/2。详细协议与选择逻辑见 `docs/parax_shared_level_routing_analysis_20260923.md`。当前尚未批准或启动实现/实验。
+
 ## 2026-09-16：开始实现视图专用 Selector 实验
 
 用户确认按 Full/Person/Face 视图专用 Selector 方案开始修改。新分支为
@@ -2149,3 +2157,61 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - 目标是判断Prompt与独立Adapter的收益是否叠加。必须先完成服务器全测、P3 task0 smoke和4-task稳定性检查，
   再启动唯一8-task seed0 validation；不访问test。
 - gradient-clip=1.0试跑未能阻止AMP overflow；后续P3稳定验证只关闭AMP并保持其余配置不变，以隔离数值精度因素。
+
+## 2026-09-17：P3 FP32稳定性结果
+
+- FP32 P3 batch `view_private_components_p3_stable_fp32_seed0_20260917_152148`（commit `c6ef90b`）已完整结束并同步；240 epochs、13,950 updates、zero skipped，日志无non-finite/OOM/traceback，服务器与本地逐文件SHA-256一致，未访问test、未保存full checkpoint。AMP数值不稳定已被`--no-amp`消除。
+- 但P1私有Prompt与P2独立Adapter的收益没有叠加：P3 final/average mAP为`40.9340/47.5726`，相对P0为`-0.4516/-0.1654`，相对P2为`-1.3312/-1.0989`；P3低于P1/P2的每一个累计task。Person/reliable-Face相对P0分别`-0.9828/-0.6897`，预注册分支保护失败。
+- 1705原图组、2000次配对bootstrap的P3−P0为`-0.4548`（95%`[-1.2159,+0.2937]`），P3−P2为`-1.3160`（95%`[-2.0876,-0.5579]`）。前者对固定模型的样本不确定性跨0，不能据此声称总体退化；但不支持叠加且明显低于P2。
+- P3与旧臂唯一训练差异为AMP关闭（TF32仍开），因此FP32/AMP是严格因果对照的混杂因素。当前证据只保留P2为局部候选；不运行P3 seed1/2或test，也不继续all-private下游组合。完整报告见`output/emotic_track_a_view_private_components_p3_stable/view_private_components_p3_stable_fp32_seed0_20260917_152148/analysis.md`。
+
+## 2026-09-17：FP32交互项与选择性 Prompt 实验准备
+
+- 新分支 `exp/view-private-components-fp32-selective-prompt` 基于 `c6ef90b` 创建，保留所有既有未提交用户文档和 `tmp/`。
+- `MultiLaneModel` 新增 `prompt_mode=view_specific_full_face`：bank 0 为 Person 使用的共享 Prompt，bank 1/2 分别为 Full/Face 私有 Prompt；三者从同一初始化复制，任务激活时逐 bank 复制上一任务。
+- runner/smoke CLI、Prompt 元数据、回归测试和 validation launcher 已更新。新增 FP32/TF32 固定精度 F0/F1/F2/F3 与选择性 S1 五臂入口及交互项汇总器。
+- 待本地静态检查后提交并同步服务器，在 `ddp` 环境运行完整测试、task0 smoke，再启动唯一 validation batch；仅 validation、禁止 test、无 full checkpoint。
+- 正式 batch `fp32_interaction_selective_seed0_20260917_230307` 已在服务器 tmux `multilane_fp32_interaction_230307` 启动，使用 GPU0--4（当时每卡约5.6GiB空闲，launcher 门槛按5GiB执行）。
+
+## 2026-09-18：FP32交互与选择性 Prompt validation 结果
+
+- F0/F1/F2/F3/S1 均完成 240 epochs、13,950 updates、zero skipped；日志均以 `MULTI_LANE_TRACK_A_COMPLETE` 结束。服务器与本地 output/log 共132个文件逐项 SHA-256 一致；仅 validation，未访问 test、未保存 full checkpoint。
+- 同精度 final/average mAP：F0 `41.7772/49.1334`，F1 `41.4559/48.7443`，F2 `41.6545/48.0103`，F3 `41.2212/48.4650`，S1 `41.8203/48.0093`。
+- 交互项 `F3-F1-F2+F0` 为 final mAP `-0.1121`、average mAP `+0.8438`；final 交互项略负但 average 为正，不能宣称稳定的结构负交互。S1 相对 F2 final `+0.1659`、average `-0.0010`，Full/Face/reliable-Face 改善而 Person 下降。
+- 汇总报告：`output/emotic_track_a_fp32_interaction_selective/fp32_interaction_selective_seed0_20260917_230307/interaction_summary.md`。
+
+## 2026-09-18：共享基座视图残差与晚层 Prompt 实验启动
+
+- 新分支 `exp/shared-view-residuals-late-prompts` 已推送，最新提交 `d9d8b2a`。实现 `shared_residual` Selector、共享 Adapter 加视图残差，以及逐层布局的 `late_view_residual_full_face` Prompt。
+- 服务器 `ddp` 完整单测 231/231 通过；R0/R1/R2/R3 四组真实 ViT FP32 task0 smoke 全部通过。R1 Selector residual scale=0.1、通用 L2 系数=0.1；R3 前3层共享、最后2层 Full/Face 私有、Person全层共享。
+- 正式 batch `shared_residuals_late_prompt_seed0_20260918_103705` 已在 tmux `multilane_shared_residuals_103705` 启动，GPU0--3 并行，validation-only、无 full checkpoint、禁止 test。
+
+## 2026-09-18：共享基座视图残差与晚层 Prompt validation 结果
+
+- batch `shared_residuals_late_prompt_seed0_20260918_103705` 的 R0/R1/R2/R3 均完成 240 epochs、13,950 updates、zero skipped；日志无 OOM、NaN、traceback，服务器与本地 98 个 output/log 文件逐项 SHA-256 一致。仅 validation，未访问 test、未保存 full checkpoint。
+- Final/average mAP：R0 43.0394/50.5326，R1 Selector residual 41.9762/48.7030，R2 Adapter residual 42.4221/49.6954，R3 晚层 Full/Face Prompt residual 42.4917/49.9806。相对 R0，R1 -1.0632/-1.8296，R2 -0.6173/-0.8372，R3 -0.5477/-0.5520；三种残差在 seed0 上都没有超过共享基线。
+- 最终 task7 累计 mAP：R0 43.039、R1 41.976、R2 42.422、R3 42.492。逐 task mAP 也显示 R1 从 task0 开始全面落后；R2/R3只有早期局部接近或超过R0，后期仍落后。
+- task7 视图诊断（fused/full/person/face/reliable-face mAP）：R0 43.036/41.640/40.152/34.107/37.849；R1 41.973/40.370/40.373/33.823/36.894；R2 42.417/41.070/38.766/33.955/37.291；R3 42.494/41.279/38.702/33.813/37.026。R1 对 Person 相对R0略升但 Full/Face/reliable-Face下降；R2/R3的 Person 和 Face 均下降，未形成可叠加的单路收益。
+- 解释：通用小残差并没有带来可见收益，说明当前瓶颈可能不是参数自由度不足，而是三路表示在固定融合权重和共享后续 head 下的校准/兼容性，以及增量任务中的累计漂移。R1 的 Selector residual 还可能破坏原共享 Selector 的跨视图正则；R2/R3保留共享基座但残差仍改变了各路坐标，无法自动改善融合。
+- 本结果不支持继续盲目增加残差容量。若继续，应先做多 seed 复现或冻结训练策略下的融合/校准实验，明确验证动态融合是否能利用三路互补；不要直接启动 test。
+
+## 2026-09-18：R0 与动态三视图融合 test 准备
+
+- 用户要求比较当前共享基座 R0 与动态融合版本。当前实现已有 `soft_three_view`：每个增量 task 使用 hidden-16 masked-softmax Router，输入对应 Full/Person/Face task-lane 特征，初始化为固定可靠 Face 先验 `[0.64,0.16,0.20]`，不可靠 Face 时强制 Face 权重为0并回退到 Full/Person。
+- 新增专用脚本 `scripts/emotic/run_multilane_track_a_r0_dynamic_test.sh` 与 `scripts/emotic/launch_multilane_track_a_r0_dynamic_test.sh`。R0 与 D1 仅改变 `fixed_three_view`/`soft_three_view`，其余保持当前 R0：shared Selector/Prompt/Adapter、Image-token layer1 bottleneck32、FP32+TF32、seed0、8 tasks、30 epochs/task、batch64、joint gradient、auxiliary view loss0.1、无checkpoint、一次性test无test-side搜索。
+- 历史同类动态 J1 validation final mAP 为`39.8569`，固定 J0 为`42.5330`，因此本批动态 test 属于用户明确要求的诊断性 held-out comparison，不把 test 结果用于回溯选择模型或调权重。
+
+## 2026-09-18：R0 与动态三视图融合 test 结果
+
+- batch `r0_dynamic_fusion_test_20260918_152435` 的 R0/D1 均完成 240 epochs、13,950 updates、zero skipped，无 OOM、NaN、非有限值或 traceback；服务器与本地 34 个 output/log 文件 SHA-256 全部一致。仅按锁定规则评估 test，未在 test 搜索权重。
+- R0 fixed final/average mAP=`31.9883/38.8315`，D1 soft Router=`29.5224/36.1115`；D1 相对 R0 final/average mAP `-2.4658/-2.7200`，cF1 `-0.6820`，oF1 `-1.7644`，forgetting 略低 `-0.1254`但不足以抵消性能损失。
+- D1 在全部 8 个累计 task 上都低于 R0，task0--7 mAP 差值为 `-4.0987/-3.2065/-2.4326/-2.1804/-2.6097/-2.2856/-2.4806/-2.4658`。
+- task7 D1 Router 权重明显偏向 Person：lane0/lane1/lane2/lane7 的平均 Full/Person/Face 分别约为 `0.038/0.909/0.053`、`0.019/0.896/0.085`、`0.091/0.838/0.072`、`0.046/0.771/0.183`；而 R0 实际平均约 `0.703/0.176/0.122`。动态路由出现 Person collapse，未学到稳定互补组合。
+- 结论：动态比例在当前联合训练下不能直接替代固定融合；问题更像是路由主损失驱动、缺乏先验/校准约束，而非工程或数值故障。若继续，只应在 validation 上预注册受限 prior/KL、OOF image-group calibration 或小幅 residual Router，并做多 seed 复现；不基于本次 test 继续搜索。
+
+## 2026-09-23：ParaX shared level routing 实验实现
+
+- 当前分支为 `exp/parax-level-routing`；新增 token-only `ParaXImageAdapterBank`，采用 CLS 旁路、共享 expert center、逐层 router，可选 Full/Person/Face level embedding 与 static uniform routing 对照。
+- ParaX 主路径位于冻结 CLIP block 之间：图像 block 参数保持冻结，但允许梯度穿过 block 输入返回 ParaX；现有 image-token Adapter 默认关闭。`post` 是最后 block 前的 terminal pre-consumer proxy。
+- runner/smoke 已接入 ParaX mode、rank、expert 数、层索引、router hidden、残差尺度和 official/small 初始化；training history 记录逐视图/逐层 gate 均值、熵、top-expert 频率、跨视图 gate L1 距离和 residual/token norm ratio。
+- 已完成本地 `py_compile` 与 `git diff --check`；本机缺少 torch/numpy，依赖型单测与真实 ViT smoke 待服务器 `ddp` 环境完成。

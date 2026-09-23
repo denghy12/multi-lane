@@ -1,5 +1,12 @@
 # 工作日志
 
+## 停止视图专用 Selector 并分析 ParaX 候选
+
+- 用户要求停止个性化 Selector 路线，转向分析 ParaX 对共享 ViT 多 level 表征路由的适用性；本轮遵守“不修改代码”。
+- 只读检查了当前 `exp/r0-dynamic-fusion-test` 工作树、MULTI-LANE 图像/任务双流与 Adapter 调用位置，以及本地 ParaX 官方实现和 plug-and-play guide。ParaX 原生 ViT adapter 位于 block 后并只处理 patch tokens；其多个 block 共享专家参数中心，各 block router 根据当前输入动态组合参数。
+- 建议内部 late-block 插入作为主路线，冻结 backbone final-token 后置 ParaX 作为低风险对照；不建议直接把 ParaX 塞进 task-lane Adapter。标注了 `no_grad()/detach()` 梯度断路、最后 block 的输出未被现有 Selector 消费、增量 task 遗忘和 gate 路由混淆等风险。
+- 记录详细研究判断和预注册式阶段实验方案于 `docs/parax_shared_level_routing_analysis_20260923.md`；未运行测试、smoke、训练或 Git 操作。
+
 ## 开始实现视图专用 Selector
 
 - 创建分支 `exp/view-specialized-selector`，保留原工作树中用户未提交的文档和 `tmp/`。
@@ -3840,3 +3847,69 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
   只验证裁剪后P1/P2收益是否可叠加。实验协议见`docs/view_private_components_p3_stability_validation.md`。
 - 首次gradient-clip=1.0试跑仍在task3出现同样的134+32 skipped并于epoch18产生non-finite logits，
   证明overflow发生在裁剪前；稳定版改为仅`--no-amp`的FP32控制，clip恢复0。
+
+## 2026-09-17：同步并分析P3 FP32稳定性验证
+
+- P3 FP32 batch `view_private_components_p3_stable_fp32_seed0_20260917_152148`已结束；本地同步output/log后，服务器与本地逐文件SHA-256一致。完成240 epochs、13,950 updates、zero skipped，`MULTI_LANE_TRACK_A_COMPLETE`存在，未访问test、未保存full checkpoint，日志无OOM、non-finite、traceback或error。`amp=false`、`tf32=true`、`gradient_clip_norm=0`与协议一致。
+- P3 final/average mAP=`40.9340/47.5726`，较P0为`-0.4516/-0.1654`、较P1为`-0.9096/-1.0226`、较P2为`-1.3312/-1.0989`。P3在每个累计task都低于P1/P2；相对P0仅task0 `+0.4619`和task4 `+0.0300`为正，其余为负。
+- final Full/Person/Face/reliable-Face为`39.9004/35.5129/31.8530/34.4468`；相对P0 Person/reliable-Face下降`0.9828/0.6897`，不通过预注册保护。P3−P2的1705原图组2000次bootstrap为`-1.3160`、95%`[-2.0876,-0.5579]`；P3−P0为`-0.4548`、95%`[-1.2159,+0.2937]`。
+- FP32证明数值稳定性问题可消除，不能证明Prompt+Adapter有效叠加。P3相对P1只多约5%可训练参数，故纯容量解释较弱；更合理的待验证机制是Prompt和Adapter同时私有化移除了两者中仅存的跨视图耦合，而固定融合与共享post-fusion head需要三路表征保持兼容。由于P3关闭AMP，不能把它与旧AMP P0/P1/P2作无混杂因果归因；不跑P3 seed1/2或test。完整报告位于`output/emotic_track_a_view_private_components_p3_stable/view_private_components_p3_stable_fp32_seed0_20260917_152148/analysis.md`。
+
+## 2026-09-17：FP32四组交互与选择性 Prompt 修改
+
+- 从 `exp/view-private-components-p3-stable` 的 `c6ef90b` 创建 `exp/view-private-components-fp32-selective-prompt`。
+- 新增 Prompt 模式 `view_specific_full_face`，实现 Person 共享 bank、Full/Face 私有 bank；初始化和增量 task 复制保持确定性。同步扩展 runner/smoke 参数、实验元数据、回归测试。
+- 新增 `scripts/emotic/launch_multilane_track_a_fp32_interaction_selective_val.sh`，固定 `--no-amp`、TF32、seed0、8 tasks、30 epochs/task、batch64、既有 P2 Adapter/Selector/fusion 协议，运行 F0/F1/F2/F3/S1；新增 `summarize_fp32_interaction_selective.py` 计算 `F3-F1-F2+F0` 与 `S1-F2`。
+- 本地 `python3 -m py_compile`、shell `bash -n`、`git diff --check` 通过；本机无 torch，依赖型单测待服务器 `ddp` 执行。
+
+## 2026-09-17：FP32交互与选择性 Prompt validation 已启动
+
+- 服务器 `ddp` 完整单测 229/229 通过；selective Prompt 真实 ViT task0 FP32 smoke 通过，初始化等价、路由和 zero-skip 检查成立。
+- 正式 batch `fp32_interaction_selective_seed0_20260917_230307` 已在 tmux `multilane_fp32_interaction_230307` 启动，GPU0--4 并行 F0/F1/F2/F3/S1。由于 GPU 当时约 5.6GiB 空闲且单 run 历史约3.5GiB，launcher 显存门槛设为5GiB；配置仍为 FP32/TF32、8-task validation、无checkpoint/test。
+
+## 2026-09-18：FP32交互与选择性 Prompt validation 结果
+
+- 五组均完成 240 epochs、13,950 updates、zero skipped，无 OOM/NaN/traceback；output 94 个文件、logs 10 个文件已从服务器同步，本地与服务器逐项 SHA-256 一致。
+- F0/F1/F2/F3/S1 final mAP 分别为 `41.7772/41.4559/41.6545/41.2212/41.8203`，average mAP 分别为 `49.1334/48.7443/48.0103/48.4650/48.0093`。同精度控制显示 F1/F2 单独臂相对 F0 都略低，FP32 本身改变了旧 AMP 基线的绝对数值。
+- 预注册交互项 `F3-F1-F2+F0`：final `-0.1121`，average `+0.8438`；逐 task 为 `[+1.4001,+1.0433,+1.2592,+1.1022,+1.2414,+0.7942,+0.0222,-0.1121]`。因此 final 末任务存在轻微负交互，但累计平均并非负，证据不足以确认结构性负交互。
+- 选择性 S1（Person Prompt 共享、Full/Face 私有）相对 F2：final `+0.1659`、average `-0.0010`；最终单视图 Full/Person/Face/reliable-Face 变化为 `+0.627/-0.962/+0.262/+0.621`。它改善 Full、Face 和可靠 Face，但 Person 仍是瓶颈，融合总收益有限。
+- 完整汇总见 `output/emotic_track_a_fp32_interaction_selective/fp32_interaction_selective_seed0_20260917_230307/interaction_summary.md`。
+
+## 2026-09-18：共享基座视图残差与晚层 Prompt 实验启动
+
+- 新分支 `exp/shared-view-residuals-late-prompts` 从同精度实验分支创建并推送；核心提交链为 `949e58d`、`0925f5c`、`69a6d42`、`da607db`、`d9d8b2a`。保留既有用户文档和 `tmp/`，未纳入提交。
+- 新增四臂协议：R0 共享 Selector/Adapter/Prompt；R1 共享 Selector+零初始化视图残差并加通用 L2；R2 共享 Adapter+零初始化视图残差；R3 前3层共享 Prompt、最后2层 Full/Face 私有、Person共享。
+- 服务器完整单测 231/231 通过；四组真实 ViT FP32 task0 smoke 均通过，包含初始化 roundoff、视图路由和 optimizer 参数审计。
+- 正式 batch `shared_residuals_late_prompt_seed0_20260918_103705` 已在 tmux `multilane_shared_residuals_103705` 启动，GPU0--3 并行；固定 FP32/TF32、seed0、8 tasks、30 epochs/task、batch64、joint gradient、auxiliary loss 0.1、validation-only、无 checkpoint/test。
+
+## 2026-09-18：共享基座残差与晚层 Prompt 结果已同步
+
+- 从服务器 `/mnt/haoyuan/workspace/multi-lane-main-shared-residuals` 同步 batch `shared_residuals_late_prompt_seed0_20260918_103705` 的 output/log 到本地；远端与本地共98个文件 SHA-256 全部一致。
+- R0/R1/R2/R3均完整结束：240 epochs、13,950 updates、zero skipped，无 OOM/NaN/traceback。
+- 指标（final/average mAP）：R0 `43.0394/50.5326`；R1 Selector residual `41.9762/48.7030`；R2 Adapter residual `42.4221/49.6954`；R3 晚层 Full/Face Prompt residual `42.4917/49.9806`。三种残差均低于 R0。
+- task7 fused 与单路 mAP：R0 `43.036/41.640/40.152/34.107/37.849`；R1 `41.973/40.370/40.373/33.823/36.894`；R2 `42.417/41.070/38.766/33.955/37.291`；R3 `42.494/41.279/38.702/33.813/37.026`（顺序 fused/full/person/face/reliable-face）。
+- 结论：共享基座加小视图残差在当前固定融合与增量训练协议下未超过共享基线；R2/R3后期 Person/Face退化，R1虽Person略升但Full/Face下降。下一步优先研究融合校准/样本级路由，并用多 seed 验证，而非继续放大私有残差。
+
+## 2026-09-18：R0 与动态三视图融合 test 脚本
+
+- 用户要求将当前 R0 的固定融合与动态融合版本做 held-out test 对照。确认代码已有 `soft_three_view` task-local hidden-16 masked-softmax Router；新增独立 R0/D1 test runner 与双 GPU launcher，避免修改历史 test 入口。
+- test 协议锁定：R0=`fixed_three_view`，D1=`soft_three_view`；二者共享 Selector/Prompt/Adapter，FP32（`--no-amp`）+ TF32，seed0，8 tasks×30 epochs，train/eval batch64，Adam reset/task、cosine、main LR0.0125、Adapter LR4e-4、view Router LR4e-4、auxiliary0.1、无checkpoint、score dump 开启、无test-side调参。
+- 动态版本沿用固定先验初始化和可靠性 mask；本批结果只作 test 诊断，不能反过来改变 validation 阶段的候选选择。
+
+## 2026-09-18：R0 与动态三视图融合 test 已完成
+
+- batch `r0_dynamic_fusion_test_20260918_152435` 已同步本地；R0/D1均240 epochs、13,950 updates、zero skipped，日志无 OOM/NaN/traceback，34个文件 SHA-256 与服务器一致。
+- test 指标：R0 fixed `31.9883/38.8315/32.7963/48.9977/4.8298`，D1 dynamic `29.5224/36.1115/32.1142/47.2332/4.7045`（依次 final mAP/average mAP/cF1/oF1/forgetting）。D1 相对 R0 final mAP `-2.4658`、average mAP `-2.7200`。
+- D1 从 task0 到 task7 全部低于 R0；最终 task7 fused/full/person/face/reliable-face 为 D1 `29.524/29.223/28.242/23.356/26.499`，R0 `31.987/30.713/30.163/25.140/28.023`。
+- 动态 Router 最终明显偏向 Person，task7 lane0/lane1/lane2/lane7 平均权重约为 `0.038/0.909/0.053`、`0.019/0.896/0.085`、`0.091/0.838/0.072`、`0.046/0.771/0.183`（Full/Person/Face），解释了性能下降。动态路由没有利用三路互补，出现 Person collapse。
+- 完整分析见 `output/emotic_track_a_r0_dynamic_test/r0_dynamic_fusion_test_20260918_152435/analysis.md`。
+
+## 2026-09-23：ParaX level routing implementation
+
+- On `exp/parax-level-routing`, implemented a shared expert-center token-only ParaX image adapter for frozen CLIP block boundaries, with optional level conditioning, static uniform control, official/small initialization, and separate optimizer wiring.
+- Added gate/residual diagnostics to per-epoch history and extended smoke/model CLI configuration. Added `tests/test_track_a_parax.py`; local dependency tests remain unavailable because this macOS environment lacks torch/numpy.
+- Local `py_compile` and `git diff --check` pass. Next: commit only ParaX code/test/context files, push, create a clean server worktree through Git, then run ddp tests and real ViT task0 smoke for B0/P-post/P-10/P-8:10/P-8:10-level/Static-control.
+- Server Git-only worktree `/mnt/haoyuan/workspace/multi-lane-main-parax` is clean at commit `5163e27`; existing `/mnt/haoyuan/workspace/multi-lane-main-test-only` was not modified. `python -m unittest discover -s tests -p 'test*.py'` passed 234/234.
+- Real ViT six-arm smoke is queued by resource state only: all 8 server GPUs were occupied (1.6--2.2 GiB free, >93% utilization), so no GPU job was started or preempted.
+- Once GPUs became free, all six task0 real ViT smoke arms ran. Five passed; Static-control initially failed because the generic smoke demanded gradients for intentionally frozen static routers. Updated static control to exclude routers from trainable parameters; full 234-test suite passed again, then all six smoke arms passed (including Static-control).
+- Added formal validation run/launcher scripts for the locked seed0, 8-task, 30-epoch, batch64 fixed-three-view plan. They are being validated before the run is launched.

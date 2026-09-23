@@ -1,13 +1,23 @@
 # 下一步任务
 
-## 当前进行：实现视图专用 Selector
+## 当前方向调整：停止视图专用 Selector，先评估 ParaX
 
-1. 分支为 `exp/view-specialized-selector`，实现已覆盖 `MultiLaneModel`、runner、compact state 和 smoke。
-2. 第一批计划为 S0 shared-10、S1 Full/Person/Face view-specific-10、S2 shared-30 容量对照；协议见
-   `docs/view_specialized_selector_validation.md`。
-3. 当前待完成：本地完整测试、提交受控代码、服务器 clean worktree 测试与 task0 smoke；通过后才启动 seed0
-   validation。此阶段不解冻 ViT、不启动动态 Router、不访问 test。
-4. 首次服务器测试发现新增测试的参数复制方式不兼容 PyTorch autograd，已修复，需重新推送并完成 225 项复测。
+用户认为当前个性化 Selector 路线实验效果不支持继续，停止该路线；不要再推进其 selector 参数扩展、Router 或额外 seed。下一研究候选为本地 `/Users/denghaoyuan/workspace/MyCode/ParaX-main` 的 ParaX 动态参数路由。
+
+当前仅完成只读分析，未实现或启动实验。建议顺序：
+1. 对齐既有固定三视图融合 validation 基线和数据协议。
+2. 低风险对照：冻结 CLIP 的 final patch tokens 后接 ParaX-style input-conditioned adapter。
+3. 主假设：ParaX 插入冻结 CLIP blocks 间的 late image-token 流，至少覆盖能影响后续 Selector 读取的层（先审计 zero-based blocks 8/9/10；block 11 若没有后续消费点不能假设有效）。共享 expert center 跨目标层及 Full/Person/Face，router 从图像 token activation 动态产生权重；另设显式 level-conditioned gating 消融。
+4. 记录每 task × 每 view 的 gate 熵/专家占用、adapter 残差比、各视图梯度、参数量、旧类性能/遗忘及每路/融合 final 与 average mAP。先跑 seed0 validation 筛选，胜出后才做参数量匹配对照和 seed1/2。
+5. 实现前必须处理图像流 `no_grad()` 与 token `.detach()` 对 Adapter 梯度的阻断，同时保证 CLIP base 权重冻结；明确共享 ParaX center 在 task 间持续更新是否漂移旧特征，并预注册蒸馏/冻结策略。
+
+完整结构比较、配置建议、推进门槛与风险见 `docs/parax_shared_level_routing_analysis_20260923.md`。当前没有实验执行授权；实施前需按项目实验流程向用户声明完整配置。
+
+## 已停止：视图专用 Selector 路线
+
+1. 历史分支 `exp/view-specialized-selector` 已实现 Selector 视图专用模式，但用户确认当前实验证据不足以继续。
+2. 不再推进该路线的额外 Selector 容量、Selector-aware Router、seed1/2 或 test；保留历史代码、文档和结果用于审计。
+3. 下一候选统一转入上方 ParaX 动态参数路由分析；实现前重新创建实验分支并声明完整配置。
 
 ## 导师讨论材料
 
@@ -1269,6 +1279,47 @@ VOC 对照实验，不应在现阶段合并到 `main`。
 
 ## P3稳定性修正版
 
-1. 在`exp/view-private-components-p3-stable`运行完整服务器单测和P3 task0 smoke。
-2. 用固定`--no-amp`、`gradient_clip_norm=0`运行P3 4-task稳定性检查；确认task3完成且无non-finite logits后，再启动8-task validation。
-3. 只以完成且zero-skip的P3和P0/P1/P2做叠加效果分析；不因P3修正版直接访问test。
+1. 已完成：`exp/view-private-components-p3-stable`上的FP32 P3通过服务器全测、task0 smoke及完整8-task validation；240 epochs、13,950 updates、zero skipped，数值稳定。
+2. 已完成叠加分析：P3 final mAP `40.9340`，低P0/P1/P2 `0.4516/0.9096/1.3312`，并且Person/reliable-Face相对P0下降超过0.50；不满足预注册推进条件。
+3. 不运行P3 seed1/2或test，也不继续Prompt+独立Adapter的all-private组合。P3使用FP32、旧臂使用AMP，不能把本结果作为无混杂的精度控制；若将来重新研究机制，须先另立含FP32 P0/P1/P2对照的预注册协议。当前不自动启动新实验。
+
+## FP32交互项与选择性 Prompt（当前任务）
+
+1. 提交并推送 `exp/view-private-components-fp32-selective-prompt`；服务器先审计 worktree，创建独立 clean worktree，不修改 `multi-lane-main-test-only`。
+2. 在 `ddp` 环境运行完整单测与选择性 Prompt/task0 smoke，核对初始化等价、Person 路由和 zero skipped。
+3. 通过后启动唯一 `launch_multilane_track_a_fp32_interaction_selective_val.sh`，运行 F0/F1/F2/F3/S1；仅 validation，不访问 test、不保存 full checkpoint。
+4. 同步结果后运行 `summarize_fp32_interaction_selective.py`，报告 final/average mAP、cF1/oF1、forgetting、逐 task mAP、交互项及 S1 相对 F2 的变化。
+5. batch `fp32_interaction_selective_seed0_20260917_230307` 运行中；完成后同步 runs、logs、status，逐文件校验 SHA-256，并运行交互项汇总器。
+
+6. batch 已完成并同步。F3 final 交互项仅 `-0.1121`、average 交互项 `+0.8438`，不支持简单的“结构负交互”结论；S1 相对 F2 final `+0.1659` 但 average 持平。当前不运行 test；若继续，应先做多 seed 或更小容量/晚层 Prompt 残差的预注册验证，并重点处理 Person 分支。
+
+## 共享基座视图残差与晚层 Prompt（当前任务）
+
+1. batch `shared_residuals_late_prompt_seed0_20260918_103705` 运行中；完成后同步 output/log/status，校验 SHA-256。
+2. 汇总 R0/R1/R2/R3 的 final/average mAP、cF1/oF1、forgetting、逐 task 和 Full/Person/Face/reliable-Face 指标。
+3. 按预先定义的机制比较判断：Selector 残差、Adapter 残差、晚层 Prompt 残差是否分别改善共享基线；不根据 Person 单独定制门槛，不访问 test。
+
+## 共享基座残差与晚层 Prompt（已完成）
+
+- 已完成并同步 batch `shared_residuals_late_prompt_seed0_20260918_103705`；R0/R1/R2/R3均通过完整 validation，服务器与本地产物 SHA-256 一致。
+- seed0 结果不支持 Selector residual、Adapter residual 或晚层 Full/Face Prompt residual 优于共享基线。当前不启动 test，也不直接扩大残差容量。
+- 后续候选：先固定 R0/R2 的表示，单独研究可学习融合权重、按样本可靠性校准和三路 logits/概率温度校准；若要声称结构改进，先预注册 seed1/2 复现并保持 FP32/TF32 配置一致。
+
+## R0 与动态三视图融合 test（用户已要求）
+
+1. 已确认动态 `soft_three_view` 机制和当前 R0 其余配置一致：task-local hidden-16 masked-softmax、固定先验初始化、可靠 Face mask。
+2. 已新增独立 R0/D1 test runner/launcher；两组仅改变 fixed/soft fusion，保持 shared Selector/Prompt/Adapter、FP32/TF32、seed0、8 tasks、30 epochs/task、batch64、auxiliary0.1、无checkpoint和无test搜索。
+3. 历史动态 J1 validation 曾低于固定 J0；本次 test 为用户明确要求的诊断性比较，结果不能用于test后再选模型或调融合权重。
+
+## R0 与动态三视图融合 test（已完成）
+
+- R0/D1 test 已完成并同步。R0 final/average mAP=`31.9883/38.8315`，D1=`29.5224/36.1115`；D1 final 低`2.4658`，average 低`2.7200`，8个task全部落后。
+- D1 权重从固定先验明显漂移到 Person 主导，说明当前 joint-gradient Router 受主损失驱动而缺少先验/校准约束。该结果不支持直接采用动态融合，也不支持在 test 上继续调 Router。
+- 后续若保留动态方向，只能回到 validation 预注册：image-group OOF/calibration、KL/prior 约束或小幅受限 residual，并补多 seed；当前固定 R0 仍是共享基座下更可靠的融合方案。
+
+## ParaX shared level routing (2026-09-23)
+
+1. Commit and push `exp/parax-level-routing`, preserving unrelated pre-existing local docs/tmp.
+2. On the server, inspect worktrees and create a clean Git-only checkout; run full ddp unit tests and six real ViT task0 GPU smoke arms.
+3. If smoke passes, launch the declared seed0 validation screen with B0, P-post, P-10, P-8:10, P-8:10-level, and Static-control; use validation only, no test or full checkpoint.
+4. Report mAP, per-view performance, gate entropy/top-expert frequency, cross-view gate distance, residual/token norm ratio, gradient/CLIP-freeze checks, memory and forgetting before any rank64 or seed1/2 follow-up.
