@@ -36,6 +36,107 @@ class TransformerBlockAdapter(nn.Module):
         return self.up(self.activation(self.down(value)))
 
 
+class ParaXImageAdapterBank(nn.Module):
+    """Token-only ParaX-style image-stream adapter for frozen CLIP blocks.
+
+    The expert matrices are shared by all selected layers and views. Each layer
+    owns a small router, so the effective low-rank projection is input-dependent.
+    """
+
+    def __init__(
+        self, hidden_dim: int, rank: int, num_experts: int, layer_indices: Sequence[int],
+        router_hidden: int = 16, residual_scale: float = 0.1,
+        level_conditioned: bool = False, static: bool = False,
+        initialization: str = "official",
+    ) -> None:
+        super().__init__()
+        if hidden_dim <= 0 or rank <= 0 or num_experts <= 0:
+            raise ValueError("ParaX dimensions must be positive")
+        layers = tuple(sorted(set(int(v) for v in layer_indices)))
+        if not layers or any(v < 0 for v in layers):
+            raise ValueError("ParaX layer indices must be non-negative")
+        if residual_scale < 0:
+            raise ValueError("ParaX residual scale must be non-negative")
+        if initialization not in {"official", "small"}:
+            raise ValueError("ParaX initialization must be official or small")
+        self.hidden_dim = int(hidden_dim)
+        self.rank = int(rank)
+        self.num_experts = int(num_experts)
+        self.layer_indices = layers
+        self.residual_scale = float(residual_scale)
+        self.level_conditioned = bool(level_conditioned)
+        self.static = bool(static)
+        self.initialization = initialization
+        self.level_names = ("full", "person", "face")
+        self.expert_a = nn.Parameter(torch.empty(num_experts, rank, hidden_dim))
+        self.expert_b = nn.Parameter(torch.empty(num_experts, hidden_dim, rank))
+        nn.init.trunc_normal_(self.expert_a, std=0.02)
+        nn.init.trunc_normal_(self.expert_b, std=0.02)
+        self.routers = nn.ModuleDict()
+        input_dim = hidden_dim + (hidden_dim if self.level_conditioned else 0)
+        for layer in self.layer_indices:
+            self.routers[str(layer)] = nn.Sequential(
+                nn.Linear(input_dim, router_hidden), nn.GELU(),
+                nn.Linear(router_hidden, num_experts)
+            )
+        self.level_embeddings = (
+            nn.Parameter(torch.zeros(len(self.level_names), hidden_dim))
+            if self.level_conditioned else None
+        )
+        self.norm = nn.LayerNorm(hidden_dim)
+        self.proj = nn.Linear(rank, rank)
+        initial_scale = float(residual_scale) if initialization == "official" else min(float(residual_scale), 1e-3)
+        self.output_scale = nn.Parameter(torch.tensor(initial_scale))
+        self.requires_grad_(False)
+
+    def activate_task(self, task_id: int) -> None:
+        # Shared ParaX parameters remain trainable across tasks by design.
+        self.requires_grad_(True)
+        if self.static:
+            for router in self.routers.values():
+                router.requires_grad_(False)
+
+    def restore_task(self, task_id: int) -> None:
+        self.requires_grad_(True)
+        if self.static:
+            for router in self.routers.values():
+                router.requires_grad_(False)
+
+    def active_parameters(self) -> Iterable[nn.Parameter]:
+        return (parameter for parameter in self.parameters() if parameter.requires_grad)
+
+    def parameter_count(self) -> int:
+        return sum(p.numel() for p in self.parameters())
+
+    def forward(
+        self, layer_id: int, tokens: torch.Tensor, view_name: str = "full",
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if layer_id not in self.layer_indices:
+            return tokens, tokens.new_zeros((tokens.shape[0], self.num_experts))
+        if tokens.ndim != 3 or tokens.shape[-1] != self.hidden_dim:
+            raise ValueError("ParaX tokens must have shape [batch, tokens, hidden_dim]")
+        pooled = tokens.mean(dim=1)
+        router_input = pooled
+        if self.level_conditioned:
+            if view_name not in self.level_names:
+                raise ValueError(f"Unknown ParaX view: {view_name}")
+            level = self.level_embeddings[self.level_names.index(view_name)]
+            router_input = torch.cat([pooled, level.expand_as(pooled)], dim=-1)
+        if self.static:
+            gates = tokens.new_full((tokens.shape[0], self.num_experts), 1.0 / self.num_experts)
+        else:
+            gates = torch.softmax(self.routers[str(layer_id)](router_input.float()), dim=-1)
+            gates = gates.to(dtype=tokens.dtype)
+        a = torch.einsum("be,erk->brk", gates, self.expert_a.to(tokens))
+        b = torch.einsum("be,ekr->bkr", gates, self.expert_b.to(tokens))
+        x = self.norm(tokens)
+        low = torch.einsum("blk,brk->blr", x, a)
+        low = torch.nn.functional.gelu(self.proj(low))
+        delta = torch.einsum("blr,bkr->blk", low, b)
+        output = tokens + self.output_scale.to(tokens) * delta
+        return output, gates
+
+
 class TaskLaneTransformerAdapterBank(nn.Module):
     """Preallocated task-specific adapters, routed by MULTI-LANE lane id."""
 

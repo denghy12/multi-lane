@@ -73,6 +73,14 @@ def main() -> None:
         default="independent",
     )
     parser.add_argument("--adapter-residual-scale", type=float, default=0.1)
+    parser.add_argument("--parax-mode", choices=("disabled", "post", "image", "image_level", "static"), default="disabled")
+    parser.add_argument("--parax-rank", type=int, default=32)
+    parser.add_argument("--parax-num-experts", type=int, default=3)
+    parser.add_argument("--parax-layer-indices", type=int, nargs="+", default=(10,))
+    parser.add_argument("--parax-router-hidden", type=int, default=16)
+    parser.add_argument("--parax-residual-scale", type=float, default=0.1)
+    parser.add_argument("--parax-initialization", choices=("official", "small"), default="official")
+    parser.add_argument("--parax-level-conditioned", action="store_true")
     parser.add_argument(
         "--adapter-residual-gate-mode",
         choices=("fixed", "learnable"),
@@ -130,6 +138,14 @@ def main() -> None:
         view_classifier_mode=args.view_classifier_mode,
         adapter_view_bottleneck_dim=args.adapter_view_bottleneck_dim,
         adapter_view_mode=args.adapter_view_mode,
+        parax_mode=args.parax_mode,
+        parax_rank=args.parax_rank,
+        parax_num_experts=args.parax_num_experts,
+        parax_layer_indices=tuple(args.parax_layer_indices),
+        parax_router_hidden=args.parax_router_hidden,
+        parax_residual_scale=args.parax_residual_scale,
+        parax_level_conditioned=args.parax_level_conditioned,
+        parax_initialization=args.parax_initialization,
     ).float().cuda()
     model.activate_task(0)
     images = torch.randn(2, 3, 224, 224, device="cuda")
@@ -213,7 +229,10 @@ def main() -> None:
             )
     model.train()
     model_parameters = list(model.base_optimizer_parameters())
-    adapter_parameters = list(model.adapter_optimizer_parameters())
+    adapter_parameters = (
+        list(model.adapter_optimizer_parameters())
+        + list(model.parax_optimizer_parameters())
+    )
     if args.loss_routing in {"adapter_asl", "both_asl"} and not adapter_parameters:
         raise RuntimeError("Adapter ASL smoke requires an enabled Adapter")
     scaler = torch.cuda.amp.GradScaler(enabled=amp)
@@ -306,6 +325,7 @@ def main() -> None:
         f"precision={'amp' if amp else 'fp32'} "
         f"tf32={'on' if tf32 else 'off'} "
         f"adapter_layers={','.join(map(str, args.adapter_layer_indices))} "
+        f"parax_mode={args.parax_mode} parax_layers={','.join(map(str, args.parax_layer_indices))} "
         f"trainable_parameters={trainable} "
         f"selector_condition_max_initial_difference={selector_condition_max_initial_difference} "
         f"max_initial_difference={max_initial_difference if model.adapter_bank is not None else 0.0}"

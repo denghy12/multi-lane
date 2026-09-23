@@ -15,7 +15,9 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from .adapter import TaskImageTokenAdapterBank, TaskLaneTransformerAdapterBank
+from .adapter import (
+    ParaXImageAdapterBank, TaskImageTokenAdapterBank, TaskLaneTransformerAdapterBank,
+)
 from .selector_conditioning import TaskSelectorConditioner
 from .view_fusion import TaskwiseViewFusion
 
@@ -57,6 +59,14 @@ class MultiLaneModel(nn.Module):
         view_residual_scale: float = 0.1,
         detach_view_fusion_features: bool = False,
         view_classifier_mode: str = "shared_post_fusion",
+        parax_mode: str = "disabled",
+        parax_rank: int = 32,
+        parax_num_experts: int = 3,
+        parax_layer_indices: Sequence[int] = (10,),
+        parax_router_hidden: int = 16,
+        parax_residual_scale: float = 0.1,
+        parax_level_conditioned: bool = False,
+        parax_initialization: str = "official",
     ) -> None:
         super().__init__()
         if not task_sizes or any(int(size) <= 0 for size in task_sizes):
@@ -86,6 +96,8 @@ class MultiLaneModel(nn.Module):
             raise ValueError(
                 "Adapter mode must be disabled, task_lane, or image_token"
             )
+        if parax_mode not in {"disabled", "image", "image_level", "static", "post"}:
+            raise ValueError("Invalid ParaX mode")
         if int(adapter_view_bottleneck_dim) < 0:
             raise ValueError("View-specific Adapter bottleneck must be non-negative")
         if adapter_view_mode not in {"shared", "independent"}:
@@ -178,6 +190,19 @@ class MultiLaneModel(nn.Module):
         self.normalize = normalize
         self.adapter_mode = adapter_mode
         self.adapter_runtime_enabled = adapter_mode != "disabled"
+        self.parax_mode = parax_mode
+        self.parax_runtime_enabled = parax_mode != "disabled"
+        self.parax_bank = None
+        self._parax_gate_records = []
+        if self.parax_runtime_enabled:
+            self.parax_bank = ParaXImageAdapterBank(
+                hidden_dim=self.width, rank=parax_rank,
+                num_experts=parax_num_experts, layer_indices=parax_layer_indices,
+                router_hidden=parax_router_hidden, residual_scale=parax_residual_scale,
+                level_conditioned=(parax_level_conditioned or parax_mode == "image_level"),
+                static=(parax_mode == "static"),
+                initialization=parax_initialization,
+            )
         self._task_sizes = tuple(int(size) for size in task_sizes)
         self._current_task_id = -1
 
@@ -350,6 +375,8 @@ class MultiLaneModel(nn.Module):
                         prompt[:, task_id].copy_(prompt[:, task_id - 1])
         if self.adapter_bank is not None:
             self.adapter_bank.activate_task(task_id)
+        if self.parax_bank is not None:
+            self.parax_bank.activate_task(task_id)
         if self.selector_conditioner is not None:
             self.selector_conditioner.restore_task(task_id)
         self.view_fusion_module.restore_task(task_id)
@@ -360,6 +387,8 @@ class MultiLaneModel(nn.Module):
             raise ValueError("MULTI-LANE restored task id is invalid")
         if self.adapter_bank is not None:
             self.adapter_bank.restore_task(task_id)
+        if self.parax_bank is not None:
+            self.parax_bank.restore_task(task_id)
         if self.selector_conditioner is not None:
             self.selector_conditioner.restore_task(task_id)
         self.view_fusion_module.restore_task(task_id)
@@ -369,6 +398,61 @@ class MultiLaneModel(nn.Module):
         if enabled and self.adapter_bank is None:
             raise RuntimeError("Cannot enable an adapter that was not configured")
         self.adapter_runtime_enabled = bool(enabled)
+
+    def set_parax_runtime_enabled(self, enabled: bool) -> None:
+        if enabled and self.parax_bank is None:
+            raise RuntimeError("Cannot enable ParaX that was not configured")
+        self.parax_runtime_enabled = bool(enabled)
+
+    def _record_parax_gates(
+        self, layer_id: int, image_view: str, before: torch.Tensor,
+        after: torch.Tensor, gates: torch.Tensor,
+    ) -> None:
+        if not self.parax_runtime_enabled:
+            return
+        token_norm = before.detach().float().norm(dim=-1).mean().clamp_min(1e-12)
+        residual_norm = (after.detach().float() - before.detach().float()).norm(dim=-1).mean()
+        self._parax_gate_records.append({
+            "layer_id": int(layer_id),
+            "view": str(image_view),
+            "gates": gates.detach().float(),
+            "residual_ratio": float((residual_norm / token_norm).cpu()),
+        })
+
+    def parax_gate_diagnostics(self) -> Dict[str, float]:
+        """Return per-view/layer gate and residual diagnostics for the last forward."""
+        if not self._parax_gate_records:
+            return {}
+        result: Dict[str, float] = {}
+        grouped: Dict[Tuple[str, int], list[dict]] = {}
+        for record in self._parax_gate_records:
+            grouped.setdefault((record["view"], record["layer_id"]), []).append(record)
+        for (view, layer_id), records in grouped.items():
+            gates = torch.cat([record["gates"] for record in records], dim=0)
+            prefix = f"parax_{view}_layer{layer_id}"
+            mean = gates.mean(dim=0)
+            entropy = -(gates.clamp_min(1e-12) * gates.clamp_min(1e-12).log()).sum(dim=-1).mean()
+            top_frequency = torch.bincount(gates.argmax(dim=-1), minlength=gates.shape[1]).float() / gates.shape[0]
+            for expert, value in enumerate(mean):
+                result[f"{prefix}_gate_mean_e{expert}"] = float(value)
+            for expert, value in enumerate(top_frequency):
+                result[f"{prefix}_top_frequency_e{expert}"] = float(value)
+            result[f"{prefix}_entropy"] = float(entropy)
+            result[f"{prefix}_residual_ratio"] = float(
+                sum(record["residual_ratio"] for record in records) / len(records)
+            )
+        views = sorted({record["view"] for record in self._parax_gate_records})
+        if len(views) >= 2:
+            view_means = {}
+            for view in views:
+                view_records = [r for r in self._parax_gate_records if r["view"] == view]
+                view_means[view] = torch.cat([r["gates"] for r in view_records], dim=0).mean(dim=0)
+            distances = []
+            for index, left in enumerate(views):
+                for right in views[index + 1:]:
+                    distances.append(torch.norm(view_means[left] - view_means[right], p=1))
+            result["parax_view_gate_l1_distance"] = float(torch.stack(distances).mean())
+        return result
 
     def set_selector_conditioning_runtime_enabled(self, enabled: bool) -> None:
         if enabled and self.selector_conditioner is None:
@@ -491,7 +575,10 @@ class MultiLaneModel(nn.Module):
         # The released block applies its first LayerNorm before both selector
         # aggregation and prompt attention.  Keep the residual stream itself
         # unnormalized, as in the original pre-norm transformer.
-        frozen_normalized_image = block.ln_1(image_tokens).detach()
+        frozen_normalized_image = block.ln_1(image_tokens)
+        if not self.parax_runtime_enabled:
+            frozen_normalized_image = frozen_normalized_image.detach()
+        selector_image_tokens = frozen_normalized_image
         normalized_lane = block.ln_1(lane_tokens)
         task_cls = normalized_lane[:, :, :1]
         selectors = normalized_lane[:, :, 1:]
@@ -525,11 +612,11 @@ class MultiLaneModel(nn.Module):
             # Preserve the historical contraction path exactly for disabled
             # and task-lane modes.
             similarity = torch.einsum(
-                "tbsc,bnc->tbsn", queries, frozen_normalized_image
+                "tbsc,bnc->tbsn", queries, selector_image_tokens
             ) * (self.width**-0.5)
             selected = torch.einsum(
                 "bnc,tbsn->tbsc",
-                frozen_normalized_image,
+                selector_image_tokens,
                 torch.softmax(similarity, dim=-1),
             )
         summarized = torch.cat([task_cls, selected], dim=2)
@@ -593,6 +680,34 @@ class MultiLaneModel(nn.Module):
             images.shape[0], lane_ids, image_view=image_view
         )
         for layer_id, block in enumerate(self.visual_encoder.transformer.resblocks):
+            if (self.parax_runtime_enabled and self.parax_bank is not None
+                    and self.parax_mode != "post"
+                    and layer_id > 0
+                    and layer_id - 1 in self.parax_bank.layer_indices):
+                patch_tokens = image_tokens[:, 1:]
+                before_patch_tokens = patch_tokens
+                patch_tokens, gates = self.parax_bank(
+                    layer_id - 1, patch_tokens, view_name=image_view
+                )
+                image_tokens = torch.cat([image_tokens[:, :1], patch_tokens], dim=1)
+                self._last_parax_gates = gates.detach()
+                self._record_parax_gates(
+                    layer_id - 1, image_view, before_patch_tokens, patch_tokens, gates
+                )
+            if (self.parax_runtime_enabled and self.parax_bank is not None
+                    and self.parax_mode == "post"
+                    and layer_id == len(self.visual_encoder.transformer.resblocks) - 1):
+                patch_tokens = image_tokens[:, 1:]
+                before_patch_tokens = patch_tokens
+                patch_tokens, gates = self.parax_bank(
+                    self.parax_bank.layer_indices[0], patch_tokens, view_name=image_view
+                )
+                image_tokens = torch.cat([image_tokens[:, :1], patch_tokens], dim=1)
+                self._last_parax_gates = gates.detach()
+                self._record_parax_gates(
+                    self.parax_bank.layer_indices[0], image_view, before_patch_tokens,
+                    patch_tokens, gates
+                )
             query_delta = None
             if (condition_enabled
                     and self.selector_conditioning != "person_patches"
@@ -613,10 +728,13 @@ class MultiLaneModel(nn.Module):
                 paired["condition_valid"] if person_tokens is not None else None,
                 image_view,
             )
-            with torch.no_grad():
-                image_tokens = block(image_tokens.permute(1, 0, 2)).permute(
-                    1, 0, 2
-                )
+            if not self.parax_runtime_enabled:
+                with torch.no_grad():
+                    image_tokens = block(image_tokens.permute(1, 0, 2)).permute(
+                        1, 0, 2
+                    )
+            else:
+                image_tokens = block(image_tokens.permute(1, 0, 2)).permute(1, 0, 2)
                 if (person_tokens is not None
                         and layer_id < max(self.selector_conditioner.layer_indices)):
                     person_tokens = block(
@@ -634,6 +752,7 @@ class MultiLaneModel(nn.Module):
         self, images: ModelInputs, all_seen_lanes: bool
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         """Return fused lane features and their supervised view features."""
+        self._parax_gate_records = []
         if self.view_fusion == "disabled":
             self._last_fusion_weights = None
             return self._encode_single_lanes(images, all_seen_lanes), {}
@@ -831,6 +950,7 @@ class MultiLaneModel(nn.Module):
     def optimizer_parameters(self) -> Iterable[nn.Parameter]:
         yield from self.base_optimizer_parameters()
         yield from self.adapter_optimizer_parameters()
+        yield from self.parax_optimizer_parameters()
 
     def base_optimizer_parameters(self) -> Iterable[nn.Parameter]:
         yield from self.representation_optimizer_parameters()
@@ -867,6 +987,10 @@ class MultiLaneModel(nn.Module):
         if self.adapter_bank is not None:
             yield from self.adapter_bank.active_parameters()
 
+    def parax_optimizer_parameters(self) -> Iterable[nn.Parameter]:
+        if self.parax_bank is not None:
+            yield from self.parax_bank.active_parameters()
+
     def optimizer_parameter_names(self) -> Tuple[str, ...]:
         names = ["selectors"]
         if self.selector_view_residuals is not None:
@@ -896,6 +1020,12 @@ class MultiLaneModel(nn.Module):
                 for name in self.adapter_bank.parameter_names()
                 if dict(self.adapter_bank.named_parameters())[name].requires_grad
             )
+        if self.parax_bank is not None:
+            names.extend(
+                f"parax_bank.{name}"
+                for name, parameter in self.parax_bank.named_parameters()
+                if parameter.requires_grad
+            )
         return tuple(names)
 
     def assert_visual_frozen(self) -> None:
@@ -909,3 +1039,7 @@ class MultiLaneModel(nn.Module):
                 "MULTI-LANE visual encoder unexpectedly became trainable: "
                 + ", ".join(unexpected)
             )
+
+    def assert_parax_configured(self) -> None:
+        if self.parax_mode != "disabled" and self.parax_bank is None:
+            raise RuntimeError("ParaX mode is enabled without a ParaX bank")

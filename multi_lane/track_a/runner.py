@@ -1333,6 +1333,7 @@ def build_optimizer_groups(
             "lr": view_fusion_learning_rate,
         })
     adapter_parameters = list(model.adapter_optimizer_parameters())
+    parax_parameters = list(model.parax_optimizer_parameters())
     if adapter_parameters:
         if adapter_learning_rate is None or adapter_learning_rate <= 0:
             raise ValueError("Enabled adapters require a positive learning rate")
@@ -1350,6 +1351,18 @@ def build_optimizer_groups(
                 "lr": adapter_learning_rate,
             }
         )
+    if parax_parameters:
+        if adapter_learning_rate is None or adapter_learning_rate <= 0:
+            raise ValueError("Enabled ParaX requires a positive adapter learning rate")
+        optimizer_groups.append({
+            "params": parax_parameters,
+            "weight_decay": (
+                weight_decay if adapter_weight_decay is None
+                else float(adapter_weight_decay)
+            ),
+            "lr": adapter_learning_rate,
+        })
+        adapter_parameters.extend(parax_parameters)
     return model_parameters, adapter_parameters, optimizer_groups
 
 
@@ -1686,6 +1699,8 @@ def train_task(
         condition_visible_total = 0.0
         fusion_weight_totals = None
         fusion_weight_batches = 0
+        parax_diagnostic_totals: Dict[str, float] = {}
+        parax_diagnostic_batches = 0
         epoch_condition_lr = (
             float(optimizer.param_groups[2]["lr"])
             if model.selector_conditioner is not None else None
@@ -1981,6 +1996,13 @@ def train_task(
                     else fusion_weight_totals + values
                 )
                 fusion_weight_batches += 1
+            parax_diagnostics = model.parax_gate_diagnostics()
+            if parax_diagnostics:
+                for key, value in parax_diagnostics.items():
+                    parax_diagnostic_totals[key] = (
+                        parax_diagnostic_totals.get(key, 0.0) + float(value)
+                    )
+                parax_diagnostic_batches += 1
         if not batches:
             raise RuntimeError("Training loader produced no batches")
         if optimizer_steps and optimizer_updates_per_task is None:
@@ -2028,6 +2050,11 @@ def train_task(
             means = fusion_weight_totals / fusion_weight_batches
             for name, value in zip(model.view_fusion_module.view_names, means):
                 row[f"fusion_weight_{name}"] = float(value)
+        if parax_diagnostic_batches:
+            row.update({
+                key: value / parax_diagnostic_batches
+                for key, value in parax_diagnostic_totals.items()
+            })
         if task_gradient_audit is not None and epoch == 0:
             row.update(task_gradient_audit)
         if epoch_path_gradient_audits:
@@ -2392,6 +2419,17 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--adapter-learning-rate", type=float, default=4e-4)
     parser.add_argument(
+        "--parax-mode", choices=("disabled", "post", "image", "image_level", "static"),
+        default="disabled", help="ParaX image-stream routing mode."
+    )
+    parser.add_argument("--parax-rank", type=int, default=32)
+    parser.add_argument("--parax-num-experts", type=int, default=3)
+    parser.add_argument("--parax-layer-indices", type=int, nargs="+", default=[10])
+    parser.add_argument("--parax-router-hidden", type=int, default=16)
+    parser.add_argument("--parax-residual-scale", type=float, default=0.1)
+    parser.add_argument("--parax-initialization", choices=("official", "small"), default="official")
+    parser.add_argument("--parax-level-conditioned", action="store_true")
+    parser.add_argument(
         "--adapter-weight-decay",
         type=float,
         default=None,
@@ -2459,6 +2497,12 @@ def main() -> None:
         raise ValueError("View auxiliary supervision requires view fusion")
     if args.num_selectors <= 0:
         raise ValueError("Number of Selectors must be positive")
+    if args.parax_rank <= 0 or args.parax_num_experts <= 0 or args.parax_router_hidden <= 0:
+        raise ValueError("ParaX rank, experts and router hidden must be positive")
+    if not args.parax_layer_indices or any(index < 0 or index >= 12 for index in args.parax_layer_indices):
+        raise ValueError("ParaX layer indices must be valid CLIP block indices")
+    if args.parax_residual_scale < 0:
+        raise ValueError("ParaX residual scale must be non-negative")
     if args.view_gradient_routing != "joint" and args.view_fusion == "disabled":
         raise ValueError("View gradient routing requires view fusion")
     if args.view_gradient_routing == "dgl" and (
@@ -2728,6 +2772,14 @@ def main() -> None:
         view_residual_scale=args.view_residual_scale,
         detach_view_fusion_features=args.view_gradient_routing != "joint",
         view_classifier_mode=args.view_classifier_mode,
+        parax_mode=args.parax_mode,
+        parax_rank=args.parax_rank,
+        parax_num_experts=args.parax_num_experts,
+        parax_layer_indices=args.parax_layer_indices,
+        parax_router_hidden=args.parax_router_hidden,
+        parax_residual_scale=args.parax_residual_scale,
+        parax_level_conditioned=args.parax_level_conditioned,
+        parax_initialization=args.parax_initialization,
     ).float().to(device)
     model.visual_encoder.requires_grad_(False)
     model.assert_visual_frozen()
@@ -2740,6 +2792,10 @@ def main() -> None:
     adapter_parameters = (
         model.adapter_bank.total_parameter_count()
         if model.adapter_bank is not None else 0
+    )
+    parax_parameters = (
+        model.parax_bank.parameter_count()
+        if model.parax_bank is not None else 0
     )
     adapter_parameters_per_task = (
         model.adapter_bank.per_task_parameter_count()
@@ -2755,11 +2811,11 @@ def main() -> None:
     )
     fusion_parameters_per_task = model.view_fusion_module.parameter_count_per_task()
     print(
-        f"trainable_parameters={lane_parameters + classifier_parameters + adapter_parameters_per_task + condition_parameters_per_task + fusion_parameters_per_task} "
+        f"trainable_parameters={lane_parameters + classifier_parameters + adapter_parameters_per_task + parax_parameters + condition_parameters_per_task + fusion_parameters_per_task} "
         f"selector_mode={model.selector_mode} selectors_total={model.selectors.numel()} "
         f"selectors_per_task={model.selectors.numel() // model.num_tasks} "
         f"task_lane={lane_parameters} classifier={classifier_parameters} "
-        f"adapter_total={adapter_parameters} "
+        f"adapter_total={adapter_parameters} parax_total={parax_parameters} "
         f"adapter_per_task={adapter_parameter_counts_per_task} "
         f"selector_condition_per_task={condition_parameters_per_task} "
         f"view_fusion_per_task={fusion_parameters_per_task}",
@@ -3246,6 +3302,21 @@ def main() -> None:
         "head_mode": "concat",
         "max_tasks": args.max_tasks,
         "adapter_mode": args.adapter_mode,
+        "parax_mode": args.parax_mode,
+        "parax_rank": args.parax_rank if args.parax_mode != "disabled" else None,
+        "parax_num_experts": args.parax_num_experts if args.parax_mode != "disabled" else None,
+        "parax_layer_indices": list(args.parax_layer_indices) if args.parax_mode != "disabled" else None,
+        "parax_router_hidden": args.parax_router_hidden if args.parax_mode != "disabled" else None,
+        "parax_residual_scale": args.parax_residual_scale if args.parax_mode != "disabled" else None,
+        "parax_initialization": args.parax_initialization if args.parax_mode != "disabled" else None,
+        "parax_level_conditioned": bool(args.parax_level_conditioned or args.parax_mode == "image_level"),
+        "parax_parameters": parax_parameters,
+        "parax_target": (
+            "patch_tokens_between_frozen_clip_blocks"
+            if args.parax_mode in {"image", "image_level", "static"}
+            else "terminal_pre_consumer_patch_tokens"
+            if args.parax_mode == "post" else None
+        ),
         "adapter_bottleneck_dim": args.adapter_bottleneck_dim,
         "adapter_view_bottleneck_dim": args.adapter_view_bottleneck_dim,
         "adapter_view_mode": args.adapter_view_mode,
@@ -3308,10 +3379,12 @@ def main() -> None:
         "cuda_version": torch.version.cuda,
         "trainable_parameters": (
             lane_parameters + classifier_parameters + adapter_parameters_per_task
+            + parax_parameters
             + condition_parameters_per_task + fusion_parameters_per_task
         ),
         "total_method_parameters": (
             lane_parameters + classifier_parameters + adapter_parameters
+            + parax_parameters
             + condition_parameters_per_task * model.num_tasks
             + fusion_parameters_per_task * model.num_tasks
         ),
@@ -3320,6 +3393,7 @@ def main() -> None:
         "adapter_parameters": adapter_parameters,
         "adapter_parameters_per_task": adapter_parameters_per_task,
         "adapter_parameter_counts_per_task": adapter_parameter_counts_per_task,
+        "parax_parameters": parax_parameters,
     }
     (output / "config.json").write_text(
         json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
