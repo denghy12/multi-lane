@@ -1,5 +1,12 @@
 # 工作日志
 
+## 同步并分析 ParaX P-10 稳定性 test（2026-09-24）
+
+- batch `parax_p10_stability_test_20260924_111500` 已完成：P10-small、P10-router、P10-experts 均 240 epochs、13,950 updates、0 skipped；P10-small-distill 在 task0 后进入 task1 时 CUDA OOM，未形成完整结果。57 个结果/日志文件已同步本地。
+- test final/average mAP：P10-small `31.2761/38.5367`，P10-router `31.9207/39.3952`，P10-experts `31.7548/38.9873`；冻结三视图 test 锚点 `32.5365/39.1445`。三组 final 均低于锚点，router-only 最稳定但仍无提升。
+- residual ratio cap 生效：P10-small 和 P10-experts task7 layer10 约 0.09；P10-router 因冻结 expert center 实际残差为0。P10-experts view gate L1 仅0.0132，冻结 router 后几乎失去 level 区分；P10-router gate 有轻微 view 差异但无有效残差。
+- 蒸馏 OOM 原因是每个新 task 同时保留完整 teacher CLIP 并执行 teacher/student 三视图前向，显存峰值超过23.5GiB。结果报告见 `docs/parax_p10_stability_test_results_20260924.md`。不把不完整蒸馏组用于结论，不继续 test 搜索。
+
 ## 开始 ParaX P-10 稳定性 test-only 实验（2026-09-24）
 
 - 用户要求开始修改并直接运行 test，不跑 validation。已从 `exp/parax-level-routing` 新建 `exp/parax-p10-stability-test`，保留既有未提交文档和 `tmp/`。

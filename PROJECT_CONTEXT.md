@@ -1,5 +1,9 @@
 # 项目上下文
 
+## 2026-09-24：ParaX P-10 stability test 完成
+
+test-only batch `parax_p10_stability_test_20260924_111500` 已同步。P10-small/P10-router/P10-experts 完整结束，final mAP 为 `31.2761/31.9207/31.7548`，冻结三视图 test 锚点为 `32.5365`；三组均未超过锚点。P10-router forgetting 最低 `4.9013`，但仍高于锚点 `4.7308`。ratio cap 将 task7 residual ratio 控制在约0.09；experts-only 的 view gate L1仅0.0132，router-only 无有效残差。P10-small-distill 在 task1因完整 teacher/student 三视图前向 OOM，结果不完整。详细报告见 `docs/parax_p10_stability_test_results_20260924.md`。下一步停止直接扩大 ParaX；如继续，先实现低显存蒸馏并只做短程 validation。
+
 ## 2026-09-24：开始 ParaX P-10 稳定性 test-only 实验
 
 用户要求直接运行 held-out test，不跑 validation。已从 `exp/parax-level-routing` 创建 `exp/parax-p10-stability-test`。实现新增 ParaX trainable component 选择（all/router/experts）、固定输出 scale、residual/token ratio cap，以及按 task 快照的旧 task logit distillation；默认旧配置兼容。四组 test arm 为 P10-small、P10-router、P10-experts、P10-small-distill，均只用 P-10、rank32、3 experts、small init、fixed scale0.001、ratio cap0.10，蒸馏权重0.2。已完成本地 py_compile、bash -n、diff check；本机无 torch，服务器 ddp 全测与真实 smoke 尚未执行。实验协议见 `docs/parax_p10_stability_test_plan_20260924.md`。
