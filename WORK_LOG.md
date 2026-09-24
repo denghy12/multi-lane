@@ -1,5 +1,20 @@
 # 工作日志
 
+## 开始 ParaX P-10 稳定性 test-only 实验（2026-09-24）
+
+- 用户要求开始修改并直接运行 test，不跑 validation。已从 `exp/parax-level-routing` 新建 `exp/parax-p10-stability-test`，保留既有未提交文档和 `tmp/`。
+- 新增 ParaX 稳定性开关：`trainable_components`（all/router/experts）、fixed/learnable output scale、residual ratio cap、旧 task logit distillation；默认旧行为保持兼容。
+- 新增 test-only launcher，四组锁定为 P10-small、P10-router、P10-experts、P10-small-distill。共同使用 block10、rank32、3 experts、small init、fixed scale0.001、residual cap0.10；蒸馏权重0.2。
+- test 配置与风险边界记录于 `docs/parax_p10_stability_test_plan_20260924.md`。本机 py_compile、bash -n、git diff --check 通过；本机无 torch，完整测试需在服务器 ddp 环境执行。尚未启动服务器 smoke 或正式 test。
+
+## 同步并分析 ParaX shared level routing seed0 结果（2026-09-24）
+
+- 六组正式 validation 已全部结束并同步到本地 `output/emotic_track_a_parax/parax_shared_level_seed0_20260923_20260923_2045/` 与对应 `logs/`；每组 240 epochs、13,950 updates、0 skipped，无 OOM/NaN、未访问 test、未保存完整 checkpoint。
+- B0 final/average mAP 为 `42.9847/50.0234`。P-post、P-10、P-8:10、P-8:10-level、Static-control final mAP 相对 B0 分别为 `-6.6444/-5.4729/-11.5877/-9.9472/-9.0120`；所有预注册晋级条件失败。
+- 所有 ParaX 单视图均下降。P-10 task7 Full/Person/Face/reliable-Face 相对 B0 为 `-5.741/-6.616/-2.034/-3.770`，Face 虽相对最稳但不足以支撑融合收益。
+- P-10 residual/token ratio 约 `0.46–0.58`；P-8:10-level layer10 Person/Face 达 `1.016/0.934`，并出现近乎 one-hot gate。Static-control 仍退化，说明主要问题是残差幅度与跨 task 表征漂移，而非动态路由容量不足。
+- forgetting 从 B0 `1.0785` 增至 P-10 `6.5905`、P-8:10 `12.0309`、P-8:10-level `11.9386`。停止连续层、rank64、seed1/2 和 test；下一步只设计 P-10 的 identity/小 scale、残差约束、冻结或蒸馏稳定性小实验，稳定后再恢复 level routing。
+
 ## 停止视图专用 Selector 并分析 ParaX 候选
 
 - 用户要求停止个性化 Selector 路线，转向分析 ParaX 对共享 ViT 多 level 表征路由的适用性；本轮遵守“不修改代码”。
@@ -3913,3 +3928,5 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - Real ViT six-arm smoke is queued by resource state only: all 8 server GPUs were occupied (1.6--2.2 GiB free, >93% utilization), so no GPU job was started or preempted.
 - Once GPUs became free, all six task0 real ViT smoke arms ran. Five passed; Static-control initially failed because the generic smoke demanded gradients for intentionally frozen static routers. Updated static control to exclude routers from trainable parameters; full 234-test suite passed again, then all six smoke arms passed (including Static-control).
 - Added formal validation run/launcher scripts for the locked seed0, 8-task, 30-epoch, batch64 fixed-three-view plan. They are being validated before the run is launched.
+- Six-arm task0 smoke batch `parax_task0_smoke_20260923_retry` completed on GPUs 0--5; all six reported `MULTI_LANE_TRACK_A_SMOKE_OK`. Static-control was separately rerun after the static-router trainability fix and passed.
+- Full seed0 validation batch `parax_shared_level_seed0_20260923_20260923_2045` started on server GPUs 0--5 with commit `f769d3f`; six runs are active, each entered task0 and completed its first 84-update epoch with zero skipped updates. Current first-epoch losses: B0 0.67692, P-post 0.67800, P-10 0.67707, P-8:10 0.67603, P-8:10-level 0.67728, Static-control 0.67607. These are training losses only, not validation evidence. Outputs: `/mnt/haoyuan/workspace/emotic_benchmark_runs/multi_lane_parax_shared_level_v0.1/parax_shared_level_seed0_20260923_20260923_2045`; logs/status: `logs/emotic_track_a_parax/parax_shared_level_seed0_20260923_20260923_2045` and matching `output/` manifest/status.

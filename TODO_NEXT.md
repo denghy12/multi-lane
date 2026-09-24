@@ -1,15 +1,12 @@
 # 下一步任务
 
-## 当前方向调整：停止视图专用 Selector，先评估 ParaX
+## 当前方向调整：ParaX seed0 已失败，先做稳定性诊断
 
 用户认为当前个性化 Selector 路线实验效果不支持继续，停止该路线；不要再推进其 selector 参数扩展、Router 或额外 seed。下一研究候选为本地 `/Users/denghaoyuan/workspace/MyCode/ParaX-main` 的 ParaX 动态参数路由。
 
-当前仅完成只读分析，未实现或启动实验。建议顺序：
-1. 对齐既有固定三视图融合 validation 基线和数据协议。
-2. 低风险对照：冻结 CLIP 的 final patch tokens 后接 ParaX-style input-conditioned adapter。
-3. 主假设：ParaX 插入冻结 CLIP blocks 间的 late image-token 流，至少覆盖能影响后续 Selector 读取的层（先审计 zero-based blocks 8/9/10；block 11 若没有后续消费点不能假设有效）。共享 expert center 跨目标层及 Full/Person/Face，router 从图像 token activation 动态产生权重；另设显式 level-conditioned gating 消融。
-4. 记录每 task × 每 view 的 gate 熵/专家占用、adapter 残差比、各视图梯度、参数量、旧类性能/遗忘及每路/融合 final 与 average mAP。先跑 seed0 validation 筛选，胜出后才做参数量匹配对照和 seed1/2。
-5. 实现前必须处理图像流 `no_grad()` 与 token `.detach()` 对 Adapter 梯度的阻断，同时保证 CLIP base 权重冻结；明确共享 ParaX center 在 task 间持续更新是否漂移旧特征，并预注册蒸馏/冻结策略。
+ParaX shared level routing 的六组 seed0 validation 已完成，但全部低于 B0；结果和逐视图、gate、residual 诊断见 `docs/parax_shared_level_routing_analysis_20260923.md`。当前不要启动连续层、rank64、seed1/2 或 test。
+
+下一步仅保留 P-10 单插入点做短程稳定性实验：identity/1e-3 输出初始化或固定小 residual scale（目标 ratio 0.05–0.10），并比较冻结 shared center、只训练 router、旧 task feature/logit distillation。首轮关闭 level embedding，先确认能否控制表征漂移和 forgetting；task0/2-task validation 通过后再决定是否恢复动态 level routing。
 
 完整结构比较、配置建议、推进门槛与风险见 `docs/parax_shared_level_routing_analysis_20260923.md`。当前没有实验执行授权；实施前需按项目实验流程向用户声明完整配置。
 
@@ -1323,3 +1320,8 @@ VOC 对照实验，不应在现阶段合并到 `main`。
 2. On the server, inspect worktrees and create a clean Git-only checkout; run full ddp unit tests and six real ViT task0 GPU smoke arms.
 3. If smoke passes, launch the declared seed0 validation screen with B0, P-post, P-10, P-8:10, P-8:10-level, and Static-control; use validation only, no test or full checkpoint.
 4. Report mAP, per-view performance, gate entropy/top-expert frequency, cross-view gate distance, residual/token norm ratio, gradient/CLIP-freeze checks, memory and forgetting before any rank64 or seed1/2 follow-up.
+
+## ParaX seed0 validation in progress
+
+- Batch `parax_shared_level_seed0_20260923_20260923_2045` is running six arms on GPUs 0--5 (rank32, official initialization, fixed-three-view, 8 tasks × 30 epochs); first epoch completed in all arms with zero skipped updates.
+- Do not launch duplicate runs. Wait for all six status codes; then sync run outputs and logs from server to local output/logs, verify SHA-256, and analyze final/average mAP, per-view metrics, gate statistics, drift, speed/memory, and forgetting. Test remains forbidden.

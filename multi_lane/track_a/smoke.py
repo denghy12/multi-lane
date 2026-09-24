@@ -80,6 +80,9 @@ def main() -> None:
     parser.add_argument("--parax-router-hidden", type=int, default=16)
     parser.add_argument("--parax-residual-scale", type=float, default=0.1)
     parser.add_argument("--parax-initialization", choices=("official", "small"), default="official")
+    parser.add_argument("--parax-trainable-components", choices=("all", "router", "experts"), default="all")
+    parser.add_argument("--parax-output-scale-mode", choices=("learnable", "fixed"), default="learnable")
+    parser.add_argument("--parax-residual-ratio-cap", type=float, default=0.0)
     parser.add_argument("--parax-level-conditioned", action="store_true")
     parser.add_argument(
         "--adapter-residual-gate-mode",
@@ -146,6 +149,9 @@ def main() -> None:
         parax_residual_scale=args.parax_residual_scale,
         parax_level_conditioned=args.parax_level_conditioned,
         parax_initialization=args.parax_initialization,
+        parax_trainable_components=args.parax_trainable_components,
+        parax_output_scale_mode=args.parax_output_scale_mode,
+        parax_residual_ratio_cap=args.parax_residual_ratio_cap,
     ).float().cuda()
     model.activate_task(0)
     images = torch.randn(2, 3, 224, 224, device="cuda")

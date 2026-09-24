@@ -1,5 +1,13 @@
 # 项目上下文
 
+## 2026-09-24：开始 ParaX P-10 稳定性 test-only 实验
+
+用户要求直接运行 held-out test，不跑 validation。已从 `exp/parax-level-routing` 创建 `exp/parax-p10-stability-test`。实现新增 ParaX trainable component 选择（all/router/experts）、固定输出 scale、residual/token ratio cap，以及按 task 快照的旧 task logit distillation；默认旧配置兼容。四组 test arm 为 P10-small、P10-router、P10-experts、P10-small-distill，均只用 P-10、rank32、3 experts、small init、fixed scale0.001、ratio cap0.10，蒸馏权重0.2。已完成本地 py_compile、bash -n、diff check；本机无 torch，服务器 ddp 全测与真实 smoke 尚未执行。实验协议见 `docs/parax_p10_stability_test_plan_20260924.md`。
+
+## 2026-09-24：ParaX shared level routing seed0 结果
+
+ParaX 六组 validation 已同步并完成分析。B0 final/average mAP 为 `42.9847/50.0234`；P-post、P-10、P-8:10、P-8:10-level、Static-control 的 final mAP 分别为 `36.3403/37.5118/31.3970/33.0375/33.9727`，全部低于 B0。所有组均完成 13,950 updates、0 skipped，无 OOM/NaN，未访问 test。P-10 虽然三视图 gate 有明显差异，但 residual/token ratio 已达 0.46–0.58；P-8:10-level layer10 的 Person/Face 残差比达 1.016/0.934。Static-control 同样退化，说明首要问题是残差幅度和跨 task 表征漂移，不是动态路由容量。forgetting 从 B0 1.0785 增至 P-10 6.5905、P-8:10 12.0309。当前停止连续层、rank64、seed1/2 和 test；下一步只设计 P-10 identity/小 scale、残差约束、冻结或蒸馏稳定性小实验，稳定后再恢复 level routing。详细结果见 `docs/parax_shared_level_routing_analysis_20260923.md`。
+
 ## 2026-09-23：停止视图专用 Selector，评估 ParaX 动态参数路由
 
 用户确认停止个性化 Selector 路线，转而评估 ParaX（Parameters as Experts: Adapting Vision Models with Dynamic Parameter Routing）能否改善 Full/Person/Face 共享参数下的表征与融合。本轮只读检查当前代码和本地论文实现 `/Users/denghaoyuan/workspace/MyCode/ParaX-main`，未修改业务代码、配置或训练脚本，也未运行测试/实验。ParaX 原生 ViT 方案在每个 Transformer block 后对 patch tokens 施加输入条件化低秩残差，各层 Adapter 共享 expert-center 参数池，但各自 router 根据当前输入生成混合系数；CLS 不经过 ParaX。
