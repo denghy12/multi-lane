@@ -204,7 +204,7 @@ class MultiLaneModel(nn.Module):
             # the shared Selector/Prompt/head or DataLoader RNG stream.
             with torch.random.fork_rng(devices=[]):
                 self.parax_bank = ParaXImageAdapterBank(
-                    hidden_dim=self.width, rank=parax_rank,
+                    hidden_dim=(output_dim if parax_mode == "post" else self.width), rank=parax_rank,
                     num_experts=parax_num_experts, layer_indices=parax_layer_indices,
                     router_hidden=parax_router_hidden, residual_scale=parax_residual_scale,
                     level_conditioned=(parax_level_conditioned or parax_mode == "image_level"),
@@ -733,9 +733,6 @@ class MultiLaneModel(nn.Module):
                 and self.parax_mode == "post"
                 and layer_id == len(self.visual_encoder.transformer.resblocks) - 1
             )
-            if post_mode_last_layer:
-                with torch.no_grad():
-                    image_tokens = block(image_tokens.permute(1, 0, 2)).permute(1, 0, 2)
             if (self.parax_runtime_enabled and self.parax_bank is not None
                     and self.parax_mode != "post"
                     and layer_id > 0
@@ -749,19 +746,6 @@ class MultiLaneModel(nn.Module):
                 self._last_parax_gates = gates.detach()
                 self._record_parax_gates(
                     layer_id - 1, image_view, before_patch_tokens, patch_tokens, gates
-                )
-            if (self.parax_runtime_enabled and self.parax_bank is not None
-                    and post_mode_last_layer):
-                patch_tokens = image_tokens[:, 1:]
-                before_patch_tokens = patch_tokens
-                patch_tokens, gates = self.parax_bank(
-                    self.parax_bank.layer_indices[0], patch_tokens, view_name=image_view
-                )
-                image_tokens = torch.cat([image_tokens[:, :1], patch_tokens], dim=1)
-                self._last_parax_gates = gates.detach()
-                self._record_parax_gates(
-                    self.parax_bank.layer_indices[0], image_view, before_patch_tokens,
-                    patch_tokens, gates
                 )
             query_delta = None
             if (condition_enabled
@@ -783,9 +767,7 @@ class MultiLaneModel(nn.Module):
                 paired["condition_valid"] if person_tokens is not None else None,
                 image_view,
             )
-            if post_mode_last_layer:
-                pass  # The frozen final CLIP block already ran before post-encoder ParaX.
-            elif not self.parax_runtime_enabled:
+            if not self.parax_runtime_enabled or self.parax_mode == "post":
                 with torch.no_grad():
                     image_tokens = block(image_tokens.permute(1, 0, 2)).permute(
                         1, 0, 2
@@ -801,6 +783,17 @@ class MultiLaneModel(nn.Module):
         if self.visual_encoder.proj is not None:
             lane_tokens = lane_tokens @ self.visual_encoder.proj
         lane_cls = lane_tokens[:, :, 0].permute(1, 0, 2).float()
+        if self.parax_runtime_enabled and self.parax_bank is not None and self.parax_mode == "post":
+            before_lane_features = lane_cls
+            post_features, gates = self.parax_bank(
+                self.parax_bank.layer_indices[0], lane_cls, view_name=image_view
+            )
+            lane_cls = post_features
+            self._last_parax_gates = gates.detach()
+            self._record_parax_gates(
+                self.parax_bank.layer_indices[0], image_view,
+                before_lane_features, post_features, gates
+            )
         if self.normalize == "pre-head":
             lane_cls = F.normalize(lane_cls, dim=-1)
         return lane_cls
