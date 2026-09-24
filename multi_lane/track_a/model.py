@@ -70,6 +70,8 @@ class MultiLaneModel(nn.Module):
         parax_trainable_components: str = "all",
         parax_output_scale_mode: str = "learnable",
         parax_residual_ratio_cap: float = 0.0,
+        parax_task_local_gate: bool = False,
+        parax_freeze_center_after_task0: bool = False,
     ) -> None:
         super().__init__()
         if not task_sizes or any(int(size) <= 0 for size in task_sizes):
@@ -211,6 +213,9 @@ class MultiLaneModel(nn.Module):
                     trainable_components=parax_trainable_components,
                     output_scale_mode=parax_output_scale_mode,
                     residual_ratio_cap=parax_residual_ratio_cap,
+                    num_tasks=len(task_sizes),
+                    task_local_gate=parax_task_local_gate,
+                    freeze_center_after_task0=parax_freeze_center_after_task0,
                 )
         self._task_sizes = tuple(int(size) for size in task_sizes)
         self._current_task_id = -1
@@ -487,7 +492,14 @@ class MultiLaneModel(nn.Module):
             total_sq += norm * norm
         result["parax_grad_total_norm"] = total_sq ** 0.5
         result["parax_grad_finite"] = 1.0 if finite else 0.0
-        result["parax_output_scale"] = float(self.parax_bank.output_scale.detach().cpu())
+        output_scale = self.parax_bank.output_scale.detach().float().cpu()
+        result["parax_output_scale"] = (
+            float(output_scale)
+            if output_scale.numel() == 1
+            else float(output_scale[self.parax_bank._current_task_id])
+        )
+        if output_scale.numel() > 1:
+            result["parax_output_scale_mean"] = float(output_scale.mean())
         return result
 
     def set_selector_conditioning_runtime_enabled(self, enabled: bool) -> None:

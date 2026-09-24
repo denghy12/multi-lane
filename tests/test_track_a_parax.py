@@ -90,6 +90,29 @@ class ParaXTest(unittest.TestCase):
         self.assertTrue(torch.isfinite(bank.output_scale.grad).all())
         self.assertNotEqual(float(bank.output_scale.grad.abs()), 0.0)
 
+    def test_zero_output_initialization_is_exact_and_fixed(self) -> None:
+        bank = ParaXImageAdapterBank(
+            8, 2, 3, (0,), initialization="zero_output",
+            output_scale_mode="fixed",
+        )
+        bank.activate_task(0)
+        tokens = torch.randn(2, 5, 8)
+        output, _ = bank(0, tokens)
+        self.assertTrue(torch.equal(output, tokens))
+        self.assertFalse(bank.output_scale.requires_grad)
+
+    def test_center_freeze_and_task_local_gate(self) -> None:
+        bank = ParaXImageAdapterBank(
+            8, 2, 3, (0,), initialization="zero_output",
+            trainable_components="router", output_scale_mode="fixed",
+            num_tasks=3, task_local_gate=True, freeze_center_after_task0=True,
+        )
+        bank.activate_task(0)
+        self.assertTrue(bank.expert_a.requires_grad)
+        bank.activate_task(1)
+        self.assertFalse(bank.expert_a.requires_grad)
+        self.assertTrue(bank.output_scale.requires_grad)
+
     def test_parax_initialization_does_not_shift_shared_rng(self) -> None:
         torch.manual_seed(21)
         visual = FakeVisual()

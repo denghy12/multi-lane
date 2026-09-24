@@ -81,12 +81,14 @@ def main() -> None:
     parser.add_argument("--parax-residual-scale", type=float, default=0.1)
     parser.add_argument(
         "--parax-initialization",
-        choices=("official", "small", "identity", "zero_b"),
+        choices=("official", "small", "identity", "zero_b", "zero_output"),
         default="official",
     )
     parser.add_argument("--parax-trainable-components", choices=("all", "router", "experts"), default="all")
     parser.add_argument("--parax-output-scale-mode", choices=("learnable", "fixed"), default="learnable")
     parser.add_argument("--parax-residual-ratio-cap", type=float, default=0.0)
+    parser.add_argument("--parax-task-local-gate", action="store_true")
+    parser.add_argument("--parax-freeze-center-after-task0", action="store_true")
     parser.add_argument("--parax-level-conditioned", action="store_true")
     parser.add_argument(
         "--adapter-residual-gate-mode",
@@ -156,6 +158,8 @@ def main() -> None:
         parax_trainable_components=args.parax_trainable_components,
         parax_output_scale_mode=args.parax_output_scale_mode,
         parax_residual_ratio_cap=args.parax_residual_ratio_cap,
+        parax_task_local_gate=args.parax_task_local_gate,
+        parax_freeze_center_after_task0=args.parax_freeze_center_after_task0,
     ).float().cuda()
     model.activate_task(0)
     images = torch.randn(2, 3, 224, 224, device="cuda")
@@ -237,6 +241,27 @@ def main() -> None:
                 f"{'AMP' if amp else 'FP32'} "
                 f"tolerance: max_difference={max_initial_difference}"
             )
+    if model.parax_bank is not None:
+        model.eval()
+        with torch.no_grad(), torch.cuda.amp.autocast(enabled=amp):
+            parax_logits = model.current_all_logits(images)
+            model.set_parax_runtime_enabled(False)
+            baseline_logits = model.current_all_logits(images)
+            model.set_parax_runtime_enabled(True)
+        parax_initial_difference = float(
+            (parax_logits - baseline_logits).abs().max().cpu()
+        )
+        tolerance = 1e-4 if amp else 5e-5
+        if not torch.allclose(
+            parax_logits, baseline_logits, atol=tolerance, rtol=tolerance
+        ):
+            raise RuntimeError(
+                "ParaX initial logits differ from the frozen baseline beyond "
+                f"{'AMP' if amp else 'FP32'} tolerance: "
+                f"max_difference={parax_initial_difference}"
+            )
+    else:
+        parax_initial_difference = 0.0
     model.train()
     model_parameters = list(model.base_optimizer_parameters())
     adapter_parameters = (
@@ -338,7 +363,8 @@ def main() -> None:
         f"parax_mode={args.parax_mode} parax_layers={','.join(map(str, args.parax_layer_indices))} "
         f"trainable_parameters={trainable} "
         f"selector_condition_max_initial_difference={selector_condition_max_initial_difference} "
-        f"max_initial_difference={max_initial_difference if model.adapter_bank is not None else 0.0}"
+        f"max_initial_difference={max_initial_difference if model.adapter_bank is not None else 0.0} "
+        f"parax_initial_difference={parax_initial_difference}"
     )
 
 

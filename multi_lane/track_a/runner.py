@@ -2480,7 +2480,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--parax-residual-scale", type=float, default=0.1)
     parser.add_argument(
         "--parax-initialization",
-        choices=("official", "small", "identity", "zero_b"),
+        choices=("official", "small", "identity", "zero_b", "zero_output"),
         default="official",
     )
     parser.add_argument("--parax-level-conditioned", action="store_true")
@@ -2491,6 +2491,8 @@ def parse_args() -> argparse.Namespace:
         "--parax-output-scale-mode", choices=("learnable", "fixed"), default="learnable"
     )
     parser.add_argument("--parax-residual-ratio-cap", type=float, default=0.0)
+    parser.add_argument("--parax-task-local-gate", action="store_true")
+    parser.add_argument("--parax-freeze-center-after-task0", action="store_true")
     parser.add_argument("--parax-distillation-weight", type=float, default=0.0)
     parser.add_argument("--parax-residual-penalty-weight", type=float, default=0.0)
     parser.add_argument(
@@ -2851,6 +2853,8 @@ def main() -> None:
         parax_trainable_components=args.parax_trainable_components,
         parax_output_scale_mode=args.parax_output_scale_mode,
         parax_residual_ratio_cap=args.parax_residual_ratio_cap,
+        parax_task_local_gate=args.parax_task_local_gate,
+        parax_freeze_center_after_task0=args.parax_freeze_center_after_task0,
     ).float().to(device)
     model.visual_encoder.requires_grad_(False)
     model.assert_visual_frozen()
@@ -3384,6 +3388,8 @@ def main() -> None:
         "parax_trainable_components": args.parax_trainable_components if args.parax_mode != "disabled" else None,
         "parax_output_scale_mode": args.parax_output_scale_mode if args.parax_mode != "disabled" else None,
         "parax_residual_ratio_cap": args.parax_residual_ratio_cap if args.parax_mode != "disabled" else None,
+        "parax_task_local_gate": bool(args.parax_task_local_gate) if args.parax_mode != "disabled" else False,
+        "parax_freeze_center_after_task0": bool(args.parax_freeze_center_after_task0) if args.parax_mode != "disabled" else False,
         "parax_distillation_weight": args.parax_distillation_weight,
         "parax_residual_penalty_weight": args.parax_residual_penalty_weight,
         "parax_level_conditioned": bool(args.parax_level_conditioned or args.parax_mode == "image_level"),

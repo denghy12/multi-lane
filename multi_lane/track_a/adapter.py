@@ -51,6 +51,9 @@ class ParaXImageAdapterBank(nn.Module):
         trainable_components: str = "all",
         output_scale_mode: str = "learnable",
         residual_ratio_cap: float = 0.0,
+        num_tasks: int = 1,
+        task_local_gate: bool = False,
+        freeze_center_after_task0: bool = False,
     ) -> None:
         super().__init__()
         if hidden_dim <= 0 or rank <= 0 or num_experts <= 0:
@@ -60,9 +63,9 @@ class ParaXImageAdapterBank(nn.Module):
             raise ValueError("ParaX layer indices must be non-negative")
         if residual_scale < 0:
             raise ValueError("ParaX residual scale must be non-negative")
-        if initialization not in {"official", "small", "identity", "zero_b"}:
+        if initialization not in {"official", "small", "identity", "zero_b", "zero_output"}:
             raise ValueError(
-                "ParaX initialization must be official, small, identity, or zero_b"
+                "ParaX initialization must be official, small, identity, zero_b, or zero_output"
             )
         if trainable_components not in {"all", "router", "experts"}:
             raise ValueError("ParaX trainable components must be all, router, or experts")
@@ -81,6 +84,11 @@ class ParaXImageAdapterBank(nn.Module):
         self.trainable_components = trainable_components
         self.output_scale_mode = output_scale_mode
         self.residual_ratio_cap = float(residual_ratio_cap)
+        self.task_local_gate = bool(task_local_gate)
+        self.freeze_center_after_task0 = bool(freeze_center_after_task0)
+        self.num_tasks = int(num_tasks)
+        if self.num_tasks <= 0:
+            raise ValueError("ParaX num_tasks must be positive")
         self.level_names = ("full", "person", "face")
         self.expert_a = nn.Parameter(torch.empty(num_experts, rank, hidden_dim))
         self.expert_b = nn.Parameter(torch.empty(num_experts, hidden_dim, rank))
@@ -101,38 +109,52 @@ class ParaXImageAdapterBank(nn.Module):
         )
         self.norm = nn.LayerNorm(hidden_dim)
         self.proj = nn.Linear(rank, rank)
+        if initialization == "zero_output":
+            nn.init.zeros_(self.proj.weight)
+            nn.init.zeros_(self.proj.bias)
         if initialization == "official":
             initial_scale = float(residual_scale)
         elif initialization == "small":
             initial_scale = min(float(residual_scale), 1e-3)
         elif initialization == "identity":
             initial_scale = 0.0
-        else:  # zero_b
+        elif initialization == "zero_b":
             initial_scale = float(residual_scale)
+        else:  # zero_output
+            initial_scale = 1.0
+        scale_shape = (self.num_tasks,) if self.task_local_gate else ()
         self.output_scale = nn.Parameter(
-            torch.tensor(initial_scale),
-            requires_grad=(output_scale_mode == "learnable" or initialization == "identity"),
+            torch.full(scale_shape, initial_scale) if scale_shape else torch.tensor(initial_scale),
+            requires_grad=(output_scale_mode == "learnable" or initialization == "identity" or self.task_local_gate),
         )
+        self._current_task_id = 0
         self._last_residual_penalties: list[torch.Tensor] = []
         self.requires_grad_(False)
 
     def activate_task(self, task_id: int) -> None:
+        self._current_task_id = int(task_id)
         self._set_trainability()
 
     def restore_task(self, task_id: int) -> None:
+        self._current_task_id = int(task_id)
         self._set_trainability()
 
     def _set_trainability(self) -> None:
         self.requires_grad_(False)
-        if self.trainable_components in {"all", "experts"}:
+        center_frozen = self.freeze_center_after_task0 and self._current_task_id > 0
+        effective_components = self.trainable_components
+        if self.freeze_center_after_task0 and self._current_task_id == 0:
+            effective_components = "all"
+        if effective_components in {"all", "experts"} and not center_frozen:
             for name in ("expert_a", "expert_b", "norm", "proj"):
                 getattr(self, name).requires_grad_(True)
-        if self.trainable_components in {"all", "router"} and not self.static:
+        if effective_components in {"all", "router"} and not self.static:
             self.routers.requires_grad_(True)
             if self.level_embeddings is not None:
                 self.level_embeddings.requires_grad_(True)
         self.output_scale.requires_grad_(
             self.output_scale_mode == "learnable" or self.initialization == "identity"
+            or self.task_local_gate
         )
 
     def active_parameters(self) -> Iterable[nn.Parameter]:
@@ -174,7 +196,11 @@ class ParaXImageAdapterBank(nn.Module):
         low = torch.einsum("blk,brk->blr", x, a)
         low = torch.nn.functional.gelu(self.proj(low))
         delta = torch.einsum("blr,bkr->blk", low, b)
-        scaled_delta = self.output_scale.to(tokens) * delta
+        if self.task_local_gate:
+            scale = self.output_scale[self._current_task_id].to(tokens)
+        else:
+            scale = self.output_scale.to(tokens)
+        scaled_delta = scale * delta
         token_norm = tokens.float().norm(dim=-1).mean(dim=1).clamp_min(1e-12)
         delta_norm = scaled_delta.float().norm(dim=-1).mean(dim=1)
         self._last_residual_penalties.append(
