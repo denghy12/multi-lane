@@ -121,7 +121,9 @@ class ParaXImageAdapterBank(nn.Module):
         elif initialization == "zero_b":
             initial_scale = float(residual_scale)
         else:  # zero_output
-            initial_scale = 1.0
+            # Keep the projection exactly zero for identity, while allowing
+            # the caller to choose the residual scale used after learning.
+            initial_scale = float(residual_scale)
         scale_shape = (self.num_tasks,) if self.task_local_gate else ()
         self.output_scale = nn.Parameter(
             torch.full(scale_shape, initial_scale) if scale_shape else torch.tensor(initial_scale),
