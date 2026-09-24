@@ -1556,6 +1556,7 @@ def train_task(
     ranking_loss_weight: float = 0.0,
     gradient_clip_norm: float = 0.0,
     parax_distillation_weight: float = 0.0,
+    parax_residual_penalty_weight: float = 0.0,
 ) -> List[Dict[str, float]]:
     if loss_routing not in {
         "joint_bce", "model_asl", "adapter_asl", "both_asl"
@@ -1621,6 +1622,8 @@ def train_task(
         raise ValueError("Gradient clip norm must be finite and non-negative")
     if not math.isfinite(parax_distillation_weight) or not 0 <= parax_distillation_weight <= 1:
         raise ValueError("ParaX distillation weight must be finite and in [0, 1]")
+    if not math.isfinite(parax_residual_penalty_weight) or parax_residual_penalty_weight < 0:
+        raise ValueError("ParaX residual penalty weight must be finite and non-negative")
     if (ranking_loader is None) != (ranking_loss_weight == 0):
         raise ValueError("Ranking loader and positive ranking loss weight must be enabled together")
     if ranking_loader is not None and len(ranking_loader) < epochs * len(loader):
@@ -1694,6 +1697,7 @@ def train_task(
         dgl_unimodal_asl_total = 0.0
         dgl_fusion_total = 0.0
         parax_distillation_total = 0.0
+        parax_residual_penalty_total = 0.0
         batches = 0
         optimizer_steps = 0
         skipped_steps = 0
@@ -1711,6 +1715,8 @@ def train_task(
         fusion_weight_batches = 0
         parax_diagnostic_totals: Dict[str, float] = {}
         parax_diagnostic_batches = 0
+        parax_gradient_totals: Dict[str, float] = {}
+        parax_gradient_batches = 0
         epoch_condition_lr = (
             float(optimizer.param_groups[2]["lr"])
             if model.selector_conditioner is not None else None
@@ -1744,6 +1750,7 @@ def train_task(
                 logits, view_logits, view_features = (
                 model.current_all_logits_with_view_features(images)
                 )
+                parax_residual_penalty = model.parax_residual_penalty()
                 fused_bce_loss = compute_training_loss(
                     logits,
                     current_targets,
@@ -1863,6 +1870,9 @@ def train_task(
                 )
                 model_loss = model_loss + ranking_loss_weight * ranking_loss
                 model_loss = model_loss + parax_distillation_weight * parax_distillation_loss
+                model_loss = model_loss + (
+                    parax_residual_penalty_weight * parax_residual_penalty
+                )
                 selector_residual_loss = (
                     selector_view_residual_regularization
                     * model.selector_view_residual_metric()
@@ -1955,6 +1965,13 @@ def train_task(
                         and ranking_loader is None
                     ),
                 )
+            parax_gradients = model.parax_gradient_diagnostics()
+            if parax_gradients:
+                for key, value in parax_gradients.items():
+                    parax_gradient_totals[key] = (
+                        parax_gradient_totals.get(key, 0.0) + float(value)
+                    )
+                parax_gradient_batches += 1
             if gradient_clip_norm > 0:
                 # GradScaler keeps gradients scaled until unscale_. Clip the
                 # complete optimizer parameter set after unscaling so the
@@ -2003,6 +2020,9 @@ def train_task(
             supervised_bce_total += float(supervised_bce_loss.detach().cpu())
             oof_distillation_total += float(oof_distillation_loss.detach().cpu())
             parax_distillation_total += float(parax_distillation_loss.detach().cpu())
+            parax_residual_penalty_total += float(
+                parax_residual_penalty.detach().cpu()
+            )
             ranking_loss_total += float(ranking_loss.detach().cpu())
             if view_gradient_routing == "dgl":
                 dgl_unimodal_bce_total += float(unimodal_bce_loss.detach().cpu())
@@ -2043,6 +2063,8 @@ def train_task(
             "oof_distillation_mix": float(oof_distillation_mix),
             "parax_distillation_loss": parax_distillation_total / batches,
             "parax_distillation_weight": float(parax_distillation_weight),
+            "parax_residual_penalty": parax_residual_penalty_total / batches,
+            "parax_residual_penalty_weight": float(parax_residual_penalty_weight),
             "pairwise_ranking_loss": ranking_loss_total / batches,
             "pairwise_ranking_loss_weight": float(ranking_loss_weight),
             "dgl_unimodal_bce_loss": dgl_unimodal_bce_total / batches,
@@ -2077,6 +2099,11 @@ def train_task(
             row.update({
                 key: value / parax_diagnostic_batches
                 for key, value in parax_diagnostic_totals.items()
+            })
+        if parax_gradient_batches:
+            row.update({
+                key: value / parax_gradient_batches
+                for key, value in parax_gradient_totals.items()
             })
         if task_gradient_audit is not None and epoch == 0:
             row.update(task_gradient_audit)
@@ -2451,7 +2478,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--parax-layer-indices", type=int, nargs="+", default=[10])
     parser.add_argument("--parax-router-hidden", type=int, default=16)
     parser.add_argument("--parax-residual-scale", type=float, default=0.1)
-    parser.add_argument("--parax-initialization", choices=("official", "small"), default="official")
+    parser.add_argument(
+        "--parax-initialization",
+        choices=("official", "small", "identity", "zero_b"),
+        default="official",
+    )
     parser.add_argument("--parax-level-conditioned", action="store_true")
     parser.add_argument(
         "--parax-trainable-components", choices=("all", "router", "experts"), default="all"
@@ -2461,6 +2492,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--parax-residual-ratio-cap", type=float, default=0.0)
     parser.add_argument("--parax-distillation-weight", type=float, default=0.0)
+    parser.add_argument("--parax-residual-penalty-weight", type=float, default=0.0)
     parser.add_argument(
         "--adapter-weight-decay",
         type=float,
@@ -3353,6 +3385,7 @@ def main() -> None:
         "parax_output_scale_mode": args.parax_output_scale_mode if args.parax_mode != "disabled" else None,
         "parax_residual_ratio_cap": args.parax_residual_ratio_cap if args.parax_mode != "disabled" else None,
         "parax_distillation_weight": args.parax_distillation_weight,
+        "parax_residual_penalty_weight": args.parax_residual_penalty_weight,
         "parax_level_conditioned": bool(args.parax_level_conditioned or args.parax_mode == "image_level"),
         "parax_parameters": parax_parameters,
         "parax_target": (
@@ -3392,7 +3425,12 @@ def main() -> None:
         ),
         "adapter_writes_back_to_frozen_visual_stream": False,
         "adapter_initialization_rng": (
-            "forked_global_state" if args.adapter_mode != "disabled" else None
+            "forked_global_state"
+            if args.adapter_mode != "disabled" or args.parax_mode != "disabled"
+            else None
+        ),
+        "parax_initialization_rng": (
+            "forked_global_state" if args.parax_mode != "disabled" else None
         ),
         "adapter_learning_rate": (
             args.adapter_learning_rate if args.adapter_mode != "disabled" else None
@@ -3570,6 +3608,7 @@ def main() -> None:
             scheduler_multistep_gamma=args.scheduler_multistep_gamma,
             gradient_clip_norm=args.gradient_clip_norm,
             parax_distillation_weight=args.parax_distillation_weight,
+            parax_residual_penalty_weight=args.parax_residual_penalty_weight,
         )
         row = evaluate(
             model,

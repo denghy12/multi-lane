@@ -58,3 +58,11 @@ P10-small-distill 完成 task0 test mAP `53.8050`，进入 task1 时在第二个
 小残差和 ratio cap 成功解决了上一轮的“残差爆炸”问题：ratio 从 `0.46–0.58` 降到约 `0.09`，连续层 one-hot 路由问题也不再出现。但性能仍低于冻结 baseline，说明主要瓶颈不只是残差尺度，还包括 ParaX 在 block10 改写图像表示后对后续 Selector/任务路径的校准问题，以及共享参数在 task 间持续更新造成的遗忘。
 
 下一步不建议继续扩大 ParaX 或恢复 level embedding。若保留路线，应先修正蒸馏实现为低显存形式：teacher 固定在 CPU 或只缓存 task 开始时的旧 logits/feature，训练 batch 不同时跑完整 teacher；然后只验证 P10-router 与 P10-experts 的短程 validation，避免再次直接读取 test 选择结构。若稳定版本仍低于 B0，应停止 ParaX image-stream 方案，转向冻结 backbone 上的后置小模块或显式视图专家。
+
+## 新发现：现有 ParaX 对比还存在初始化混淆
+
+当前 `MultiLaneModel` 在构造 Selector、Prompt 和 classifier 之前直接创建 `ParaXImageAdapterBank`。ParaX bank 的 `trunc_normal_`、router 和 `proj` 初始化会消耗全局 PyTorch RNG；该构造没有像原有 Image-token Adapter 那样放入 `torch.random.fork_rng()`。因此同一个 seed 下，B0（没有 ParaX bank）与 P10（有 ParaX bank）的 Selector、Prompt、head 初始值和后续 DataLoader 随机轨迹可能不同。此前 validation 和 test 都没有在同一批次包含一个严格 RNG 对齐的 B0，所以 `P10 < B0` 的差值不能全部归因于 ParaX。
+
+这不会推翻“ParaX 目前没有带来收益”的方向性证据：P10 三路单视图也下降，P10-router 在小残差 test 中仍低于 test 锚点。但它会改变退化幅度的解释，必须先修复后重做最小 paired validation。
+
+另一个实现层面的混淆是 `small` 初始化仍然使用随机 expert A/B，只把输出 scale 设为 1e-3，并非严格 identity；而 residual ratio cap 是按 batch 平均 token/residual 范数进行硬裁剪，会改变梯度而不只是监控幅度。P10-small task7 ratio 已接近 0.09，说明 cap 在后期实际参与了优化。

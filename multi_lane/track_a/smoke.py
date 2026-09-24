@@ -79,7 +79,11 @@ def main() -> None:
     parser.add_argument("--parax-layer-indices", type=int, nargs="+", default=(10,))
     parser.add_argument("--parax-router-hidden", type=int, default=16)
     parser.add_argument("--parax-residual-scale", type=float, default=0.1)
-    parser.add_argument("--parax-initialization", choices=("official", "small"), default="official")
+    parser.add_argument(
+        "--parax-initialization",
+        choices=("official", "small", "identity", "zero_b"),
+        default="official",
+    )
     parser.add_argument("--parax-trainable-components", choices=("all", "router", "experts"), default="all")
     parser.add_argument("--parax-output-scale-mode", choices=("learnable", "fixed"), default="learnable")
     parser.add_argument("--parax-residual-ratio-cap", type=float, default=0.0)

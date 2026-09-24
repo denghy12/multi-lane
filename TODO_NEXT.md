@@ -1,5 +1,17 @@
 # 下一步任务
 
+## 当前 ParaX 决策：先做严格 paired 稳定性诊断（2026-09-24）
+
+根因定位与实验协议见 `docs/parax_root_cause_and_next_plan_20260924.md`。下一步顺序固定为：
+
+1. ParaX 初始化使用 `torch.random.fork_rng()`，增加 B0/P10 参数 hash、global RNG、第一批 DataLoader index 对齐检查。
+2. 增加严格 identity/zero-output 初始化，先做真实 task0 paired smoke。
+3. 只做 B0、P10-identity、P10-small、P10-zeroB 的 task0-2 短 validation；关闭 level embedding、连续层、rank64 和 test。
+4. 稳定后再比较 shared-live、frozen-center、task-local delta；如仍遗忘，再实现 CPU logits/features cache 的低显存蒸馏。
+5. 只有稳定且接近 B0 后，才恢复 image-only level routing、level-bias 和 gate 正则。
+
+当前仅完成分析文档，未修改业务代码、未启动实验。
+
 ## 当前方向调整：ParaX seed0 已失败，先做稳定性诊断
 
 用户认为当前个性化 Selector 路线实验效果不支持继续，停止该路线；不要再推进其 selector 参数扩展、Router 或额外 seed。下一研究候选为本地 `/Users/denghaoyuan/workspace/MyCode/ParaX-main` 的 ParaX 动态参数路由。

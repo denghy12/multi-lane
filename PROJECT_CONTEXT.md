@@ -1,5 +1,11 @@
 # 项目上下文
 
+## 2026-09-24：ParaX 根因定位与下一步方案
+
+结合 shared-level validation 和 P-10 stability test，当前不能把 ParaX 的退化简单归因于动态路由容量不足。首要混淆因素是 ParaX bank 初始化未使用 `torch.random.fork_rng()`，导致 B0/P10 的 Selector、Prompt、classifier 和后续随机轨迹未严格配对；其次 `small` 仍是随机非零残差，ratio cap 会改变梯度；更核心的问题是同一份 ParaX expert/router 在增量 task 间持续更新，旧 task 的图像表征随之漂移。P10-router 的残差几乎为零，P10-experts 的 view gate L1 仅约 0.0132，说明路由与专家变换没有形成有效联动；Static-control 也失败，说明问题不只是动态 gate。
+
+新增详细方案见 `docs/parax_root_cause_and_next_plan_20260924.md`。下一步只做阶段 0 可比性修复、identity/zero-init paired smoke 和 task0-2 短 validation；暂不恢复连续层、rank64、level embedding、seed1/2 或 test。当前本轮只更新分析文档，未修改业务代码、未启动实验。
+
 ## 2026-09-24：ParaX P-10 stability test 完成
 
 test-only batch `parax_p10_stability_test_20260924_111500` 已同步。P10-small/P10-router/P10-experts 完整结束，final mAP 为 `31.2761/31.9207/31.7548`，冻结三视图 test 锚点为 `32.5365`；三组均未超过锚点。P10-router forgetting 最低 `4.9013`，但仍高于锚点 `4.7308`。ratio cap 将 task7 residual ratio 控制在约0.09；experts-only 的 view gate L1仅0.0132，router-only 无有效残差。P10-small-distill 在 task1因完整 teacher/student 三视图前向 OOM，结果不完整。详细报告见 `docs/parax_p10_stability_test_results_20260924.md`。下一步停止直接扩大 ParaX；如继续，先实现低显存蒸馏并只做短程 validation。

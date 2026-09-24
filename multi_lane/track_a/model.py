@@ -198,17 +198,20 @@ class MultiLaneModel(nn.Module):
         self.parax_bank = None
         self._parax_gate_records = []
         if self.parax_runtime_enabled:
-            self.parax_bank = ParaXImageAdapterBank(
-                hidden_dim=self.width, rank=parax_rank,
-                num_experts=parax_num_experts, layer_indices=parax_layer_indices,
-                router_hidden=parax_router_hidden, residual_scale=parax_residual_scale,
-                level_conditioned=(parax_level_conditioned or parax_mode == "image_level"),
-                static=(parax_mode == "static"),
-                initialization=parax_initialization,
-                trainable_components=parax_trainable_components,
-                output_scale_mode=parax_output_scale_mode,
-                residual_ratio_cap=parax_residual_ratio_cap,
-            )
+            # ParaX has additional random parameters, but they must not shift
+            # the shared Selector/Prompt/head or DataLoader RNG stream.
+            with torch.random.fork_rng(devices=[]):
+                self.parax_bank = ParaXImageAdapterBank(
+                    hidden_dim=self.width, rank=parax_rank,
+                    num_experts=parax_num_experts, layer_indices=parax_layer_indices,
+                    router_hidden=parax_router_hidden, residual_scale=parax_residual_scale,
+                    level_conditioned=(parax_level_conditioned or parax_mode == "image_level"),
+                    static=(parax_mode == "static"),
+                    initialization=parax_initialization,
+                    trainable_components=parax_trainable_components,
+                    output_scale_mode=parax_output_scale_mode,
+                    residual_ratio_cap=parax_residual_ratio_cap,
+                )
         self._task_sizes = tuple(int(size) for size in task_sizes)
         self._current_task_id = -1
 
@@ -458,6 +461,33 @@ class MultiLaneModel(nn.Module):
                 for right in views[index + 1:]:
                     distances.append(torch.norm(view_means[left] - view_means[right], p=1))
             result["parax_view_gate_l1_distance"] = float(torch.stack(distances).mean())
+        return result
+
+    def parax_residual_penalty(self) -> torch.Tensor:
+        if self.parax_bank is None:
+            return self.selectors.new_zeros(())
+        return self.parax_bank.residual_penalty()
+
+    def parax_gradient_diagnostics(self) -> Dict[str, float]:
+        if self.parax_bank is None:
+            return {}
+        result: Dict[str, float] = {}
+        total_sq = 0.0
+        finite = True
+        for name, parameter in self.parax_bank.named_parameters():
+            if not parameter.requires_grad:
+                continue
+            if parameter.grad is None:
+                result[f"parax_grad_{name.replace('.', '_')}_norm"] = 0.0
+                continue
+            value = parameter.grad.detach().float()
+            norm = float(value.norm().cpu())
+            result[f"parax_grad_{name.replace('.', '_')}_norm"] = norm
+            finite = finite and bool(torch.isfinite(value).all())
+            total_sq += norm * norm
+        result["parax_grad_total_norm"] = total_sq ** 0.5
+        result["parax_grad_finite"] = 1.0 if finite else 0.0
+        result["parax_output_scale"] = float(self.parax_bank.output_scale.detach().cpu())
         return result
 
     def set_selector_conditioning_runtime_enabled(self, enabled: bool) -> None:
@@ -768,6 +798,8 @@ class MultiLaneModel(nn.Module):
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         """Return fused lane features and their supervised view features."""
         self._parax_gate_records = []
+        if self.parax_bank is not None:
+            self.parax_bank.reset_forward_diagnostics()
         if self.view_fusion == "disabled":
             self._last_fusion_weights = None
             return self._encode_single_lanes(images, all_seen_lanes), {}

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import unittest
 
 import torch
@@ -76,6 +77,38 @@ class ParaXTest(unittest.TestCase):
         output, _ = bank(0, tokens)
         ratio = (output - tokens).norm() / tokens.norm()
         self.assertLessEqual(float(ratio), 0.1001)
+
+    def test_identity_initialization_is_exact_and_learnable(self) -> None:
+        torch.manual_seed(17)
+        bank = ParaXImageAdapterBank(8, 2, 3, (0,), initialization="identity")
+        bank.activate_task(0)
+        tokens = torch.randn(2, 5, 8, requires_grad=True)
+        output, _ = bank(0, tokens)
+        self.assertTrue(torch.equal(output, tokens))
+        output.square().mean().backward()
+        self.assertIsNotNone(bank.output_scale.grad)
+        self.assertTrue(torch.isfinite(bank.output_scale.grad).all())
+        self.assertNotEqual(float(bank.output_scale.grad.abs()), 0.0)
+
+    def test_parax_initialization_does_not_shift_shared_rng(self) -> None:
+        torch.manual_seed(21)
+        visual = FakeVisual()
+        visual_without = copy.deepcopy(visual)
+        visual_with = copy.deepcopy(visual)
+        torch.manual_seed(22)
+        baseline = MultiLaneModel(visual_without, (2, 1), num_selectors=2, num_prompts=2, num_prompt_layers=1)
+        baseline_state = torch.get_rng_state().clone()
+        torch.manual_seed(22)
+        candidate = MultiLaneModel(
+            visual_with, (2, 1), num_selectors=2, num_prompts=2, num_prompt_layers=1,
+            parax_mode="image", parax_layer_indices=(0,), parax_rank=2,
+            parax_num_experts=3, parax_initialization="identity",
+        )
+        candidate_state = torch.get_rng_state().clone()
+        self.assertTrue(torch.equal(baseline_state, candidate_state))
+        self.assertTrue(torch.equal(baseline.selectors, candidate.selectors))
+        self.assertTrue(torch.equal(baseline.head.weight, candidate.head.weight))
+        self.assertTrue(torch.equal(baseline.head.bias, candidate.head.bias))
 
 
 if __name__ == "__main__":

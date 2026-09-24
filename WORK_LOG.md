@@ -1,5 +1,13 @@
 # 工作日志
 
+## 2026-09-24：ParaX 根因定位与下一步方案
+
+- 核对 `MultiLaneModel`、`ParaXImageAdapterBank`、runner optimizer/forward 路径和已同步 output/logs。
+- 结论分为四层：B0/P10 存在 RNG 初始化混淆；small 不是严格 identity 且硬 ratio cap 改变梯度；shared ParaX 参数跨 task 更新导致旧 task image feature drift；最终 fixed-fusion loss 没有直接推动 Full/Person/Face 的有效 level specialization。
+- P10-router 的 view gate 差异没有对应有效 residual，P10-experts 的 residual 没有对应 level-specific gate，Static-control 仍退化；因此不能继续扩大层数/专家数来搜索。
+- 新增 `docs/parax_root_cause_and_next_plan_20260924.md`，规定先做 RNG paired 修复、zero-output identity、task0 smoke 和 task0-2 validation，再拆 shared-live/frozen-center/task-local delta，最后才恢复 level routing。
+- 本轮没有修改业务代码、没有启动训练或测试；只更新分析与上下文文档。
+
 ## 同步并分析 ParaX P-10 稳定性 test（2026-09-24）
 
 - batch `parax_p10_stability_test_20260924_111500` 已完成：P10-small、P10-router、P10-experts 均 240 epochs、13,950 updates、0 skipped；P10-small-distill 在 task0 后进入 task1 时 CUDA OOM，未形成完整结果。57 个结果/日志文件已同步本地。
