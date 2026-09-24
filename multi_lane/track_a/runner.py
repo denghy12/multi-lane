@@ -2470,7 +2470,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--adapter-learning-rate", type=float, default=4e-4)
     parser.add_argument(
-        "--parax-mode", choices=("disabled", "post", "image", "image_level", "static"),
+        "--parax-mode", choices=("disabled", "post", "post_static", "image", "image_level", "static"),
         default="disabled", help="ParaX image-stream routing mode."
     )
     parser.add_argument("--parax-rank", type=int, default=32)
@@ -3398,7 +3398,7 @@ def main() -> None:
             "patch_tokens_between_frozen_clip_blocks"
             if args.parax_mode in {"image", "image_level", "static"}
             else "terminal_pre_consumer_patch_tokens"
-            if args.parax_mode == "post" else None
+            if args.parax_mode in {"post", "post_static"} else None
         ),
         "adapter_bottleneck_dim": args.adapter_bottleneck_dim,
         "adapter_view_bottleneck_dim": args.adapter_view_bottleneck_dim,

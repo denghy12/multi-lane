@@ -73,7 +73,7 @@ def main() -> None:
         default="independent",
     )
     parser.add_argument("--adapter-residual-scale", type=float, default=0.1)
-    parser.add_argument("--parax-mode", choices=("disabled", "post", "image", "image_level", "static"), default="disabled")
+    parser.add_argument("--parax-mode", choices=("disabled", "post", "post_static", "image", "image_level", "static"), default="disabled")
     parser.add_argument("--parax-rank", type=int, default=32)
     parser.add_argument("--parax-num-experts", type=int, default=3)
     parser.add_argument("--parax-layer-indices", type=int, nargs="+", default=(10,))

@@ -15,7 +15,7 @@ FACE_MANIFEST_ROOT="${FACE_MANIFEST_ROOT:-/mnt/haoyuan/workspace/multi-lane-main
 case "${METHOD}" in
   B0-paired) PARAX_MODE=disabled; ENABLE_PARAX=0 ;;
   P-post-small) PARAX_MODE=post; ENABLE_PARAX=1 ;;
-  P-post-static) PARAX_MODE=static; ENABLE_PARAX=1 ;;
+  P-post-static) PARAX_MODE=post_static; ENABLE_PARAX=1 ;;
   *) echo "Unknown METHOD=${METHOD}" >&2; exit 2 ;;
 esac
 
