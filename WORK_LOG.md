@@ -6,6 +6,7 @@
 - 两组均完整结束 task0--2 validation：B0 final/average mAP `45.2395/54.9341`、forgetting `2.7760`；P-post-small `44.2960/53.7270`、forgetting `2.5475`。P-post 遗忘略低但 final mAP 低 `0.9434`，task0 已低 `1.3981`。
 - strict zero-output 初始 logits diff 小于 `2e-8`；task2 residual/token ratio 约 Full/Person/Face=`0.035/0.045/0.050`，gate 主要选择 expert2，说明性能损失来自训练后的后置 feature 改写与固定融合/head 失配，不是初始化错位或中间 block 干扰。
 - 新增结果报告 `docs/parax_post_control_results_20260925.md`。下一步启动参数量匹配的 `P-post-static`，用 uniform gate 排除动态路由本身的负贡献；仍只做 task0--2 validation，不访问 test。
+- 首次启动误将 `static` 解释为中间 block 模式，已在 `a7d83a9` 增加独立 `post_static`，通过真实 ViT smoke（初始 logits diff `1.68e-08`）后重新启动。当前批次为 `parax_post_static_control_20260925_003631`，GPU0/1 正在运行。
 
 ## 2026-09-25：启动 ParaX post-encoder control
 

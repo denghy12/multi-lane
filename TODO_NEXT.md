@@ -6,6 +6,8 @@ P-post-small 已完成但 final mAP `44.2960` 低于 B0 `45.2395`，尽管 forge
 
 下一步已固定为参数量匹配的 `P-post-static`：P-post 后置位置、rank32、3 experts、fixed scale `0.001`、task0 后冻结 center，改用 uniform gate，不使用动态 router。仅 task0--2 validation、seed0、无 checkpoint、禁止 test。若 static 仍低 B0，则停止继续扩展 ParaX image stream，改做 strict identity 或 view-specific 受限后置专家。
 
+实际批次 `parax_post_static_control_20260925_003631` 已启动（GPU0 B0-paired、GPU1 P-post-static）。`post_static` 是独立模式，确保静态对照与 P-post 位于同一最终 lane feature 位置。
+
 ## 当前运行：ParaX post-encoder control（2026-09-25）
 
 批次 `parax_post_control_20260925_230104` 正在 GPU0/1 运行 B0-paired 与 P-post-small。该实验用于区分“ParaX 机制无效”和“CLIP 中间插入位置破坏后续编码”；等待完成后统一分析，不访问 test。

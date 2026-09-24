@@ -6,6 +6,8 @@
 
 结论：后置位置比 block10 插入更稳定，但仍不能提升精度；阶段四蒸馏暂不执行，因为蒸馏无法修复 task0 表征损失。当前分支 `exp/parax-post-static-control` 已加入 `P-post-static` 入口，下一步执行参数量匹配的 static post-encoder control，保持 rank32/3 experts/scale0.001/task0 后冻结 center，仅将动态 router 替换为 uniform gate。若 static 也低于 B0，则停止继续扩展 ParaX image stream，转向 strict identity 或 view-specific 受限后置专家。
 
+静态入口已修正为独立的 `post_static` 模式，避免误用原有 block-10 `static` 模式。smoke 初始 logits diff 为 `1.68e-08`。批次 `parax_post_static_control_20260925_003631` 已在 GPU0/1 启动 B0-paired 与 P-post-static，仍为 task0--2 validation-only、无 checkpoint、禁止 test。
+
 ## 2026-09-25：启动 ParaX post-encoder control
 
 Frozen-center controlled residual 已结束：small final mAP `44.3814`（B0 `45.2395`），penalty final `43.5579`；penalty 已将 residual ratio 压至约 `0.006--0.009`，仍无恢复，说明继续调 penalty 信息价值低。新分支 `exp/parax-post-adapter-control` 提交 `e12a54b` 修正 P-post 的 forward 时序，改为保持冻结 CLIP/lane encoder 顺序后在最终 lane feature 追加 ParaX；239 项单测、P-post smoke 通过，初始 logits diff `1.86e-08`。批次 `parax_post_control_20260925_230104` 已启动 B0-paired/P-post-small validation。
