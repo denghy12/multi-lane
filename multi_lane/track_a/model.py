@@ -67,6 +67,9 @@ class MultiLaneModel(nn.Module):
         parax_residual_scale: float = 0.1,
         parax_level_conditioned: bool = False,
         parax_initialization: str = "official",
+        parax_trainable_components: str = "all",
+        parax_output_scale_mode: str = "learnable",
+        parax_residual_ratio_cap: float = 0.0,
     ) -> None:
         super().__init__()
         if not task_sizes or any(int(size) <= 0 for size in task_sizes):
@@ -202,6 +205,9 @@ class MultiLaneModel(nn.Module):
                 level_conditioned=(parax_level_conditioned or parax_mode == "image_level"),
                 static=(parax_mode == "static"),
                 initialization=parax_initialization,
+                trainable_components=parax_trainable_components,
+                output_scale_mode=parax_output_scale_mode,
+                residual_ratio_cap=parax_residual_ratio_cap,
             )
         self._task_sizes = tuple(int(size) for size in task_sizes)
         self._current_task_id = -1

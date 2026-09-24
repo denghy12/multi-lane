@@ -8,6 +8,7 @@ benchmark protocol used for the registered MULTI-LANE Track-A result.
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import math
@@ -1516,7 +1517,7 @@ def optimizer_update_budget_for_task(
 def train_task(
     model: MultiLaneModel,
     loader: DataLoader,
-    validation_loader: DataLoader,
+    validation_loader: Optional[DataLoader],
     device: torch.device,
     task_id: int,
     epochs: int,
@@ -1554,6 +1555,7 @@ def train_task(
     ranking_loader: Optional[DataLoader] = None,
     ranking_loss_weight: float = 0.0,
     gradient_clip_norm: float = 0.0,
+    parax_distillation_weight: float = 0.0,
 ) -> List[Dict[str, float]]:
     if loss_routing not in {
         "joint_bce", "model_asl", "adapter_asl", "both_asl"
@@ -1617,6 +1619,8 @@ def train_task(
         raise ValueError("Ranking loss weight must be finite and non-negative")
     if not math.isfinite(gradient_clip_norm) or gradient_clip_norm < 0:
         raise ValueError("Gradient clip norm must be finite and non-negative")
+    if not math.isfinite(parax_distillation_weight) or not 0 <= parax_distillation_weight <= 1:
+        raise ValueError("ParaX distillation weight must be finite and in [0, 1]")
     if (ranking_loader is None) != (ranking_loss_weight == 0):
         raise ValueError("Ranking loader and positive ranking loss weight must be enabled together")
     if ranking_loader is not None and len(ranking_loader) < epochs * len(loader):
@@ -1658,6 +1662,11 @@ def train_task(
     )
     scaler = torch.cuda.amp.GradScaler(enabled=amp)
     current = list(task_indices(task_id))
+    teacher_model = None
+    previous_classes = tuple(seen_indices(task_id - 1)) if task_id > 0 else ()
+    if parax_distillation_weight > 0 and previous_classes:
+        teacher_model = copy.deepcopy(model).eval()
+        teacher_model.requires_grad_(False)
     history: List[Dict[str, float]] = []
     completed_task_updates = 0
     regularization_metric_calibration_total = 0.0
@@ -1684,6 +1693,7 @@ def train_task(
         dgl_unimodal_bce_total = 0.0
         dgl_unimodal_asl_total = 0.0
         dgl_fusion_total = 0.0
+        parax_distillation_total = 0.0
         batches = 0
         optimizer_steps = 0
         skipped_steps = 0
@@ -1732,7 +1742,7 @@ def train_task(
             optimizer.zero_grad(set_to_none=True)
             with torch.cuda.amp.autocast(enabled=amp):
                 logits, view_logits, view_features = (
-                    model.current_all_logits_with_view_features(images)
+                model.current_all_logits_with_view_features(images)
                 )
                 fused_bce_loss = compute_training_loss(
                     logits,
@@ -1764,6 +1774,15 @@ def train_task(
                         current,
                         temperature,
                         loss_mode,
+                    )
+                parax_distillation_loss = logits.new_zeros(())
+                if teacher_model is not None:
+                    with torch.no_grad():
+                        teacher_logits, _ = teacher_model.seen_logits_with_views(images)
+                    student_seen, _ = model.seen_logits_with_views(images)
+                    teacher_targets = torch.sigmoid(teacher_logits[:, list(previous_classes)].float())
+                    parax_distillation_loss = F.binary_cross_entropy_with_logits(
+                        student_seen[:, list(previous_classes)].float(), teacher_targets
                     )
                 bce_loss = (
                     (1.0 - oof_distillation_mix) * supervised_bce_loss
@@ -1843,6 +1862,7 @@ def train_task(
                     else bce_loss
                 )
                 model_loss = model_loss + ranking_loss_weight * ranking_loss
+                model_loss = model_loss + parax_distillation_weight * parax_distillation_loss
                 selector_residual_loss = (
                     selector_view_residual_regularization
                     * model.selector_view_residual_metric()
@@ -1982,6 +2002,7 @@ def train_task(
             )
             supervised_bce_total += float(supervised_bce_loss.detach().cpu())
             oof_distillation_total += float(oof_distillation_loss.detach().cpu())
+            parax_distillation_total += float(parax_distillation_loss.detach().cpu())
             ranking_loss_total += float(ranking_loss.detach().cpu())
             if view_gradient_routing == "dgl":
                 dgl_unimodal_bce_total += float(unimodal_bce_loss.detach().cpu())
@@ -2020,6 +2041,8 @@ def train_task(
             "supervised_bce_loss": supervised_bce_total / batches,
             "oof_distillation_loss": oof_distillation_total / batches,
             "oof_distillation_mix": float(oof_distillation_mix),
+            "parax_distillation_loss": parax_distillation_total / batches,
+            "parax_distillation_weight": float(parax_distillation_weight),
             "pairwise_ranking_loss": ranking_loss_total / batches,
             "pairwise_ranking_loss_weight": float(ranking_loss_weight),
             "dgl_unimodal_bce_loss": dgl_unimodal_bce_total / batches,
@@ -2079,8 +2102,9 @@ def train_task(
             flush=True,
         )
         epoch += 1
-    history[-1]["validation_current_mAP"] = current_validation_map(
-        model, validation_loader, device, amp
+    history[-1]["validation_current_mAP"] = (
+        current_validation_map(model, validation_loader, device, amp)
+        if validation_loader is not None else None
     )
     return history
 
@@ -2430,6 +2454,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--parax-initialization", choices=("official", "small"), default="official")
     parser.add_argument("--parax-level-conditioned", action="store_true")
     parser.add_argument(
+        "--parax-trainable-components", choices=("all", "router", "experts"), default="all"
+    )
+    parser.add_argument(
+        "--parax-output-scale-mode", choices=("learnable", "fixed"), default="learnable"
+    )
+    parser.add_argument("--parax-residual-ratio-cap", type=float, default=0.0)
+    parser.add_argument("--parax-distillation-weight", type=float, default=0.0)
+    parser.add_argument(
         "--adapter-weight-decay",
         type=float,
         default=None,
@@ -2457,6 +2489,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-tasks", type=int, default=len(TASK_SIZES))
     parser.add_argument(
         "--reporting-split", choices=("val", "test"), default="test"
+    )
+    parser.add_argument(
+        "--skip-validation-eval", action="store_true",
+        help="Do not run per-task validation evaluation; useful only for an explicitly locked test run.",
     )
     return parser.parse_args()
 
@@ -2780,6 +2816,9 @@ def main() -> None:
         parax_residual_scale=args.parax_residual_scale,
         parax_level_conditioned=args.parax_level_conditioned,
         parax_initialization=args.parax_initialization,
+        parax_trainable_components=args.parax_trainable_components,
+        parax_output_scale_mode=args.parax_output_scale_mode,
+        parax_residual_ratio_cap=args.parax_residual_ratio_cap,
     ).float().to(device)
     model.visual_encoder.requires_grad_(False)
     model.assert_visual_frozen()
@@ -2968,6 +3007,7 @@ def main() -> None:
         "train_split": "train",
         "validation_split": "val",
         "reporting_split": args.reporting_split,
+        "skip_validation_eval": bool(args.skip_validation_eval),
         "training_label_scope": "current_classes_only",
         "training_loss_mode": args.training_loss_mode,
         "parameter_group_loss_routing": args.loss_routing,
@@ -3309,6 +3349,10 @@ def main() -> None:
         "parax_router_hidden": args.parax_router_hidden if args.parax_mode != "disabled" else None,
         "parax_residual_scale": args.parax_residual_scale if args.parax_mode != "disabled" else None,
         "parax_initialization": args.parax_initialization if args.parax_mode != "disabled" else None,
+        "parax_trainable_components": args.parax_trainable_components if args.parax_mode != "disabled" else None,
+        "parax_output_scale_mode": args.parax_output_scale_mode if args.parax_mode != "disabled" else None,
+        "parax_residual_ratio_cap": args.parax_residual_ratio_cap if args.parax_mode != "disabled" else None,
+        "parax_distillation_weight": args.parax_distillation_weight,
         "parax_level_conditioned": bool(args.parax_level_conditioned or args.parax_mode == "image_level"),
         "parax_parameters": parax_parameters,
         "parax_target": (
@@ -3447,7 +3491,7 @@ def main() -> None:
             train_view, batch_size=args.train_batch_size, shuffle=True,
             num_workers=args.workers, pin_memory=True, drop_last=False,
         )
-        val_loader = DataLoader(
+        val_loader = None if args.skip_validation_eval else DataLoader(
             val_view, batch_size=args.eval_batch_size, shuffle=False,
             num_workers=args.workers, pin_memory=False, drop_last=False,
         )
@@ -3525,6 +3569,7 @@ def main() -> None:
             ),
             scheduler_multistep_gamma=args.scheduler_multistep_gamma,
             gradient_clip_norm=args.gradient_clip_norm,
+            parax_distillation_weight=args.parax_distillation_weight,
         )
         row = evaluate(
             model,

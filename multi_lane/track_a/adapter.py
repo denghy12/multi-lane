@@ -48,6 +48,9 @@ class ParaXImageAdapterBank(nn.Module):
         router_hidden: int = 16, residual_scale: float = 0.1,
         level_conditioned: bool = False, static: bool = False,
         initialization: str = "official",
+        trainable_components: str = "all",
+        output_scale_mode: str = "learnable",
+        residual_ratio_cap: float = 0.0,
     ) -> None:
         super().__init__()
         if hidden_dim <= 0 or rank <= 0 or num_experts <= 0:
@@ -59,6 +62,12 @@ class ParaXImageAdapterBank(nn.Module):
             raise ValueError("ParaX residual scale must be non-negative")
         if initialization not in {"official", "small"}:
             raise ValueError("ParaX initialization must be official or small")
+        if trainable_components not in {"all", "router", "experts"}:
+            raise ValueError("ParaX trainable components must be all, router, or experts")
+        if output_scale_mode not in {"learnable", "fixed"}:
+            raise ValueError("ParaX output scale mode must be learnable or fixed")
+        if residual_ratio_cap < 0:
+            raise ValueError("ParaX residual ratio cap must be non-negative")
         self.hidden_dim = int(hidden_dim)
         self.rank = int(rank)
         self.num_experts = int(num_experts)
@@ -67,6 +76,9 @@ class ParaXImageAdapterBank(nn.Module):
         self.level_conditioned = bool(level_conditioned)
         self.static = bool(static)
         self.initialization = initialization
+        self.trainable_components = trainable_components
+        self.output_scale_mode = output_scale_mode
+        self.residual_ratio_cap = float(residual_ratio_cap)
         self.level_names = ("full", "person", "face")
         self.expert_a = nn.Parameter(torch.empty(num_experts, rank, hidden_dim))
         self.expert_b = nn.Parameter(torch.empty(num_experts, hidden_dim, rank))
@@ -86,21 +98,27 @@ class ParaXImageAdapterBank(nn.Module):
         self.norm = nn.LayerNorm(hidden_dim)
         self.proj = nn.Linear(rank, rank)
         initial_scale = float(residual_scale) if initialization == "official" else min(float(residual_scale), 1e-3)
-        self.output_scale = nn.Parameter(torch.tensor(initial_scale))
+        self.output_scale = nn.Parameter(
+            torch.tensor(initial_scale), requires_grad=output_scale_mode == "learnable"
+        )
         self.requires_grad_(False)
 
     def activate_task(self, task_id: int) -> None:
-        # Shared ParaX parameters remain trainable across tasks by design.
-        self.requires_grad_(True)
-        if self.static:
-            for router in self.routers.values():
-                router.requires_grad_(False)
+        self._set_trainability()
 
     def restore_task(self, task_id: int) -> None:
-        self.requires_grad_(True)
-        if self.static:
-            for router in self.routers.values():
-                router.requires_grad_(False)
+        self._set_trainability()
+
+    def _set_trainability(self) -> None:
+        self.requires_grad_(False)
+        if self.trainable_components in {"all", "experts"}:
+            for name in ("expert_a", "expert_b", "norm", "proj"):
+                getattr(self, name).requires_grad_(True)
+        if self.trainable_components in {"all", "router"} and not self.static:
+            self.routers.requires_grad_(True)
+            if self.level_embeddings is not None:
+                self.level_embeddings.requires_grad_(True)
+        self.output_scale.requires_grad_(self.output_scale_mode == "learnable")
 
     def active_parameters(self) -> Iterable[nn.Parameter]:
         return (parameter for parameter in self.parameters() if parameter.requires_grad)
@@ -133,7 +151,15 @@ class ParaXImageAdapterBank(nn.Module):
         low = torch.einsum("blk,brk->blr", x, a)
         low = torch.nn.functional.gelu(self.proj(low))
         delta = torch.einsum("blr,bkr->blk", low, b)
-        output = tokens + self.output_scale.to(tokens) * delta
+        scaled_delta = self.output_scale.to(tokens) * delta
+        if self.residual_ratio_cap > 0:
+            token_norm = tokens.float().norm(dim=-1).mean(dim=1).clamp_min(1e-12)
+            delta_norm = scaled_delta.float().norm(dim=-1).mean(dim=1)
+            scale = (
+                self.residual_ratio_cap * token_norm / delta_norm.clamp_min(1e-12)
+            ).clamp(max=1.0).to(dtype=delta.dtype)
+            scaled_delta = scaled_delta * scale[:, None, None]
+        output = tokens + scaled_delta
         return output, gates
 
 

@@ -61,6 +61,22 @@ class ParaXTest(unittest.TestCase):
         ))
         self.assertTrue(model.parax_gate_diagnostics())
 
+    def test_small_fixed_scale_and_component_freezing(self) -> None:
+        bank = ParaXImageAdapterBank(
+            8, 2, 3, (0,), residual_scale=1e-3,
+            initialization="small", trainable_components="router",
+            output_scale_mode="fixed", residual_ratio_cap=0.1,
+        )
+        bank.activate_task(0)
+        self.assertFalse(bank.expert_a.requires_grad)
+        self.assertFalse(bank.expert_b.requires_grad)
+        self.assertTrue(next(bank.routers.parameters()).requires_grad)
+        self.assertFalse(bank.output_scale.requires_grad)
+        tokens = torch.randn(2, 5, 8)
+        output, _ = bank(0, tokens)
+        ratio = (output - tokens).norm() / tokens.norm()
+        self.assertLessEqual(float(ratio), 0.1001)
+
 
 if __name__ == "__main__":
     unittest.main()
