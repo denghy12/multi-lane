@@ -1,5 +1,46 @@
 # 下一步任务
 
+## 当前运行：ParaX post static control（2026-09-25）
+
+P-post-small 已完成但 final mAP `44.2960` 低于 B0 `45.2395`，尽管 forgetting `2.5475` 略低于 B0 `2.7760`。task0 已低 `1.3981`，因此阶段四 Full-only CPU-cache 蒸馏暂缓；蒸馏不能修复 task0 表征损失。
+
+下一步已固定为参数量匹配的 `P-post-static`：P-post 后置位置、rank32、3 experts、fixed scale `0.001`、task0 后冻结 center，改用 uniform gate，不使用动态 router。仅 task0--2 validation、seed0、无 checkpoint、禁止 test。若 static 仍低 B0，则停止继续扩展 ParaX image stream，改做 strict identity 或 view-specific 受限后置专家。
+
+## 当前运行：ParaX post-encoder control（2026-09-25）
+
+批次 `parax_post_control_20260925_230104` 正在 GPU0/1 运行 B0-paired 与 P-post-small。该实验用于区分“ParaX 机制无效”和“CLIP 中间插入位置破坏后续编码”；等待完成后统一分析，不访问 test。
+
+## 当前运行：Frozen-center controlled residual 阶段（2026-09-24）
+
+唯一 batch `parax_frozen_controlled_20260924_220444` 正在 GPU0/1/2 运行 B0-paired、Frozen-center-small、Frozen-center-penalty；等待完成后同步和统一分析，训练期间不做实时监督，不访问 test。
+
+## ParaX shared-center stability 阶段三已完成（2026-09-24）
+
+Shared-live/Frozen-center/Task-local-delta 已完成。Shared-live final `39.2991`、forgetting `8.1971`；Frozen-center `43.0695/3.3804`；Task-local-delta `42.6452/6.7104`；B0 `45.2395/2.7760`。Shared-live 与 Frozen-center task0 一致、task1 起分化，确认跨 task shared center 漂移是主要遗忘来源。Frozen-center 仍低 B0 `2.1700`，因此还存在 task0 表征改写和固定融合失配；Task-local gate 残差过大，停止该组。
+
+下一步：
+
+1. 只保留 Frozen-center，加入更小固定 output scale或可微 residual penalty，目标 residual/token ratio `0.05--0.10`。
+2. 做严格 task0 paired 对照，记录 residual/logit drift 和单路 mAP，先解决 task0 相对 B0 的 `-3.7219`。
+3. 若受控 Frozen-center 仍有遗忘，再做 Full-only CPU cache 蒸馏；不在训练 batch 中运行 teacher。
+4. 只有接近 B0 后才恢复 level routing；否则转向冻结 CLIP 后置 adapter或显式 view-specific 小专家。
+
+## 当前运行：ParaX shared-center stability 阶段三（2026-09-24）
+
+唯一 batch `parax_center_stability_20260924_173712` 正在 GPU0/1/2 运行 `Shared-live`、`Frozen-center`、`Task-local-delta`。等待完成后同步 output/log 并统一分析；训练期间不做实时监督，不访问 test。
+
+## ParaX paired stability validation 已结束（2026-09-24）
+
+批次 `parax_paired_stability_20260924_161643` 的 B0/P10-identity/P10-small/P10-zeroB task0--2 validation 已完成。P10-small final mAP `44.3357`，低 B0 `0.9037`，但 forgetting `2.6773` 与 B0 `2.7760` 接近；P10-zeroB 和 P10-identity 分别低 `6.3187/6.6329`，forgetting 升至 `9.6834/10.9558`。当前结论是“小残差可稳定但无收益，identity/zeroB 仍会漂移”。
+
+下一步顺序：
+
+1. 补完整模型级 initial token/logit diff、Selector/Prompt/head hash、global RNG 和第一批 DataLoader index 对齐；修正 ParaX-only smoke 对 `max_initial_difference` 的漏检。
+2. 将 identity 改为真正的零输出对照，或使用有界 output gate；不要让当前无界 identity gate 继续作为稳定性证据。
+3. 只保留 P-10/rank32/无 level embedding，做 Shared-live、Frozen-center、Task-local delta 三组短 validation，并在固定 anchor batch 测旧 task feature/logit drift。
+4. 只有 frozen-center 仍有明显遗忘时，才实现 CPU cache 的低显存旧 task 蒸馏；先 Full-only。
+5. 只有稳定版本达到或超过 B0 后，才恢复 level routing；否则转向冻结 CLIP 后置 ParaX-style adapter 或显式 view-specific 小专家。
+
 ## 当前 ParaX 决策：先做严格 paired 稳定性诊断（2026-09-24）
 
 根因定位与实验协议见 `docs/parax_root_cause_and_next_plan_20260924.md`。下一步顺序固定为：

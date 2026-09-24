@@ -1,5 +1,35 @@
 # 项目上下文
 
+## 2026-09-25：ParaX P-post control 结果与静态对照
+
+批次 `parax_post_control_20260925_230104` 已同步。B0 与 P-post-small 均完成 task0--2、90 epochs、5010 updates、validation-only，无 OOM/NaN/traceback，未访问 test。P-post-small final/average mAP 为 `44.2960/53.7270`，B0 为 `45.2395/54.9341`；forgetting 为 `2.5475`，略优于 B0 的 `2.7760`，但 task0 mAP 已低 `1.3981`，说明后置残差本身在 task0 就改写了有效特征坐标。task2 Full/Person/Face/reliable-Face mAP 为 `42.3548/42.2803/33.2613/38.0635`，均低于 B0 的 `43.7058/42.5883/33.9794/39.4689`。最终 residual/token ratio 约为 `0.035/0.045/0.050`，gate 主要塌缩到 expert2，未形成可验证的 level-specific 收益。详细报告见 `docs/parax_post_control_results_20260925.md`。
+
+结论：后置位置比 block10 插入更稳定，但仍不能提升精度；阶段四蒸馏暂不执行，因为蒸馏无法修复 task0 表征损失。当前分支 `exp/parax-post-static-control` 已加入 `P-post-static` 入口，下一步执行参数量匹配的 static post-encoder control，保持 rank32/3 experts/scale0.001/task0 后冻结 center，仅将动态 router 替换为 uniform gate。若 static 也低于 B0，则停止继续扩展 ParaX image stream，转向 strict identity 或 view-specific 受限后置专家。
+
+## 2026-09-25：启动 ParaX post-encoder control
+
+Frozen-center controlled residual 已结束：small final mAP `44.3814`（B0 `45.2395`），penalty final `43.5579`；penalty 已将 residual ratio 压至约 `0.006--0.009`，仍无恢复，说明继续调 penalty 信息价值低。新分支 `exp/parax-post-adapter-control` 提交 `e12a54b` 修正 P-post 的 forward 时序，改为保持冻结 CLIP/lane encoder 顺序后在最终 lane feature 追加 ParaX；239 项单测、P-post smoke 通过，初始 logits diff `1.86e-08`。批次 `parax_post_control_20260925_230104` 已启动 B0-paired/P-post-small validation。
+
+## 2026-09-24：启动 Frozen-center controlled residual 阶段
+
+分支 `exp/parax-frozen-center-controlled-residual`（提交 `c71da1d`）已完成服务器 239 项单测和 strict zero-output smoke，初始 logits diff 约 `1.9e-08`。唯一 batch `parax_frozen_controlled_20260924_220444` 已在 GPU0/1/2 启动 B0-paired、Frozen-center-small、Frozen-center-penalty 三组；仅 validation、无 checkpoint、禁止 test。
+
+## 2026-09-24：ParaX shared-center stability 阶段三结果
+
+batch `parax_center_stability_20260924_173712` 已同步。Shared-live/Frozen-center/Task-local-delta final mAP 为 `39.2991/43.0695/42.6452`，相对 B0 `45.2395` 分别为 `-5.9403/-2.1700/-2.5943`；forgetting 为 `8.1971/3.3804/6.7104`，B0 为 `2.7760`。Shared-live 与 Frozen-center 的 task0 完全相同、task1 起分化，说明冻结 shared expert center 能显著控制跨 task 漂移；但 Frozen-center 仍低于 B0，Task-local gate 也重新引入较大残差。阶段3完成定位但未达到收益门槛。详细报告见 `docs/parax_center_stability_results_20260924.md`。下一步仅保留 Frozen-center，测试受控小残差和必要时 Full-only CPU-cache 蒸馏；阶段5 level routing 继续暂停。
+
+## 2026-09-24：启动 ParaX shared-center stability 阶段三
+
+分支 `exp/parax-shared-center-stability`（提交 `2282b2a`）已完成 239 项服务器单测和真实 ViT smoke；strict zero-output initial logits diff 为 `1.49e-08`。服务器独立 worktree 为 `/mnt/haoyuan/workspace/multi-lane-main-parax-center-stability`。唯一 batch `parax_center_stability_20260924_173712` 已在 GPU0/1/2 启动 `Shared-live`、`Frozen-center`、`Task-local-delta` 三组，配置为 seed0、task0--2、30 epochs/task、P-10/rank32/3 experts、无 level embedding、validation-only、无 checkpoint/test。
+
+## 2026-09-24：ParaX paired stability validation 结果
+
+批次 `parax_paired_stability_20260924_161643` 已完成并同步到 `output/emotic_track_a_parax_paired/` 和 `logs/emotic_track_a_parax_paired/`。分支 `exp/parax-paired-stability`、提交 `6f4853f`。B0、P10-identity、P10-small、P10-zeroB 均为 task0--2 validation、90 epochs、5010 updates、0 skipped，无 OOM/NaN，未访问 test。
+
+final/average mAP 分别为 B0 `45.2395/54.9341`、P10-small `44.3357/53.5132`、P10-zeroB `38.9207/49.9796`、P10-identity `38.6066/50.8907`；forgetting 分别为 `2.7760/2.6773/9.6834/10.9558`。P10-small 仅说明固定极小残差可控制遗忘，未带来收益；identity 与 zeroB 的实际残差均快速变大并显著退化。详细结果见 `docs/parax_paired_stability_results_20260924.md`。
+
+五阶段状态：阶段1已完成 RNG fork、初始化模式和 ParaX 梯度诊断，但完整模型级 initial token/logit/hash/DataLoader 对齐仍未完成；阶段2 paired task0--2 已完成且所有 ParaX 组未超过 B0；阶段3 shared-live/frozen-center/task-local delta、阶段4低显存蒸馏和阶段5 level routing 尚未执行。下一步只补阶段1诊断并做阶段3短 validation，暂不恢复 level embedding、连续层、rank64、seed1/2 或 test。
+
 ## 2026-09-24：ParaX 根因定位与下一步方案
 
 结合 shared-level validation 和 P-10 stability test，当前不能把 ParaX 的退化简单归因于动态路由容量不足。首要混淆因素是 ParaX bank 初始化未使用 `torch.random.fork_rng()`，导致 B0/P10 的 Selector、Prompt、classifier 和后续随机轨迹未严格配对；其次 `small` 仍是随机非零残差，ratio cap 会改变梯度；更核心的问题是同一份 ParaX expert/router 在增量 task 间持续更新，旧 task 的图像表征随之漂移。P10-router 的残差几乎为零，P10-experts 的 view gate L1 仅约 0.0132，说明路由与专家变换没有形成有效联动；Static-control 也失败，说明问题不只是动态 gate。

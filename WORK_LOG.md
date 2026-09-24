@@ -1,5 +1,50 @@
 # 工作日志
 
+## 2026-09-25：ParaX P-post 结果分析与 static control 启动
+
+- 已从服务器同步批次 `parax_post_control_20260925_230104` 到 `output/emotic_track_a_parax_post_control/` 和 `logs/emotic_track_a_parax_post_control/`。
+- 两组均完整结束 task0--2 validation：B0 final/average mAP `45.2395/54.9341`、forgetting `2.7760`；P-post-small `44.2960/53.7270`、forgetting `2.5475`。P-post 遗忘略低但 final mAP 低 `0.9434`，task0 已低 `1.3981`。
+- strict zero-output 初始 logits diff 小于 `2e-8`；task2 residual/token ratio 约 Full/Person/Face=`0.035/0.045/0.050`，gate 主要选择 expert2，说明性能损失来自训练后的后置 feature 改写与固定融合/head 失配，不是初始化错位或中间 block 干扰。
+- 新增结果报告 `docs/parax_post_control_results_20260925.md`。下一步启动参数量匹配的 `P-post-static`，用 uniform gate 排除动态路由本身的负贡献；仍只做 task0--2 validation，不访问 test。
+
+## 2026-09-25：启动 ParaX post-encoder control
+
+- controlled residual 结果已完成：Frozen-center-small final mAP `44.3814`，低 B0 `0.8581`；Frozen-center-penalty final `43.5579`，低 B0 `1.6816`。penalty 已将 residual ratio 压到约 `0.006--0.009`，仍未恢复性能，停止继续调 penalty。
+- 结论是中间 CLIP block 插入位置本身可能破坏后续视觉编码坐标，因此新分支 `exp/parax-post-adapter-control`、提交 `e12a54b` 修正 P-post：严格保持 B0 block/lane 顺序，在最终 lane feature 后追加 ParaX；strict zero-output 初始 logits diff `1.86e-08`。
+- 服务器 239 项单测和真实 P-post smoke 通过。唯一 batch `parax_post_control_20260925_230104` 已启动 B0-paired 与 P-post-small，GPU0/1，task0--2 validation-only、无 checkpoint、禁止 test。
+
+## 2026-09-24：启动 Frozen-center controlled residual 阶段
+
+- 分支 `exp/parax-frozen-center-controlled-residual`，提交 `c71da1d`；服务器独立 worktree `/mnt/haoyuan/workspace/multi-lane-main-parax-frozen-controlled`，239 项单测通过。
+- strict zero-output smoke 通过，初始 ParaX logits 最大差异约 `1.9e-08`。
+- 唯一 batch `parax_frozen_controlled_20260924_220444` 已在 GPU0/1/2 启动 `B0-paired`、`Frozen-center-small`、`Frozen-center-penalty`。共同配置为 seed0、task0--2、30 epochs/task、P-10/rank32、无 level embedding、validation-only、无 checkpoint、禁止 test；small 使用 fixed scale `0.001`，penalty 使用 scale `0.1` 与 residual penalty `1.0`。
+- 用户要求训练期间不做实时监督；完成后再统一同步和分析。
+
+## 2026-09-24：ParaX shared-center stability 阶段三结果
+
+- batch `parax_center_stability_20260924_173712` 已完成并同步；三组均为 task0--2、90 epochs、5010 updates、0 skipped，无 OOM/NaN/traceback，未访问 test。
+- final/average mAP：Shared-live `39.2991/49.7908`，Frozen-center `43.0695/52.1703`，Task-local-delta `42.6452/53.8214`；相对同批 B0 `45.2395/54.9341`，final 分别为 `-5.9403/-2.1700/-2.5943`。
+- forgetting：Shared-live `8.1971`，Frozen-center `3.3804`，Task-local-delta `6.7104`，B0 `2.7760`。Shared-live 与 Frozen-center 在 task0 完全一致，差异从 task1 开始，直接支持 shared expert center 跨 task 漂移是主要遗忘来源。
+- Frozen-center 只训练 router 后显著恢复稳定性，但 task0 就比 B0 低 `3.7219`，说明问题还包括 ParaX center 学习后的表征坐标变化与固定融合失配。Task-local-delta 的 task-local gate 最终仍产生约 `0.26/0.33/0.26` residual ratio，未改善稳定性。
+- 详细结果见 `docs/parax_center_stability_results_20260924.md`。五阶段状态：阶段1基本完成，阶段2已完成，阶段3已完成且定位出漂移来源，阶段4尚未执行，阶段5继续暂停。下一步只保留 Frozen-center，测试更小且可微的残差约束，必要时再加入 Full-only CPU-cache 蒸馏；不恢复 level embedding、连续层、rank64、额外 seed 或 test。
+
+## 2026-09-24：启动 ParaX shared-center stability 阶段三
+
+- 分支 `exp/parax-shared-center-stability`，提交 `2282b2a`，服务器独立 worktree `/mnt/haoyuan/workspace/multi-lane-main-parax-center-stability`。
+- 新增严格 `zero_output` 初始化、ParaX 初始 logits 对齐诊断、shared center task0 后冻结开关和 task-local gate；服务器 239 项单测通过，真实 ViT smoke 通过，FP32 初始 logits 最大差异 `1.49e-08`。
+- 唯一 batch `parax_center_stability_20260924_173712` 已在 GPU0/1/2 启动三组：`Shared-live`、`Frozen-center`、`Task-local-delta`。共同配置为 seed0、task0--2、30 epochs/task、batch64、P-10、rank32、3 experts、zero-output、fixed scale、无 level embedding、validation-only、无 checkpoint、禁止 test。
+- 用户要求训练期间不做实时监督；完成后再同步结果并统一分析。
+
+## 2026-09-24：ParaX paired stability validation 结果
+
+- 批次 `parax_paired_stability_20260924_161643` 已完成并同步；分支 `exp/parax-paired-stability`，提交 `6f4853f`。B0、P10-identity、P10-small、P10-zeroB 四组均完成 task0--2、90 epochs、5010 updates、0 skipped，无 OOM/NaN/traceback，未访问 test、未保存 checkpoint。
+- final/average mAP：B0 `45.2395/54.9341`；P10-small `44.3357/53.5132`；P10-zeroB `38.9207/49.9796`；P10-identity `38.6066/50.8907`。相对 B0 final 分别为 `-0.9037/-6.3187/-6.6329`，无 ParaX 组超过 B0。
+- forgetting：B0 `2.7760`、P10-small `2.6773`、P10-zeroB `9.6834`、P10-identity `10.9558`。P10-small 证明固定极小残差能把稳定性拉回 B0 附近，但没有带来精度收益。
+- P10-identity 的 output scale 从0增长到 task2 `0.1247`，residual/token ratio 达 Full/Person/Face `0.2803/0.3472/0.3316`；它不是训练期间保持 identity。P10-zeroB 只将 Expert-B 置零，固定 output scale `0.1`，task2 residual ratio 仍约 `0.2000/0.2426/0.2299`，同样造成明显漂移。
+- P10-small task2 residual ratio 为 `0.1076/0.1059/0.1187`，gate L1 为 `0.0570`；gate 差异没有对应单路收益，Full/Person/Face/reliable-Face 相对 B0 均下降。gate 差异不能单独视为有效 level routing。
+- smoke 中的 `max_initial_difference` 仍只检查 `adapter_bank`，ParaX-only 时会输出0；完整模型级 initial token/logit diff、Selector/Prompt/head hash、第一批 DataLoader index 和 anchor feature/logit drift 尚未闭环。
+- 详细报告见 `docs/parax_paired_stability_results_20260924.md`。五阶段判断：阶段1实现修正完成但诊断未闭环；阶段2已完成且未通过收益门槛；阶段3/4/5尚未执行。下一步先补诊断并做 Shared-live/Frozen-center/Task-local delta 短 validation，不恢复 level embedding、连续层、rank64、seed1/2 或 test。
+
 ## 2026-09-24：ParaX 根因定位与下一步方案
 
 - 核对 `MultiLaneModel`、`ParaXImageAdapterBank`、runner optimizer/forward 路径和已同步 output/logs。
