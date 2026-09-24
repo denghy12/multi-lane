@@ -10,7 +10,7 @@ OUTPUT_ROOT="${OUTPUT_ROOT:?OUTPUT_ROOT is required}"
 LOG_PATH="${LOG_PATH:?LOG_PATH is required}"
 DATA_ROOT="${DATA_ROOT:-/mnt/haoyuan/workspace/multi-lane-main/datasets/EMOTIC}"
 CLIP_CHECKPOINT="${CLIP_CHECKPOINT:-/mnt/haoyuan/workspace/CODE_DDP-benchmark/pretrained/clip/ViT-B-16.pt}"
-FACE_MANIFEST_ROOT="${FACE_MANIFEST_ROOT:-/mnt/haoyuan/workspace/multi-lane-main-face-manifest/output/emotic_face_manifest/face_manifest_audit_v1_20260908}"
+FACE_MANIFEST_ROOT="${FACE_MANIFEST_ROOT:-/mnt/haoyuan/workspace/emotic_benchmark_runs/multi_lane_face_test_manifest_v0.1/face_manifest_train_val_test_v1_20260909}"
 mkdir -p "$(dirname "${LOG_PATH}")"
 case "${METHOD}" in
   P10-router) COMPONENTS=router; DISTILL=0.0 ;;
