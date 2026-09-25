@@ -1,5 +1,11 @@
 # 项目上下文
 
+## 2026-09-25：P-post-zero 闭环与后置校准转向
+
+`parax_post_zero_control_20260925_020000` 已完成。B0 与 P-post-zero 的 task0--2 mAP、average mAP、forgetting、F1、所有视图指标、class AP 和 pairwise 统计完全相同，差异为0；ParaX residual ratio/gradient 也为0，初始 logits diff `2.33e-08`。这证明完整训练可比性没有隐藏问题，P-post-tiny 的 `-0.5319` mAP 确实来自非零残差。详细报告见 `docs/parax_post_zero_results_20260925.md`。
+
+ParaX image-stream 路线停止：small/static/tiny 都没有超过 B0，scale 降低只会逼近 identity，不能形成有效收益。阶段四蒸馏与阶段五 level routing 不再执行。下一步转向独立后置特征校准：关闭 ParaX，保持 Full anchor，在冻结 CLIP 输出后的融合模块中只训练 task-local、zero-initialized Person/Face residual，验证是否能利用辅助视图而不改写共享 image stream。
+
 ## 2026-09-25：P-post-tiny 结果与 strict identity control
 
 批次 `parax_post_tiny_control_20260925_010500` 已同步。P-post-tiny final/average mAP `44.7075/54.1956`、forgetting `2.3772`，比 P-post-small 提升 `0.4115/0.4686`，但仍低于 B0 final `0.5319`。task0 mAP `59.5844`，低 B0 `0.9381`。最终 residual/token ratio 仅约 `1.7e-7`，gate entropy 约 `1.094`、view gate L1 `0.009`，说明 scale `0.0001` 已几乎 identity，同时路由也几乎没有有效区分。task2 Face 单路比 B0 高 `0.7680`，但 Full/Person/reliable-Face 下降，固定融合仍未受益。详细报告见 `docs/parax_post_tiny_results_20260925.md`。

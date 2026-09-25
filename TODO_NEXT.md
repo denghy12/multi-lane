@@ -1,5 +1,11 @@
 # 下一步任务
 
+## 当前运行：后置特征校准对照（2026-09-25）
+
+P-post-zero 已与 B0 完全一致，闭合了阶段一；tiny 的非零残差确定会损失精度。ParaX image-stream、蒸馏和 level routing 停止。
+
+下一步 `V-post-residual`：ParaX/Adapter/CLIP 微调全部关闭，Full 作为 anchor，使用现有 `residual_three_view` 融合模块对 Person/Face 训练 task-local zero-initialized residual，scale=`0.1`、hidden=`16`、fusion LR=`4e-4`，只跑 task0--2 validation，不保存 checkpoint，不运行 test。若仍低于 B0，说明当前辅助视图本身需要重新建模，不再继续 image-stream 路由。
+
 ## 下一步：P-post-zero strict identity（2026-09-25）
 
 P-post-tiny final mAP `44.7075`，低 B0 `0.5319`；其 residual ratio 已约 `1.7e-7`。下一步只运行 B0-paired 与 P-post-zero：结构、optimizer 参数组、router/expert 保留，fixed output scale=`0`，task0--2 validation-only，无 checkpoint，禁止 test。

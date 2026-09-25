@@ -1,5 +1,12 @@
 # 工作日志
 
+## 2026-09-25：P-post-zero 闭环与后置校准实验
+
+- `parax_post_zero_control_20260925_020000` 已完成，B0/P-post-zero 90 epochs、5010 updates，所有指标完全一致，差异为0；smoke 初始 logits diff `2.33e-08`。
+- 结论：额外 ParaX 参数组、optimizer group 和 post forward 在 scale=0 时不会破坏可比性；P-post-tiny 的剩余差距由真实非零残差造成。
+- ParaX image-stream、阶段四蒸馏和阶段五 level routing 停止。新增 `docs/parax_post_zero_results_20260925.md`。
+- 新增 `scripts/emotic/run_multilane_track_a_post_calibration_control.sh`，下一步运行 B0 与 `V-post-residual`：关闭 ParaX，Full anchor，task-local zero-initialized Person/Face post-feature residual，task0--2 validation-only。
+
 ## 2026-09-25：P-post-tiny 结果与 P-post-zero
 
 - 已同步批次 `parax_post_tiny_control_20260925_010500`。B0 与 tiny 均完成 task0--2、90 epochs、5010 updates、无 OOM/NaN，未访问 test。
