@@ -2303,3 +2303,4 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - 新增只读per-view Adapter residual ratio和梯度范数诊断，不进入loss；新增task0--2 validation入口与预注册协议`docs/shared_selector_independent_adapter_plan_20260925.md`。待提交、服务器全测和三组真实smoke通过后启动正式实验。
 - 分支提交`284a34d`已推送，服务器新建clean worktree `/mnt/haoyuan/workspace/multi-lane-main-shared-selector-independent-adapter`；完整245项单测通过，未修改主工作树或`multi-lane-main-test-only`。
 - A0/A-cap/A-view真实task0一轮smoke均84 updates、zero skipped，参数量严格为`49,952/149,857/149,856`。A-view三路梯度有限非零，Full/Person/Face residual ratio约`0.00168/0.00328/0.00677`；可以启动正式task0--2 validation。
+- 正式batch`shared_selector_independent_adapter_20260925_1803`已从clean commit `323ba28`启动，GPU0/1/2分别运行A0/A-cap/A-view。固定seed0、task0--2、30 epochs/task、batch64、BCE/ASL、auxiliary0.1、AMP/TF32、validation-only、无checkpoint/test。三组首轮均84 updates、zero skipped，参数计数正确，无立即错误；后续等待自然完成，不持续监控。

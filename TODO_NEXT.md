@@ -1418,3 +1418,4 @@ VOC 对照实验，不应在现阶段合并到 `main`。
 5. smoke全部通过后启动唯一seed0 task0--2 validation：30 epochs/task、batch64、main LR0.0125、Adapter LR4e-4、BCE/ASL、auxiliary0.1、AMP/TF32、validation-only、无checkpoint/test。
 6. A-view只有在task0不低A0、task2分别至少高A0/A-cap `0.10`、average不低A0、单路与forgetting保护均通过时，才进入完整8-task validation；失败则停止，不加Router、level embedding、更大Adapter、多层、seed1/2或test。
 7. 已完成服务器245/245全测和三组真实task0 smoke；下一步在同一clean分支启动唯一正式task0--2 batch，训练期间不持续监控，结束后统一同步分析。
+8. 正式batch`shared_selector_independent_adapter_20260925_1803`已启动并通过首轮审计；不要重复启动、不要中途调参或读取test。完成后同步三组JSON/NPZ/log/status并逐项校验SHA-256，再按预注册六项门槛决定是否进入完整8-task validation。
