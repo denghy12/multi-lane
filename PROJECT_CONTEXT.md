@@ -1,5 +1,11 @@
 # 项目上下文
 
+## 2026-09-25：P-post-static 结果与 P-post-tiny 下一步
+
+静态对照批次 `parax_post_static_control_20260925_003631` 已同步。B0 final/average mAP `45.2395/54.9341`、forgetting `2.7760`；P-post-static final/average `43.9191/52.8834`、forgetting `2.2440`。静态 uniform gate 比 dynamic P-post-small (`44.2960/53.7270`, forgetting `2.5475`) 更稳定但精度更低，说明动态路由提供了部分 task/view 适应，却没有解决共同的后置特征坐标失配。task0 静态 mAP 已低 B0 `3.0228`，阶段四蒸馏不能作为首要修复。详细结果见 `docs/parax_post_static_control_results_20260925.md`。
+
+已加入 `P-post-tiny` 入口，保持 dynamic P-post 全部配置不变，仅将 fixed output scale 降至 `0.0001`，用于验证减小后置残差是否能恢复 task0。阶段五 level routing 继续暂停；若 tiny 仍低于 B0，将停止扩展 ParaX image stream，转向 view-specific post-feature calibration 或 logit-level residual。
+
 ## 2026-09-25：ParaX P-post control 结果与静态对照
 
 批次 `parax_post_control_20260925_230104` 已同步。B0 与 P-post-small 均完成 task0--2、90 epochs、5010 updates、validation-only，无 OOM/NaN/traceback，未访问 test。P-post-small final/average mAP 为 `44.2960/53.7270`，B0 为 `45.2395/54.9341`；forgetting 为 `2.5475`，略优于 B0 的 `2.7760`，但 task0 mAP 已低 `1.3981`，说明后置残差本身在 task0 就改写了有效特征坐标。task2 Full/Person/Face/reliable-Face mAP 为 `42.3548/42.2803/33.2613/38.0635`，均低于 B0 的 `43.7058/42.5883/33.9794/39.4689`。最终 residual/token ratio 约为 `0.035/0.045/0.050`，gate 主要塌缩到 expert2，未形成可验证的 level-specific 收益。详细报告见 `docs/parax_post_control_results_20260925.md`。

@@ -1,5 +1,12 @@
 # 工作日志
 
+## 2026-09-25：P-post-static 结果与 P-post-tiny 启动
+
+- 批次 `parax_post_static_control_20260925_003631` 已同步，B0/P-post-static 均完成 90 epochs、5010 updates、无 OOM/NaN、validation-only。
+- P-post-static final/average mAP `43.9191/52.8834`、forgetting `2.2440`；动态 P-post-small 为 `44.2960/53.7270`、forgetting `2.5475`。静态方案稳定性最好，但 task0 已比 B0 低 `3.0228`。
+- Dynamic 相对 static 在 task0 提升 `1.6248` mAP、最终提升 `0.3769`，说明 routing 有适应作用；两者共同低于 B0，主要问题仍是后置 residual 改写特征坐标与现有融合/head 不匹配。
+- 新增 `docs/parax_post_static_control_results_20260925.md`。脚本新增 `P-post-tiny`，scale=`0.0001`，下一步仅比较 B0-paired/P-post-tiny，task0--2 validation-only，不访问 test。
+
 ## 2026-09-25：ParaX P-post 结果分析与 static control 启动
 
 - 已从服务器同步批次 `parax_post_control_20260925_230104` 到 `output/emotic_track_a_parax_post_control/` 和 `logs/emotic_track_a_parax_post_control/`。

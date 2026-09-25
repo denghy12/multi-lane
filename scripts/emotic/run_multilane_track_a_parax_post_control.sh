@@ -13,9 +13,10 @@ CLIP_CHECKPOINT="${CLIP_CHECKPOINT:-/mnt/haoyuan/workspace/CODE_DDP-benchmark/pr
 FACE_MANIFEST_ROOT="${FACE_MANIFEST_ROOT:-/mnt/haoyuan/workspace/multi-lane-main-face-manifest/output/emotic_face_manifest/face_manifest_audit_v1_20260908}"
 
 case "${METHOD}" in
-  B0-paired) PARAX_MODE=disabled; ENABLE_PARAX=0 ;;
-  P-post-small) PARAX_MODE=post; ENABLE_PARAX=1 ;;
-  P-post-static) PARAX_MODE=post_static; ENABLE_PARAX=1 ;;
+  B0-paired) PARAX_MODE=disabled; ENABLE_PARAX=0; PARAX_SCALE=0.0 ;;
+  P-post-small) PARAX_MODE=post; ENABLE_PARAX=1; PARAX_SCALE=0.001 ;;
+  P-post-tiny) PARAX_MODE=post; ENABLE_PARAX=1; PARAX_SCALE=0.0001 ;;
+  P-post-static) PARAX_MODE=post_static; ENABLE_PARAX=1; PARAX_SCALE=0.001 ;;
   *) echo "Unknown METHOD=${METHOD}" >&2; exit 2 ;;
 esac
 
@@ -25,7 +26,7 @@ for path in "${CLIP_CHECKPOINT}" "${DATA_ROOT}/CVPR17_Annotations.mat" "${FACE_M
   [[ -f "${path}" ]] || { echo "Missing input: ${path}" >&2; exit 2; }
 done
 mkdir -p "$(dirname "${LOG_PATH}")"
-echo "ParaX post control method=${METHOD} seed=0 gpu=${GPU} tasks=3 epochs=30 batch=64 main_lr=0.0125 parax_lr=0.0004 mode=${PARAX_MODE} rank=32 experts=3 layer=10 zero_output fixed_scale=0.001 frozen_center_after_task0 fixed_three_view validation_only checkpoint=off test=forbidden AMP=on TF32=on"
+echo "ParaX post control method=${METHOD} seed=0 gpu=${GPU} tasks=3 epochs=30 batch=64 main_lr=0.0125 parax_lr=0.0004 mode=${PARAX_MODE} rank=32 experts=3 layer=10 zero_output fixed_scale=${PARAX_SCALE} frozen_center_after_task0 fixed_three_view validation_only checkpoint=off test=forbidden AMP=on TF32=on"
 ARGS=(
   --seed 0 --data-root "${DATA_ROOT}" --clip-checkpoint "${CLIP_CHECKPOINT}"
   --face-manifest-root "${FACE_MANIFEST_ROOT}" --output-root "${RUN_ROOT}"
@@ -45,7 +46,7 @@ ARGS=(
   --parax-rank 32 --parax-num-experts 3 --parax-layer-indices 10
   --parax-router-hidden 16 --parax-initialization zero_output
   --parax-trainable-components router --parax-output-scale-mode fixed
-  --parax-residual-scale 0.001 --parax-residual-ratio-cap 0
+  --parax-residual-scale "${PARAX_SCALE}" --parax-residual-ratio-cap 0
   --parax-residual-penalty-weight 0 --parax-freeze-center-after-task0
   --adapter-learning-rate 0.0004 --adapter-weight-decay 0
   --selector-mode shared --prompt-mode shared --num-selectors 10 --reporting-split val

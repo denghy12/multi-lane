@@ -1,5 +1,11 @@
 # 下一步任务
 
+## 当前运行：ParaX P-post-tiny（2026-09-25）
+
+P-post-static 已完成：final mAP `43.9191`、forgetting `2.2440`；dynamic P-post-small 为 `44.2960/2.5475`，均低于 B0 `45.2395/2.7760`。静态方案稳定但 task0 损失更大，动态路由只部分恢复精度。
+
+下一步运行 `P-post-tiny`：最终 lane feature 后置 dynamic ParaX，rank32/3 experts，strict zero-output，fixed scale `0.0001`，task0 训练 center、后续 task 冻结 center，无 level embedding，task0--2 validation-only，无 checkpoint，禁止 test。若 tiny 仍低 B0，停止 ParaX image-stream 扩展，改做 view-specific post-feature calibration 或 logit-level residual。
+
 ## 当前运行：ParaX post static control（2026-09-25）
 
 P-post-small 已完成但 final mAP `44.2960` 低于 B0 `45.2395`，尽管 forgetting `2.5475` 略低于 B0 `2.7760`。task0 已低 `1.3981`，因此阶段四 Full-only CPU-cache 蒸馏暂缓；蒸馏不能修复 task0 表征损失。
