@@ -1408,3 +1408,12 @@ VOC 对照实验，不应在现阶段合并到 `main`。
 3. 已完成：`ddp`完整242项单测、目标23项复验与真实EMOTIC task0短smoke全部通过；zero-init对齐、B0/calibration梯度隔离、52参数/task、finite非零系数和zero skipped成立。
 4. 已启动唯一batch`logit_residual_control_20260925_163436`：B0-paired与L-post-logit，seed0、task0--2、30 epochs/task、batch64、auxiliary0.1、AMP/TF32、validation-only、无checkpoint/test；首轮均zero skipped。等待自然完成，不重复启动或持续监控。
 5. 晋级要求：L-post-logit task0与average不低于paired B0、final至少`+0.10`、forgetting增加不超过`0.10`，且系数既非全零也不饱和。失败则停止当前residual/calibration路线，不加level embedding、ParaX experts、蒸馏、seed1/2或test。
+
+## 2026-09-25：共享Selector + 三路独立完整Adapter
+
+1. logit residual已结束：final只比B0高`0.0857`，不补seed1/2或test，不继续调校准超参数。
+2. 在`exp/shared-selector-independent-adapter`只提交本实验代码、测试、入口、协议、结果报告和三份上下文文档；不得纳入用户既有未提交docs或`tmp/`。
+3. 推送后先审计服务器`git worktree list`，创建新的clean worktree；不得修改`/mnt/haoyuan/workspace/multi-lane-main-test-only`或服务器主工作树。
+4. 在`ddp`环境运行完整单测，再对A0共享b32、A-cap共享b97、A-view独立三路b32分别运行真实EMOTIC task0一轮smoke。必须核对参数量`49,952/149,857/149,856`、A0/A-view初始对齐、有限非零梯度、CLIP冻结和zero skipped。
+5. smoke全部通过后启动唯一seed0 task0--2 validation：30 epochs/task、batch64、main LR0.0125、Adapter LR4e-4、BCE/ASL、auxiliary0.1、AMP/TF32、validation-only、无checkpoint/test。
+6. A-view只有在task0不低A0、task2分别至少高A0/A-cap `0.10`、average不低A0、单路与forgetting保护均通过时，才进入完整8-task validation；失败则停止，不加Router、level embedding、更大Adapter、多层、seed1/2或test。

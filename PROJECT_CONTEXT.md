@@ -2293,3 +2293,11 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - 本批 B0 final mAP 只有`43.4145`，低于 strict paired B0 `45.2395`；配置审计确认唯一差异是 auxiliary view loss 从`0.1`改为`0`。因此本批只支持“特征 residual 没有优于其同批控制”，不能替代既有B0。
 - 下一步转为固定B0训练梯度不变的task-local逐类别logit residual：Person/Face相对B0 logit差值使用detached输入，系数零初始化并由tanh限制到`±0.1`，每task仅52参数；另立`exp/fixed-fusion-residual-calibration`。
 - 服务器clean worktree在`865aec1`通过242项全测与真实task0 smoke；正式batch`logit_residual_control_20260925_163436`已在GPU0/1启动B0-paired和L-post-logit。两组首轮均84 updates、zero skipped，base loss精确同为`0.67691673`；等待自然完成后统一同步分析。
+
+## 2026-09-25：logit residual结果与独立视图Adapter下一阶段
+
+- 批次`logit_residual_control_20260925_163436`已结束并完整同步：两组均90 epochs、5,010 updates、zero skipped；24个本地/服务器文件SHA-256逐项一致，无OOM/NaN/traceback。
+- B0/L-post-logit final mAP=`45.2395/45.3251`，差`+0.0857`；average差`+0.1027`，task0/1/2差`+0.0977/+0.1248/+0.0857`，forgetting改善`0.0302`。单路指标和base BCE完全相同，说明增益仅来自校准。
+- task0/1/2排序净纠正分别增加`1,389/4,139/4,186`，但task2额外损坏12,546个正确pair；系数有限非零且未饱和。final未达到预注册`+0.10`，因此不补seed1/2或test，关闭当前ParaX/residual/calibration序列。
+- 新建`exp/shared-selector-independent-adapter`。下一阶段保持冻结CLIP、共享Selector/Prompt/head和固定融合，比较A0共享b32、A-cap共享b97（149,857参数/task）和A-view三路独立b32（149,856参数/task）。三路bank从配对共享b32初始化复制，确保初始forward严格一致。
+- 新增只读per-view Adapter residual ratio和梯度范数诊断，不进入loss；新增task0--2 validation入口与预注册协议`docs/shared_selector_independent_adapter_plan_20260925.md`。待提交、服务器全测和三组真实smoke通过后启动正式实验。

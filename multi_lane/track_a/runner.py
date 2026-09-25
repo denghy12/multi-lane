@@ -1754,6 +1754,10 @@ def train_task(
         parax_diagnostic_batches = 0
         parax_gradient_totals: Dict[str, float] = {}
         parax_gradient_batches = 0
+        adapter_diagnostic_totals: Dict[str, float] = {}
+        adapter_diagnostic_batches = 0
+        adapter_gradient_totals: Dict[str, float] = {}
+        adapter_gradient_batches = 0
         epoch_condition_lr = (
             float(optimizer.param_groups[2]["lr"])
             if model.selector_conditioner is not None else None
@@ -2036,6 +2040,13 @@ def train_task(
                         parax_gradient_totals.get(key, 0.0) + float(value)
                     )
                 parax_gradient_batches += 1
+            adapter_gradients = model.adapter_gradient_diagnostics(scale_before)
+            if adapter_gradients:
+                for key, value in adapter_gradients.items():
+                    adapter_gradient_totals[key] = (
+                        adapter_gradient_totals.get(key, 0.0) + float(value)
+                    )
+                adapter_gradient_batches += 1
             if gradient_clip_norm > 0:
                 # GradScaler keeps gradients scaled until unscale_. Clip the
                 # complete optimizer parameter set after unscaling so the
@@ -2120,6 +2131,13 @@ def train_task(
                         parax_diagnostic_totals.get(key, 0.0) + float(value)
                     )
                 parax_diagnostic_batches += 1
+            adapter_diagnostics = model.adapter_view_diagnostics()
+            if adapter_diagnostics:
+                for key, value in adapter_diagnostics.items():
+                    adapter_diagnostic_totals[key] = (
+                        adapter_diagnostic_totals.get(key, 0.0) + float(value)
+                    )
+                adapter_diagnostic_batches += 1
         if not batches:
             raise RuntimeError("Training loader produced no batches")
         if optimizer_steps and optimizer_updates_per_task is None:
@@ -2187,6 +2205,16 @@ def train_task(
             row.update({
                 key: value / parax_gradient_batches
                 for key, value in parax_gradient_totals.items()
+            })
+        if adapter_diagnostic_batches:
+            row.update({
+                key: value / adapter_diagnostic_batches
+                for key, value in adapter_diagnostic_totals.items()
+            })
+        if adapter_gradient_batches:
+            row.update({
+                key: value / adapter_gradient_batches
+                for key, value in adapter_gradient_totals.items()
             })
         if task_gradient_audit is not None and epoch == 0:
             row.update(task_gradient_audit)

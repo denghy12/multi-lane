@@ -4025,3 +4025,12 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - 服务器clean worktree完整242项单测通过。首次真实candidate smoke在训练前暴露CLI校验误读不存在的Namespace字段；B0正常运行。该接线错误已本地修复，需提交后ff-only同步并重跑candidate smoke。
 - CLI修复后目标23项与完整242项单测再次通过。真实task0一轮smoke：B0和L-post-logit均84 updates、zero skipped；两组base loss同为`0.67691673`。候选每task52参数，Person/Face系数平均绝对值`1.49e-4/7.87e-5`、最大`0.00103`，有限非零且未饱和；smoke val mAP相对B0仅`+0.00093`。正式两臂validation可启动。
 - 正式batch`logit_residual_control_20260925_163436`已从clean server HEAD `865aec1`启动，GPU0/1分别运行B0-paired与L-post-logit。固定seed0、task0--2、30 epochs/task、batch64、auxiliary0.1、AMP/TF32、validation-only、无checkpoint/test。两组首轮84 updates、zero skipped，base loss同为`0.67691673`，无训练错误；后续不持续轮询。
+
+## 2026-09-25：logit residual正式结果与下一实验实现
+
+- 通过SSH tar同步`logit_residual_control_20260925_163436`两组完整结果、六个NPZ、四份日志和控制文件；本地/远端24个SHA-256逐项一致。
+- 两组均`status=complete`，90 epochs、5,010 updates、zero skipped。B0/L-post-logit final=`45.2395/45.3251`、average=`54.9341/55.0368`、forgetting=`2.7760/2.7458`。
+- L-post-logit在三个task均小幅提高mAP，但final只`+0.0857`，未过预注册`+0.10`。Full/Person/Face/reliable-Face和base BCE完全一致；排序净纠正增加但正确pair损坏也增加。按规则停止该候选，不运行seed1/2或test。
+- 创建分支`exp/shared-selector-independent-adapter`。实现新的三组task0--2配对入口：A0共享b32、A-cap共享b97、A-view三路独立b32；后两者每task参数只差1。
+- 修正独立view bank初始化：bottleneck相同时从同task共享bank复制到Full/Person/Face，再冻结未使用共享bank，使A0/A-view初始输出严格对齐。
+- 增加只读per-view residual/token ratio和shared/Full/Person/Face Adapter梯度范数，诊断不参与loss。新增初始化、参数量和诊断单测；本地`py_compile`、`bash -n`和`git diff --check`通过。

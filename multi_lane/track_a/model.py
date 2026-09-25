@@ -504,6 +504,49 @@ class MultiLaneModel(nn.Module):
             result["parax_output_scale_mean"] = float(output_scale.mean())
         return result
 
+    def adapter_gradient_diagnostics(
+        self, gradient_scale: float = 1.0
+    ) -> Dict[str, float]:
+        if self.adapter_bank is None:
+            return {}
+        if gradient_scale <= 0:
+            raise ValueError("Adapter gradient scale must be positive")
+        if isinstance(self.adapter_bank, TaskImageTokenAdapterBank):
+            groups = {
+                "shared": tuple(self.adapter_bank.shared_active_parameters())
+            }
+            groups.update({
+                name: tuple(self.adapter_bank.view_active_parameters(name))
+                for name in self.adapter_bank.view_names
+            })
+        else:
+            groups = {"shared": tuple(self.adapter_bank.active_parameters())}
+        result: Dict[str, float] = {}
+        total_sq = 0.0
+        finite = True
+        for group_name, parameters in groups.items():
+            if not parameters:
+                continue
+            group_sq = 0.0
+            for parameter in parameters:
+                if parameter.grad is None:
+                    continue
+                gradient = parameter.grad.detach().float() / float(gradient_scale)
+                finite = finite and bool(torch.isfinite(gradient).all())
+                norm = float(gradient.norm().cpu())
+                group_sq += norm * norm
+            group_norm = group_sq ** 0.5
+            result[f"adapter_grad_{group_name}_norm"] = group_norm
+            total_sq += group_sq
+        result["adapter_grad_total_norm"] = total_sq ** 0.5
+        result["adapter_grad_finite"] = 1.0 if finite else 0.0
+        return result
+
+    def adapter_view_diagnostics(self) -> Dict[str, float]:
+        if not isinstance(self.adapter_bank, TaskImageTokenAdapterBank):
+            return {}
+        return self.adapter_bank.view_residual_ratio_diagnostics()
+
     def set_selector_conditioning_runtime_enabled(self, enabled: bool) -> None:
         if enabled and self.selector_conditioner is None:
             raise RuntimeError("Cannot enable unconfigured selector conditioning")
@@ -807,6 +850,8 @@ class MultiLaneModel(nn.Module):
         self._parax_gate_records = []
         if self.parax_bank is not None:
             self.parax_bank.reset_forward_diagnostics()
+        if isinstance(self.adapter_bank, TaskImageTokenAdapterBank):
+            self.adapter_bank.reset_view_diagnostics()
         if self.view_fusion == "disabled":
             self._last_fusion_weights = None
             return self._encode_single_lanes(images, all_seen_lanes), {}

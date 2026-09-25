@@ -208,6 +208,88 @@ class ViewSpecializedSelectorTest(unittest.TestCase):
             sum(p.numel() for p in model.adapter_bank.view_task_adapters[0].parameters()),
         )
 
+    def test_independent_adapter_diagnostics_are_view_specific_and_finite(self) -> None:
+        model = make_model(
+            adapter_mode="image_token",
+            adapter_view_mode="independent",
+            adapter_view_bottleneck_dim=3,
+        )
+        model.activate_task(0)
+        with torch.no_grad():
+            model.adapter_bank.view_task_adapters[0]["person"]["0"].up.bias[0] = 1.0
+            model.adapter_bank.view_task_adapters[0]["face"]["0"].up.bias[0] = 2.0
+        logits = model.current_all_logits(view_batch())
+        residuals = model.adapter_view_diagnostics()
+        self.assertEqual(
+            set(residuals),
+            {
+                "adapter_residual_ratio_full",
+                "adapter_residual_ratio_person",
+                "adapter_residual_ratio_face",
+            },
+        )
+        self.assertEqual(residuals["adapter_residual_ratio_full"], 0.0)
+        self.assertGreater(residuals["adapter_residual_ratio_person"], 0.0)
+        self.assertGreater(
+            residuals["adapter_residual_ratio_face"],
+            residuals["adapter_residual_ratio_person"],
+        )
+        logits.sum().backward()
+        gradients = model.adapter_gradient_diagnostics()
+        self.assertEqual(gradients["adapter_grad_finite"], 1.0)
+        for name in ("full", "person", "face"):
+            self.assertIn(f"adapter_grad_{name}_norm", gradients)
+            self.assertGreater(gradients[f"adapter_grad_{name}_norm"], 0.0)
+
+    def test_shared_b97_matches_independent_b32_parameter_count(self) -> None:
+        shared = MultiLaneModel(
+            FakeVisual(), (5, 3), num_selectors=2, num_prompts=2,
+            num_prompt_layers=1, adapter_mode="image_token",
+            adapter_bottleneck_dim=97, adapter_layer_indices=(0,),
+            view_fusion="fixed_three_view",
+        )
+        independent = MultiLaneModel(
+            FakeVisual(), (5, 3), num_selectors=2, num_prompts=2,
+            num_prompt_layers=1, adapter_mode="image_token",
+            adapter_bottleneck_dim=32, adapter_layer_indices=(0,),
+            adapter_view_mode="independent", adapter_view_bottleneck_dim=32,
+            view_fusion="fixed_three_view",
+        )
+        self.assertEqual(
+            shared.adapter_bank.per_task_parameter_count(0),
+            independent.adapter_bank.per_task_parameter_count(0) + 1,
+        )
+
+    def test_independent_b32_matches_shared_b32_initial_forward(self) -> None:
+        torch.manual_seed(123)
+        shared = MultiLaneModel(
+            FakeVisual(), (5, 3), num_selectors=2, num_prompts=2,
+            num_prompt_layers=1, adapter_mode="image_token",
+            adapter_bottleneck_dim=32, adapter_layer_indices=(0,),
+            view_fusion="fixed_three_view",
+        )
+        torch.manual_seed(123)
+        independent = MultiLaneModel(
+            FakeVisual(), (5, 3), num_selectors=2, num_prompts=2,
+            num_prompt_layers=1, adapter_mode="image_token",
+            adapter_bottleneck_dim=32, adapter_layer_indices=(0,),
+            adapter_view_mode="independent", adapter_view_bottleneck_dim=32,
+            view_fusion="fixed_three_view",
+        )
+        shared.activate_task(0)
+        independent.activate_task(0)
+        for view_name in independent.adapter_bank.view_names:
+            shared_state = shared.adapter_bank.task_adapters[0].state_dict()
+            view_state = independent.adapter_bank.view_task_adapters[0][view_name].state_dict()
+            self.assertEqual(set(shared_state), set(view_state))
+            for name in shared_state:
+                self.assertTrue(torch.equal(shared_state[name], view_state[name]))
+        inputs = view_batch()
+        with torch.no_grad():
+            expected = shared.current_all_logits(inputs)
+            actual = independent.current_all_logits(inputs)
+        self.assertTrue(torch.equal(expected, actual))
+
     def test_private_per_view_heads_are_copied_and_optimizer_unique(self) -> None:
         model = make_model(view_classifier_mode="private_per_view")
         model.activate_task(0)

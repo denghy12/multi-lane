@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from typing import Iterable, Optional, Sequence, Tuple
+from typing import Dict, Iterable, Optional, Sequence, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -472,6 +472,7 @@ class TaskImageTokenAdapterBank(TaskLaneTransformerAdapterBank):
             raise ValueError("Independent Adapter views require a positive bottleneck")
         self.view_mode = view_mode
         self.view_names = names
+        self._last_view_residual_ratios: Dict[str, torch.Tensor] = {}
         self.view_task_adapters = nn.ModuleList()
         if self.view_bottleneck_dim:
             for _ in range(self.num_tasks):
@@ -487,13 +488,19 @@ class TaskImageTokenAdapterBank(TaskLaneTransformerAdapterBank):
                     for name in self.view_names
                 }))
             if self.view_mode == "independent":
-                # All view branches start from the same weights.  This keeps
-                # the first optimization step free of view-specific RNG
-                # differences; specialization then comes only from gradients.
-                for task_adapters in self.view_task_adapters:
-                    source = task_adapters[self.view_names[0]].state_dict()
+                # When dimensions match, copy the paired shared-control
+                # initialization before freezing that unused bank.  Otherwise
+                # at least keep all view branches identical to one another.
+                # Specialization then comes only from view-specific gradients.
+                for task_id, task_adapters in enumerate(self.view_task_adapters):
+                    source = (
+                        self.task_adapters[task_id].state_dict()
+                        if self.view_bottleneck_dim == self.bottleneck_dims_per_task[task_id]
+                        else task_adapters[self.view_names[0]].state_dict()
+                    )
                     for name in self.view_names[1:]:
                         task_adapters[name].load_state_dict(source)
+                    task_adapters[self.view_names[0]].load_state_dict(source)
         self.requires_grad_(False)
 
     @property
@@ -563,6 +570,15 @@ class TaskImageTokenAdapterBank(TaskLaneTransformerAdapterBank):
             self.view_task_adapters[self.current_task_id][view_name].parameters()
         )
 
+    def reset_view_diagnostics(self) -> None:
+        self._last_view_residual_ratios = {}
+
+    def view_residual_ratio_diagnostics(self) -> Dict[str, float]:
+        return {
+            f"adapter_residual_ratio_{name}": float(value.cpu())
+            for name, value in self._last_view_residual_ratios.items()
+        }
+
     def adapted_tokens_for_layer(
         self,
         layer_id: int,
@@ -584,6 +600,7 @@ class TaskImageTokenAdapterBank(TaskLaneTransformerAdapterBank):
         if layer_id not in self.layer_indices:
             return expanded
         adapted = []
+        residual_ratios = []
         for task_id in lane_ids:
             if not 0 <= int(task_id) < self.num_tasks:
                 raise ValueError("Lane id is outside the adapter bank")
@@ -600,13 +617,19 @@ class TaskImageTokenAdapterBank(TaskLaneTransformerAdapterBank):
                     ](frozen_image_tokens)
             delta = self.residual_multiplier(int(task_id)) * delta
             adapted_tokens = frozen_image_tokens + delta
+            frozen_float = frozen_image_tokens.detach().float()
+            delta_float = delta.detach().float()
+            residual_ratios.append(
+                (
+                    delta_float.square().sum(dim=-1)
+                    / frozen_float.square().sum(dim=-1).clamp_min(1e-8)
+                ).mean()
+            )
             if self.auxiliary_metric_mode == "residual_ratio":
-                frozen_float = frozen_image_tokens.float()
-                delta_float = delta.float()
                 self._auxiliary_residual_ratios.append(
                     (
-                        delta_float.square().sum(dim=-1)
-                        / frozen_float.square().sum(dim=-1).clamp_min(1e-8)
+                        delta.square().sum(dim=-1)
+                        / frozen_image_tokens.square().sum(dim=-1).clamp_min(1e-8)
                     ).mean()
                 )
             elif self.auxiliary_metric_mode == "feature_cosine":
@@ -619,4 +642,7 @@ class TaskImageTokenAdapterBank(TaskLaneTransformerAdapterBank):
                     ).mean()
                 )
             adapted.append(adapted_tokens)
+        self._last_view_residual_ratios[view_name] = torch.stack(
+            residual_ratios
+        ).mean()
         return torch.stack(adapted, dim=0)
