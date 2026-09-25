@@ -6,6 +6,8 @@ P-post-tiny final mAP `44.7075`，低 B0 `0.5319`；其 residual ratio 已约 `1
 
 判断规则：zero 若仍低于 B0，优先修复完整训练可比性；zero 若与 B0 对齐，确认 tiny 残差仍有负作用并结束 ParaX image-stream 路线，转向冻结 B0 feature 上的 view-specific calibration 或 logit-level residual。
 
+当前批次：`parax_post_zero_control_20260925_020000`，GPU0 B0-paired、GPU1 P-post-zero。等待结束后同步统一分析，不实时监督。
+
 ## 当前运行：ParaX P-post-tiny（2026-09-25）
 
 P-post-static 已完成：final mAP `43.9191`、forgetting `2.2440`；dynamic P-post-small 为 `44.2960/2.5475`，均低于 B0 `45.2395/2.7760`。静态方案稳定但 task0 损失更大，动态路由只部分恢复精度。

@@ -6,6 +6,7 @@
 - P-post-tiny final/average mAP `44.7075/54.1956`、forgetting `2.3772`；比 small/static 更好，但 final 仍低 B0 `0.5319`。
 - 最终 residual/token ratio 约 `1.7e-7`，gate 近均匀且 view L1 仅 `0.009`。继续单纯减 scale 已无法定位剩余差距。
 - 新增 `P-post-zero` 入口，保留结构和参数组但 output scale 固定为0，用于验证 full-training strict identity。
+- `P-post-zero` smoke 初始 logits diff `2.33e-08`；批次 `parax_post_zero_control_20260925_020000` 已在 GPU0/1 启动严格 B0/zero 配对。
 
 ## 2026-09-25：P-post-static 结果与 P-post-tiny 启动
 
