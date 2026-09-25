@@ -4045,3 +4045,7 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 分析 `shared_selector_independent_adapter_20260925_1803`：A-cap b97 相对 A0 b32 的 task0/task1/task2 fused mAP 提升 `+2.5218/+1.6715/+1.0746`，最终 `+1.0746`、average `+1.7560`，且 Full/Person/Face/reliable-Face 全部提升；A-view 独立三路虽较 A0 提升 `+0.6245`，但相对容量匹配 A-cap 低 `0.4501`，Face/reliable-Face 相对 A0 下降 `-1.0424/-2.2674`，按预注册规则停止。
 
 旧类负梯度不是主要原因：`legacy_full_zero` 把非当前类别 logit 用 `index_fill` 常数化为0，旧类分支不产生梯度；因此未实施无依据的旧分类行冻结。新分支 `exp/shared-capacity-lane-freeze` 新增 A0/A-cap 完整 8-task validation 脚本和协议文档，先验证 b97 收益能否跨后期任务保持。
+
+## 2026-09-25：共享 Adapter 容量完整 validation 启动
+
+分支 `exp/shared-capacity-lane-freeze` 提交 `5ef84d2` 已推送。服务器创建独立 clean worktree，未修改主工作树或 `multi-lane-main-test-only`；ddp 全测245/245通过。A0/A-cap真实task0 smoke各84 updates、zero skipped，trainable parameters 739130/839035，总 Adapter bank 399616/1198856，smoke loss分别0.67687206/0.67701335。正式 batch `shared_capacity_full_validation_20260925_2015` 已在GPU0/1启动，结果根目录 `/mnt/haoyuan/workspace/emotic_benchmark_runs/multi_lane_shared_capacity_full_v0.1/`，等待完成后同步分析。

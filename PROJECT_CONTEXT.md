@@ -2308,3 +2308,7 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 ## 2026-09-25：共享 Adapter 容量完整 validation 已声明
 
 三任务配对筛选显示共享 b97 是当前唯一同时提升融合与三路单视图的候选，三路独立 b32 未通过门槛。新分支 `exp/shared-capacity-lane-freeze` 新增 A0/A-cap 两组完整 8-task validation 入口；配置保持冻结 CLIP、共享 Selector/Prompt/head、固定 reliable-Face 融合、layer1 Image-token Adapter、BCE+Adapter ASL、auxiliary0.1、seed0、30 epochs/task、batch64、AMP/TF32，仅比较共享 bottleneck 32 与 97。validation-only，禁止 Router、level embedding、private view、蒸馏、checkpoint 和 test。
+
+## 2026-09-25：共享 Adapter 容量完整 validation 已启动
+
+服务器 clean worktree `/mnt/haoyuan/workspace/multi-lane-main-shared-capacity-full` 使用 commit `5ef84d2`，完整单测 `245/245` 通过；A0 shared b32 与 A-cap shared b97 的真实 task0 一轮 smoke 均完成84 updates、zero skipped，参数量分别为49,952与149,857/task，无数值错误。正式 batch `shared_capacity_full_validation_20260925_2015` 已在 GPU0/1 启动，8 tasks、30 epochs/task、validation-only、无 checkpoint/test；训练期间不持续轮询。

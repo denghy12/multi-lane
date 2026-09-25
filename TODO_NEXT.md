@@ -1425,3 +1425,8 @@ VOC 对照实验，不应在现阶段合并到 `main`。
 - 已创建分支 `exp/shared-capacity-lane-freeze`，新增 `scripts/emotic/run_multilane_track_a_shared_capacity_full_validation.sh` 与双 GPU launcher，以及 `docs/shared_capacity_full_validation_plan_20260925.md`。
 - 锁定 A0 shared b32 与 A-cap shared b97，seed0、EMOTIC Track A、8 tasks、30 epochs/task、batch64、BCE+ASL、auxiliary0.1、AMP/TF32、validation-only；不加 private view、Router、level embedding、蒸馏或 test。
 - 下一步：提交并 push，服务器创建 clean worktree，运行完整单测和两组 task0 smoke；通过后启动唯一正式 batch，训练结束再同步分析。
+
+## 共享 Adapter 容量完整 validation 已启动（2026-09-25）
+
+- batch `shared_capacity_full_validation_20260925_2015` 已在服务器 GPU0/1启动；不要重复启动或中途调参。
+- 完成后同步两组 JSON/NPZ、日志和 status，核对8 tasks、240 epochs、13,950 updates、zero skipped、无OOM/NaN/traceback，再判断 b97 是否跨后期任务保持收益。
