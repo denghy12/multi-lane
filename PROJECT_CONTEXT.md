@@ -2292,3 +2292,4 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - `post_calibration_control_20260925_134822` 两组均完成90 epochs、5,010 updates、zero skipped；本地同步的10份结果JSON与4份日志和服务器SHA-256一致。`V-post-residual` 相对同批 B0 final/average mAP 为 `-0.0263/-0.2699`，task0 为 `-0.6981`，final Full/Person/Face 为 `-1.0351/-0.2047/-0.9411`。
 - 本批 B0 final mAP 只有`43.4145`，低于 strict paired B0 `45.2395`；配置审计确认唯一差异是 auxiliary view loss 从`0.1`改为`0`。因此本批只支持“特征 residual 没有优于其同批控制”，不能替代既有B0。
 - 下一步转为固定B0训练梯度不变的task-local逐类别logit residual：Person/Face相对B0 logit差值使用detached输入，系数零初始化并由tanh限制到`±0.1`，每task仅52参数；另立`exp/fixed-fusion-residual-calibration`。
+- 服务器clean worktree在`865aec1`通过242项全测与真实task0 smoke；正式batch`logit_residual_control_20260925_163436`已在GPU0/1启动B0-paired和L-post-logit。两组首轮均84 updates、zero skipped，base loss精确同为`0.67691673`；等待自然完成后统一同步分析。
