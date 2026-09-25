@@ -1430,3 +1430,5 @@ VOC 对照实验，不应在现阶段合并到 `main`。
 
 - batch `shared_capacity_full_validation_20260925_2015` 已在服务器 GPU0/1启动；不要重复启动或中途调参。
 - 完成后同步两组 JSON/NPZ、日志和 status，核对8 tasks、240 epochs、13,950 updates、zero skipped、无OOM/NaN/traceback，再判断 b97 是否跨后期任务保持收益。
+- 2026-09-25: shared-capacity full validation ended with A0 complete and A-cap failing at the start of task3 cycle18, after 17 completed cycles and 140 skipped AMP updates. A-cap's task0--2 gain is real but is not a full-sequence result. Full analysis: `docs/shared_capacity_full_validation_results_20260925.md`.
+- Active batch `shared_capacity_residual_scale_validation_20260925_222440` on `exp/shared-capacity-residual-control`: seed0, EMOTIC Track-A tasks0--7, validation-only, b32 vs b97, residual scale `0.03`, 30 epochs/task, batch64, main LR0.0125, Adapter LR4e-4, BCE+ASL, auxiliary view loss0.1, AMP/TF32, no checkpoint/test. Full 245-test suite and both real ViT task0 smokes passed; each arm entered cycle1 with 84 updates and zero skips. Wait for natural completion before analysis; do not test or tune during the run.

@@ -4049,3 +4049,8 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 ## 2026-09-25：共享 Adapter 容量完整 validation 启动
 
 分支 `exp/shared-capacity-lane-freeze` 提交 `5ef84d2` 已推送。服务器创建独立 clean worktree，未修改主工作树或 `multi-lane-main-test-only`；ddp 全测245/245通过。A0/A-cap真实task0 smoke各84 updates、zero skipped，trainable parameters 739130/839035，总 Adapter bank 399616/1198856，smoke loss分别0.67687206/0.67701335。正式 batch `shared_capacity_full_validation_20260925_2015` 已在GPU0/1启动，结果根目录 `/mnt/haoyuan/workspace/emotic_benchmark_runs/multi_lane_shared_capacity_full_v0.1/`，等待完成后同步分析。
+- 2026-09-25：共享 Adapter 容量完整 validation 结果与 residual-scale follow-up
+
+  A0 shared b32 完成 8 tasks、240 epochs、13,950 updates、zero skipped，final/average mAP 为 `42.7525/49.6763`，forgetting `0.8915`。A-cap shared b97 在 task0--2 分别高 A0 `+2.5218/+1.6715/+1.0746`，task3 cycle1--17完成后累计140次 AMP skip，在cycle18因`ASL received non-finite training logits`中止。b97已保存task0/1 residual-energy/token-energy ratio明显高于b32，但task3失败batch没有保留ratio快照，不能把早期ratio当成故障瞬间读数。详见`docs/shared_capacity_full_validation_results_20260925.md`。
+
+  新建`exp/shared-capacity-residual-control`，新增scale=0.03的b32/b97配对完整validation入口。服务器完整245项单测与两组真实ViT smoke通过；正式batch`shared_capacity_residual_scale_validation_20260925_222440`已在GPU0/1启动，首轮各84 updates、zero skipped，validation-only、无checkpoint/test。
