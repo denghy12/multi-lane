@@ -2654,12 +2654,10 @@ def main() -> None:
         or args.adapter_mode != "disabled"
         or args.parax_mode != "disabled"
         or args.view_gradient_routing != "joint"
-        or args.oof_distillation_mix != 0
-        or args.ranking_loss_weight != 0
     ):
         raise ValueError(
-            "Logit residual calibration requires joint BCE without Adapter, "
-            "ParaX, OOF distillation, or ranking loss"
+            "Logit residual calibration requires joint BCE without Adapter "
+            "or ParaX"
         )
     if args.num_selectors <= 0:
         raise ValueError("Number of Selectors must be positive")

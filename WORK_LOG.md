@@ -4022,3 +4022,4 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - 配置审计发现本批唯一相对strict paired B0的差异为view auxiliary loss `0.1→0`，解释了本批B0从`45.2395`降至`43.4145`。停止现有feature residual，不做seed1/2或test。
 - 新建`exp/fixed-fusion-residual-calibration`，实现`logit_residual_three_view`：固定融合产生B0 logits后，用task-local逐类别Person/Face差值做bounded residual；输入detach、系数零初始化、幅度`±0.1`、每task52参数。训练将原B0 loss仅路由到Selector/Prompt/head，calibrated BCE仅路由到residual参数。
 - 新增配对runner/launcher、初始化/Face mask/task隔离/梯度隔离测试与实验协议。macOS静态编译和shell语法检查待完成；本机无torch，完整单测和真实GPU smoke必须在服务器`ddp`环境执行。
+- 服务器clean worktree完整242项单测通过。首次真实candidate smoke在训练前暴露CLI校验误读不存在的Namespace字段；B0正常运行。该接线错误已本地修复，需提交后ff-only同步并重跑candidate smoke。
