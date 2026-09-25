@@ -2285,3 +2285,10 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - ParaX 主路径位于冻结 CLIP block 之间：图像 block 参数保持冻结，但允许梯度穿过 block 输入返回 ParaX；现有 image-token Adapter 默认关闭。`post` 是最后 block 前的 terminal pre-consumer proxy。
 - runner/smoke 已接入 ParaX mode、rank、expert 数、层索引、router hidden、残差尺度和 official/small 初始化；training history 记录逐视图/逐层 gate 均值、熵、top-expert 频率、跨视图 gate L1 距离和 residual/token norm ratio。
 - 已完成本地 `py_compile` 与 `git diff --check`；本机缺少 torch/numpy，依赖型单测与真实 ViT smoke 待服务器 `ddp` 环境完成。
+
+## 2026-09-25：ParaX 后置与融合残差结论
+
+- ParaX strict zero-output 后置路径已经与 B0 完全对齐，证明此前非零 ParaX 下降来自真实 residual，不是 RNG、DataLoader 或 forward 实现错误；image-stream ParaX 与后置 ParaX 均停止扩展。
+- `post_calibration_control_20260925_134822` 两组均完成90 epochs、5,010 updates、zero skipped；本地同步的10份结果JSON与4份日志和服务器SHA-256一致。`V-post-residual` 相对同批 B0 final/average mAP 为 `-0.0263/-0.2699`，task0 为 `-0.6981`，final Full/Person/Face 为 `-1.0351/-0.2047/-0.9411`。
+- 本批 B0 final mAP 只有`43.4145`，低于 strict paired B0 `45.2395`；配置审计确认唯一差异是 auxiliary view loss 从`0.1`改为`0`。因此本批只支持“特征 residual 没有优于其同批控制”，不能替代既有B0。
+- 下一步转为固定B0训练梯度不变的task-local逐类别logit residual：Person/Face相对B0 logit差值使用detached输入，系数零初始化并由tanh限制到`±0.1`，每task仅52参数；另立`exp/fixed-fusion-residual-calibration`。

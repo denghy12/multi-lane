@@ -341,8 +341,10 @@ class MultiLaneModel(nn.Module):
                 len(self._task_sizes), self.output_dim, view_fusion,
                 hidden_dim=view_fusion_hidden_dim,
                 residual_scale=view_residual_scale,
+                num_classes=self.num_classes,
             )
         self._last_fusion_weights: Optional[torch.Tensor] = None
+        self._last_base_fused_logits: Optional[torch.Tensor] = None
 
     @property
     def task_sizes(self) -> Tuple[int, ...]:
@@ -884,14 +886,10 @@ class MultiLaneModel(nn.Module):
     ]:
         """Return current logits and branch endpoints for gradient diagnostics."""
         fused, features = self.encode_lanes_with_views(images, all_seen_lanes=False)
-        view_lane_logits = {
-            name: self._head_for_view(name)(value)
-            for name, value in features.items()
-        }
-        if self.view_classifier_mode == "shared_post_fusion":
-            fused_lane_logits = self.head(fused)
-        else:
-            fused_lane_logits = self._fuse_view_lane_logits(view_lane_logits)
+        lane_ids = self._lane_ids(all_seen_lanes=False)
+        fused_lane_logits, view_lane_logits = self._lane_logits_with_views(
+            fused, features, images, lane_ids
+        )
         return (
             fused_lane_logits[:, 0],
             {name: value[:, 0] for name, value in view_lane_logits.items()},
@@ -922,6 +920,31 @@ class MultiLaneModel(nn.Module):
             stacked * weights.unsqueeze(-1).to(dtype=stacked.dtype), dim=2
         )
 
+    def _lane_logits_with_views(
+        self,
+        fused: torch.Tensor,
+        features: Dict[str, torch.Tensor],
+        images: ModelInputs,
+        lane_ids: Sequence[int],
+    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+        view_lane_logits = {
+            name: self._head_for_view(name)(value)
+            for name, value in features.items()
+        }
+        if self.view_classifier_mode == "shared_post_fusion":
+            base_logits = self.head(fused)
+        else:
+            base_logits = self._fuse_view_lane_logits(view_lane_logits)
+        self._last_base_fused_logits = base_logits
+        if not self.view_fusion_module.logit_residual:
+            return base_logits, view_lane_logits
+        if not isinstance(images, dict):
+            raise ValueError("Logit residual calibration requires view inputs")
+        calibrated = self.view_fusion_module.calibrate_logits(
+            base_logits, view_lane_logits, lane_ids, images.get("face_reliable")
+        )
+        return calibrated, view_lane_logits
+
     def seen_logits_with_views(
         self, images: ModelInputs
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
@@ -935,14 +958,8 @@ class MultiLaneModel(nn.Module):
         def combine(logits: torch.Tensor) -> torch.Tensor:
             combined = torch.sum(logits * masks.unsqueeze(0), dim=1)
             return combined[:, : self.seen_classes]
-        view_lane_logits = {
-            name: self._head_for_view(name)(value)
-            for name, value in features.items()
-        }
-        fused_lane_logits = (
-            self.head(fused)
-            if self.view_classifier_mode == "shared_post_fusion"
-            else self._fuse_view_lane_logits(view_lane_logits)
+        fused_lane_logits, view_lane_logits = self._lane_logits_with_views(
+            fused, features, images, lane_ids
         )
         return combine(fused_lane_logits), {
             name: combine(value) for name, value in view_lane_logits.items()
@@ -958,6 +975,26 @@ class MultiLaneModel(nn.Module):
             return None
         values = self._last_fusion_weights.float().mean(dim=(0, 1)).cpu()
         return tuple(float(value) for value in values)
+
+    def last_base_fused_logits(self) -> torch.Tensor:
+        if self._last_base_fused_logits is None:
+            raise RuntimeError("Base fused logits are not available before forward")
+        return self._last_base_fused_logits
+
+    def logit_residual_diagnostics(self) -> Dict[str, float]:
+        if not self.view_fusion_module.logit_residual:
+            return {}
+        task_id = self.current_task_id
+        if task_id < 0:
+            return {}
+        values = self.view_fusion_module.residual_scale * torch.tanh(
+            self.view_fusion_module.task_logit_residuals[task_id].detach().float()
+        )
+        return {
+            "logit_residual_person_abs_mean": float(values[0].abs().mean()),
+            "logit_residual_face_abs_mean": float(values[1].abs().mean()),
+            "logit_residual_abs_max": float(values.abs().max()),
+        }
 
     def adapter_auxiliary_metric(self, mode: str) -> torch.Tensor:
         if self.adapter_mode != "image_token" or self.adapter_bank is None:
@@ -975,13 +1012,23 @@ class MultiLaneModel(nn.Module):
     def lane_logits(
         self, images: ModelInputs, all_seen_lanes: bool
     ) -> torch.Tensor:
-        if self.view_classifier_mode != "shared_post_fusion":
-            _, features = self.encode_lanes_with_views(images, all_seen_lanes)
-            return self._fuse_view_lane_logits({
-                name: self._head_for_view(name)(value)
-                for name, value in features.items()
-            })
-        return self.head(self.encode_lanes(images, all_seen_lanes))
+        fused, features = self.encode_lanes_with_views(images, all_seen_lanes)
+        if self.view_fusion == "disabled":
+            logits = self.head(fused)
+            self._last_base_fused_logits = logits
+            return logits
+        if (
+            self.view_classifier_mode == "shared_post_fusion"
+            and not self.view_fusion_module.logit_residual
+        ):
+            logits = self.head(fused)
+            self._last_base_fused_logits = logits
+            return logits
+        lane_ids = self._lane_ids(all_seen_lanes)
+        logits, _ = self._lane_logits_with_views(
+            fused, features, images, lane_ids
+        )
+        return logits
 
     def current_logits(self, images: ModelInputs) -> torch.Tensor:
         logits = self.current_all_logits(images)

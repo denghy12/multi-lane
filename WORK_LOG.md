@@ -4013,3 +4013,12 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - Added formal validation run/launcher scripts for the locked seed0, 8-task, 30-epoch, batch64 fixed-three-view plan. They are being validated before the run is launched.
 - Six-arm task0 smoke batch `parax_task0_smoke_20260923_retry` completed on GPUs 0--5; all six reported `MULTI_LANE_TRACK_A_SMOKE_OK`. Static-control was separately rerun after the static-router trainability fix and passed.
 - Full seed0 validation batch `parax_shared_level_seed0_20260923_20260923_2045` started on server GPUs 0--5 with commit `f769d3f`; six runs are active, each entered task0 and completed its first 84-update epoch with zero skipped updates. Current first-epoch losses: B0 0.67692, P-post 0.67800, P-10 0.67707, P-8:10 0.67603, P-8:10-level 0.67728, Static-control 0.67607. These are training losses only, not validation evidence. Outputs: `/mnt/haoyuan/workspace/emotic_benchmark_runs/multi_lane_parax_shared_level_v0.1/parax_shared_level_seed0_20260923_20260923_2045`; logs/status: `logs/emotic_track_a_parax/parax_shared_level_seed0_20260923_20260923_2045` and matching `output/` manifest/status.
+
+## 2026-09-25：后置特征残差结果与logit校准实现
+
+- 同步批次`post_calibration_control_20260925_134822`；B0/V-post-residual均完成3 tasks×30 epochs、5,010 updates、zero skipped，日志无OOM/NaN/traceback并以`MULTI_LANE_TRACK_A_COMPLETE`结束。10份JSON与4份日志的本地/服务器SHA-256逐项一致；未同步NPZ。
+- 同批B0 final/average mAP=`43.4145/52.3126`，V-post-residual=`43.3882/52.0427`，差`-0.0263/-0.2699`；forgetting只改善`0.0222`。task0差`-0.6981`，final Full/Person/Face/reliable-Face差`-1.0351/-0.2047/-0.9411/-1.2377`。
+- V-post-residual task2相对Full纠正`312,681`个错误pair但损坏`257,918`个正确pair，净收益`54,763`，低于B0的`73,414`；说明 residual 有信号但选择性不足，不能稳定保留原排序。
+- 配置审计发现本批唯一相对strict paired B0的差异为view auxiliary loss `0.1→0`，解释了本批B0从`45.2395`降至`43.4145`。停止现有feature residual，不做seed1/2或test。
+- 新建`exp/fixed-fusion-residual-calibration`，实现`logit_residual_three_view`：固定融合产生B0 logits后，用task-local逐类别Person/Face差值做bounded residual；输入detach、系数零初始化、幅度`±0.1`、每task52参数。训练将原B0 loss仅路由到Selector/Prompt/head，calibrated BCE仅路由到residual参数。
+- 新增配对runner/launcher、初始化/Face mask/task隔离/梯度隔离测试与实验协议。macOS静态编译和shell语法检查待完成；本机无torch，完整单测和真实GPU smoke必须在服务器`ddp`环境执行。

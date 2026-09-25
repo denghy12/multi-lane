@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from typing import Dict, Iterable, Mapping, Sequence, Tuple
+from typing import Dict, Iterable, Mapping, Optional, Sequence, Tuple
 
 import torch
 from torch import nn
@@ -25,6 +25,7 @@ class TaskwiseViewFusion(nn.Module):
         "soft_full_person",
         "residual_full_person",
         "residual_three_view",
+        "logit_residual_three_view",
     )
     THREE_VIEW_PRIOR = (0.64, 0.16, 0.20)
     INVALID_FACE_PRIOR = (0.80, 0.20, 0.0)
@@ -37,6 +38,7 @@ class TaskwiseViewFusion(nn.Module):
         mode: str,
         hidden_dim: int = 16,
         residual_scale: float = 0.1,
+        num_classes: Optional[int] = None,
     ) -> None:
         super().__init__()
         if mode not in self.MODES:
@@ -50,6 +52,11 @@ class TaskwiseViewFusion(nn.Module):
         self.feature_dim = int(feature_dim)
         self.hidden_dim = int(hidden_dim)
         self.residual_scale = float(residual_scale)
+        self.num_classes = None if num_classes is None else int(num_classes)
+        if self.logit_residual and (self.num_classes is None or self.num_classes <= 0):
+            raise ValueError(
+                "Logit residual calibration requires a positive class count"
+            )
         self.current_task_id = -1
         self.view_names = (
             ("full", "person")
@@ -58,6 +65,7 @@ class TaskwiseViewFusion(nn.Module):
         )
         self.task_routers = nn.ModuleList()
         self.task_residuals = nn.ModuleList()
+        self.task_logit_residuals = nn.ParameterList()
         if mode.startswith("soft_"):
             view_count = len(self.view_names)
             input_dim = self.feature_dim * view_count
@@ -107,6 +115,14 @@ class TaskwiseViewFusion(nn.Module):
                         "projections": projections,
                         "gates": gates,
                     }))
+        elif self.logit_residual:
+            # One bounded Person coefficient and one bounded Face coefficient
+            # per class.  Zero initialization makes the complete model exactly
+            # equal to fixed three-view fusion before learning.
+            for _ in range(self.num_tasks):
+                self.task_logit_residuals.append(
+                    nn.Parameter(torch.zeros(2, self.num_classes))
+                )
         self.requires_grad_(False)
 
     @property
@@ -115,11 +131,20 @@ class TaskwiseViewFusion(nn.Module):
 
     @property
     def learned(self) -> bool:
-        return self.mode.startswith(("soft_", "residual_"))
+        return self.mode.startswith(("soft_", "residual_")) or self.logit_residual
 
     @property
     def residual(self) -> bool:
         return self.mode.startswith("residual_")
+
+    @property
+    def logit_residual(self) -> bool:
+        return self.mode == "logit_residual_three_view"
+
+    def _task_modules(self):
+        if self.logit_residual:
+            return self.task_logit_residuals
+        return self.task_residuals if self.residual else self.task_routers
 
     def restore_task(self, task_id: int) -> None:
         if not -1 <= int(task_id) < self.num_tasks:
@@ -128,24 +153,27 @@ class TaskwiseViewFusion(nn.Module):
         for parameter in self.parameters():
             parameter.grad = None
         if self.learned and task_id >= 0:
-            modules = (
-                self.task_residuals if self.residual else self.task_routers
-            )
+            modules = self._task_modules()
             modules[int(task_id)].requires_grad_(True)
         self.current_task_id = int(task_id)
 
     def active_parameters(self) -> Iterable[nn.Parameter]:
         if self.learned and self.current_task_id >= 0:
-            modules = (
-                self.task_residuals if self.residual else self.task_routers
-            )
-            yield from modules[self.current_task_id].parameters()
+            modules = self._task_modules()
+            active = modules[self.current_task_id]
+            if isinstance(active, nn.Parameter):
+                yield active
+            else:
+                yield from active.parameters()
 
     def parameter_count_per_task(self) -> int:
         if not self.learned:
             return 0
-        modules = self.task_residuals if self.residual else self.task_routers
-        return sum(parameter.numel() for parameter in modules[0].parameters())
+        modules = self._task_modules()
+        first = modules[0]
+        if isinstance(first, nn.Parameter):
+            return first.numel()
+        return sum(parameter.numel() for parameter in first.parameters())
 
     def _validate(
         self,
@@ -197,7 +225,7 @@ class TaskwiseViewFusion(nn.Module):
                     coefficients.append(coefficient)
                 rows.append(torch.stack(coefficients, dim=-1))
             return torch.stack(rows, dim=1)
-        if self.mode == "fixed_three_view":
+        if self.mode in {"fixed_three_view", "logit_residual_three_view"}:
             valid_prior = reference.new_tensor(self.THREE_VIEW_PRIOR)
             invalid_prior = reference.new_tensor(self.INVALID_FACE_PRIOR)
             return torch.where(
@@ -266,6 +294,54 @@ class TaskwiseViewFusion(nn.Module):
         stacked = torch.stack([features[name] for name in self.view_names], dim=2)
         fused = torch.sum(stacked * weights.unsqueeze(-1).to(stacked.dtype), dim=2)
         return fused, weights
+
+    def calibrate_logits(
+        self,
+        base_logits: torch.Tensor,
+        view_logits: Mapping[str, torch.Tensor],
+        lane_ids: Sequence[int],
+        face_reliable: torch.Tensor | None,
+    ) -> torch.Tensor:
+        """Apply a bounded task-local correction without changing B0 gradients.
+
+        The base and per-view logits are detached deliberately.  Training uses
+        a separate ordinary B0 loss for the shared representation/head and a
+        calibration loss for these coefficients, so adding this module cannot
+        redirect the B0 optimization path.
+        """
+        if not self.logit_residual:
+            return base_logits
+        if set(view_logits) != {"full", "person", "face"}:
+            raise ValueError("Logit residual calibration requires three views")
+        if base_logits.ndim != 3 or base_logits.shape[1] != len(lane_ids):
+            raise ValueError("Invalid base logits for taskwise calibration")
+        if any(value.shape != base_logits.shape for value in view_logits.values()):
+            raise ValueError("Per-view logits do not match base logits")
+        if face_reliable is None or face_reliable.shape != (base_logits.shape[0],):
+            raise ValueError("Logit residual calibration requires a Face mask")
+
+        base = base_logits.detach()
+        person_delta = view_logits["person"].detach() - base
+        face_delta = view_logits["face"].detach() - base
+        face_mask = face_reliable.to(
+            device=base.device, dtype=base.dtype
+        )[:, None]
+        rows = []
+        for lane_position, task_id in enumerate(lane_ids):
+            coefficients = self.residual_scale * torch.tanh(
+                self.task_logit_residuals[int(task_id)].float()
+            )
+            person = coefficients[0].to(base) * person_delta[:, lane_position]
+            face = (
+                coefficients[1].to(base)
+                * face_delta[:, lane_position]
+                * face_mask
+            )
+            rows.append(base[:, lane_position] + person + face)
+        calibrated = torch.stack(rows, dim=1)
+        if not torch.isfinite(calibrated).all():
+            raise FloatingPointError("Non-finite taskwise logit calibration")
+        return calibrated
 
     def prior(self, face_reliable: bool = True) -> Dict[str, float]:
         if len(self.view_names) == 2:

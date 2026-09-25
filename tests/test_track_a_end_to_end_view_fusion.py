@@ -12,6 +12,7 @@ from multi_lane.track_a.paired_transforms import ThreeViewTransform
 from multi_lane.track_a.runner import (
     add_view_auxiliary_loss,
     backward_dgl_training_losses,
+    backward_logit_residual_training_losses,
     build_optimizer_groups,
     compute_training_loss,
     view_gradient_audit,
@@ -51,6 +52,75 @@ def three_view_batch(batch_size: int = 3):
 
 
 class TaskwiseViewFusionTest(unittest.TestCase):
+    def test_logit_residual_starts_exactly_at_fixed_fusion(self) -> None:
+        torch.manual_seed(37)
+        fixed = tiny_model("fixed_three_view")
+        torch.manual_seed(37)
+        calibrated = tiny_model("logit_residual_three_view")
+        inputs = three_view_batch()
+        fixed_logits, fixed_views = fixed.current_all_logits_with_views(inputs)
+        calibrated_logits, calibrated_views = (
+            calibrated.current_all_logits_with_views(inputs)
+        )
+        self.assertTrue(torch.equal(fixed_logits, calibrated_logits))
+        for name in fixed_views:
+            self.assertTrue(torch.equal(fixed_views[name], calibrated_views[name]))
+        self.assertEqual(
+            calibrated.view_fusion_module.parameter_count_per_task(),
+            2 * calibrated.num_classes,
+        )
+
+    def test_logit_residual_is_bounded_masked_and_task_local(self) -> None:
+        module = TaskwiseViewFusion(
+            2, 4, "logit_residual_three_view", residual_scale=0.1,
+            num_classes=3,
+        )
+        module.restore_task(1)
+        self.assertFalse(
+            module.task_logit_residuals[0].requires_grad
+        )
+        self.assertTrue(module.task_logit_residuals[1].requires_grad)
+        base = torch.randn(2, 2, 3, requires_grad=True)
+        views = {
+            "full": torch.randn(2, 2, 3, requires_grad=True),
+            "person": torch.randn(2, 2, 3, requires_grad=True),
+            "face": torch.randn(2, 2, 3, requires_grad=True),
+        }
+        reliable = torch.tensor([False, True])
+        with torch.no_grad():
+            module.task_logit_residuals[1].fill_(100.0)
+        calibrated = module.calibrate_logits(
+            base, views, (0, 1), reliable
+        )
+        expected_second = (
+            base.detach()[:, 1]
+            + 0.1 * (views["person"].detach()[:, 1] - base.detach()[:, 1])
+            + 0.1
+            * (views["face"].detach()[:, 1] - base.detach()[:, 1])
+            * reliable[:, None]
+        )
+        self.assertTrue(torch.allclose(calibrated[:, 1], expected_second))
+        calibrated[:, 1].sum().backward()
+        self.assertIsNone(base.grad)
+        self.assertTrue(all(value.grad is None for value in views.values()))
+        self.assertIsNotNone(module.task_logit_residuals[1].grad)
+
+    def test_logit_residual_backward_keeps_base_and_calibration_separate(
+        self,
+    ) -> None:
+        base = torch.nn.Parameter(torch.tensor(2.0))
+        calibration = torch.nn.Parameter(torch.tensor(3.0))
+        scaler = torch.cuda.amp.GradScaler(enabled=False)
+        backward_logit_residual_training_losses(
+            base.square(),
+            calibration.square(),
+            (base,),
+            (calibration,),
+            scaler,
+        )
+        self.assertEqual(float(base.grad), 4.0)
+        self.assertEqual(float(calibration.grad), 6.0)
+
     def test_full_private_head_copies_initialization_without_rng_drift(self) -> None:
         torch.manual_seed(41)
         shared = tiny_model("fixed_three_view", "shared_per_view")

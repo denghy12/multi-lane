@@ -834,6 +834,36 @@ def backward_routed_training_losses(
         parameter.grad = gradient
 
 
+def backward_logit_residual_training_losses(
+    base_loss: torch.Tensor,
+    calibration_loss: torch.Tensor,
+    base_parameters: Sequence[torch.nn.Parameter],
+    calibration_parameters: Sequence[torch.nn.Parameter],
+    scaler: torch.cuda.amp.GradScaler,
+) -> None:
+    """Keep ordinary B0 optimization independent from logit calibration."""
+
+    base_parameters = tuple(base_parameters)
+    calibration_parameters = tuple(calibration_parameters)
+    if not base_parameters or not calibration_parameters:
+        raise ValueError("Logit residual training requires both parameter groups")
+    overlap = {id(parameter) for parameter in base_parameters}.intersection(
+        id(parameter) for parameter in calibration_parameters
+    )
+    if overlap:
+        raise ValueError("Base and calibration parameter groups must be disjoint")
+    base_gradients = torch.autograd.grad(
+        scaler.scale(base_loss), base_parameters, retain_graph=True
+    )
+    calibration_gradients = torch.autograd.grad(
+        scaler.scale(calibration_loss), calibration_parameters
+    )
+    for parameter, gradient in zip(base_parameters, base_gradients):
+        parameter.grad = gradient
+    for parameter, gradient in zip(calibration_parameters, calibration_gradients):
+        parameter.grad = gradient
+
+
 def resolve_dataset_parent(path: Path) -> Path:
     path = path.expanduser().resolve()
     if path.name == "EMOTIC" and (path / "CVPR17_Annotations.mat").is_file():
@@ -1640,6 +1670,11 @@ def train_task(
         raise ValueError("Adapter ASL routing requires an enabled Adapter")
     representation_parameters = tuple(model.representation_optimizer_parameters())
     prediction_parameters = tuple(model.prediction_optimizer_parameters())
+    logit_residual_parameters = tuple(model.fusion_optimizer_parameters())
+    logit_residual_base_parameters = (
+        *representation_parameters,
+        *tuple(model.classifier_optimizer_parameters()),
+    )
     if view_gradient_routing == "dgl":
         expected_model_parameters = {
             id(parameter) for parameter in model_parameters
@@ -1691,6 +1726,7 @@ def train_task(
         adapter_regularization_total = 0.0
         adapter_regularization_metric_total = 0.0
         supervised_bce_total = 0.0
+        base_supervised_bce_total = 0.0
         oof_distillation_total = 0.0
         ranking_loss_total = 0.0
         dgl_unimodal_bce_total = 0.0
@@ -1698,6 +1734,7 @@ def train_task(
         dgl_fusion_total = 0.0
         parax_distillation_total = 0.0
         parax_residual_penalty_total = 0.0
+        logit_calibration_total = 0.0
         batches = 0
         optimizer_steps = 0
         skipped_steps = 0
@@ -1768,8 +1805,22 @@ def train_task(
                     "bce",
                 )
                 supervised_bce_loss = fused_bce_loss
+                base_supervised_bce_loss = fused_bce_loss
+                if model.view_fusion_module.logit_residual:
+                    base_logits = model.last_base_fused_logits()[:, 0]
+                    base_supervised_bce_loss = compute_training_loss(
+                        base_logits,
+                        current_targets,
+                        current,
+                        temperature,
+                        loss_mode,
+                    )
                 if view_bce_losses and view_auxiliary_loss_weight:
                     supervised_bce_loss = supervised_bce_loss + (
+                        float(view_auxiliary_loss_weight)
+                        * torch.stack(list(view_bce_losses.values())).mean()
+                    )
+                    base_supervised_bce_loss = base_supervised_bce_loss + (
                         float(view_auxiliary_loss_weight)
                         * torch.stack(list(view_bce_losses.values())).mean()
                     )
@@ -1794,6 +1845,11 @@ def train_task(
                 bce_loss = (
                     (1.0 - oof_distillation_mix) * supervised_bce_loss
                     + oof_distillation_mix * oof_distillation_loss
+                )
+                base_bce_loss = (
+                    base_supervised_bce_loss
+                    if model.view_fusion_module.logit_residual
+                    else bce_loss
                 )
                 ranking_loss = logits.new_zeros(())
                 if ranking_iterator is not None:
@@ -1866,7 +1922,7 @@ def train_task(
                 model_loss = (
                     asl_loss
                     if loss_routing in {"model_asl", "both_asl"}
-                    else bce_loss
+                    else base_bce_loss
                 )
                 model_loss = model_loss + ranking_loss_weight * ranking_loss
                 model_loss = model_loss + parax_distillation_weight * parax_distillation_loss
@@ -1930,7 +1986,15 @@ def train_task(
                         adapter_parameters,
                     ))
             scale_before = float(scaler.get_scale())
-            if view_gradient_routing == "dgl":
+            if model.view_fusion_module.logit_residual:
+                backward_logit_residual_training_losses(
+                    base_loss=model_loss,
+                    calibration_loss=fused_bce_loss,
+                    base_parameters=logit_residual_base_parameters,
+                    calibration_parameters=logit_residual_parameters,
+                    scaler=scaler,
+                )
+            elif view_gradient_routing == "dgl":
                 if not view_bce_losses or not view_asl_losses:
                     raise RuntimeError("DGL requires available view objectives")
                 unimodal_bce_loss = (
@@ -2018,11 +2082,16 @@ def train_task(
                 regularization_metric.detach().cpu()
             )
             supervised_bce_total += float(supervised_bce_loss.detach().cpu())
+            base_supervised_bce_total += float(
+                base_supervised_bce_loss.detach().cpu()
+            )
             oof_distillation_total += float(oof_distillation_loss.detach().cpu())
             parax_distillation_total += float(parax_distillation_loss.detach().cpu())
             parax_residual_penalty_total += float(
                 parax_residual_penalty.detach().cpu()
             )
+            if model.view_fusion_module.logit_residual:
+                logit_calibration_total += float(fused_bce_loss.detach().cpu())
             ranking_loss_total += float(ranking_loss.detach().cpu())
             if view_gradient_routing == "dgl":
                 dgl_unimodal_bce_total += float(unimodal_bce_loss.detach().cpu())
@@ -2044,6 +2113,13 @@ def train_task(
                         parax_diagnostic_totals.get(key, 0.0) + float(value)
                     )
                 parax_diagnostic_batches += 1
+            logit_residual_diagnostics = model.logit_residual_diagnostics()
+            if logit_residual_diagnostics:
+                for key, value in logit_residual_diagnostics.items():
+                    parax_diagnostic_totals[key] = (
+                        parax_diagnostic_totals.get(key, 0.0) + float(value)
+                    )
+                parax_diagnostic_batches += 1
         if not batches:
             raise RuntimeError("Training loader produced no batches")
         if optimizer_steps and optimizer_updates_per_task is None:
@@ -2059,12 +2135,19 @@ def train_task(
                 adapter_regularization_metric_total / batches
             ),
             "supervised_bce_loss": supervised_bce_total / batches,
+            "base_supervised_bce_loss": (
+                base_supervised_bce_total / batches
+            ),
             "oof_distillation_loss": oof_distillation_total / batches,
             "oof_distillation_mix": float(oof_distillation_mix),
             "parax_distillation_loss": parax_distillation_total / batches,
             "parax_distillation_weight": float(parax_distillation_weight),
             "parax_residual_penalty": parax_residual_penalty_total / batches,
             "parax_residual_penalty_weight": float(parax_residual_penalty_weight),
+            "logit_calibration_loss": (
+                logit_calibration_total / batches
+                if model.view_fusion_module.logit_residual else 0.0
+            ),
             "pairwise_ranking_loss": ranking_loss_total / batches,
             "pairwise_ranking_loss_weight": float(ranking_loss_weight),
             "dgl_unimodal_bce_loss": dgl_unimodal_bce_total / batches,
@@ -2306,7 +2389,7 @@ def parse_args() -> argparse.Namespace:
         choices=(
             "disabled", "fixed_three_view", "soft_three_view",
             "soft_full_person", "residual_full_person",
-            "residual_three_view",
+            "residual_three_view", "logit_residual_three_view",
         ),
         default="disabled",
     )
@@ -2534,7 +2617,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     three_view_fusion = args.view_fusion in {
-        "fixed_three_view", "soft_three_view", "residual_three_view"
+        "fixed_three_view", "soft_three_view", "residual_three_view",
+        "logit_residual_three_view",
     }
     paired_inputs = (
         args.paired_full_person
@@ -2565,6 +2649,18 @@ def main() -> None:
         raise ValueError("View auxiliary loss weight must be in [0, 1]")
     if args.view_fusion == "disabled" and args.view_auxiliary_loss_weight != 0:
         raise ValueError("View auxiliary supervision requires view fusion")
+    if args.view_fusion == "logit_residual_three_view" and (
+        args.loss_routing != "joint_bce"
+        or args.adapter_mode != "disabled"
+        or args.parax_mode != "disabled"
+        or args.view_gradient_routing != "joint"
+        or args.oof_distillation_mix != 0
+        or args.ranking_loss_weight != 0
+    ):
+        raise ValueError(
+            "Logit residual calibration requires joint BCE without Adapter, "
+            "ParaX, OOF distillation, or ranking loss"
+        )
     if args.num_selectors <= 0:
         raise ValueError("Number of Selectors must be positive")
     if args.parax_rank <= 0 or args.parax_num_experts <= 0 or args.parax_router_hidden <= 0:
@@ -3187,12 +3283,15 @@ def main() -> None:
         ),
         "view_residual_scale": (
             args.view_residual_scale
-            if model.view_fusion_module.residual else None
+            if (model.view_fusion_module.residual
+                or model.view_fusion_module.logit_residual) else None
         ),
         "view_fusion_parameters_per_task": fusion_parameters_per_task,
         "view_fusion_task_semantics": (
             "router_k_only_fuses_task_k_lane_and_freezes_after_task"
             if args.view_fusion.startswith("soft_")
+            else "task_local_classwise_logit_residual_frozen_after_task"
+            if model.view_fusion_module.logit_residual
             else "full_fixed_one_auxiliary_taskwise_residuals_freeze_after_task"
             if model.view_fusion_module.residual
             else "fixed_per_sample_reliability_masked_weights"
