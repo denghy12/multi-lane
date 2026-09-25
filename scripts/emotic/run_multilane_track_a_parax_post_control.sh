@@ -14,6 +14,7 @@ FACE_MANIFEST_ROOT="${FACE_MANIFEST_ROOT:-/mnt/haoyuan/workspace/multi-lane-main
 
 case "${METHOD}" in
   B0-paired) PARAX_MODE=disabled; ENABLE_PARAX=0; PARAX_SCALE=0.0 ;;
+  P-post-zero) PARAX_MODE=post; ENABLE_PARAX=1; PARAX_SCALE=0.0 ;;
   P-post-small) PARAX_MODE=post; ENABLE_PARAX=1; PARAX_SCALE=0.001 ;;
   P-post-tiny) PARAX_MODE=post; ENABLE_PARAX=1; PARAX_SCALE=0.0001 ;;
   P-post-static) PARAX_MODE=post_static; ENABLE_PARAX=1; PARAX_SCALE=0.001 ;;

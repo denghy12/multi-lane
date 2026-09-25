@@ -1,5 +1,11 @@
 # 下一步任务
 
+## 下一步：P-post-zero strict identity（2026-09-25）
+
+P-post-tiny final mAP `44.7075`，低 B0 `0.5319`；其 residual ratio 已约 `1.7e-7`。下一步只运行 B0-paired 与 P-post-zero：结构、optimizer 参数组、router/expert 保留，fixed output scale=`0`，task0--2 validation-only，无 checkpoint，禁止 test。
+
+判断规则：zero 若仍低于 B0，优先修复完整训练可比性；zero 若与 B0 对齐，确认 tiny 残差仍有负作用并结束 ParaX image-stream 路线，转向冻结 B0 feature 上的 view-specific calibration 或 logit-level residual。
+
 ## 当前运行：ParaX P-post-tiny（2026-09-25）
 
 P-post-static 已完成：final mAP `43.9191`、forgetting `2.2440`；dynamic P-post-small 为 `44.2960/2.5475`，均低于 B0 `45.2395/2.7760`。静态方案稳定但 task0 损失更大，动态路由只部分恢复精度。

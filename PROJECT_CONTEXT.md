@@ -1,5 +1,11 @@
 # 项目上下文
 
+## 2026-09-25：P-post-tiny 结果与 strict identity control
+
+批次 `parax_post_tiny_control_20260925_010500` 已同步。P-post-tiny final/average mAP `44.7075/54.1956`、forgetting `2.3772`，比 P-post-small 提升 `0.4115/0.4686`，但仍低于 B0 final `0.5319`。task0 mAP `59.5844`，低 B0 `0.9381`。最终 residual/token ratio 仅约 `1.7e-7`，gate entropy 约 `1.094`、view gate L1 `0.009`，说明 scale `0.0001` 已几乎 identity，同时路由也几乎没有有效区分。task2 Face 单路比 B0 高 `0.7680`，但 Full/Person/reliable-Face 下降，固定融合仍未受益。详细报告见 `docs/parax_post_tiny_results_20260925.md`。
+
+下一步加入 `P-post-zero`：保留 ParaX 模块和 optimizer group，但 fixed output scale 为 `0`，验证完整训练过程能否严格复现 B0。若 zero 仍偏离 B0，说明 paired 可比性还有隐藏数值/优化轨迹差异；若 zero 对齐，则确认 tiny 的剩余损失来自真实残差并停止 ParaX image-stream 扩展。阶段四蒸馏与阶段五 level routing 继续暂停。
+
 ## 2026-09-25：P-post-static 结果与 P-post-tiny 下一步
 
 静态对照批次 `parax_post_static_control_20260925_003631` 已同步。B0 final/average mAP `45.2395/54.9341`、forgetting `2.7760`；P-post-static final/average `43.9191/52.8834`、forgetting `2.2440`。静态 uniform gate 比 dynamic P-post-small (`44.2960/53.7270`, forgetting `2.5475`) 更稳定但精度更低，说明动态路由提供了部分 task/view 适应，却没有解决共同的后置特征坐标失配。task0 静态 mAP 已低 B0 `3.0228`，阶段四蒸馏不能作为首要修复。详细结果见 `docs/parax_post_static_control_results_20260925.md`。

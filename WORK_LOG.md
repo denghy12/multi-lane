@@ -1,5 +1,12 @@
 # 工作日志
 
+## 2026-09-25：P-post-tiny 结果与 P-post-zero
+
+- 已同步批次 `parax_post_tiny_control_20260925_010500`。B0 与 tiny 均完成 task0--2、90 epochs、5010 updates、无 OOM/NaN，未访问 test。
+- P-post-tiny final/average mAP `44.7075/54.1956`、forgetting `2.3772`；比 small/static 更好，但 final 仍低 B0 `0.5319`。
+- 最终 residual/token ratio 约 `1.7e-7`，gate 近均匀且 view L1 仅 `0.009`。继续单纯减 scale 已无法定位剩余差距。
+- 新增 `P-post-zero` 入口，保留结构和参数组但 output scale 固定为0，用于验证 full-training strict identity。
+
 ## 2026-09-25：P-post-static 结果与 P-post-tiny 启动
 
 - 批次 `parax_post_static_control_20260925_003631` 已同步，B0/P-post-static 均完成 90 epochs、5010 updates、无 OOM/NaN、validation-only。
