@@ -4039,3 +4039,9 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - A-view的Full/Person/Face梯度范数约`9.96e-5/5.61e-5/8.13e-5`，residual ratio约`0.00168/0.00328/0.00677`；三路均有效更新。共享b97 residual更大，正式配对容量控制不可省略。
 - 提交smoke记录`323ba28`并ff-only同步服务器clean worktree。首次正式启动在执行launcher前因外层nohup日志父目录不存在而退出，没有产生训练或结果；创建目录后以同一batch ID安全重启。
 - 唯一正式batch`shared_selector_independent_adapter_20260925_1803`已在GPU0--2运行。A0/A-cap/A-view首轮loss为`0.67687206/0.67701335/0.67696667`，各84 updates、zero skipped；参数量和日志路径正确。训练期间不持续监控，结束后统一同步。
+
+## 2026-09-25：启动共享 Adapter 容量完整 validation 准备
+
+分析 `shared_selector_independent_adapter_20260925_1803`：A-cap b97 相对 A0 b32 的 task0/task1/task2 fused mAP 提升 `+2.5218/+1.6715/+1.0746`，最终 `+1.0746`、average `+1.7560`，且 Full/Person/Face/reliable-Face 全部提升；A-view 独立三路虽较 A0 提升 `+0.6245`，但相对容量匹配 A-cap 低 `0.4501`，Face/reliable-Face 相对 A0 下降 `-1.0424/-2.2674`，按预注册规则停止。
+
+旧类负梯度不是主要原因：`legacy_full_zero` 把非当前类别 logit 用 `index_fill` 常数化为0，旧类分支不产生梯度；因此未实施无依据的旧分类行冻结。新分支 `exp/shared-capacity-lane-freeze` 新增 A0/A-cap 完整 8-task validation 脚本和协议文档，先验证 b97 收益能否跨后期任务保持。
