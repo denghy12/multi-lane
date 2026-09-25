@@ -1405,6 +1405,6 @@ VOC 对照实验，不应在现阶段合并到 `main`。
 
 1. 在`exp/fixed-fusion-residual-calibration`只提交本次model/runner/view-fusion、测试、两份入口、协议和三份上下文文档；不得纳入用户已有未提交docs或`tmp/`。
 2. 推送后在服务器先运行`git worktree list`并创建新的clean worktree；不得修改`/mnt/haoyuan/workspace/multi-lane-main-test-only`。
-3. 在`ddp`环境运行完整单测；再做真实EMOTIC task0短smoke，核对zero-init logits对齐、B0/calibration梯度隔离、52参数/task、finite gradients和zero skipped。
-4. 全部通过后启动唯一两臂batch：B0-paired与L-post-logit，seed0、task0--2、30 epochs/task、batch64、auxiliary0.1、AMP/TF32、validation-only、无checkpoint/test。
+3. 已完成：`ddp`完整242项单测、目标23项复验与真实EMOTIC task0短smoke全部通过；zero-init对齐、B0/calibration梯度隔离、52参数/task、finite非零系数和zero skipped成立。
+4. 启动唯一两臂batch：B0-paired与L-post-logit，seed0、task0--2、30 epochs/task、batch64、auxiliary0.1、AMP/TF32、validation-only、无checkpoint/test。
 5. 晋级要求：L-post-logit task0与average不低于paired B0、final至少`+0.10`、forgetting增加不超过`0.10`，且系数既非全零也不饱和。失败则停止当前residual/calibration路线，不加level embedding、ParaX experts、蒸馏、seed1/2或test。

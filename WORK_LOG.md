@@ -4023,3 +4023,4 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - 新建`exp/fixed-fusion-residual-calibration`，实现`logit_residual_three_view`：固定融合产生B0 logits后，用task-local逐类别Person/Face差值做bounded residual；输入detach、系数零初始化、幅度`±0.1`、每task52参数。训练将原B0 loss仅路由到Selector/Prompt/head，calibrated BCE仅路由到residual参数。
 - 新增配对runner/launcher、初始化/Face mask/task隔离/梯度隔离测试与实验协议。macOS静态编译和shell语法检查待完成；本机无torch，完整单测和真实GPU smoke必须在服务器`ddp`环境执行。
 - 服务器clean worktree完整242项单测通过。首次真实candidate smoke在训练前暴露CLI校验误读不存在的Namespace字段；B0正常运行。该接线错误已本地修复，需提交后ff-only同步并重跑candidate smoke。
+- CLI修复后目标23项与完整242项单测再次通过。真实task0一轮smoke：B0和L-post-logit均84 updates、zero skipped；两组base loss同为`0.67691673`。候选每task52参数，Person/Face系数平均绝对值`1.49e-4/7.87e-5`、最大`0.00103`，有限非零且未饱和；smoke val mAP相对B0仅`+0.00093`。正式两臂validation可启动。
