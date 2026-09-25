@@ -1417,3 +1417,4 @@ VOC 对照实验，不应在现阶段合并到 `main`。
 4. 在`ddp`环境运行完整单测，再对A0共享b32、A-cap共享b97、A-view独立三路b32分别运行真实EMOTIC task0一轮smoke。必须核对参数量`49,952/149,857/149,856`、A0/A-view初始对齐、有限非零梯度、CLIP冻结和zero skipped。
 5. smoke全部通过后启动唯一seed0 task0--2 validation：30 epochs/task、batch64、main LR0.0125、Adapter LR4e-4、BCE/ASL、auxiliary0.1、AMP/TF32、validation-only、无checkpoint/test。
 6. A-view只有在task0不低A0、task2分别至少高A0/A-cap `0.10`、average不低A0、单路与forgetting保护均通过时，才进入完整8-task validation；失败则停止，不加Router、level embedding、更大Adapter、多层、seed1/2或test。
+7. 已完成服务器245/245全测和三组真实task0 smoke；下一步在同一clean分支启动唯一正式task0--2 batch，训练期间不持续监控，结束后统一同步分析。

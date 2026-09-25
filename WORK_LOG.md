@@ -4034,3 +4034,6 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - 创建分支`exp/shared-selector-independent-adapter`。实现新的三组task0--2配对入口：A0共享b32、A-cap共享b97、A-view三路独立b32；后两者每task参数只差1。
 - 修正独立view bank初始化：bottleneck相同时从同task共享bank复制到Full/Person/Face，再冻结未使用共享bank，使A0/A-view初始输出严格对齐。
 - 增加只读per-view residual/token ratio和shared/Full/Person/Face Adapter梯度范数，诊断不参与loss。新增初始化、参数量和诊断单测；本地`py_compile`、`bash -n`和`git diff --check`通过。
+- 提交并推送`284a34d`；服务器审计全部worktree后创建独立clean worktree，保留有历史修改的主工作树和`multi-lane-main-test-only`不变。
+- 服务器`ddp`完整单测245/245通过。三组真实task0一轮smoke均84 updates、zero skipped、无训练错误：A0/A-cap/A-view mAP为`39.8053/40.7147/39.8119`，仅作短程诊断。
+- A-view的Full/Person/Face梯度范数约`9.96e-5/5.61e-5/8.13e-5`，residual ratio约`0.00168/0.00328/0.00677`；三路均有效更新。共享b97 residual更大，正式配对容量控制不可省略。

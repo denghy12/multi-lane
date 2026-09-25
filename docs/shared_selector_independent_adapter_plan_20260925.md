@@ -85,3 +85,19 @@ test after failure.
 - server results: `/mnt/haoyuan/workspace/emotic_benchmark_runs/multi_lane_shared_selector_independent_adapter_v0.1/`
 - logs: `./logs/emotic_track_a_shared_selector_independent_adapter/`
 - control/output: `./output/emotic_track_a_shared_selector_independent_adapter/`
+
+## Smoke status
+
+Server clean commit `284a34d` passed 245/245 unit tests. Three real EMOTIC
+task-0, one-epoch smoke runs completed with 84 optimizer updates and zero
+skipped steps:
+
+| arm | parameters/task | validation mAP | residual ratio Full/Person/Face |
+|---|---:|---:|---:|
+| A0-shared-b32 | 49,952 | 39.8053 | 0.00326 / 0.00517 / 0.00797 |
+| A-cap-shared-b97 | 149,857 | 40.7147 | 0.02404 / 0.03883 / 0.05902 |
+| A-view-independent-b32 | 149,856 | 39.8119 | 0.00168 / 0.00328 / 0.00677 |
+
+All Adapter gradients were finite and nonzero. A-view Full/Person/Face gradient
+norms were approximately `9.96e-5/5.61e-5/8.13e-5`. These short-run metrics are
+engineering diagnostics only and do not select an arm.
