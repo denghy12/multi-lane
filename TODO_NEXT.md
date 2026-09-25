@@ -1,5 +1,17 @@
 # 下一步任务
 
+## 下一阶段：shared Adapter 容量 seed1/2 复现（2026-09-26）
+
+seed0 residual-scale validation 已同步并通过SHA核验。b97提高mean task mAP `+1.3077`但final只`+0.2654`，低于注册`+0.5`门槛；收益主要来自Full/Person，reliable-Face无提升，forgetting略差。先不扩结构，以seed1、seed2复现b32/b97配对8-task validation。固定scale0.03、冻结ViT-B/16、layer1 shared Image-token Adapter、30 epochs/task、batch64、BCE+Adapter ASL、auxiliary loss0.1、AMP/TF32，其余与seed0完全一致；validation-only、无checkpoint/test。
+
+执行顺序为seed1在GPU0/1配对运行b32/b97，完成后seed2复用GPU0/1；不要占用seed0 held-out test当前使用的GPU2/3。若三seed final mAP平均增益未达`+0.5`或稳定性/遗忘明显变差，停止b97扩容；若通过，再按validation指标设计最小的视图残差强度对照。详细分析见`docs/shared_capacity_residual_scale_validation_results_20260926.md`。
+
+## 当前运行：共享 Adapter 容量 residual-scale held-out test（2026-09-26）
+
+batch `shared_capacity_residual_scale_test_20260925_160954` 已在 tmux `ml_captest_160954`、GPU2/3 运行 A0 shared b32 与 A-cap shared b97。两组均以 seed0 在 train split 从头训练 8 tasks × 30 epochs，再按 task 评估 held-out test；validation 未保存 checkpoint。Residual scale 固定为0.03，其他训练配置与 validation 配对一致，不做 test-side 搜索。
+
+等两臂自然结束后，同步服务器 `logs/emotic_track_a_shared_capacity_residual_scale/shared_capacity_residual_scale_test_20260925_160954/` 与外部结果目录 `/mnt/haoyuan/workspace/emotic_benchmark_runs/multi_lane_shared_capacity_residual_scale_test_v0.1/shared_capacity_residual_scale_test_20260925_160954/`，核对状态、8 tasks、updates、skip、异常和SHA-256，再分析总体及 Full/Person/Face/reliable-Face 指标。详细锁定配置见 `docs/shared_capacity_residual_scale_test_plan_20260926.md`。
+
 ## 当前运行：后置特征校准对照（2026-09-25）
 
 P-post-zero 已与 B0 完全一致，闭合了阶段一；tiny 的非零残差确定会损失精度。ParaX image-stream、蒸馏和 level routing 停止。

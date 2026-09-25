@@ -4054,3 +4054,20 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
   A0 shared b32 完成 8 tasks、240 epochs、13,950 updates、zero skipped，final/average mAP 为 `42.7525/49.6763`，forgetting `0.8915`。A-cap shared b97 在 task0--2 分别高 A0 `+2.5218/+1.6715/+1.0746`，task3 cycle1--17完成后累计140次 AMP skip，在cycle18因`ASL received non-finite training logits`中止。b97已保存task0/1 residual-energy/token-energy ratio明显高于b32，但task3失败batch没有保留ratio快照，不能把早期ratio当成故障瞬间读数。详见`docs/shared_capacity_full_validation_results_20260925.md`。
 
   新建`exp/shared-capacity-residual-control`，新增scale=0.03的b32/b97配对完整validation入口。服务器完整245项单测与两组真实ViT smoke通过；正式batch`shared_capacity_residual_scale_validation_20260925_222440`已在GPU0/1启动，首轮各84 updates、zero skipped，validation-only、无checkpoint/test。
+# 2026-09-26：共享 Adapter residual-scale validation 结果与 test 启动
+
+- 服务器 validation batch `shared_capacity_residual_scale_validation_20260925_222440` 的 b32/b97 均完成 8 tasks × 30 epochs，无 AMP skipped。A0/b32 final/mean mAP=`42.3199/48.9646`，A-cap/b97=`42.5853/50.2722`；b97 差 `+0.2654/+1.3077`。它通过数值稳定性检查，但 final 增益未达到预注册 `+0.5` 晋级条件。
+- 用户要求执行 test 后，按 paired capacity comparison 启动两臂；未将 b97 单独挑作胜者。配置锁定 seed0、EMOTIC Track A、8 tasks、30 epochs/task、batch64、冻结 CLIP ViT-B/16、layer1 shared Image-token Adapter、b32/b97、residual scale0.03、fixed reliable-Face fusion、BCE+Adapter ASL、auxiliary loss0.1、AMP/TF32。test 不参与训练、调阈值或调融合权重。
+- 无 validation checkpoint；test 两臂均从头用 train split 训练，逐 task 在 test split 报告。服务器 batch `shared_capacity_residual_scale_test_20260925_160954` 已在 GPU2/3、tmux `ml_captest_160954` 进入 task0。test manifest train/test 文件存在。
+- Face 可靠性操作定义为 manifest `valid_face && !ambiguous_match && face_short_side>=24 && face_detection_score>=0.6`。mask 由 `continual_datasets.py` 生成，fixed prior 在 `view_fusion.py` 应用：可靠 `[0.64,0.16,0.20]`，不可靠 `[0.80,0.20,0]`。这是预先设定的数据质量过滤标准，不等于检测器概率经过校准。
+- test manifest 共5,368个person样本；4,677个检测有效（87.13%），4,179个匹配无歧义（77.85%），3,261个满足完整可靠规则（60.75%）。这只是可靠Face覆盖率，是否提供情绪识别增益要看Face单路与固定融合的held-out指标。
+- 计划和完整路径：`docs/shared_capacity_residual_scale_test_plan_20260926.md`。test 完成后同步 logs/output 并分析覆盖率、Face/reliable-Face 单路和融合指标及逐 task 结果。
+
+# 2026-09-26：shared capacity residual-scale validation 分析
+
+- 同步批次`shared_capacity_residual_scale_validation_20260925_222440`两个完整结果目录（含validation score dumps）及日志；远程/本地30个文件SHA-256全部一致。
+- A0 b32与A-cap b97均完成240 epochs、13,950更新、zero skipped、无异常。Final/mean mAP分别为`42.3199/48.9646`与`42.5853/50.2722`；b97差`+0.2654/+1.3077`。Final cF1/oF1差`+0.0609/+0.0130`，forgetting差`+0.0655`。
+- b97 fused mAP逐task均高于b32，但差值从task0的`+3.2866`递减到task7的`+0.2654`。task7 Full/Person/Face/reliable-Face差为`+0.255/+0.346/+0.054/-0.125`；task0--3 reliable-Face均下降，收益主要在Full/Person。
+- per-view Adapter residual诊断为训练batch均值`sum(delta²)/sum(frozen_token²)`能量比。b97 task7 Full/Person/Face=`7.076/8.277/10.702`，task3=`115.259/142.915/187.276`；高于b32且无AMP跳步。scale0.03不是有效能量上界，但该诊断不足以归因AP变化。
+- 审查`TaskImageTokenAdapterBank`/`_lane_block`确认当前是共享Selector证据Adapter，视觉CLIP冻结、无ParaX、三视图固定融合；该实验没有证明encoder层级动态路由。
+- 由于只有seed0且final增益未达预注册`+0.5`，下一步用seed1/2复现b32/b97 8-task validation，GPU0/1、validation-only、无checkpoint/test；seed0 test继续在GPU2/3。完整结果见`docs/shared_capacity_residual_scale_validation_results_20260926.md`。
