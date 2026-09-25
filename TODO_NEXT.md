@@ -6,6 +6,8 @@ seed0 residual-scale validation 已同步并通过SHA核验。b97提高mean task
 
 执行顺序为seed1在GPU0/1配对运行b32/b97，完成后seed2复用GPU0/1；不要占用seed0 held-out test当前使用的GPU2/3。若三seed final mAP平均增益未达`+0.5`或稳定性/遗忘明显变差，停止b97扩容；若通过，再按validation指标设计最小的视图残差强度对照。详细分析见`docs/shared_capacity_residual_scale_validation_results_20260926.md`。
 
+正式 batch `shared_capacity_residual_scale_multiseed_seed12_20260926` 已启动于服务器 clean worktree `/mnt/haoyuan/workspace/multi-lane-main-shared-capacity-multiseed-validation`，tmux `ml_caps12_20260926`。seed1 b32/b97 已进入 GPU0/1；脚本会在两组完成后自动运行 seed2。运行期间不访问test、不添加新参数搜索。
+
 ## 当前运行：共享 Adapter 容量 residual-scale held-out test（2026-09-26）
 
 batch `shared_capacity_residual_scale_test_20260925_160954` 已在 tmux `ml_captest_160954`、GPU2/3 运行 A0 shared b32 与 A-cap shared b97。两组均以 seed0 在 train split 从头训练 8 tasks × 30 epochs，再按 task 评估 held-out test；validation 未保存 checkpoint。Residual scale 固定为0.03，其他训练配置与 validation 配对一致，不做 test-side 搜索。

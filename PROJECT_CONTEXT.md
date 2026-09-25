@@ -2330,3 +2330,4 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - task7 b97三路Adapter residual energy/token energy ratios为`7.076/8.277/10.702`，task3为`115.259/142.915/187.276`，显著高于b32且无数值跳步。这是每epoch跨训练batch的能量比，不是有界norm比例；scale0.03不保证实际残差很小，但不能单凭该诊断归因AP变化。
 - 架构审计：b97没有解冻CLIP，也没有ParaX。共享Image-token Adapter以同一组权重处理不同视图tokens并为selector提供选择证据；CLIP视觉image-token residual stream仍冻结。三路使用相同固定可靠Face融合先验。
 - 下一步用seed1、2复现b32/b97 scale0.03的8-task validation，检验容量增益是否跨seed稳定；配置只更换seed，其余同seed0，GPU0/1运行，held-out seed0 test继续使用GPU2/3，validation不访问test。详细分析见`docs/shared_capacity_residual_scale_validation_results_20260926.md`。
+- 已在服务器 clean worktree `/mnt/haoyuan/workspace/multi-lane-main-shared-capacity-multiseed-validation`（HEAD `1df3398`）启动 batch `shared_capacity_residual_scale_multiseed_seed12_20260926`，tmux `ml_caps12_20260926`。seed1 的 b32/b97 已分别占用GPU0/1进入训练；seed1完成后脚本自动在同卡运行seed2。服务器245项 unittest、bash语法检查和两组真实ViT smoke均通过；seed0 test仍在GPU2/3，未被新validation占用。

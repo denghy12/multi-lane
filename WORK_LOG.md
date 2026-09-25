@@ -4071,3 +4071,4 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - per-view Adapter residual诊断为训练batch均值`sum(delta²)/sum(frozen_token²)`能量比。b97 task7 Full/Person/Face=`7.076/8.277/10.702`，task3=`115.259/142.915/187.276`；高于b32且无AMP跳步。scale0.03不是有效能量上界，但该诊断不足以归因AP变化。
 - 审查`TaskImageTokenAdapterBank`/`_lane_block`确认当前是共享Selector证据Adapter，视觉CLIP冻结、无ParaX、三视图固定融合；该实验没有证明encoder层级动态路由。
 - 由于只有seed0且final增益未达预注册`+0.5`，下一步用seed1/2复现b32/b97 8-task validation，GPU0/1、validation-only、无checkpoint/test；seed0 test继续在GPU2/3。完整结果见`docs/shared_capacity_residual_scale_validation_results_20260926.md`。
+- 提交`1df3398`并推送`exp/shared-capacity-multiseed-validation`；服务器创建clean worktree并通过245项unittest、bash -n、两组真实ViT smoke。正式 batch `shared_capacity_residual_scale_multiseed_seed12_20260926` 已在tmux `ml_caps12_20260926`启动，seed1 b32/b97进入GPU0/1；完成后自动执行seed2，test仍在GPU2/3。
