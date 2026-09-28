@@ -19,7 +19,7 @@ PARAX_LAYERS=(10)
 PARAX_INIT=official
 PARAX_COMPONENTS=all
 PARAX_SCALE=0.1
-PARAX_SCALE_MODE=fixed
+PARAX_SCALE_MODE=learnable
 PARAX_LEVEL_CONDITIONED=0
 PARAX_FREEZE_CENTER=0
 PARAX_TASK_LOCAL=0
@@ -34,21 +34,21 @@ case "${SUITE}:${METHOD}" in
   level:P-8:10-level) PARAX_MODE=image_level; PARAX_LAYERS=(8 9 10); PARAX_LEVEL_CONDITIONED=1 ;;
   level:Static-control) PARAX_MODE=static; PARAX_LAYERS=(8 9 10) ;;
 
-  paired:B0-paired) PARAX_MODE=disabled ;;
+  paired:B0-paired) PARAX_MODE=disabled; PARAX_SCALE_MODE=fixed ;;
   paired:P10-identity) PARAX_MODE=image; PARAX_INIT=identity; PARAX_SCALE_MODE=learnable ;;
-  paired:P10-small) PARAX_MODE=image; PARAX_INIT=small ;;
-  paired:P10-zeroB) PARAX_MODE=image; PARAX_INIT=zero_b ;;
+  paired:P10-small) PARAX_MODE=image; PARAX_INIT=small; PARAX_SCALE_MODE=fixed ;;
+  paired:P10-zeroB) PARAX_MODE=image; PARAX_INIT=zero_b; PARAX_SCALE_MODE=fixed ;;
 
-  center:B0) PARAX_MODE=disabled ;;
-  center:Shared-live) PARAX_MODE=image; PARAX_INIT=zero_output; PARAX_COMPONENTS=all ;;
-  center:Frozen-center) PARAX_MODE=image; PARAX_INIT=zero_output; PARAX_COMPONENTS=router; PARAX_FREEZE_CENTER=1 ;;
-  center:Task-local-delta) PARAX_MODE=image; PARAX_INIT=zero_output; PARAX_COMPONENTS=router; PARAX_FREEZE_CENTER=1; PARAX_TASK_LOCAL=1 ;;
+  center:B0) PARAX_MODE=disabled; PARAX_SCALE_MODE=fixed ;;
+  center:Shared-live) PARAX_MODE=image; PARAX_INIT=zero_output; PARAX_COMPONENTS=all; PARAX_SCALE_MODE=fixed ;;
+  center:Frozen-center) PARAX_MODE=image; PARAX_INIT=zero_output; PARAX_COMPONENTS=router; PARAX_SCALE_MODE=fixed; PARAX_FREEZE_CENTER=1 ;;
+  center:Task-local-delta) PARAX_MODE=image; PARAX_INIT=zero_output; PARAX_COMPONENTS=router; PARAX_SCALE_MODE=fixed; PARAX_FREEZE_CENTER=1; PARAX_TASK_LOCAL=1 ;;
 
-  frozen:B0) PARAX_MODE=disabled ;;
-  frozen:Frozen-center-small) PARAX_MODE=image; PARAX_INIT=zero_output; PARAX_COMPONENTS=router; PARAX_SCALE=0.001; PARAX_FREEZE_CENTER=1 ;;
-  frozen:Frozen-center-penalty) PARAX_MODE=image; PARAX_INIT=zero_output; PARAX_COMPONENTS=router; PARAX_FREEZE_CENTER=1; PARAX_PENALTY=1.0 ;;
+  frozen:B0) PARAX_MODE=disabled; PARAX_SCALE_MODE=fixed ;;
+  frozen:Frozen-center-small) PARAX_MODE=image; PARAX_INIT=zero_output; PARAX_COMPONENTS=router; PARAX_SCALE=0.001; PARAX_SCALE_MODE=fixed; PARAX_FREEZE_CENTER=1 ;;
+  frozen:Frozen-center-penalty) PARAX_MODE=image; PARAX_INIT=zero_output; PARAX_COMPONENTS=router; PARAX_SCALE_MODE=fixed; PARAX_FREEZE_CENTER=1; PARAX_PENALTY=1.0 ;;
 
-  post:B0) PARAX_MODE=disabled ;;
+  post:B0) PARAX_MODE=disabled; PARAX_SCALE_MODE=fixed ;;
   post:P-post-zero) PARAX_MODE=post; PARAX_INIT=zero_output; PARAX_SCALE=0.0; PARAX_FREEZE_CENTER=1 ;;
   post:P-post-small) PARAX_MODE=post; PARAX_INIT=zero_output; PARAX_SCALE=0.001; PARAX_FREEZE_CENTER=1 ;;
   post:P-post-tiny) PARAX_MODE=post; PARAX_INIT=zero_output; PARAX_SCALE=0.0001; PARAX_FREEZE_CENTER=1 ;;
