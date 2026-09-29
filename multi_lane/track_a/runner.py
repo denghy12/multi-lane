@@ -1377,7 +1377,10 @@ def build_optimizer_groups(
             raise ValueError("Adapter weight decay must be non-negative")
         optimizer_groups.append(
             {
-                "params": adapter_parameters,
+                # Keep this optimizer group separate from the combined list
+                # returned below for loss routing.  ParaX parameters are
+                # appended to that list later and own a distinct group.
+                "params": list(adapter_parameters),
                 "weight_decay": resolved_adapter_weight_decay,
                 "lr": adapter_learning_rate,
             }

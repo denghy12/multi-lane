@@ -4,6 +4,8 @@
 
 `MultiLaneModel` 已允许 `adapter_mode=image_token` 与 `parax_mode=image` 同时启用；此前 ParaX 入口显式设置 `--adapter-mode disabled`，因此没有检验在稳定的共享 b32 Adapter 上额外加入 ParaX 是否有收益。本次新增一组严格配对的 test-only 入口，不修改模型前向。
 
+首次服务器全测暴露了组合特有的优化器参数组重复：构建 Adapter 参数组时保存了可变列表，随后追加 ParaX 参数也改变了已创建的 Adapter 组。已改为在创建 Adapter 组时复制列表；返回给损失路由的合并列表仍包含两个模块，但优化器中每个参数只出现一次。完整单测与真实 ViT smoke 需在此修正后重新通过。
+
 数据流为：同一个冻结 CLIP ViT-B/16 按顺序处理 Full、Person、Face；共享 b32 Image-token Adapter 在视觉块索引 1 的 Selector 读取位置生成临时适配 tokens，不写回图像 residual stream；共享 ParaX 在视觉块索引 10 之后、11 之前仅修改主流 patch tokens，CLS 旁路。Task Forward 与图像流逐块并行。三路最终 task 特征按可靠 Face 固定权重融合，再经过共享线性分类头。固定权重为可靠 `[0.64, 0.16, 0.20]`、不可靠 `[0.80, 0.20, 0]`。
 
 ## 配对运行臂
