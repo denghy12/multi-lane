@@ -22,6 +22,8 @@
 - 结果：`./output/emotic_track_a_b32_parax_p10_test/<RUN_ID>/<METHOD>/`
 - 日志：`./logs/emotic_track_a_b32_parax_p10_test/<RUN_ID>/<METHOD>.log`
 
+正式批次使用 `scripts/emotic/launch_multilane_track_a_b32_parax_p10_test.sh` 在 GPU 5、6 上配对启动，先等待两卡各自至少 18 GiB 空闲显存。控制状态位于 `./output/emotic_track_a_b32_parax_p10_control/<BATCH_ID>/status/`；每臂写入退出码，全部成功后写 `complete.txt`。若 GPU 条件未达到，只保持排队，不占用既有 post-only 实验。
+
 运行示例（在服务器 clean worktree、激活 PyTorch 环境后，按真实资产位置设置路径）：
 
 ```bash
