@@ -49,10 +49,10 @@ case "${SUITE}:${METHOD}" in
   frozen:Frozen-center-penalty) PARAX_MODE=image; PARAX_INIT=zero_output; PARAX_COMPONENTS=router; PARAX_SCALE_MODE=fixed; PARAX_FREEZE_CENTER=1; PARAX_PENALTY=1.0 ;;
 
   post:B0) PARAX_MODE=disabled; PARAX_SCALE_MODE=fixed ;;
-  post:P-post-zero) PARAX_MODE=post; PARAX_INIT=zero_output; PARAX_SCALE=0.0; PARAX_FREEZE_CENTER=1 ;;
-  post:P-post-small) PARAX_MODE=post; PARAX_INIT=zero_output; PARAX_SCALE=0.001; PARAX_FREEZE_CENTER=1 ;;
-  post:P-post-tiny) PARAX_MODE=post; PARAX_INIT=zero_output; PARAX_SCALE=0.0001; PARAX_FREEZE_CENTER=1 ;;
-  post:P-post-static) PARAX_MODE=post_static; PARAX_INIT=zero_output; PARAX_SCALE=0.001; PARAX_FREEZE_CENTER=1 ;;
+  post:P-post-zero) PARAX_MODE=post; PARAX_INIT=zero_output; PARAX_COMPONENTS=router; PARAX_SCALE=0.0; PARAX_SCALE_MODE=fixed; PARAX_FREEZE_CENTER=1 ;;
+  post:P-post-small) PARAX_MODE=post; PARAX_INIT=zero_output; PARAX_COMPONENTS=router; PARAX_SCALE=0.001; PARAX_SCALE_MODE=fixed; PARAX_FREEZE_CENTER=1 ;;
+  post:P-post-tiny) PARAX_MODE=post; PARAX_INIT=zero_output; PARAX_COMPONENTS=router; PARAX_SCALE=0.0001; PARAX_SCALE_MODE=fixed; PARAX_FREEZE_CENTER=1 ;;
+  post:P-post-static) PARAX_MODE=post_static; PARAX_INIT=zero_output; PARAX_COMPONENTS=router; PARAX_SCALE=0.001; PARAX_SCALE_MODE=fixed; PARAX_FREEZE_CENTER=1 ;;
   *) echo "Unknown SUITE/METHOD=${SUITE}/${METHOD}" >&2; exit 2 ;;
 esac
 
