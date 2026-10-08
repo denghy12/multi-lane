@@ -176,6 +176,7 @@ def fit_cached_routes(model, cache: Dict, current_classes: Sequence[int], device
     for parameter in bank.parameters():
         parameter.grad = None
     return {"history": history, "samples": len(cache["targets"]),
+            "active_calibration_parameters": sum(parameter.numel() for parameter in parameters),
             "initial_output_max_difference": max_initial_difference,
             "base_hash_before": base_before, "base_hash_after": base_after,
             "center_hash_before": center_before, "center_hash_after": center_after,
