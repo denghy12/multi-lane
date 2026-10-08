@@ -19,6 +19,7 @@ LOG_DIR="${LOG_DIR:-./logs/emotic_track_a_post_task_router_val}"
 parax_args=()
 PARAX_SCALE=0.001
 PARAX_BOUND=0
+PARAX_LAYER_KEY=10
 POST_DESCRIPTION="shared_center_task0_then_frozen task_specific_routers_frozen_after_task"
 case "${METHOD}" in
   B0) PARAX_MODE=disabled ;;
@@ -31,6 +32,9 @@ case "${METHOD}" in
     [[ "${METHOD}" == POST_TASK_STAGED_STATIC ]] && PARAX_MODE=post_task_staged_static
     PARAX_SCALE=1.0
     PARAX_BOUND=0.02
+    # Staged routing has one logical bank entry after the whole Task Forward;
+    # this key does not denote a Transformer insertion layer.
+    PARAX_LAYER_KEY=0
     POST_DESCRIPTION="base_first frozen_random_shared_center task_local_zero_projection smooth_ratio_bound=0.02 calibration_epochs=5 consistency=0.1"
     parax_args+=(--parax-calibration-epochs 5 --parax-calibration-consistency-weight 0.1)
     ;;
@@ -71,7 +75,7 @@ CUDA_VISIBLE_DEVICES="${GPU}" "${PYTHON}" -m multi_lane.track_a.runner \
   --evaluation-score-purpose validation_search \
   --adapter-mode disabled --adapter-learning-rate 0.0004 \
   --adapter-weight-decay 0 --parax-mode "${PARAX_MODE}" \
-  --parax-layer-indices 10 --parax-rank 32 --parax-num-experts 3 \
+  --parax-layer-indices "${PARAX_LAYER_KEY}" --parax-rank 32 --parax-num-experts 3 \
   --parax-router-hidden 16 --parax-initialization zero_output \
   --parax-residual-scale "${PARAX_SCALE}" --parax-output-scale-mode fixed \
   --parax-smooth-ratio-bound "${PARAX_BOUND}" \
