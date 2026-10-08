@@ -264,8 +264,11 @@ class ParaXImageAdapterBank(nn.Module):
             # Compare the tokens actually consumed by Frozen/Task Forward to
             # the same frozen-CLIP tokens before ParaX.  The reference has no
             # trainable path, so alignment does not update the CLIP backbone.
-            cosine = F.cosine_similarity(output.float(), tokens.detach().float(), dim=-1)
-            self._last_alignment_penalties.append((1.0 - cosine).mean())
+            normalized_output = F.normalize(output.float(), dim=-1)
+            normalized_reference = F.normalize(tokens.detach().float(), dim=-1)
+            self._last_alignment_penalties.append(
+                0.5 * (normalized_output - normalized_reference).square().sum(dim=-1).mean()
+            )
         else:
             self.last_projector_correction_ratio = 0.0
         return output, gates
