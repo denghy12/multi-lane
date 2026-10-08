@@ -1590,6 +1590,7 @@ def train_task(
     gradient_clip_norm: float = 0.0,
     parax_distillation_weight: float = 0.0,
     parax_residual_penalty_weight: float = 0.0,
+    parax_projector_alignment_weight: float = 0.0,
 ) -> List[Dict[str, float]]:
     if loss_routing not in {
         "joint_bce", "model_asl", "adapter_asl", "both_asl"
@@ -1657,6 +1658,8 @@ def train_task(
         raise ValueError("ParaX distillation weight must be finite and in [0, 1]")
     if not math.isfinite(parax_residual_penalty_weight) or parax_residual_penalty_weight < 0:
         raise ValueError("ParaX residual penalty weight must be finite and non-negative")
+    if not math.isfinite(parax_projector_alignment_weight) or parax_projector_alignment_weight < 0:
+        raise ValueError("ParaX projector alignment weight must be finite and non-negative")
     if (ranking_loader is None) != (ranking_loss_weight == 0):
         raise ValueError("Ranking loader and positive ranking loss weight must be enabled together")
     if ranking_loader is not None and len(ranking_loader) < epochs * len(loader):
@@ -1737,6 +1740,7 @@ def train_task(
         dgl_fusion_total = 0.0
         parax_distillation_total = 0.0
         parax_residual_penalty_total = 0.0
+        parax_projector_alignment_total = 0.0
         logit_calibration_total = 0.0
         batches = 0
         optimizer_steps = 0
@@ -1795,6 +1799,7 @@ def train_task(
                 model.current_all_logits_with_view_features(images)
                 )
                 parax_residual_penalty = model.parax_residual_penalty()
+                parax_projector_alignment = model.parax_alignment_penalty()
                 fused_bce_loss = compute_training_loss(
                     logits,
                     current_targets,
@@ -1936,6 +1941,9 @@ def train_task(
                 model_loss = model_loss + (
                     parax_residual_penalty_weight * parax_residual_penalty
                 )
+                model_loss = model_loss + (
+                    parax_projector_alignment_weight * parax_projector_alignment
+                )
                 selector_residual_loss = (
                     selector_view_residual_regularization
                     * model.selector_view_residual_metric()
@@ -1967,7 +1975,10 @@ def train_task(
                         regularization_loss = (
                             regularization_metric * regularization_weight
                         )
-                adapter_loss = adapter_base_loss + regularization_loss
+                adapter_loss = (
+                    adapter_base_loss + regularization_loss
+                    + parax_projector_alignment_weight * parax_projector_alignment
+                )
                 if view_gradient_audit_enabled and task_gradient_audit is None:
                     task_gradient_audit = view_gradient_audit(
                         fused_bce_loss,
@@ -2104,6 +2115,9 @@ def train_task(
             parax_residual_penalty_total += float(
                 parax_residual_penalty.detach().cpu()
             )
+            parax_projector_alignment_total += float(
+                parax_projector_alignment.detach().cpu()
+            )
             if model.view_fusion_module.logit_residual:
                 logit_calibration_total += float(fused_bce_loss.detach().cpu())
             ranking_loss_total += float(ranking_loss.detach().cpu())
@@ -2165,6 +2179,8 @@ def train_task(
             "parax_distillation_weight": float(parax_distillation_weight),
             "parax_residual_penalty": parax_residual_penalty_total / batches,
             "parax_residual_penalty_weight": float(parax_residual_penalty_weight),
+            "parax_projector_alignment": parax_projector_alignment_total / batches,
+            "parax_projector_alignment_weight": float(parax_projector_alignment_weight),
             "logit_calibration_loss": (
                 logit_calibration_total / batches
                 if model.view_fusion_module.logit_residual else 0.0
@@ -2609,6 +2625,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--parax-freeze-center-after-task0", action="store_true")
     parser.add_argument("--parax-distillation-weight", type=float, default=0.0)
     parser.add_argument("--parax-residual-penalty-weight", type=float, default=0.0)
+    parser.add_argument("--parax-projector-bottleneck-dim", type=int, default=0)
+    parser.add_argument("--parax-projector-alignment-weight", type=float, default=0.0)
     parser.add_argument(
         "--adapter-weight-decay",
         type=float,
@@ -2698,6 +2716,12 @@ def main() -> None:
         raise ValueError("ParaX layer indices must be valid CLIP block indices")
     if args.parax_residual_scale < 0:
         raise ValueError("ParaX residual scale must be non-negative")
+    if args.parax_projector_bottleneck_dim < 0:
+        raise ValueError("ParaX projector bottleneck must be non-negative")
+    if args.parax_projector_alignment_weight < 0 or not math.isfinite(args.parax_projector_alignment_weight):
+        raise ValueError("ParaX projector alignment weight must be finite and non-negative")
+    if args.parax_projector_alignment_weight and not args.parax_projector_bottleneck_dim:
+        raise ValueError("ParaX projector alignment requires an enabled projector")
     if args.view_gradient_routing != "joint" and args.view_fusion == "disabled":
         raise ValueError("View gradient routing requires view fusion")
     if args.view_gradient_routing == "dgl" and (
@@ -2980,6 +3004,7 @@ def main() -> None:
         parax_residual_ratio_cap=args.parax_residual_ratio_cap,
         parax_task_local_gate=args.parax_task_local_gate,
         parax_freeze_center_after_task0=args.parax_freeze_center_after_task0,
+        parax_projector_bottleneck_dim=args.parax_projector_bottleneck_dim,
     ).float().to(device)
     model.visual_encoder.requires_grad_(False)
     model.assert_visual_frozen()
@@ -2996,6 +3021,10 @@ def main() -> None:
     parax_parameters = (
         model.parax_bank.parameter_count()
         if model.parax_bank is not None else 0
+    )
+    projector_parameters = (
+        sum(p.numel() for p in model.parax_bank.projector.parameters())
+        if model.parax_bank is not None and model.parax_bank.projector is not None else 0
     )
     adapter_parameters_per_task = (
         model.adapter_bank.per_task_parameter_count()
@@ -3016,6 +3045,7 @@ def main() -> None:
         f"selectors_per_task={model.selectors.numel() // model.num_tasks} "
         f"task_lane={lane_parameters} classifier={classifier_parameters} "
         f"adapter_total={adapter_parameters} parax_total={parax_parameters} "
+        f"parax_projector_total={projector_parameters} "
         f"adapter_per_task={adapter_parameter_counts_per_task} "
         f"selector_condition_per_task={condition_parameters_per_task} "
         f"view_fusion_per_task={fusion_parameters_per_task}",
@@ -3522,6 +3552,9 @@ def main() -> None:
         "parax_residual_penalty_weight": args.parax_residual_penalty_weight,
         "parax_level_conditioned": bool(args.parax_level_conditioned or args.parax_mode == "image_level"),
         "parax_parameters": parax_parameters,
+        "parax_projector_parameters": projector_parameters,
+        "parax_projector_bottleneck_dim": args.parax_projector_bottleneck_dim,
+        "parax_projector_alignment_weight": args.parax_projector_alignment_weight,
         "parax_target": (
             "patch_tokens_between_frozen_clip_blocks"
             if args.parax_mode in {"image", "image_level", "static"}
@@ -3743,6 +3776,7 @@ def main() -> None:
             gradient_clip_norm=args.gradient_clip_norm,
             parax_distillation_weight=args.parax_distillation_weight,
             parax_residual_penalty_weight=args.parax_residual_penalty_weight,
+            parax_projector_alignment_weight=args.parax_projector_alignment_weight,
         )
         row = evaluate(
             model,

@@ -72,6 +72,7 @@ class MultiLaneModel(nn.Module):
         parax_residual_ratio_cap: float = 0.0,
         parax_task_local_gate: bool = False,
         parax_freeze_center_after_task0: bool = False,
+        parax_projector_bottleneck_dim: int = 0,
     ) -> None:
         super().__init__()
         if not task_sizes or any(int(size) <= 0 for size in task_sizes):
@@ -103,6 +104,10 @@ class MultiLaneModel(nn.Module):
             )
         if parax_mode not in {"disabled", "image", "image_level", "static", "post", "post_static"}:
             raise ValueError("Invalid ParaX mode")
+        if parax_projector_bottleneck_dim < 0:
+            raise ValueError("ParaX projector bottleneck must be non-negative")
+        if parax_projector_bottleneck_dim and parax_mode not in {"image", "image_level", "static"}:
+            raise ValueError("ParaX projector requires image-stream ParaX")
         if int(adapter_view_bottleneck_dim) < 0:
             raise ValueError("View-specific Adapter bottleneck must be non-negative")
         if adapter_view_mode not in {"shared", "independent"}:
@@ -216,6 +221,7 @@ class MultiLaneModel(nn.Module):
                     num_tasks=len(task_sizes),
                     task_local_gate=parax_task_local_gate,
                     freeze_center_after_task0=parax_freeze_center_after_task0,
+                    projector_bottleneck_dim=parax_projector_bottleneck_dim,
                 )
         self._task_sizes = tuple(int(size) for size in task_sizes)
         self._current_task_id = -1
@@ -423,6 +429,8 @@ class MultiLaneModel(nn.Module):
     def _record_parax_gates(
         self, layer_id: int, image_view: str, before: torch.Tensor,
         after: torch.Tensor, gates: torch.Tensor,
+        raw_residual_ratio: Optional[float] = None,
+        projector_correction_ratio: Optional[float] = None,
     ) -> None:
         if not self.parax_runtime_enabled:
             return
@@ -433,6 +441,8 @@ class MultiLaneModel(nn.Module):
             "view": str(image_view),
             "gates": gates.detach().float(),
             "residual_ratio": float((residual_norm / token_norm).cpu()),
+            "raw_residual_ratio": raw_residual_ratio,
+            "projector_correction_ratio": projector_correction_ratio,
         })
 
     def parax_gate_diagnostics(self) -> Dict[str, float]:
@@ -457,6 +467,13 @@ class MultiLaneModel(nn.Module):
             result[f"{prefix}_residual_ratio"] = float(
                 sum(record["residual_ratio"] for record in records) / len(records)
             )
+            if records[0]["raw_residual_ratio"] is not None:
+                result[f"{prefix}_raw_residual_ratio"] = float(
+                    sum(record["raw_residual_ratio"] for record in records) / len(records)
+                )
+                result[f"{prefix}_projector_correction_ratio"] = float(
+                    sum(record["projector_correction_ratio"] for record in records) / len(records)
+                )
         views = sorted({record["view"] for record in self._parax_gate_records})
         if len(views) >= 2:
             view_means = {}
@@ -474,6 +491,11 @@ class MultiLaneModel(nn.Module):
         if self.parax_bank is None:
             return self.selectors.new_zeros(())
         return self.parax_bank.residual_penalty()
+
+    def parax_alignment_penalty(self) -> torch.Tensor:
+        if self.parax_bank is None:
+            return self.selectors.new_zeros(())
+        return self.parax_bank.alignment_penalty()
 
     def parax_gradient_diagnostics(self) -> Dict[str, float]:
         if self.parax_bank is None:
@@ -790,7 +812,9 @@ class MultiLaneModel(nn.Module):
                 image_tokens = torch.cat([image_tokens[:, :1], patch_tokens], dim=1)
                 self._last_parax_gates = gates.detach()
                 self._record_parax_gates(
-                    layer_id - 1, image_view, before_patch_tokens, patch_tokens, gates
+                    layer_id - 1, image_view, before_patch_tokens, patch_tokens, gates,
+                    self.parax_bank.last_raw_residual_ratio,
+                    self.parax_bank.last_projector_correction_ratio,
                 )
             query_delta = None
             if (condition_enabled

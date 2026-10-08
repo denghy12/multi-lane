@@ -87,6 +87,7 @@ def main() -> None:
     parser.add_argument("--parax-trainable-components", choices=("all", "router", "experts"), default="all")
     parser.add_argument("--parax-output-scale-mode", choices=("learnable", "fixed"), default="learnable")
     parser.add_argument("--parax-residual-ratio-cap", type=float, default=0.0)
+    parser.add_argument("--parax-projector-bottleneck-dim", type=int, default=0)
     parser.add_argument("--parax-task-local-gate", action="store_true")
     parser.add_argument("--parax-freeze-center-after-task0", action="store_true")
     parser.add_argument("--parax-level-conditioned", action="store_true")
@@ -158,6 +159,7 @@ def main() -> None:
         parax_trainable_components=args.parax_trainable_components,
         parax_output_scale_mode=args.parax_output_scale_mode,
         parax_residual_ratio_cap=args.parax_residual_ratio_cap,
+        parax_projector_bottleneck_dim=args.parax_projector_bottleneck_dim,
         parax_task_local_gate=args.parax_task_local_gate,
         parax_freeze_center_after_task0=args.parax_freeze_center_after_task0,
     ).float().cuda()

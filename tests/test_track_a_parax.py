@@ -12,6 +12,75 @@ from test_track_a_reproduction import FakeVisual
 
 
 class ParaXTest(unittest.TestCase):
+    def test_projector_preserves_initial_p10_and_updates_with_expert_center(self) -> None:
+        torch.manual_seed(41)
+        visual = FakeVisual()
+        visual.transformer.resblocks.append(copy.deepcopy(visual.transformer.resblocks[0]))
+        common = dict(
+            task_sizes=(2, 1), num_selectors=2, num_prompts=2,
+            num_prompt_layers=1, parax_mode="image",
+            parax_layer_indices=(0,), parax_rank=2, parax_num_experts=3,
+            parax_initialization="official", parax_residual_scale=0.1,
+            parax_trainable_components="all", parax_freeze_center_after_task0=False,
+        )
+        torch.manual_seed(42)
+        plain = MultiLaneModel(copy.deepcopy(visual), **common)
+        torch.manual_seed(42)
+        projected = MultiLaneModel(
+            copy.deepcopy(visual), **common, parax_projector_bottleneck_dim=4,
+        )
+        plain.activate_task(0)
+        projected.activate_task(0)
+        images = torch.randn(2, 3, 4, 4)
+        torch.testing.assert_close(
+            projected.current_all_logits(images), plain.current_all_logits(images),
+            atol=1e-6, rtol=1e-6,
+        )
+        _, _, optimizer_groups = build_optimizer_groups(
+            projected, weight_decay=0.0, adapter_learning_rate=4e-4,
+        )
+        optimizer_ids = [id(p) for group in optimizer_groups for p in group["params"]]
+        self.assertEqual(len(optimizer_ids), len(set(optimizer_ids)))
+        self.assertTrue({
+            id(p) for p in projected.parax_bank.projector.parameters()
+        } <= set(optimizer_ids))
+        projected.zero_grad(set_to_none=True)
+        logits = projected.current_all_logits(images)
+        alignment = projected.parax_alignment_penalty()
+        self.assertTrue(torch.isfinite(alignment))
+        self.assertGreater(float(alignment.detach()), 0)
+        (logits.square().mean() + 0.1 * alignment).backward()
+        projector_gradients = [
+            parameter.grad for parameter in projected.parax_bank.projector.parameters()
+        ]
+        self.assertTrue(any(
+            grad is not None and torch.isfinite(grad).all() and torch.count_nonzero(grad)
+            for grad in projector_gradients
+        ))
+        diagnostics = projected.parax_gate_diagnostics()
+        self.assertIn("parax_full_layer0_raw_residual_ratio", diagnostics)
+        self.assertIn("parax_full_layer0_projector_correction_ratio", diagnostics)
+        projected.assert_visual_frozen()
+        projected.activate_task(1)
+        self.assertTrue(projected.parax_bank.expert_a.requires_grad)
+        self.assertTrue(any(
+            parameter.requires_grad for parameter in projected.parax_bank.routers.parameters()
+        ))
+        self.assertTrue(all(
+            parameter.requires_grad for parameter in projected.parax_bank.projector.parameters()
+        ))
+
+    def test_zero_parax_with_projector_is_exact_identity_initially(self) -> None:
+        bank = ParaXImageAdapterBank(
+            8, 2, 3, (0,), residual_scale=0.0,
+            output_scale_mode="fixed", projector_bottleneck_dim=4,
+        )
+        bank.activate_task(0)
+        tokens = torch.randn(2, 5, 8)
+        output, _ = bank(0, tokens)
+        self.assertTrue(torch.equal(output, tokens))
+        self.assertAlmostEqual(float(bank.alignment_penalty()), 0.0, places=6)
+
     def test_image_token_adapter_and_p10_parax_run_together(self) -> None:
         torch.manual_seed(31)
         visual = FakeVisual()

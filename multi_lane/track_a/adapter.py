@@ -36,6 +36,23 @@ class TransformerBlockAdapter(nn.Module):
         return self.up(self.activation(self.down(value)))
 
 
+class CLIPPatchProjector(nn.Module):
+    """Identity-initialized correction in the frozen ViT patch-token space."""
+
+    def __init__(self, hidden_dim: int, bottleneck_dim: int) -> None:
+        super().__init__()
+        if hidden_dim <= 0 or bottleneck_dim <= 0:
+            raise ValueError("Projector dimensions must be positive")
+        self.norm = nn.LayerNorm(hidden_dim)
+        self.down = nn.Linear(hidden_dim, bottleneck_dim)
+        self.up = nn.Linear(bottleneck_dim, hidden_dim)
+        nn.init.zeros_(self.up.weight)
+        nn.init.zeros_(self.up.bias)
+
+    def forward(self, tokens: torch.Tensor) -> torch.Tensor:
+        return tokens + self.up(F.gelu(self.down(self.norm(tokens))))
+
+
 class ParaXImageAdapterBank(nn.Module):
     """Token-only ParaX-style image-stream adapter for frozen CLIP blocks.
 
@@ -54,6 +71,7 @@ class ParaXImageAdapterBank(nn.Module):
         num_tasks: int = 1,
         task_local_gate: bool = False,
         freeze_center_after_task0: bool = False,
+        projector_bottleneck_dim: int = 0,
     ) -> None:
         super().__init__()
         if hidden_dim <= 0 or rank <= 0 or num_experts <= 0:
@@ -73,6 +91,8 @@ class ParaXImageAdapterBank(nn.Module):
             raise ValueError("ParaX output scale mode must be learnable or fixed")
         if residual_ratio_cap < 0:
             raise ValueError("ParaX residual ratio cap must be non-negative")
+        if projector_bottleneck_dim < 0:
+            raise ValueError("ParaX projector bottleneck must be non-negative")
         self.hidden_dim = int(hidden_dim)
         self.rank = int(rank)
         self.num_experts = int(num_experts)
@@ -109,6 +129,10 @@ class ParaXImageAdapterBank(nn.Module):
         )
         self.norm = nn.LayerNorm(hidden_dim)
         self.proj = nn.Linear(rank, rank)
+        self.projector = (
+            CLIPPatchProjector(hidden_dim, projector_bottleneck_dim)
+            if projector_bottleneck_dim else None
+        )
         if initialization == "zero_output":
             nn.init.zeros_(self.proj.weight)
             nn.init.zeros_(self.proj.bias)
@@ -131,6 +155,9 @@ class ParaXImageAdapterBank(nn.Module):
         )
         self._current_task_id = 0
         self._last_residual_penalties: list[torch.Tensor] = []
+        self._last_alignment_penalties: list[torch.Tensor] = []
+        self.last_raw_residual_ratio = 0.0
+        self.last_projector_correction_ratio = 0.0
         self.requires_grad_(False)
 
     def activate_task(self, task_id: int) -> None:
@@ -150,6 +177,10 @@ class ParaXImageAdapterBank(nn.Module):
         if effective_components in {"all", "experts"} and not center_frozen:
             for name in ("expert_a", "expert_b", "norm", "proj"):
                 getattr(self, name).requires_grad_(True)
+        if self.projector is not None:
+            # The projector is a shared, continually updated correction in
+            # this experiment; it is not part of the expert-center freeze.
+            self.projector.requires_grad_(True)
         if effective_components in {"all", "router"} and not self.static:
             self.routers.requires_grad_(True)
             if self.level_embeddings is not None:
@@ -167,11 +198,17 @@ class ParaXImageAdapterBank(nn.Module):
 
     def reset_forward_diagnostics(self) -> None:
         self._last_residual_penalties = []
+        self._last_alignment_penalties = []
 
     def residual_penalty(self) -> torch.Tensor:
         if not self._last_residual_penalties:
             return self.output_scale.new_zeros(())
         return torch.stack(self._last_residual_penalties).mean()
+
+    def alignment_penalty(self) -> torch.Tensor:
+        if not self._last_alignment_penalties:
+            return self.output_scale.new_zeros(())
+        return torch.stack(self._last_alignment_penalties).mean()
 
     def forward(
         self, layer_id: int, tokens: torch.Tensor, view_name: str = "full",
@@ -214,6 +251,23 @@ class ParaXImageAdapterBank(nn.Module):
             ).clamp(max=1.0).to(dtype=delta.dtype)
             scaled_delta = scaled_delta * scale[:, None, None]
         output = tokens + scaled_delta
+        self.last_raw_residual_ratio = float(
+            (scaled_delta.detach().float().norm(dim=-1).mean(dim=1) / token_norm).mean().cpu()
+        )
+        if self.projector is not None:
+            before_projector = output
+            output = self.projector(output)
+            self.last_projector_correction_ratio = float(
+                ((output.detach().float() - before_projector.detach().float())
+                 .norm(dim=-1).mean(dim=1) / token_norm).mean().cpu()
+            )
+            # Compare the tokens actually consumed by Frozen/Task Forward to
+            # the same frozen-CLIP tokens before ParaX.  The reference has no
+            # trainable path, so alignment does not update the CLIP backbone.
+            cosine = F.cosine_similarity(output.float(), tokens.detach().float(), dim=-1)
+            self._last_alignment_penalties.append((1.0 - cosine).mean())
+        else:
+            self.last_projector_correction_ratio = 0.0
         return output, gates
 
 
