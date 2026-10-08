@@ -6,9 +6,13 @@ cd "${ROOT}"
 BATCH_ID="${BATCH_ID:-post_task_router_seed0_val_$(date +%Y%m%d_%H%M%S)}"
 GPU_LIST="${GPU_LIST:-1 2}"
 read -r -a GPUS <<< "${GPU_LIST}"
-[[ "${#GPUS[@]}" -eq 2 && "${GPUS[0]}" != "${GPUS[1]}" ]] || {
-  echo "GPU_LIST must contain two distinct GPU indices" >&2; exit 2;
+[[ "${#GPUS[@]}" -eq 2 ]] || {
+  echo "GPU_LIST must contain exactly two GPU indices" >&2; exit 2;
 }
+shared_gpu=0
+if [[ "${GPUS[0]}" == "${GPUS[1]}" ]]; then
+  shared_gpu=1
+fi
 MIN_FREE_MIB="${MIN_FREE_MIB:-18000}"
 POLL_SECONDS="${POLL_SECONDS:-60}"
 PYTHON="${PYTHON:-python}"
@@ -28,12 +32,21 @@ for path in "${CLIP_CHECKPOINT}" "${DATA_ROOT}/CVPR17_Annotations.mat" \
   [[ -f "${path}" ]] || { echo "Missing input: ${path}" >&2; exit 2; }
 done
 mkdir -p "${CONTROL}/status" "${LOG_ROOT}/${BATCH_ID}"
+if (( shared_gpu )); then
+  echo "Waiting for GPU ${GPUS[0]} before starting both methods concurrently"
+  while true; do
+    free_mib="$(nvidia-smi -i "${GPUS[0]}" --query-gpu=memory.free --format=csv,noheader,nounits | tr -d ' ')"
+    (( free_mib >= MIN_FREE_MIB )) && break
+    sleep "${POLL_SECONDS}"
+  done
+fi
 cat > "${CONTROL}/experiment_manifest.txt" <<EOF_MANIFEST
 batch=${BATCH_ID}
 branch=$(git branch --show-current)
 code_commit=$(git rev-parse HEAD)
 methods=${METHODS[*]}
 gpu_indices=${GPUS[*]}
+same_gpu_parallel=${shared_gpu}
 dataset=EMOTIC Track-A train; tasks 0-2; validation only; test forbidden
 inputs=${DATA_ROOT}; ${CLIP_CHECKPOINT}; ${FACE_MANIFEST_ROOT}
 seed=0; epochs=30/task; train/eval batch=64; Adam reset/task; main lr=0.0125; ParaX lr=0.0004; cosine; weight decay=0; AMP+TF32
@@ -48,11 +61,13 @@ for index in "${!METHODS[@]}"; do
   method="${METHODS[index]}"; gpu="${GPUS[index]}"
   (
     echo "gpu=${gpu}" > "${CONTROL}/status/${method}.waiting.txt"
-    while true; do
-      free_mib="$(nvidia-smi -i "${gpu}" --query-gpu=memory.free --format=csv,noheader,nounits | tr -d ' ')"
-      (( free_mib >= MIN_FREE_MIB )) && break
-      sleep "${POLL_SECONDS}"
-    done
+    if (( ! shared_gpu )); then
+      while true; do
+        free_mib="$(nvidia-smi -i "${gpu}" --query-gpu=memory.free --format=csv,noheader,nounits | tr -d ' ')"
+        (( free_mib >= MIN_FREE_MIB )) && break
+        sleep "${POLL_SECONDS}"
+      done
+    fi
     mv "${CONTROL}/status/${method}.waiting.txt" "${CONTROL}/status/${method}.started.txt"
     METHOD="${method}" GPU="${gpu}" RUN_ID="${BATCH_ID}" SEED=0 \
       MAX_TASKS=3 EPOCHS=30 PYTHON="${PYTHON}" DATA_ROOT="${DATA_ROOT}" \

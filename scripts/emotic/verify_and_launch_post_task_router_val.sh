@@ -6,8 +6,8 @@ cd "${ROOT}"
 BATCH_ID="${BATCH_ID:-post_task_router_seed0_val_$(date +%Y%m%d_%H%M%S)}"
 GPU_LIST="${GPU_LIST:-1 2}"
 read -r -a GPUS <<< "${GPU_LIST}"
-[[ "${#GPUS[@]}" -eq 2 && "${GPUS[0]}" != "${GPUS[1]}" ]] || {
-  echo "GPU_LIST must contain two distinct GPU indices" >&2; exit 2;
+[[ "${#GPUS[@]}" -eq 2 ]] || {
+  echo "GPU_LIST must contain exactly two GPU indices" >&2; exit 2;
 }
 MIN_FREE_MIB="${MIN_FREE_MIB:-18000}"
 POLL_SECONDS="${POLL_SECONDS:-60}"
