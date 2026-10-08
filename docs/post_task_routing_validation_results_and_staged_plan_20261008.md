@@ -104,3 +104,9 @@ task1 起只能重组 task0 学到并冻结的变换，不能新增适合新类�
 日志：`logs/emotic_track_a_post_task_router_val/post_task_router_seed0_val_gpu0_parallel_20261008_01/`。
 
 本轮结论仅来自一个 seed、三个任务；没有得到跨 seed 或八任务有效性的证据。
+
+## 下一轮执行状态
+
+代码分支 `exp/post-task-staged-bounded-routing`，最终提交 `028d29c`；服务器独立 worktree `/mnt/haoyuan/workspace/multi-lane-main-post-task-staged-bounded-routing`。在原训练环境 `/opt/conda/envs/ddp/bin/python` 中，254/254 单测通过。真实 EMOTIC 两任务 smoke 三臂均完成各153次基础更新、0 skipped；两校正组在 task0/task1 校正前的 logits 相对独立 B0 最大差为0，baseline compact checkpoint 全部参数一致。校正期间 base/center/old-route hash 不变，初始输出差为0，校正 epoch 平均残差最大约0.0180；smoke用于验证实现，没有用于选择配置。
+
+2026-10-08 16:56（北京时间）在GPU0并行启动三任务正式Validation，batch=`post_task_staged_bounded_seed0_val_gpu0_20261008_01`，tmux=`ml_post_stage_gpu0_20261008`。结果/日志分别在独立worktree的 `output/emotic_track_a_post_task_staged_val/<batch>/` 与 `logs/emotic_track_a_post_task_staged_val/<batch>/`。训练期间不持续监督，完成后统一核验和分析。
