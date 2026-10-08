@@ -12,6 +12,55 @@ from test_track_a_reproduction import FakeVisual
 
 
 class ParaXTest(unittest.TestCase):
+    def test_post_task_router_keeps_old_lane_fixed_after_new_task_update(self) -> None:
+        torch.manual_seed(61)
+        visual = FakeVisual()
+        common = dict(task_sizes=(2, 1), num_selectors=2, num_prompts=2,
+                      num_prompt_layers=1)
+        torch.manual_seed(62)
+        baseline = MultiLaneModel(copy.deepcopy(visual), **common)
+        torch.manual_seed(62)
+        routed = MultiLaneModel(
+            copy.deepcopy(visual), **common,
+            parax_mode="post_task_router", parax_layer_indices=(0,),
+            parax_rank=2, parax_num_experts=3, parax_initialization="zero_output",
+            parax_residual_scale=0.001, parax_output_scale_mode="fixed",
+            parax_trainable_components="router", parax_freeze_center_after_task0=True,
+        )
+        baseline.activate_task(0)
+        routed.activate_task(0)
+        images = torch.randn(2, 3, 4, 4)
+        torch.testing.assert_close(
+            routed.current_all_logits(images), baseline.current_all_logits(images),
+            atol=1e-6, rtol=1e-6,
+        )
+        self.assertTrue(routed.parax_bank.expert_a.requires_grad)
+        opt0 = torch.optim.Adam(routed.parax_optimizer_parameters(), lr=0.1)
+        opt0.zero_grad()
+        routed.current_all_logits(images).square().mean().backward()
+        opt0.step()
+        routed.activate_task(1)
+        self.assertFalse(routed.parax_bank.expert_a.requires_grad)
+        self.assertFalse(any(
+            p.requires_grad for p in routed.parax_bank.routers["0_0"].parameters()
+        ))
+        self.assertTrue(all(
+            p.requires_grad for p in routed.parax_bank.routers["1_0"].parameters()
+        ))
+        old_logits = routed.seen_logits(images)[:, :2].detach().clone()
+        opt1 = torch.optim.Adam(routed.parax_optimizer_parameters(), lr=0.1)
+        opt1.zero_grad()
+        routed.current_all_logits(images).square().mean().backward()
+        self.assertTrue(any(
+            p.grad is not None and bool(torch.isfinite(p.grad).all())
+            for p in routed.parax_bank.routers["1_0"].parameters()
+        ))
+        opt1.step()
+        torch.testing.assert_close(
+            routed.seen_logits(images)[:, :2], old_logits, atol=1e-6, rtol=1e-6,
+        )
+        routed.assert_visual_frozen()
+
     def test_projector_preserves_initial_p10_and_updates_with_expert_center(self) -> None:
         torch.manual_seed(41)
         visual = FakeVisual()

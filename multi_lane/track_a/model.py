@@ -102,8 +102,16 @@ class MultiLaneModel(nn.Module):
             raise ValueError(
                 "Adapter mode must be disabled, task_lane, or image_token"
             )
-        if parax_mode not in {"disabled", "image", "image_level", "static", "post", "post_static"}:
+        if parax_mode not in {"disabled", "image", "image_level", "static", "post", "post_static", "post_task_router"}:
             raise ValueError("Invalid ParaX mode")
+        if parax_mode == "post_task_router" and (
+            not parax_freeze_center_after_task0 or parax_output_scale_mode != "fixed"
+            or parax_task_local_gate or parax_level_conditioned
+        ):
+            raise ValueError(
+                "Task-local post ParaX requires frozen center after task0, fixed scale, "
+                "and no task-local output gate or shared level embedding"
+            )
         if parax_projector_bottleneck_dim < 0:
             raise ValueError("ParaX projector bottleneck must be non-negative")
         if parax_projector_bottleneck_dim and parax_mode not in {"image", "image_level", "static"}:
@@ -209,7 +217,7 @@ class MultiLaneModel(nn.Module):
             # the shared Selector/Prompt/head or DataLoader RNG stream.
             with torch.random.fork_rng(devices=[]):
                 self.parax_bank = ParaXImageAdapterBank(
-                    hidden_dim=(output_dim if parax_mode in {"post", "post_static"} else self.width), rank=parax_rank,
+                    hidden_dim=(output_dim if parax_mode in {"post", "post_static", "post_task_router"} else self.width), rank=parax_rank,
                     num_experts=parax_num_experts, layer_indices=parax_layer_indices,
                     router_hidden=parax_router_hidden, residual_scale=parax_residual_scale,
                     level_conditioned=(parax_level_conditioned or parax_mode == "image_level"),
@@ -222,6 +230,7 @@ class MultiLaneModel(nn.Module):
                     task_local_gate=parax_task_local_gate,
                     freeze_center_after_task0=parax_freeze_center_after_task0,
                     projector_bottleneck_dim=parax_projector_bottleneck_dim,
+                    task_local_router=(parax_mode == "post_task_router"),
                 )
         self._task_sizes = tuple(int(size) for size in task_sizes)
         self._current_task_id = -1
@@ -797,11 +806,11 @@ class MultiLaneModel(nn.Module):
         for layer_id, block in enumerate(self.visual_encoder.transformer.resblocks):
             post_mode_last_layer = (
                 self.parax_runtime_enabled and self.parax_bank is not None
-                and self.parax_mode in {"post", "post_static"}
+                and self.parax_mode in {"post", "post_static", "post_task_router"}
                 and layer_id == len(self.visual_encoder.transformer.resblocks) - 1
             )
             if (self.parax_runtime_enabled and self.parax_bank is not None
-                    and self.parax_mode not in {"post", "post_static"}
+                    and self.parax_mode not in {"post", "post_static", "post_task_router"}
                     and layer_id > 0
                     and layer_id - 1 in self.parax_bank.layer_indices):
                 patch_tokens = image_tokens[:, 1:]
@@ -836,7 +845,7 @@ class MultiLaneModel(nn.Module):
                 paired["condition_valid"] if person_tokens is not None else None,
                 image_view,
             )
-            if not self.parax_runtime_enabled or self.parax_mode in {"post", "post_static"}:
+            if not self.parax_runtime_enabled or self.parax_mode in {"post", "post_static", "post_task_router"}:
                 with torch.no_grad():
                     image_tokens = block(image_tokens.permute(1, 0, 2)).permute(
                         1, 0, 2
@@ -852,11 +861,22 @@ class MultiLaneModel(nn.Module):
         if self.visual_encoder.proj is not None:
             lane_tokens = lane_tokens @ self.visual_encoder.proj
         lane_cls = lane_tokens[:, :, 0].permute(1, 0, 2).float()
-        if self.parax_runtime_enabled and self.parax_bank is not None and self.parax_mode in {"post", "post_static"}:
+        if self.parax_runtime_enabled and self.parax_bank is not None and self.parax_mode in {"post", "post_static", "post_task_router"}:
             before_lane_features = lane_cls
-            post_features, gates = self.parax_bank(
-                self.parax_bank.layer_indices[0], lane_cls, view_name=image_view
-            )
+            if self.parax_mode == "post_task_router":
+                routed = [
+                    self.parax_bank(
+                        self.parax_bank.layer_indices[0], lane_cls[:, index:index + 1],
+                        view_name=image_view, task_id=task_id,
+                    )
+                    for index, task_id in enumerate(lane_ids)
+                ]
+                post_features = torch.cat([value for value, _ in routed], dim=1)
+                gates = torch.stack([value for _, value in routed], dim=1).mean(dim=1)
+            else:
+                post_features, gates = self.parax_bank(
+                    self.parax_bank.layer_indices[0], lane_cls, view_name=image_view
+                )
             lane_cls = post_features
             self._last_parax_gates = gates.detach()
             self._record_parax_gates(

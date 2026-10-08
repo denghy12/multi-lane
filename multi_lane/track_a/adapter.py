@@ -72,6 +72,7 @@ class ParaXImageAdapterBank(nn.Module):
         task_local_gate: bool = False,
         freeze_center_after_task0: bool = False,
         projector_bottleneck_dim: int = 0,
+        task_local_router: bool = False,
     ) -> None:
         super().__init__()
         if hidden_dim <= 0 or rank <= 0 or num_experts <= 0:
@@ -105,6 +106,7 @@ class ParaXImageAdapterBank(nn.Module):
         self.output_scale_mode = output_scale_mode
         self.residual_ratio_cap = float(residual_ratio_cap)
         self.task_local_gate = bool(task_local_gate)
+        self.task_local_router = bool(task_local_router)
         self.freeze_center_after_task0 = bool(freeze_center_after_task0)
         self.num_tasks = int(num_tasks)
         if self.num_tasks <= 0:
@@ -119,10 +121,12 @@ class ParaXImageAdapterBank(nn.Module):
         self.routers = nn.ModuleDict()
         input_dim = hidden_dim + (hidden_dim if self.level_conditioned else 0)
         for layer in self.layer_indices:
-            self.routers[str(layer)] = nn.Sequential(
-                nn.Linear(input_dim, router_hidden), nn.GELU(),
-                nn.Linear(router_hidden, num_experts)
-            )
+            for task_id in range(self.num_tasks if self.task_local_router else 1):
+                key = f"{task_id}_{layer}" if self.task_local_router else str(layer)
+                self.routers[key] = nn.Sequential(
+                    nn.Linear(input_dim, router_hidden), nn.GELU(),
+                    nn.Linear(router_hidden, num_experts)
+                )
         self.level_embeddings = (
             nn.Parameter(torch.zeros(len(self.level_names), hidden_dim))
             if self.level_conditioned else None
@@ -182,7 +186,11 @@ class ParaXImageAdapterBank(nn.Module):
             # this experiment; it is not part of the expert-center freeze.
             self.projector.requires_grad_(True)
         if effective_components in {"all", "router"} and not self.static:
-            self.routers.requires_grad_(True)
+            if self.task_local_router:
+                for layer in self.layer_indices:
+                    self.routers[f"{self._current_task_id}_{layer}"].requires_grad_(True)
+            else:
+                self.routers.requires_grad_(True)
             if self.level_embeddings is not None:
                 self.level_embeddings.requires_grad_(True)
         self.output_scale.requires_grad_(
@@ -212,6 +220,7 @@ class ParaXImageAdapterBank(nn.Module):
 
     def forward(
         self, layer_id: int, tokens: torch.Tensor, view_name: str = "full",
+        task_id: Optional[int] = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         if layer_id not in self.layer_indices:
             return tokens, tokens.new_zeros((tokens.shape[0], self.num_experts))
@@ -227,7 +236,14 @@ class ParaXImageAdapterBank(nn.Module):
         if self.static:
             gates = tokens.new_full((tokens.shape[0], self.num_experts), 1.0 / self.num_experts)
         else:
-            gates = torch.softmax(self.routers[str(layer_id)](router_input.float()), dim=-1)
+            if self.task_local_router:
+                route_task = self._current_task_id if task_id is None else int(task_id)
+                if not 0 <= route_task <= self._current_task_id:
+                    raise ValueError("Task-local ParaX Router cannot access a future task")
+                router_key = f"{route_task}_{layer_id}"
+            else:
+                router_key = str(layer_id)
+            gates = torch.softmax(self.routers[router_key](router_input.float()), dim=-1)
             gates = gates.to(dtype=tokens.dtype)
         a = torch.einsum("be,erk->brk", gates, self.expert_a.to(tokens))
         b = torch.einsum("be,ekr->bkr", gates, self.expert_b.to(tokens))

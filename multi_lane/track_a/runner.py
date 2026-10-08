@@ -2600,7 +2600,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--adapter-learning-rate", type=float, default=4e-4)
     parser.add_argument(
-        "--parax-mode", choices=("disabled", "post", "post_static", "image", "image_level", "static"),
+        "--parax-mode", choices=("disabled", "post", "post_static", "post_task_router", "image", "image_level", "static"),
         default="disabled", help="ParaX image-stream routing mode."
     )
     parser.add_argument("--parax-rank", type=int, default=32)
@@ -3559,6 +3559,7 @@ def main() -> None:
         "parax_residual_ratio_cap": args.parax_residual_ratio_cap if args.parax_mode != "disabled" else None,
         "parax_task_local_gate": bool(args.parax_task_local_gate) if args.parax_mode != "disabled" else False,
         "parax_freeze_center_after_task0": bool(args.parax_freeze_center_after_task0) if args.parax_mode != "disabled" else False,
+        "parax_task_local_router": args.parax_mode == "post_task_router",
         "parax_distillation_weight": args.parax_distillation_weight,
         "parax_residual_penalty_weight": args.parax_residual_penalty_weight,
         "parax_level_conditioned": bool(args.parax_level_conditioned or args.parax_mode == "image_level"),
@@ -3569,7 +3570,9 @@ def main() -> None:
         "parax_target": (
             "patch_tokens_between_frozen_clip_blocks"
             if args.parax_mode in {"image", "image_level", "static"}
-            else "terminal_pre_consumer_patch_tokens"
+            else "task_forward_final_lane_features_with_task_local_router"
+            if args.parax_mode == "post_task_router"
+            else "task_forward_final_lane_features"
             if args.parax_mode in {"post", "post_static"} else None
         ),
         "adapter_bottleneck_dim": args.adapter_bottleneck_dim,
