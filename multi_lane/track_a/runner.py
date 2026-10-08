@@ -38,6 +38,7 @@ from .paired_transforms import (
 )
 from .selector_conditioning import TaskSelectorConditioner
 from .openai_clip_loader import OPENAI_VIT_B16_SHA256, load_openai_clip_visual
+from .post_task_calibration import cache_current_features, fit_cached_routes, isolated_rng
 
 
 CLASS_ORDER: Tuple[str, ...] = (
@@ -2600,7 +2601,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--adapter-learning-rate", type=float, default=4e-4)
     parser.add_argument(
-        "--parax-mode", choices=("disabled", "post", "post_static", "post_task_router", "image", "image_level", "static"),
+        "--parax-mode", choices=("disabled", "post", "post_static", "post_task_router", "post_task_staged", "post_task_staged_static", "image", "image_level", "static"),
         default="disabled", help="ParaX image-stream routing mode."
     )
     parser.add_argument("--parax-rank", type=int, default=32)
@@ -2621,6 +2622,9 @@ def parse_args() -> argparse.Namespace:
         "--parax-output-scale-mode", choices=("learnable", "fixed"), default="learnable"
     )
     parser.add_argument("--parax-residual-ratio-cap", type=float, default=0.0)
+    parser.add_argument("--parax-smooth-ratio-bound", type=float, default=0.0)
+    parser.add_argument("--parax-calibration-epochs", type=int, default=5)
+    parser.add_argument("--parax-calibration-consistency-weight", type=float, default=0.1)
     parser.add_argument("--parax-task-local-gate", action="store_true")
     parser.add_argument("--parax-freeze-center-after-task0", action="store_true")
     parser.add_argument("--parax-distillation-weight", type=float, default=0.0)
@@ -2722,6 +2726,14 @@ def main() -> None:
         raise ValueError("ParaX layer indices must be valid CLIP block indices")
     if args.parax_residual_scale < 0:
         raise ValueError("ParaX residual scale must be non-negative")
+    if args.parax_mode in {"post_task_staged", "post_task_staged_static"}:
+        if (args.view_fusion != "fixed_three_view" or args.view_classifier_mode != "shared_post_fusion"
+                or args.adapter_mode != "disabled" or args.loss_routing != "joint_bce"
+                or args.reporting_split != "val" or args.also_report_test
+                or args.parax_calibration_epochs <= 0):
+            raise ValueError("Staged routing requires fixed three-view B0, positive calibration epochs, and validation only")
+        if not math.isfinite(args.parax_calibration_consistency_weight) or args.parax_calibration_consistency_weight < 0:
+            raise ValueError("Calibration consistency weight must be finite and non-negative")
     if args.parax_projector_bottleneck_dim < 0:
         raise ValueError("ParaX projector bottleneck must be non-negative")
     if args.parax_projector_alignment_weight < 0 or not math.isfinite(args.parax_projector_alignment_weight):
@@ -3011,6 +3023,7 @@ def main() -> None:
         parax_task_local_gate=args.parax_task_local_gate,
         parax_freeze_center_after_task0=args.parax_freeze_center_after_task0,
         parax_projector_bottleneck_dim=args.parax_projector_bottleneck_dim,
+        parax_smooth_ratio_bound=args.parax_smooth_ratio_bound,
     ).float().to(device)
     model.visual_encoder.requires_grad_(False)
     model.assert_visual_frozen()
@@ -3114,7 +3127,7 @@ def main() -> None:
             face_min_training_short_side=args.face_min_training_short_side,
             face_min_training_score=args.face_min_training_score,
         )
-        if args.calibration_fraction > 0 or crossfit_enabled
+        if args.calibration_fraction > 0 or crossfit_enabled or model.parax_staged_mode
         else None
     )
     val_source = EMOTIC(
@@ -3559,7 +3572,13 @@ def main() -> None:
         "parax_residual_ratio_cap": args.parax_residual_ratio_cap if args.parax_mode != "disabled" else None,
         "parax_task_local_gate": bool(args.parax_task_local_gate) if args.parax_mode != "disabled" else False,
         "parax_freeze_center_after_task0": bool(args.parax_freeze_center_after_task0) if args.parax_mode != "disabled" else False,
-        "parax_task_local_router": args.parax_mode == "post_task_router",
+        "parax_task_local_router": args.parax_mode in {"post_task_router", "post_task_staged", "post_task_staged_static"},
+        "parax_staged_calibration": model.parax_staged_mode,
+        "parax_smooth_ratio_bound": args.parax_smooth_ratio_bound,
+        "parax_calibration_epochs": args.parax_calibration_epochs if model.parax_staged_mode else 0,
+        "parax_calibration_consistency_weight": args.parax_calibration_consistency_weight if model.parax_staged_mode else 0.0,
+        "parax_center_frozen_from_start": model.parax_staged_mode,
+        "parax_task_local_projection": model.parax_staged_mode,
         "parax_distillation_weight": args.parax_distillation_weight,
         "parax_residual_penalty_weight": args.parax_residual_penalty_weight,
         "parax_level_conditioned": bool(args.parax_level_conditioned or args.parax_mode == "image_level"),
@@ -3570,6 +3589,8 @@ def main() -> None:
         "parax_target": (
             "patch_tokens_between_frozen_clip_blocks"
             if args.parax_mode in {"image", "image_level", "static"}
+            else "normalized_task_forward_lane_features_before_fixed_fusion"
+            if model.parax_staged_mode
             else "task_forward_final_lane_features_with_task_local_router"
             if args.parax_mode == "post_task_router"
             else "task_forward_final_lane_features"
@@ -3667,6 +3688,8 @@ def main() -> None:
     calibration_rows: List[TaskMetrics] = []
     calibration_counts: Dict[str, object] = {}
     training_history: Dict[str, object] = {}
+    route_calibration: Dict[str, object] = {}
+    base_task_rows: List[TaskMetrics] = []
     view_diagnostics: Dict[str, object] = {}
     test_view_diagnostics: Dict[str, object] = {}
     start = time.time()
@@ -3759,6 +3782,8 @@ def main() -> None:
             args.optimizer_updates_per_task,
             args.optimizer_updates_by_task,
         )
+        if model.parax_staged_mode:
+            model.set_parax_runtime_enabled(False)
         history = train_task(
             model, train_loader, val_loader, device, task_id,
             args.epochs, learning_rate, args.weight_decay,
@@ -3804,6 +3829,32 @@ def main() -> None:
             parax_residual_penalty_weight=args.parax_residual_penalty_weight,
             parax_projector_alignment_weight=args.parax_projector_alignment_weight,
         )
+        if model.parax_staged_mode:
+            # Keep baseline training, initialization, and DataLoader RNG
+            # identical across tasks. All extra route work is isolated.
+            with isolated_rng(device):
+                base_row = evaluate(
+                    model, reporting_loader, device, task_id, args.threshold, amp,
+                    score_output_path=output / "base_val_scores" / f"task{task_id}.npz",
+                )
+                base_task_rows.append(base_row)
+                cache_view = LabelView(calibration_source, fit_indices, task_indices(task_id), include_sample_id=True)
+                cache_loader = DataLoader(cache_view, batch_size=args.eval_batch_size, shuffle=False,
+                                          num_workers=args.workers, pin_memory=False, drop_last=False)
+                cache = cache_current_features(model, cache_loader, device, amp)
+                cache_path = output / "train_feature_cache" / f"task{task_id}.pt"
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                torch.save(cache, cache_path)
+                route_calibration[str(task_id)] = fit_cached_routes(
+                    model, cache, task_indices(task_id), device,
+                    args.parax_calibration_epochs, args.adapter_learning_rate,
+                    batch_size=args.train_batch_size,
+                    consistency_weight=args.parax_calibration_consistency_weight,
+                    auxiliary_weight=args.view_auxiliary_loss_weight,
+                )
+                (output / "route_calibration.json").write_text(json.dumps(route_calibration, indent=2) + "\n")
+                (output / "base_task_metrics.json").write_text(json.dumps([asdict(item) for item in base_task_rows], indent=2) + "\n")
+            model.set_parax_runtime_enabled(True)
         row = evaluate(
             model,
             reporting_loader,
@@ -3942,6 +3993,9 @@ def main() -> None:
             for row in history
         )),
         "metrics": summarize_tasks(task_rows),
+        "base_metrics_without_routing": summarize_tasks(base_task_rows) if base_task_rows else None,
+        "completed_route_calibration_epochs": sum(len(value["history"]) for value in route_calibration.values()),
+        "completed_route_calibration_updates": sum(row["optimizer_steps"] for value in route_calibration.values() for row in value["history"]),
         "test_metrics": summarize_tasks(test_rows) if test_rows else None,
         "test_task_metrics": [asdict(item) for item in test_rows],
         "task_metrics": [asdict(item) for item in task_rows],

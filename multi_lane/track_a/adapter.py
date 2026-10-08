@@ -73,6 +73,9 @@ class ParaXImageAdapterBank(nn.Module):
         freeze_center_after_task0: bool = False,
         projector_bottleneck_dim: int = 0,
         task_local_router: bool = False,
+        task_local_projection: bool = False,
+        freeze_center_from_start: bool = False,
+        smooth_ratio_bound: float = 0.0,
     ) -> None:
         super().__init__()
         if hidden_dim <= 0 or rank <= 0 or num_experts <= 0:
@@ -94,6 +97,8 @@ class ParaXImageAdapterBank(nn.Module):
             raise ValueError("ParaX residual ratio cap must be non-negative")
         if projector_bottleneck_dim < 0:
             raise ValueError("ParaX projector bottleneck must be non-negative")
+        if not math.isfinite(smooth_ratio_bound) or smooth_ratio_bound < 0:
+            raise ValueError("ParaX smooth ratio bound must be finite and non-negative")
         self.hidden_dim = int(hidden_dim)
         self.rank = int(rank)
         self.num_experts = int(num_experts)
@@ -107,6 +112,9 @@ class ParaXImageAdapterBank(nn.Module):
         self.residual_ratio_cap = float(residual_ratio_cap)
         self.task_local_gate = bool(task_local_gate)
         self.task_local_router = bool(task_local_router)
+        self.task_local_projection = bool(task_local_projection)
+        self.freeze_center_from_start = bool(freeze_center_from_start)
+        self.smooth_ratio_bound = float(smooth_ratio_bound)
         self.freeze_center_after_task0 = bool(freeze_center_after_task0)
         self.num_tasks = int(num_tasks)
         if self.num_tasks <= 0:
@@ -133,6 +141,13 @@ class ParaXImageAdapterBank(nn.Module):
         )
         self.norm = nn.LayerNorm(hidden_dim)
         self.proj = nn.Linear(rank, rank)
+        self.task_projections = nn.ModuleList()
+        if self.task_local_projection:
+            for _ in range(self.num_tasks):
+                projection = nn.Linear(rank, rank)
+                nn.init.zeros_(projection.weight)
+                nn.init.zeros_(projection.bias)
+                self.task_projections.append(projection)
         self.projector = (
             CLIPPatchProjector(hidden_dim, projector_bottleneck_dim)
             if projector_bottleneck_dim else None
@@ -174,13 +189,17 @@ class ParaXImageAdapterBank(nn.Module):
 
     def _set_trainability(self) -> None:
         self.requires_grad_(False)
-        center_frozen = self.freeze_center_after_task0 and self._current_task_id > 0
+        center_frozen = self.freeze_center_from_start or (
+            self.freeze_center_after_task0 and self._current_task_id > 0
+        )
         effective_components = self.trainable_components
         if self.freeze_center_after_task0 and self._current_task_id == 0:
             effective_components = "all"
         if effective_components in {"all", "experts"} and not center_frozen:
             for name in ("expert_a", "expert_b", "norm", "proj"):
                 getattr(self, name).requires_grad_(True)
+        if self.task_local_projection:
+            self.task_projections[self._current_task_id].requires_grad_(True)
         if self.projector is not None:
             # The projector is a shared, continually updated correction in
             # this experiment; it is not part of the expert-center freeze.
@@ -249,7 +268,11 @@ class ParaXImageAdapterBank(nn.Module):
         b = torch.einsum("be,ekr->bkr", gates, self.expert_b.to(tokens))
         x = self.norm(tokens)
         low = torch.einsum("blk,brk->blr", x, a)
-        low = torch.nn.functional.gelu(self.proj(low))
+        route_task = self._current_task_id if task_id is None else int(task_id)
+        if self.task_local_projection and not 0 <= route_task <= self._current_task_id:
+            raise ValueError("Task-local projection cannot access a future task")
+        projection = self.task_projections[route_task] if self.task_local_projection else self.proj
+        low = torch.nn.functional.gelu(projection(low))
         delta = torch.einsum("blr,bkr->blk", low, b)
         if self.task_local_gate:
             scale = self.output_scale[self._current_task_id].to(tokens)
@@ -257,6 +280,13 @@ class ParaXImageAdapterBank(nn.Module):
             scale = self.output_scale.to(tokens)
         scaled_delta = scale * delta
         token_norm = tokens.float().norm(dim=-1).mean(dim=1).clamp_min(1e-12)
+        if self.smooth_ratio_bound > 0:
+            # Per-token differentiable bound. Its derivative is finite at
+            # zero, unlike a hard norm clip or a learnable global scale.
+            radius = self.smooth_ratio_bound * tokens.float().norm(dim=-1, keepdim=True).clamp_min(1e-12)
+            squared_delta = scaled_delta.float().square().sum(dim=-1, keepdim=True)
+            factor = radius / (radius.square() + squared_delta).sqrt()
+            scaled_delta = scaled_delta * factor.to(scaled_delta)
         delta_norm = scaled_delta.float().norm(dim=-1).mean(dim=1)
         self._last_residual_penalties.append(
             (delta_norm / token_norm).square().mean()
