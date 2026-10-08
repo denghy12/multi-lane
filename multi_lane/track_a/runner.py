@@ -2657,6 +2657,10 @@ def parse_args() -> argparse.Namespace:
         "--reporting-split", choices=("val", "test"), default="test"
     )
     parser.add_argument(
+        "--also-report-test", action="store_true",
+        help="Evaluate the same validation-run checkpoints on held-out test after each task.",
+    )
+    parser.add_argument(
         "--skip-validation-eval", action="store_true",
         help="Do not run per-task validation evaluation; useful only for an explicitly locked test run.",
     )
@@ -2665,6 +2669,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if args.also_report_test and (args.reporting_split != "val" or args.skip_validation_eval):
+        raise ValueError("Dual validation/test reporting requires normal validation evaluation")
     three_view_fusion = args.view_fusion in {
         "fixed_three_view", "soft_three_view", "residual_three_view",
         "logit_residual_three_view",
@@ -3122,8 +3128,9 @@ def main() -> None:
         face_min_training_short_side=args.face_min_training_short_side,
         face_min_training_score=args.face_min_training_score,
     )
-    if args.reporting_split == "test":
-        reporting_source = EMOTIC(
+    test_source = None
+    if args.reporting_split == "test" or args.also_report_test:
+        test_source = EMOTIC(
             str(dataset_parent), train=False, transform=eval_transform,
             eval_splits=("test",), input_mode=args.input_mode,
             person_crop_margin=args.person_crop_margin,
@@ -3134,10 +3141,13 @@ def main() -> None:
             face_min_training_short_side=args.face_min_training_short_side,
             face_min_training_score=args.face_min_training_score,
         )
-        validate_classes(train_source, val_source, reporting_source)
+        validate_classes(train_source, val_source, test_source)
+    if args.reporting_split == "test":
+        reporting_source = test_source
     else:
         reporting_source = val_source
-        validate_classes(train_source, val_source)
+        if test_source is None:
+            validate_classes(train_source, val_source)
     if calibration_source is not None:
         validate_classes(train_source, calibration_source)
 
@@ -3198,6 +3208,7 @@ def main() -> None:
         "train_split": "train",
         "validation_split": "val",
         "reporting_split": args.reporting_split,
+        "also_report_test": bool(args.also_report_test),
         "skip_validation_eval": bool(args.skip_validation_eval),
         "training_label_scope": "current_classes_only",
         "training_loss_mode": args.training_loss_mode,
@@ -3649,10 +3660,12 @@ def main() -> None:
     )
 
     task_rows: List[TaskMetrics] = []
+    test_rows: List[TaskMetrics] = []
     calibration_rows: List[TaskMetrics] = []
     calibration_counts: Dict[str, object] = {}
     training_history: Dict[str, object] = {}
     view_diagnostics: Dict[str, object] = {}
+    test_view_diagnostics: Dict[str, object] = {}
     start = time.time()
     for task_id in range(args.max_tasks):
         print(f"begin_task={task_id}", flush=True)
@@ -3704,6 +3717,16 @@ def main() -> None:
             reporting_view, batch_size=args.eval_batch_size, shuffle=False,
             num_workers=args.workers, pin_memory=False, drop_last=False,
         )
+        test_loader = None
+        if args.also_report_test:
+            test_view = dataset_view(
+                test_source, seen_indices(task_id),
+                include_sample_id=args.save_evaluation_scores,
+            )
+            test_loader = DataLoader(
+                test_view, batch_size=args.eval_batch_size, shuffle=False,
+                num_workers=args.workers, pin_memory=False, drop_last=False,
+            )
         calibration_loader = None
         if args.save_calibration_scores:
             if calibration_source is None:
@@ -3804,6 +3827,29 @@ def main() -> None:
                     if args.save_view_evaluation_scores else None
                 ),
             )
+        if test_loader is not None:
+            # The extra DataLoader and evaluation may draw RNG seeds. Restore
+            # CPU/GPU RNG so task-(t+1) training matches the val-only run.
+            python_rng = random.getstate()
+            numpy_rng = np.random.get_state()
+            try:
+                with torch.random.fork_rng(devices=[torch.cuda.current_device()]):
+                    test_row = evaluate(
+                        model, test_loader, device, task_id, args.threshold, amp,
+                        score_output_path=(
+                            output / "test_scores" / f"task{task_id}.npz"
+                            if args.save_evaluation_scores else None
+                        ),
+                    )
+                    if args.view_evaluation_diagnostics:
+                        test_view_diagnostics[str(task_id)] = evaluate_view_diagnostics(
+                            model, test_loader, device, task_id, args.threshold, amp,
+                        )
+            finally:
+                random.setstate(python_rng)
+                np.random.set_state(numpy_rng)
+            test_rows.append(test_row)
+            print(f"task={task_id} test_mAP={test_row.mAP:.6f}", flush=True)
         if calibration_loader is not None:
             calibration_row = evaluate(
                 model,
@@ -3840,12 +3886,22 @@ def main() -> None:
             json.dumps([asdict(item) for item in task_rows], indent=2) + "\n",
             encoding="utf-8",
         )
+        if test_rows:
+            (output / "test_task_metrics.json").write_text(
+                json.dumps([asdict(item) for item in test_rows], indent=2) + "\n",
+                encoding="utf-8",
+            )
         (output / "training_history.json").write_text(
             json.dumps(training_history, indent=2) + "\n", encoding="utf-8"
         )
         if view_diagnostics:
             (output / "view_diagnostics.json").write_text(
                 json.dumps(view_diagnostics, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+        if test_view_diagnostics:
+            (output / "test_view_diagnostics.json").write_text(
+                json.dumps(test_view_diagnostics, indent=2, ensure_ascii=False) + "\n",
                 encoding="utf-8",
             )
         if calibration_rows:
@@ -3883,6 +3939,8 @@ def main() -> None:
             for row in history
         )),
         "metrics": summarize_tasks(task_rows),
+        "test_metrics": summarize_tasks(test_rows) if test_rows else None,
+        "test_task_metrics": [asdict(item) for item in test_rows],
         "task_metrics": [asdict(item) for item in task_rows],
         "calibration_metrics": [asdict(item) for item in calibration_rows],
         "calibration_counts": calibration_counts,

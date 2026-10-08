@@ -9,6 +9,9 @@ RUN_ID="${RUN_ID:?Set a unique batch ID}"
 GPU="${GPU:?Set a CUDA GPU index}"
 PYTHON="${PYTHON:-python}"
 SEED="${SEED:-0}"
+MAX_TASKS="${MAX_TASKS:-3}"
+EPOCHS="${EPOCHS:-30}"
+DUAL_REPORT="${DUAL_REPORT:-0}"
 DATA_ROOT="${DATA_ROOT:-./datasets/EMOTIC}"
 CLIP_CHECKPOINT="${CLIP_CHECKPOINT:-./models/clip/ViT-B-16.pt}"
 FACE_MANIFEST_ROOT="${FACE_MANIFEST_ROOT:-./output/emotic_face_manifest/face_manifest_audit_v1_20260908}"
@@ -39,14 +42,21 @@ for path in \
   "${FACE_MANIFEST_ROOT}/manifests/val.jsonl"; do
   [[ -f "${path}" ]] || { echo "Missing input: ${path}" >&2; exit 2; }
 done
+dual_args=()
+if [[ "${DUAL_REPORT}" == 1 ]]; then
+  [[ -f "${FACE_MANIFEST_ROOT}/manifests/test.jsonl" ]] || {
+    echo "Missing test manifest" >&2; exit 2;
+  }
+  dual_args+=(--also-report-test)
+fi
 mkdir -p "$(dirname "${LOG_PATH}")"
 
-echo "Projector paired validation method=${METHOD} seed=${SEED} gpu=${GPU} tasks=0-2 epochs=30/task batch=64 optimizer=Adam main_lr=0.0125 parax/projector_lr=0.0004 scheduler=cosine ParaX=FrozenForward_after_block11_patch_only_rank32_3experts_shared_live router_hidden16 init=official scale=${PARAX_SCALE} projector_bottleneck=${PROJECTOR_DIM} alignment_weight=${ALIGN_WEIGHT} fixed_three_view auxiliary=0.1 AMP=on TF32=on reporting=val test=forbidden checkpoint=off"
+echo "Projector paired run method=${METHOD} seed=${SEED} gpu=${GPU} tasks=0-$((MAX_TASKS-1)) epochs=${EPOCHS}/task batch=64 optimizer=Adam main_lr=0.0125 parax/projector_lr=0.0004 scheduler=cosine ParaX=FrozenForward_after_block11_patch_only_rank32_3experts_shared_live router_hidden16 init=official scale=${PARAX_SCALE} projector_bottleneck=${PROJECTOR_DIM} alignment_weight=${ALIGN_WEIGHT} fixed_three_view auxiliary=0.1 AMP=on TF32=on reporting=val dual_test=${DUAL_REPORT} checkpoint=off"
 CUDA_VISIBLE_DEVICES="${GPU}" "${PYTHON}" -m multi_lane.track_a.runner \
   --seed "${SEED}" --data-root "${DATA_ROOT}" \
   --clip-checkpoint "${CLIP_CHECKPOINT}" \
   --face-manifest-root "${FACE_MANIFEST_ROOT}" --output-root "${RUN_ROOT}" \
-  --epochs 30 --max-tasks 3 --scheduler-mode cosine \
+  --epochs "${EPOCHS}" --max-tasks "${MAX_TASKS}" --scheduler-mode cosine \
   --scheduler-min-lr-ratio 0 --scheduler-warmup-ratio 0 \
   --train-batch-size 64 --eval-batch-size 64 --workers 2 \
   --threshold 0.5 --source-learning-rate 0.05 \
@@ -71,4 +81,4 @@ CUDA_VISIBLE_DEVICES="${GPU}" "${PYTHON}" -m multi_lane.track_a.runner \
   --parax-projector-bottleneck-dim "${PROJECTOR_DIM}" \
   --parax-projector-alignment-weight "${ALIGN_WEIGHT}" \
   --selector-mode shared --prompt-mode shared --num-selectors 10 \
-  --reporting-split val 2>&1 | tee "${LOG_PATH}"
+  --reporting-split val "${dual_args[@]}" 2>&1 | tee "${LOG_PATH}"
