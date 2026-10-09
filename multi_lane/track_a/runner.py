@@ -2769,6 +2769,7 @@ def run(args: argparse.Namespace) -> None:
         raise ValueError("Supervised loss scale must be finite and positive")
     if args.also_report_test and (args.reporting_split != "val" or args.skip_validation_eval):
         raise ValueError("Dual validation/test reporting requires normal validation evaluation")
+    # Fixed two-view ablations retain the original three-view data/RNG protocol.
     three_view_fusion = args.view_fusion in {
         "fixed_three_view", "soft_three_view", "residual_three_view",
         "logit_residual_three_view", "fixed_full_person", "fixed_full_face",

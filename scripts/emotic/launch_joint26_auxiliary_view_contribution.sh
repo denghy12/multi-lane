@@ -32,7 +32,7 @@ dataset=EMOTIC train16001/val2397; test5368 only after final checkpoint; all26 l
 seed=${SEEDS}; epochs30; batch64/eval64; workers2; Adam main_lr0.0125 WD0 cosine no-warmup; temperature1 threshold0.5; AMP+TF32 initialscale1024 growth1e9
 fusion=Full+Person[0.8,0.2]; Full+Face reliable[0.64/0.84,0.20/0.84] else[1,0]; same Face reliability valid/nonambiguous/shortside24/score0.6
 loss=BCE(fused)+0.1*mean(BCE(active reliable views)); inactive views never encoded or supervised; same ThreeViewTransform for paired augmentation
-parameters=shared frozen CLIP ViT-B/16, shared Selector10/Prompt10 last5 layers/classifier, pre-head normalization
+parameters=shared frozen CLIP ViT-B/16, shared Selector10/Prompt10 first5 layers/classifier, pre-head normalization
 train_GPU=${GPU} two concurrent; test_GPU=${TEST_GPU} two concurrent after each seed; source final epoch30 only; no weight or threshold search; smoke_updates=${SMOKE_UPDATES:-none}
 input=${DATA_ROOT}; ${CLIP_CHECKPOINT}; ${FACE_MANIFEST_ROOT}; test_face=${TEST_FACE_ROOT}
 references=${REFERENCE_ROOT}/${REFERENCE_PREFIX}_seedN; reference_test=${REFERENCE_TEST_ROOT}/stableamp_seedN
