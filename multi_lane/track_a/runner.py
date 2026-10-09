@@ -2525,6 +2525,8 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Save deterministic held-out train scores after every task.",
     )
+    parser.add_argument("--export-calibration-view-scores", action="store_true",
+                        help="Export held-out train three-view logits for frozen-output fusion.")
     parser.add_argument(
         "--crossfit-folds",
         type=int,
@@ -2875,6 +2877,15 @@ def main() -> None:
         raise ValueError("A calibration holdout must save its score provenance")
     if args.calibration_fraction > 0 and args.reporting_split != "val":
         raise ValueError("Calibration holdout source training is validation-only")
+    if args.export_calibration_view_scores and (
+        args.calibration_fraction <= 0 or not args.save_calibration_scores
+        or args.reporting_split != "val" or args.also_report_test
+        or args.view_fusion != "fixed_three_view"
+        or args.view_classifier_mode != "shared_post_fusion"
+        or args.parax_mode != "disabled" or args.adapter_mode != "disabled"
+        or not args.save_view_evaluation_scores or not args.save_compact_checkpoints
+    ):
+        raise ValueError("Frozen fusion export requires held-out train calibration, frozen-output B0, compact checkpoints and validation view scores; test forbidden")
     if args.adapter_bottleneck_dims_per_task is not None:
         if len(args.adapter_bottleneck_dims_per_task) != len(TASK_SIZES):
             raise ValueError(
@@ -3488,6 +3499,7 @@ def main() -> None:
             args.calibration_fraction > 0 or crossfit_enabled
         ),
         "save_calibration_scores": args.save_calibration_scores,
+        "export_calibration_view_scores": args.export_calibration_view_scores,
         "save_compact_checkpoints": args.save_compact_checkpoints,
         "compact_checkpoint_excludes_frozen_visual": (
             args.save_compact_checkpoints
@@ -3707,6 +3719,21 @@ def main() -> None:
             fit_indices, calibration_indices = fit_calibration_indices(
                 train_source, task_indices(task_id), args.calibration_fraction
             )
+        if args.export_calibration_view_scores:
+            split_record = {
+                "task_id": task_id, "source_split": "train",
+                "training_exclusion": True,
+                "split_salt": "emotic-reliability-calibration-v1",
+                "fit_sample_ids": [str(train_source.sample_ids[i]) for i in fit_indices],
+                "calibration_sample_ids": [str(train_source.sample_ids[i]) for i in calibration_indices],
+            }
+            fit_groups = {value.rsplit("#person=", 1)[0] for value in split_record["fit_sample_ids"]}
+            held_groups = {value.rsplit("#person=", 1)[0] for value in split_record["calibration_sample_ids"]}
+            if fit_groups & held_groups:
+                raise RuntimeError("Calibration image groups leaked into base training")
+            split_dir = output / "calibration_split_provenance"
+            split_dir.mkdir(exist_ok=True)
+            (split_dir / f"task{task_id}.json").write_text(json.dumps(split_record, indent=2) + "\n")
         unfiltered_fit_count = len(fit_indices)
         if args.input_mode == "face_crop":
             fit_indices = filter_face_training_indices(train_source, fit_indices)
@@ -3917,6 +3944,12 @@ def main() -> None:
                 ),
             )
             calibration_rows.append(calibration_row)
+            if args.export_calibration_view_scores:
+                with isolated_rng(device):
+                    evaluate_view_diagnostics(
+                        model, calibration_loader, device, task_id, args.threshold, amp,
+                        score_output_path=output / "calibration_view_scores" / f"task{task_id}.npz",
+                    )
         training_history[str(task_id)] = history
         if save_checkpoints:
             torch.save(

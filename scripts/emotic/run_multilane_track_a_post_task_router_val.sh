@@ -42,6 +42,10 @@ case "${METHOD}" in
 esac
 [[ "${EXPORT_VIEW_SCORES:-0}" == 1 ]] && parax_args+=(--save-view-evaluation-scores)
 [[ "${SAVE_COMPACT:-0}" == 1 ]] && parax_args+=(--save-compact-checkpoints)
+if [[ "${EXPORT_HELDOUT_VIEWS:-0}" == 1 ]]; then
+  [[ "${METHOD}" == B0 ]] || { echo "Heldout fusion source must be B0" >&2; exit 2; }
+  parax_args+=(--calibration-fraction 0.2 --save-calibration-scores --export-calibration-view-scores)
+fi
 for path in \
   "${CLIP_CHECKPOINT}" "${DATA_ROOT}/CVPR17_Annotations.mat" \
   "${FACE_MANIFEST_ROOT}/manifests/train.jsonl" \
