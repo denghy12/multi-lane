@@ -24,6 +24,21 @@ class Source:
 
 
 class Joint26Test(unittest.TestCase):
+    def test_parax_gradient_norm_removes_amp_loss_scale(self):
+        model = MultiLaneModel(FakeVisual(), (26,), num_selectors=2, num_prompts=2,
+                               num_prompt_layers=1, parax_mode="image", parax_layer_indices=(0,),
+                               parax_rank=2, parax_num_experts=3)
+        for p in model.parax_bank.parameters():
+            p.grad = torch.ones_like(p)
+        reference = model.parax_gradient_diagnostics()
+        for p in model.parax_bank.parameters():
+            p.grad.mul_(1024)
+        measured = model.parax_gradient_diagnostics(1024)
+        for key in reference:
+            self.assertAlmostEqual(reference[key], measured[key], places=5)
+        with self.assertRaises(ValueError):
+            model.parax_gradient_diagnostics(0)
+
     def test_protocol_restores_legacy_after_exception(self):
         original = runner.TASK_SIZES
         with self.assertRaisesRegex(RuntimeError, "stop"):

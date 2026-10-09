@@ -9,6 +9,7 @@ copying, shared classifier, and concat inference remain method-specific.
 from __future__ import annotations
 
 import copy
+import math
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 import torch
@@ -520,7 +521,9 @@ class MultiLaneModel(nn.Module):
             return self.selectors.new_zeros(())
         return self.parax_bank.alignment_penalty()
 
-    def parax_gradient_diagnostics(self) -> Dict[str, float]:
+    def parax_gradient_diagnostics(self, gradient_scale: float = 1.0) -> Dict[str, float]:
+        if not math.isfinite(gradient_scale) or gradient_scale <= 0:
+            raise ValueError("Gradient diagnostic scale must be finite and positive")
         if self.parax_bank is None:
             return {}
         result: Dict[str, float] = {}
@@ -532,7 +535,7 @@ class MultiLaneModel(nn.Module):
             if parameter.grad is None:
                 result[f"parax_grad_{name.replace('.', '_')}_norm"] = 0.0
                 continue
-            value = parameter.grad.detach().float()
+            value = parameter.grad.detach().float() / gradient_scale
             norm = float(value.norm().cpu())
             result[f"parax_grad_{name.replace('.', '_')}_norm"] = norm
             finite = finite and bool(torch.isfinite(value).all())

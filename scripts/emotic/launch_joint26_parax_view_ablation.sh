@@ -4,6 +4,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${ROOT}"
 BATCH_ID="${BATCH_ID:-joint26_parax_views_seed0_$(date +%Y%m%d_%H%M%S)}"
 GPU="${GPU:-0}"
+SEED="${SEED:-0}"
 PYTHON="${PYTHON:-python}"
 DATA_ROOT="${DATA_ROOT:-./datasets/EMOTIC}"
 CLIP_CHECKPOINT="${CLIP_CHECKPOINT:-./models/clip/ViT-B-16.pt}"
@@ -34,7 +35,7 @@ commit=$(git rev-parse HEAD)
 methods=${METHODS[*]}; four concurrent processes on GPU${GPU}
 dataset=EMOTIC original train; all person instances and all26 labels simultaneously; one Task Forward lane; same validation sample IDs
 inputs=${DATA_ROOT}; ${CLIP_CHECKPOINT}; ${FACE_MANIFEST_ROOT}
-seed=0; epochs=30; batch=64; Adam; main_lr=0.0125; ParaX_lr=0.0004; weight_decay=0; cosine; no warmup; AMP+TF32
+seed=${SEED}; epochs=30; batch=64; Adam; main_lr=0.0125; ParaX_lr=0.0004; weight_decay=0; cosine; no warmup; AMP+TF32; AMP_initial_scale=${AMP_INITIAL_SCALE:-65536}; AMP_growth_interval=${AMP_GROWTH_INTERVAL:-2000}; smoke_updates=${SMOKE_UPDATES:-none}
 backbone=frozen OpenAI CLIP ViT-B/16; shared Selector/Prompt/classifier; Image-token Adapter disabled
 ParaX=Frozen Forward after Block11/code10 before Block12; patch tokens only; CLS bypass; shared E_A/E_B parameter-matrix experts=3; rank32; router_hidden16; official initialization; initial learnable scale0.1; all ParaX parameters train throughout joint phase
 excluded=Projector, level embedding, distillation, residual penalty/cap, dynamic fusion
@@ -53,7 +54,7 @@ for method in "${METHODS[@]}"; do
     METHOD="${method}" GPU="${GPU}" RUN_ID="${BATCH_ID}" PYTHON="${PYTHON}" \
       DATA_ROOT="${DATA_ROOT}" CLIP_CHECKPOINT="${CLIP_CHECKPOINT}" \
       FACE_MANIFEST_ROOT="${FACE_MANIFEST_ROOT}" RESULT_ROOT="${RESULT_ROOT}" LOG_ROOT="${LOG_ROOT}" \
-      SEED=0 EPOCHS=30 bash scripts/emotic/run_joint26_parax_view_ablation.sh \
+      SEED="${SEED}" EPOCHS=30 bash scripts/emotic/run_joint26_parax_view_ablation.sh \
       > "${LOG_ROOT}/${BATCH_ID}/${method}.launcher.log" 2>&1
     result=$?
     printf '%s\n' "${result}" > "${CONTROL}/status/${method}.exit_code"

@@ -13,6 +13,8 @@ RESULT_ROOT="${RESULT_ROOT:-./output/emotic_joint26_parax_view_ablation}"
 LOG_ROOT="${LOG_ROOT:-./logs/emotic_joint26_parax_view_ablation}"
 SEED="${SEED:-0}"
 EPOCHS="${EPOCHS:-30}"
+AMP_INITIAL_SCALE="${AMP_INITIAL_SCALE:-65536}"
+AMP_GROWTH_INTERVAL="${AMP_GROWTH_INTERVAL:-2000}"
 PARAX_MODE=disabled
 VIEW_FUSION=disabled
 AUX_WEIGHT=0
@@ -53,6 +55,7 @@ CUDA_VISIBLE_DEVICES="${GPU}" "${PYTHON}" -m multi_lane.track_a.runner \
   --data-root "${DATA_ROOT}" --clip-checkpoint "${CLIP_CHECKPOINT}" \
   --output-root "${RUN_ROOT}" \
   --epochs "${EPOCHS}" --train-batch-size 64 --eval-batch-size 64 --workers 2 \
+  --amp-initial-scale "${AMP_INITIAL_SCALE}" --amp-growth-interval "${AMP_GROWTH_INTERVAL}" \
   --source-learning-rate 0.05 --source-reference-batch-size 256 \
   --weight-decay 0 --scheduler-mode cosine --scheduler-min-lr-ratio 0 \
   --scheduler-warmup-ratio 0 --temperature 1 --threshold 0.5 \

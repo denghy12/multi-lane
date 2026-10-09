@@ -1625,11 +1625,15 @@ def train_task(
     parax_residual_penalty_weight: float = 0.0,
     parax_projector_alignment_weight: float = 0.0,
     supervised_loss_scale: float = 1.0,
+    amp_initial_scale: float = 65536.0,
+    amp_growth_interval: int = 2000,
 ) -> List[Dict[str, float]]:
     if not math.isfinite(supervised_loss_scale) or supervised_loss_scale <= 0:
         raise ValueError("Supervised loss scale must be finite and positive")
     if supervised_loss_scale != 1.0 and loss_routing != "joint_bce":
         raise ValueError("Supervised loss scaling requires joint BCE routing")
+    if not math.isfinite(amp_initial_scale) or amp_initial_scale <= 0 or amp_growth_interval <= 0:
+        raise ValueError("AMP scale and growth interval must be positive")
     if loss_routing not in {
         "joint_bce", "model_asl", "adapter_asl", "both_asl"
     }:
@@ -1742,7 +1746,8 @@ def train_task(
         ),
         multistep_gamma=scheduler_multistep_gamma,
     )
-    scaler = torch.cuda.amp.GradScaler(enabled=amp)
+    scaler = torch.cuda.amp.GradScaler(enabled=amp, init_scale=amp_initial_scale,
+                                     growth_interval=amp_growth_interval)
     current = list(task_indices(task_id))
     teacher_model = None
     previous_classes = tuple(seen_indices(task_id - 1)) if task_id > 0 else ()
@@ -2087,7 +2092,7 @@ def train_task(
                         and ranking_loader is None
                     ),
                 )
-            parax_gradients = model.parax_gradient_diagnostics()
+            parax_gradients = model.parax_gradient_diagnostics(scale_before)
             if parax_gradients:
                 for key, value in parax_gradients.items():
                     parax_gradient_totals[key] = (
@@ -2237,6 +2242,7 @@ def train_task(
             "optimizer_steps": float(optimizer_steps),
             "completed_task_optimizer_updates": float(completed_task_updates),
             "skipped_optimizer_steps": float(skipped_steps),
+            "amp_loss_scale_end": float(scaler.get_scale()),
             "learning_rate": epoch_lr,
             "next_learning_rate": float(optimizer.param_groups[0]["lr"]),
             "elapsed_seconds": time.time() - epoch_start,
@@ -2433,6 +2439,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Do not write per-task checkpoints (intended for validation sweeps).",
     )
     parser.add_argument("--no-amp", action="store_true")
+    parser.add_argument("--amp-initial-scale", type=float, default=65536.0)
+    parser.add_argument("--amp-growth-interval", type=int, default=2000)
     parser.add_argument("--no-tf32", action="store_true")
     parser.add_argument(
         "--gradient-clip-norm",
@@ -3334,6 +3342,8 @@ def run(args: argparse.Namespace) -> None:
             else "current_classes_only"
         ),
         "supervised_loss_scale": args.supervised_loss_scale,
+        "amp_initial_scale": args.amp_initial_scale,
+        "amp_growth_interval": args.amp_growth_interval,
         "initial_selector_prompt_classifier_sha256": base_initialization_digest,
         "frozen_visual_sha256_before": frozen_visual_before,
         "training_loss_mode": args.training_loss_mode,
@@ -3997,6 +4007,8 @@ def run(args: argparse.Namespace) -> None:
             parax_residual_penalty_weight=args.parax_residual_penalty_weight,
             parax_projector_alignment_weight=args.parax_projector_alignment_weight,
             supervised_loss_scale=args.supervised_loss_scale,
+            amp_initial_scale=args.amp_initial_scale,
+            amp_growth_interval=args.amp_growth_interval,
         )
         if model.parax_staged_mode:
             # Keep baseline training, initialization, and DataLoader RNG
