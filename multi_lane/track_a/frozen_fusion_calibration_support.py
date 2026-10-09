@@ -104,9 +104,9 @@ def main():
                                full_crop_mode=cfg["full_crop_mode"])
     dataset = EMOTIC(str(parent), train=True, transform=transform, input_mode=cfg["input_mode"],
                      person_crop_margin=cfg["person_crop_margin"], multi_view_transform=paired,
-                     face_manifest_root=args.face_manifest_root, face_crop_margin=cfg["face_crop_margin"],
-                     face_min_training_short_side=cfg["face_min_training_short_side"],
-                     face_min_training_score=cfg["face_min_training_score"])
+                     face_manifest_root=args.face_manifest_root, face_crop_margin=.15,
+                     face_min_training_short_side=0.,
+                     face_min_training_score=0.)
     exported = args.output / "augmented_source"
     exported.mkdir()
     for folder in ("calibration_scores", "calibration_view_scores", "calibration_split_provenance"):
