@@ -127,7 +127,10 @@ def ranking_loss(scores, labels, temperature):
     return torch.stack(losses).mean() if losses else scores.sum() * 0.0
 
 
-def fit_gate(views, fixed, labels, reliable, method, device, epochs=30, batch_size=256, seed=0):
+def fit_gate(views, fixed, labels, reliable, method, device, epochs=30, batch_size=256, seed=0, epoch_samples=None):
+    epoch_samples = len(labels) if epoch_samples is None else int(epoch_samples)
+    if not 0 < epoch_samples <= len(labels):
+        raise ValueError("Epoch sample budget must fit the calibration pool")
     torch.manual_seed(seed)
     gate = BoundedFusionGate(views, fixed, dynamic=method != "static_bce").to(device)
     initial, _ = gate(views.to(device), fixed.to(device), reliable.to(device))
@@ -138,8 +141,8 @@ def fit_gate(views, fixed, labels, reliable, method, device, epochs=30, batch_si
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, epochs)
     history = []
     for epoch in range(epochs):
-        loss_sum, valid_pairs, steps, grad_sq = 0., 0, 0, 0.
-        for ix in torch.randperm(len(labels)).split(batch_size):
+        loss_sum, valid_pairs, steps, grad_sq, samples_used = 0., 0, 0, 0., 0
+        for ix in torch.randperm(len(labels))[:epoch_samples].split(batch_size):
             v, z, y, r = (value[ix].to(device) for value in (views, fixed, labels, reliable))
             output, delta = gate(v, z, r)
             if method == "dynamic_ranking":
@@ -159,12 +162,14 @@ def fit_gate(views, fixed, labels, reliable, method, device, epochs=30, batch_si
             optimizer.step()
             loss_sum += float(loss.detach()) * len(ix)
             steps += 1
-        history.append({"epoch": epoch + 1, "loss": loss_sum / len(labels), "updates": steps,
+            samples_used += len(ix)
+        history.append({"epoch": epoch + 1, "loss": loss_sum / samples_used, "updates": steps,
+                        "samples_used": samples_used,
                         "valid_ranking_class_batches": valid_pairs,
                         "gradient_rms_norm": (grad_sq / steps) ** .5})
         scheduler.step()
     gate.cpu().eval().requires_grad_(False)
-    return gate, {"initial_logit_difference": 0., "samples": len(labels), "history": history,
+    return gate, {"initial_logit_difference": 0., "samples": len(labels), "epoch_samples": epoch_samples, "history": history,
                   "trainable_parameters": sum(p.numel() for p in gate.parameters()),
                   "positive_counts": labels.sum(dim=0).tolist(),
                   "negative_counts": (1 - labels).sum(dim=0).tolist()}
@@ -227,7 +232,8 @@ def run(args):
             raise ValueError("Calibration IDs do not match exclusion provenance")
         for method in METHODS:
             gate, fit = fit_gate(*tensors(data, columns), method, torch.device(args.device),
-                                 args.epochs, args.batch_size, config["seed"] + task)
+                                 args.epochs, args.batch_size, config["seed"] + task,
+                                 epoch_samples=config.get("calibration_epoch_samples", [None] * args.tasks)[task])
             gates[method].append(gate)
             history[method][str(task)] = fit
             gate_path = output / method / "gates" / f"task{task}.pt"
@@ -302,7 +308,9 @@ def run(args):
                 "lr": .001, "optimizer": "Adam", "scheduler": "cosine", "radius": .05,
                 "consistency_weight": .1, "delta_penalty": 1., "router_hidden": 8,
                 "fit_split": "20% train image groups excluded from all base tasks", "validation_used_only_for_evaluation": True,
-                "test_forbidden": True, "no_bce_fallback_in_pairless_ranking_batches": True}
+                "test_forbidden": True, "calibration_pool": config.get("calibration_pool", "current_task_positive_samples"),
+                "calibration_memory": config.get("calibration_memory", False),
+                "calibration_epoch_samples": config.get("calibration_epoch_samples"), "no_bce_fallback_in_pairless_ranking_batches": True}
     (output / "experiment.json").write_text(json.dumps(manifest, indent=2) + "\n")
     (output / "complete.txt").write_text("FROZEN_VIEW_FUSION_COMPLETE\n")
 
