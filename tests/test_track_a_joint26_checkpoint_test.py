@@ -1,15 +1,35 @@
 import copy
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
 import torch
 
-from multi_lane.track_a.evaluate_joint26_checkpoint import build_model
-from multi_lane.track_a.export_compact_test_scores import restore_compact_model_state
+from multi_lane.track_a.evaluate_joint26_checkpoint import audit_face_manifest, build_model
+from multi_lane.track_a.export_compact_test_scores import _sha256, restore_compact_model_state
 from multi_lane.track_a.runner import compact_model_state_dict
 from test_track_a_reproduction import FakeVisual
 
 
 class JointCheckpointTest(unittest.TestCase):
+    def test_extended_test_manifest_preserves_training_data_and_detector(self):
+        with tempfile.TemporaryDirectory() as directory:
+            original, extended = Path(directory) / "original", Path(directory) / "extended"
+            for root, splits in ((original, ["train", "val"]), (extended, ["train", "val", "test"])):
+                (root / "manifests").mkdir(parents=True)
+                for split in splits:
+                    (root / "manifests" / (split + ".jsonl")).write_text(split + "\n")
+                (root / "detector_config.json").write_text(json.dumps(dict(splits=splits, threshold=0.5)))
+            config = {"face_manifest": {"root": str(original), "artifact_sha256": {
+                "train_manifest": _sha256(original / "manifests/train.jsonl"),
+                "val_manifest": _sha256(original / "manifests/val.jsonl"),
+                "detector_config": _sha256(original / "detector_config.json")}}}
+            self.assertEqual(len(audit_face_manifest(config, extended)), 4)
+            (extended / "manifests/val.jsonl").write_text("different\n")
+            with self.assertRaisesRegex(ValueError, "Face val manifest changed"):
+                audit_face_manifest(config, extended)
+
     def test_compact_round_trip_full_three_view_with_without_parax(self):
         visual = FakeVisual()
         visual.transformer.resblocks.append(copy.deepcopy(visual.transformer.resblocks[0]))

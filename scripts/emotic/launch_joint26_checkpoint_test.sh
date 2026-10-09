@@ -13,5 +13,5 @@ exec "${PYTHON}" -m multi_lane.track_a.run_joint26_locked_test \
   --log-root "./logs/emotic_joint26_locked_test/${RUN_ID}" \
   --data-root ../multi-lane-main/datasets/EMOTIC \
   --clip-checkpoint ../CODE_DDP-benchmark/pretrained/clip/ViT-B-16.pt \
-  --face-manifest-root ../multi-lane-main/output/emotic_face_manifest/face_manifest_audit_v1_20260908 \
+  --face-manifest-root ../emotic_benchmark_runs/multi_lane_face_test_manifest_v0.1/face_manifest_train_val_test_v1_20260909 \
   --gpu "${GPU}" --wait-hours 12

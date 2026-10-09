@@ -20,7 +20,7 @@
 - 数据集EMOTIC原始test，全部26类、全部有标签的人物样本；数据相对路径`../multi-lane-main/datasets/EMOTIC`。
 - 同一冻结CLIP ViT-B/16预训练权重`../CODE_DDP-benchmark/pretrained/clip/ViT-B-16.pt`，按官方SHA和训练时CLIP参数hash核验。
 - Full-only或Full/Person/Face按源配置恢复。Image-token Adapter关闭；ParaX有无、Frozen Forward代码索引10、rank32、3个参数矩阵专家等均从源config还原；保留学习后的expert、router和output scale数值。
-- 固定融合先验可靠Face为0.64/0.16/0.20，否则0.80/0.20/0；可靠性为valid、非ambiguous、短边≥24、检测分数≥0.6。Face manifest使用`../multi-lane-main/output/emotic_face_manifest/face_manifest_audit_v1_20260908`中的test清单。
+- 固定融合先验可靠Face为0.64/0.16/0.20，否则0.80/0.20/0；可靠性为valid、非ambiguous、短边≥24、检测分数≥0.6。Face manifest使用已有的`../emotic_benchmark_runs/multi_lane_face_test_manifest_v0.1/face_manifest_train_val_test_v1_20260909`。此目录的train/val清单与训练来源逐字节一致；检测器配置仅增加test split，其余参数一致。运行前后均核验清单hash，不改训练目录，不重新检测人脸。
 - eval batch64、workers2、threshold0.5、AMP/TF32与源模型一致；使用原确定性验证变换，不做训练增强。
 - **训练epochs=0、optimizer updates=0、无learning rate/optimizer/scheduler**；`eval()`、`no_grad()`，全部参数冻结。
 - GPU1同一来源四组并行，至少20,000MiB空闲才启动；四组完成后等待下一来源最终checkpoint。每个来源最长等待12小时，失败状态落盘；GPU0训练继续运行。

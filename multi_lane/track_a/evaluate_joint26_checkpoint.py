@@ -83,6 +83,26 @@ def loader_for(source, config):
                       pin_memory=False, drop_last=False)
 
 
+def audit_face_manifest(config, root):
+    """Allow a test-extended manifest only when training artifacts are identical."""
+    original = Path(config["face_manifest"]["root"])
+    expected = config["face_manifest"]["artifact_sha256"]
+    hashes = {}
+    for split in ("train", "val", "test"):
+        path = root / "manifests" / (split + ".jsonl")
+        hashes[str(path)] = _sha256(path)
+        if split != "test":
+            require(hashes[str(path)] == expected[split + "_manifest"], f"Face {split} manifest changed")
+    original_detector = _read_json(original / "detector_config.json")
+    require(_sha256(original / "detector_config.json") == expected["detector_config"], "Source detector config changed")
+    detector = _read_json(root / "detector_config.json")
+    require("test" in detector.get("splits", []), "Missing test detector provenance")
+    require({k: v for k, v in detector.items() if k != "splits"}
+            == {k: v for k, v in original_detector.items() if k != "splits"}, "Face detector protocol changed")
+    hashes[str(root / "detector_config.json")] = _sha256(root / "detector_config.json")
+    return hashes
+
+
 def evaluate_checkpoint(source, output, data_root, clip_checkpoint, face_manifest_root):
     start = time.time()
     config, source_summary, source_audit, skipped = audit_source(source)
@@ -92,10 +112,7 @@ def evaluate_checkpoint(source, output, data_root, clip_checkpoint, face_manifes
     require(not metadata["dirty"], "Evaluation worktree must be clean")
     require(Path(config["data_root"]).resolve() == (resolve_dataset_parent(data_root) / "EMOTIC").resolve(),
             "Dataset root changed")
-    if config["view_fusion"] == "fixed_three_view":
-        require(Path(config["face_manifest"]["root"]).resolve() == face_manifest_root.resolve(), "Face manifest root changed")
-        require(_sha256(face_manifest_root / "manifests" / "val.jsonl") == config["face_manifest"]["artifact_sha256"]["val_manifest"],
-                "Face validation manifest changed")
+    manifest_hashes = audit_face_manifest(config, face_manifest_root) if config["view_fusion"] == "fixed_three_view" else {}
     source_files = [source / name for name in ("config.json", "seed_summary.json", "joint_protocol_audit.json",
                                               "training_history.json", "compact_checkpoints/task0.pth", "val_scores/task0.npz")]
     hashes = {str(p): _sha256(p) for p in source_files}
@@ -133,6 +150,7 @@ def evaluate_checkpoint(source, output, data_root, clip_checkpoint, face_manifes
     require(tensor_state_digest(compact_model_state_dict(model)) == before, "Evaluation modified method weights")
     require(tensor_state_digest(model.visual_encoder.state_dict()) == clip_before, "Evaluation modified CLIP")
     require(all(_sha256(Path(p)) == value for p, value in hashes.items()), "Source artifacts changed during evaluation")
+    require(all(_sha256(Path(p)) == value for p, value in manifest_hashes.items()), "Face manifests changed during evaluation")
     with np.load(output / "test_scores" / "task0.npz") as z:
         test_ids_hash = ids_digest(z["sample_ids"].tolist())
     result = dict(status="complete", evaluation_split="test", training_performed=False, optimizer_updates=0,
@@ -143,7 +161,7 @@ def evaluate_checkpoint(source, output, data_root, clip_checkpoint, face_manifes
                   source_config=config, evaluator_git=metadata, source_sha256=hashes, source_unchanged=True,
                   clip_unchanged=True, method_weights_unchanged=True, validation_replay_max_logit_difference=difference,
                   test_sample_ids_sha256=test_ids_hash, metrics=metrics, task_metrics=[asdict(row)],
-                  view_diagnostics=views, elapsed_seconds=time.time()-start,
+                  view_diagnostics=views, face_manifest_sha256=manifest_hashes, elapsed_seconds=time.time()-start,
                   test_face_manifest_sha256=_sha256(face_manifest_root / "manifests" / "test.jsonl") if views else None)
     (output / "seed_summary.json").write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n")
     print(f"JOINT26_LOCKED_TEST_COMPLETE mAP={row.mAP:.6f}", flush=True)
