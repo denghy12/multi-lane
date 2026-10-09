@@ -21,6 +21,8 @@ class TaskwiseViewFusion(nn.Module):
     MODES = (
         "disabled",
         "fixed_three_view",
+        "fixed_full_person",
+        "fixed_full_face",
         "soft_three_view",
         "soft_full_person",
         "residual_full_person",
@@ -60,7 +62,8 @@ class TaskwiseViewFusion(nn.Module):
         self.current_task_id = -1
         self.view_names = (
             ("full", "person")
-            if mode in {"soft_full_person", "residual_full_person"}
+            if mode in {"soft_full_person", "residual_full_person", "fixed_full_person"}
+            else ("full", "face") if mode == "fixed_full_face"
             else ("full", "person", "face")
         )
         self.task_routers = nn.ModuleList()
@@ -195,7 +198,7 @@ class TaskwiseViewFusion(nn.Module):
             raise ValueError("View-fusion lane IDs must be unique")
         if any(not 0 <= int(value) < self.num_tasks for value in lane_ids):
             raise ValueError("View-fusion lane ID is outside the protocol")
-        if len(self.view_names) == 3:
+        if "face" in self.view_names:
             if face_reliable is None or face_reliable.shape != (shape[0],):
                 raise ValueError("Three-view fusion requires a per-sample Face mask")
         return shape
@@ -208,6 +211,15 @@ class TaskwiseViewFusion(nn.Module):
     ) -> torch.Tensor:
         batch, lane_count, _ = self._validate(features, lane_ids, face_reliable)
         reference = features["full"]
+        if self.mode == "fixed_full_person":
+            return reference.new_tensor(self.TWO_VIEW_PRIOR).expand(batch, lane_count, -1)
+        if self.mode == "fixed_full_face":
+            valid_prior = reference.new_tensor([0.64 / 0.84, 0.20 / 0.84])
+            invalid_prior = reference.new_tensor([1.0, 0.0])
+            return torch.where(
+                face_reliable.to(device=reference.device, dtype=torch.bool)[:, None, None],
+                valid_prior[None, None], invalid_prior[None, None],
+            ).expand(batch, lane_count, -1)
         if self.residual:
             rows = []
             for task_id in lane_ids:
@@ -344,7 +356,9 @@ class TaskwiseViewFusion(nn.Module):
         return calibrated
 
     def prior(self, face_reliable: bool = True) -> Dict[str, float]:
-        if len(self.view_names) == 2:
+        if self.mode == "fixed_full_face":
+            values = (0.64 / 0.84, 0.20 / 0.84) if face_reliable else (1.0, 0.0)
+        elif len(self.view_names) == 2:
             values = self.TWO_VIEW_PRIOR
         elif face_reliable:
             values = self.THREE_VIEW_PRIOR

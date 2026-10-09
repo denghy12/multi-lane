@@ -1233,8 +1233,8 @@ def evaluate_view_diagnostics(
     if score_output_path is not None:
         if not sample_ids:
             raise RuntimeError("View score dumping requires stable sample IDs")
-        if reliable is None or "face" not in branches:
-            raise RuntimeError("Three-view score dumping requires a Face mask")
+        if "face" in branches and reliable is None:
+            raise RuntimeError("Face view score dumping requires a Face mask")
         if len(sample_ids) != len(targets) or len(set(sample_ids)) != len(sample_ids):
             raise ValueError("View score dump has invalid sample IDs")
         arrays: Dict[str, np.ndarray] = {
@@ -1243,7 +1243,6 @@ def evaluate_view_diagnostics(
             "sample_ids": np.asarray(sample_ids, dtype=np.str_),
             "class_indices": np.arange(targets.shape[1], dtype=np.int64),
             "targets": targets.numpy().astype(np.float32, copy=False),
-            "face_reliable": reliable.numpy().astype(np.bool_, copy=False),
             "batch_lengths": np.asarray(batch_lengths, dtype=np.int64),
             "probability_device": np.asarray("cpu"),
             "probability_dtype": np.asarray("float32"),
@@ -1252,6 +1251,8 @@ def evaluate_view_diagnostics(
             "fused_logits": fused_logits.numpy().astype(np.float32, copy=False),
             "fused_probabilities": fused.numpy().astype(np.float32, copy=False),
         }
+        if reliable is not None:
+            arrays["face_reliable"] = reliable.numpy().astype(np.bool_, copy=False)
         for name in model.view_fusion_module.view_names:
             arrays[f"{name}_logits"] = branch_logits[name].numpy().astype(
                 np.float32, copy=False
@@ -2498,7 +2499,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--view-fusion",
         choices=(
-            "disabled", "fixed_three_view", "soft_three_view",
+            "disabled", "fixed_three_view", "fixed_full_person", "fixed_full_face", "soft_three_view",
             "soft_full_person", "residual_full_person",
             "residual_three_view", "logit_residual_three_view",
         ),
@@ -2757,18 +2758,20 @@ def run(args: argparse.Namespace) -> None:
                 or args.parax_projector_bottleneck_dim or args.parax_distillation_weight
                 or args.loss_routing != "joint_bce"
                 or args.input_mode != "full"
-                or args.view_fusion not in {"disabled", "fixed_three_view"}
+                or args.view_fusion not in {"disabled", "fixed_three_view", "fixed_full_person", "fixed_full_face"}
                 or args.view_classifier_mode != "shared_post_fusion"
                 or args.selector_mode != "shared" or args.prompt_mode != "shared"
                 or args.view_gradient_routing != "joint"):
-            raise ValueError("Joint26 ablation requires shared Full/three-view paths without calibration or extra adapters")
+            raise ValueError("Joint26 ablation requires shared fixed-view paths without calibration or extra adapters")
+        if args.view_fusion in {"fixed_full_person", "fixed_full_face"} and args.parax_mode != "disabled":
+            raise ValueError("Joint26 two-view contribution ablation disables ParaX")
     if not math.isfinite(args.supervised_loss_scale) or args.supervised_loss_scale <= 0:
         raise ValueError("Supervised loss scale must be finite and positive")
     if args.also_report_test and (args.reporting_split != "val" or args.skip_validation_eval):
         raise ValueError("Dual validation/test reporting requires normal validation evaluation")
     three_view_fusion = args.view_fusion in {
         "fixed_three_view", "soft_three_view", "residual_three_view",
-        "logit_residual_three_view",
+        "logit_residual_three_view", "fixed_full_person", "fixed_full_face",
     }
     paired_inputs = (
         args.paired_full_person
@@ -3504,7 +3507,7 @@ def run(args: argparse.Namespace) -> None:
             else "full_fixed_one_auxiliary_taskwise_residuals_freeze_after_task"
             if model.view_fusion_module.residual
             else "fixed_per_sample_reliability_masked_weights"
-            if args.view_fusion == "fixed_three_view" else None
+            if args.view_fusion in {"fixed_three_view", "fixed_full_person", "fixed_full_face"} else None
         ),
         "view_fusion_valid_face_prior": (
             model.view_fusion_module.prior(True)

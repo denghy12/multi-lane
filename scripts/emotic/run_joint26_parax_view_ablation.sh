@@ -25,9 +25,11 @@ case "${METHOD}" in
   FULL_ONLY_PARAX) PARAX_MODE=image ;;
   THREE_VIEW) VIEW_FUSION=fixed_three_view ;;
   THREE_VIEW_PARAX) VIEW_FUSION=fixed_three_view; PARAX_MODE=image ;;
+  FULL_PERSON) VIEW_FUSION=fixed_full_person ;;
+  FULL_FACE) VIEW_FUSION=fixed_full_face ;;
   *) echo "Unknown METHOD=${METHOD}" >&2; exit 2 ;;
 esac
-if [[ "${VIEW_FUSION}" == fixed_three_view ]]; then
+if [[ "${VIEW_FUSION}" != disabled ]]; then
   AUX_WEIGHT=0.1
   LOSS_SCALE=1
   extra_args+=(--face-manifest-root "${FACE_MANIFEST_ROOT}" --view-evaluation-diagnostics --save-view-evaluation-scores)
@@ -38,7 +40,7 @@ fi
 for path in "${DATA_ROOT}/CVPR17_Annotations.mat" "${CLIP_CHECKPOINT}"; do
   [[ -f "${path}" ]] || { echo "Missing input: ${path}" >&2; exit 2; }
 done
-if [[ "${VIEW_FUSION}" == fixed_three_view ]]; then
+if [[ "${VIEW_FUSION}" != disabled ]]; then
   for split in train val; do
     [[ -f "${FACE_MANIFEST_ROOT}/manifests/${split}.jsonl" ]] || {
       echo "Missing Face manifest: ${split}" >&2; exit 2;

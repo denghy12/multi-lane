@@ -35,7 +35,7 @@ def audit_source(source: Path):
     require(audit["frozen_visual_unchanged"] and audit["frozen_visual_sha256_before"] == audit["frozen_visual_sha256_after"],
             "Source changed CLIP")
     require(config["adapter_mode"] == "disabled" and config["parax_mode"] in ("disabled", "image")
-            and config["view_fusion"] in ("disabled", "fixed_three_view")
+            and config["view_fusion"] in ("disabled", "fixed_three_view", "fixed_full_person", "fixed_full_face")
             and config["selector_mode"] == config["prompt_mode"] == "shared"
             and config["view_classifier_mode"] == "shared_post_fusion", "Unsupported source architecture")
     history = _read_json(source / "training_history.json")["0"]
@@ -66,7 +66,7 @@ def build_model(config, visual):
 
 def make_source(config, data_root, face_manifest_root, split):
     _, transform = build_transforms(config["input_normalization"], config["train_crop_scale"])
-    three = config["view_fusion"] == "fixed_three_view"
+    three = config["view_fusion"] != "disabled"
     multi = ThreeViewTransform(train=False, normalization=config["input_normalization"],
                               crop_scale=config["train_crop_scale"], margin=config["person_crop_margin"],
                               jitter_strength=config["person_color_jitter_strength"],
@@ -112,7 +112,7 @@ def evaluate_checkpoint(source, output, data_root, clip_checkpoint, face_manifes
     require(not metadata["dirty"], "Evaluation worktree must be clean")
     require(Path(config["data_root"]).resolve() == (resolve_dataset_parent(data_root) / "EMOTIC").resolve(),
             "Dataset root changed")
-    manifest_hashes = audit_face_manifest(config, face_manifest_root) if config["view_fusion"] == "fixed_three_view" else {}
+    manifest_hashes = audit_face_manifest(config, face_manifest_root) if config["view_fusion"] != "disabled" else {}
     source_files = [source / name for name in ("config.json", "seed_summary.json", "joint_protocol_audit.json",
                                               "training_history.json", "compact_checkpoints/task0.pth", "val_scores/task0.npz")]
     hashes = {str(p): _sha256(p) for p in source_files}
