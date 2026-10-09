@@ -60,4 +60,15 @@ ParaX 插在 **Frozen Forward 的第 11 个 transformer block 完整输出之后
 
 ## 执行状态
 
-代码已实现，等待远程单测与四组真实数据 smoke。通过后启动正式训练；不进行持续监控，完成后统一同步并分析。
+已完成修改，并在 GPU0 同时启动四组正式训练。
+
+- 分支：`exp/joint26-parax-view-ablation`；训练代码提交：`1f482dc`。
+- batch：`joint26_parax_views_seed0_val_gpu0_20261009_01`。
+- tmux：`ml_joint26_gpu0_20261009`。
+- 远程全部 266 项单测通过，两个 Shell 入口语法检查通过。
+- 初次 smoke 发现 Full 单路脚本误传 Face manifest 参数；已修正，首次失败产物保留。第二次四组并行 smoke 全部完成，各 2 次有效更新，zero skipped；配对审计通过，所有 26 类参与监督，CLIP hash 不变，ParaX 专家与 router 梯度有限非零。
+- train 共 16,001 个人物实例，validation 共 2,397 个；每个正式 epoch 为 251 次更新，30 epochs 共 7,530 次更新。四组初始任务参数 hash 与样本 ID hash 一致。
+- smoke 四进程同时执行占用约 11 GB GPU 显存。短程 mAP 不用于方法收益分析。
+- smoke 输出及验证日志已同步到本地 `./output/emotic_joint26_parax_view_ablation/joint26_fourway_smoke_20261009_02/` 与 `./logs/emotic_joint26_parax_view_ablation/verification/`。
+
+正式结果尚未产生；只做启动检查，不持续监督训练。结束后脚本自动核对四组配置、预算、样本/标签及冻结权重，再生成 `comparison.md` 与 `comparison.json`。届时同步正式结果回本地统一分析。
