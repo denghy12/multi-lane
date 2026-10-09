@@ -195,7 +195,7 @@ def pair_changes(base, updated, labels):
 
 
 def run(args):
-    from .runner import compute_metrics, summarize_tasks, write_evaluation_scores
+    from .runner import compute_metrics, summarize_tasks, write_evaluation_scores, git_metadata
     source, output = Path(args.source), Path(args.output)
     if output.exists():
         raise ValueError("Refuse to overwrite experiment output")
@@ -297,7 +297,7 @@ def run(args):
     after = digest_files(tracked)
     if before != after:
         raise RuntimeError("Fusion fitting changed source artifacts")
-    manifest = {"source": str(source), "source_sha256_before": before, "source_sha256_after": after,
+    manifest = {"source_git": config.get("git"), "fusion_git": git_metadata(Path(__file__).resolve().parents[2]), "source": str(source), "source_sha256_before": before, "source_sha256_after": after,
                 "provenance": provenance, "tasks": args.tasks, "epochs": args.epochs, "batch_size": args.batch_size,
                 "lr": .001, "optimizer": "Adam", "scheduler": "cosine", "radius": .05,
                 "consistency_weight": .1, "delta_penalty": 1., "router_hidden": 8,
