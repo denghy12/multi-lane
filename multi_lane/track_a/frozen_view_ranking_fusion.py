@@ -91,6 +91,9 @@ class BoundedFusionGate(nn.Module):
     def forward(self, views, fixed, reliable):
         if hasattr(self, "router"):
             x = (views - self.mean) / self.std
+            # Invalid Face must not influence even the Person gate indirectly.
+            x = torch.stack((x[..., 0], x[..., 1],
+                             x[..., 2] * reliable[:, None]), dim=-1)
             quality = reliable[:, None, None].expand(-1, views.shape[1], 1).float()
             x = torch.cat((x, x[..., 1:2] - x[..., :1], x[..., 2:3] - x[..., :1],
                            x[..., 2:3] - x[..., 1:2], quality), dim=-1)
@@ -203,7 +206,8 @@ def run(args):
         or config["adapter_mode"] != "disabled" or config["view_fusion"] != "fixed_three_view"):
         raise ValueError("Requires completed 20% heldout B0 validation source")
     rows = json.loads((source / "task_metrics.json").read_text())
-    if len(rows) != args.tasks or not (source / "seed_summary.json").exists():
+    source_summary = json.loads((source / "seed_summary.json").read_text())
+    if len(rows) != args.tasks or source_summary.get("status") != "complete":
         raise ValueError("Source training incomplete")
     records = [json.loads((source / "calibration_split_provenance" / f"task{t}.json").read_text()) for t in range(args.tasks)]
     provenance = check_provenance(records)

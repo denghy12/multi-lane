@@ -32,6 +32,16 @@ class FrozenViewRankingTest(unittest.TestCase):
             self.assertTrue(bool((weights[~self.reliable, :, 2] == 0).all()))
             self.assertTrue(bool(torch.isfinite(out).all()))
 
+    def test_invalid_face_cannot_change_router_output(self):
+        gate = BoundedFusionGate(self.views, self.fixed)
+        with torch.no_grad():
+            gate.router[-1].weight.fill_(.1)
+        changed = self.views.clone()
+        changed[~self.reliable, :, 2] += 1000
+        a, _ = gate(self.views, self.fixed, self.reliable)
+        b, _ = gate(changed, self.fixed, self.reliable)
+        self.assertTrue(torch.equal(a, b))
+
     def test_ranking_rewards_order_and_handles_pairless_batch(self):
         y = torch.tensor([[1.], [0.]])
         temp = torch.ones(1)
