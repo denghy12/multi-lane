@@ -28,7 +28,7 @@ esac
 if [[ "${VIEW_FUSION}" == fixed_three_view ]]; then
   AUX_WEIGHT=0.1
   LOSS_SCALE=1
-  extra_args+=(--view-evaluation-diagnostics --save-view-evaluation-scores)
+  extra_args+=(--face-manifest-root "${FACE_MANIFEST_ROOT}" --view-evaluation-diagnostics --save-view-evaluation-scores)
 fi
 if [[ -n "${SMOKE_UPDATES:-}" ]]; then
   extra_args+=(--optimizer-updates-per-task "${SMOKE_UPDATES}" --skip-validation-eval)
@@ -51,7 +51,7 @@ echo "JOINT26 method=${METHOD} GPU=${GPU} seed=${SEED} labels=all26 lane=1 epoch
 CUDA_VISIBLE_DEVICES="${GPU}" "${PYTHON}" -m multi_lane.track_a.runner \
   --training-protocol joint26 --max-tasks 1 --seed "${SEED}" \
   --data-root "${DATA_ROOT}" --clip-checkpoint "${CLIP_CHECKPOINT}" \
-  --face-manifest-root "${FACE_MANIFEST_ROOT}" --output-root "${RUN_ROOT}" \
+  --output-root "${RUN_ROOT}" \
   --epochs "${EPOCHS}" --train-batch-size 64 --eval-batch-size 64 --workers 2 \
   --source-learning-rate 0.05 --source-reference-batch-size 256 \
   --weight-decay 0 --scheduler-mode cosine --scheduler-min-lr-ratio 0 \
