@@ -80,3 +80,9 @@ CLIP ViT-B/16 权重完全冻结。每个任务先按原来的 MULTI-LANE 流程
 ## 结果来源
 
 完成批次 `post_task_staged_bounded_seed0_val_gpu0_20261008_01`；训练代码028d29c，文档追加8763ffe；三组日志、指标、checkpoint及缓存已同步本地。严格配对审计和融合网格诊断见该批次根目录 `paired_audit_and_fusion_ceilings.json`。
+
+## 实施与正式运行状态
+
+最终训练提交 `df5443e`。服务器完整259项单测通过；真实两任务各1epoch基础训练共124updates、0skipped，留出TRAIN样本task0/1为1031/817，三种缓存校准各1epoch，identity、Face mask、跨任务image-group exclusion、source不变检查通过。Face屏蔽修正额外复测通过。不对smoke精度作方法结论。
+
+正式batch `frozen_view_ranking_seed0_val_gpu0_20261009_01` 已在GPU0启动，tmux `ml_frozen_rank_gpu0_20261009`，服务器worktree `/mnt/haoyuan/workspace/multi-lane-main-frozen-view-ranking-fusion`，Git状态clean。训练代码启动后不更新。实际输入以相对路径指向已有文件：`../multi-lane-main/datasets/EMOTIC`、`../CODE_DDP-benchmark/pretrained/clip/ViT-B-16.pt`、`../multi-lane-main/output/emotic_face_manifest/face_manifest_audit_v1_20260908`。没有复制数据或覆盖旧产物。待完成后统一同步分析，不持续监督。
