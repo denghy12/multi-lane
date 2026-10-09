@@ -21,7 +21,7 @@ from .openai_clip_loader import load_openai_clip_visual
 from .paired_transforms import ThreeViewTransform
 from .post_task_calibration import base_hash
 from .frozen_view_ranking_fusion import (read_scores, aligned_baseline, check_provenance,
-                                         digest_files, run as fit_and_evaluate)
+                                         digest_files, METHODS, run as fit_and_evaluate)
 from .runner import (LabelView, build_transforms, fit_calibration_indices, seen_indices,
                      resolve_dataset_parent, evaluate, evaluate_view_diagnostics,
                      write_evaluation_scores, set_seed, git_metadata)
@@ -174,12 +174,30 @@ def main():
     (exported / "task_metrics.json").write_text(json.dumps(rows, indent=2) + "\n")
     fit_and_evaluate(SimpleNamespace(source=exported, output=args.output / "fusion",
                                     tasks=args.tasks, epochs=args.epochs, batch_size=256, device="cuda:0"))
+    fit_audit = {}
+    for method in METHODS:
+        histories = json.loads((args.output / "fusion" / method / "fit_history.json").read_text())
+        for t, budget in enumerate(budgets):
+            h = histories[str(t)]["history"]
+            if sum(row["updates"] for row in h) != args.epochs * ((budget + 255) // 256):
+                raise RuntimeError("Calibration update budget changed")
+            if sum(row["samples_used"] for row in h) != args.epochs * budget:
+                raise RuntimeError("Calibration example budget changed")
+        original_history = json.loads((args.source.parent / "fusion" / method / "fit_history.json").read_text())
+        if len(original_history["0"]["history"]) == args.epochs:
+            expected_gate = _torch_load(args.source.parent / "fusion" / method / "gates" / "task0.pt")["state_dict"]
+            actual_gate = _torch_load(args.output / "fusion" / method / "gates" / "task0.pt")["state_dict"]
+            if set(expected_gate) != set(actual_gate) or any(not torch.equal(expected_gate[k], actual_gate[k]) for k in expected_gate):
+                raise RuntimeError("Unchanged task0 pool failed exact gate reproduction")
+            fit_audit[method] = {"task0_gate_exact_reproduction": True}
+        else:
+            fit_audit[method] = {"task0_gate_exact_reproduction": "not_applicable_epoch_budget_differs"}
     if digest_files(original_files) != original_hash:
         raise RuntimeError("Calibration experiment changed original source")
     (args.output / "support_audit.json").write_text(json.dumps({"tasks": audit, "provenance": provenance,
                   "source_hash_before": original_hash, "source_hash_after": original_hash,
                   "git": metadata, "no_base_training": True, "calibration_memory": True,
-                  "test_accessed": False, "matched_epoch_samples": budgets}, indent=2) + "\n")
+                  "test_accessed": False, "matched_epoch_samples": budgets, "fit_audit": fit_audit}, indent=2) + "\n")
     (args.output / "complete.txt").write_text("CALIBRATION_SUPPORT_COMPLETE\n")
     print("CALIBRATION_SUPPORT_COMPLETE", flush=True)
 
