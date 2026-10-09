@@ -82,3 +82,9 @@ task2的三个新类正样本只有81/77/22个。校准只学习三种新情绪�
 ## 产物与版本
 
 完成batch `frozen_view_ranking_seed0_val_gpu0_20261009_01`，训练代码df5443e；日志、校准cache、gate、compact checkpoint、逐样本scores及指标均已同步本地。新实验分支 `exp/frozen-fusion-calibration-support`，旧结果和用户原有未提交文档保持不变。
+
+## 实施状态
+
+服务器最终训练代码 `3460d91`，独立clean worktree `/mnt/haoyuan/workspace/multi-lane-main-frozen-fusion-calibration-support`，262/262单测通过。真实两任务、各1epoch缓存校准smoke完成；基础模型0次训练更新，task0/1每种校准5/4次更新，模型hash和源文件hash不变。task1从817扩大到1591个样本，其中新增774个当前类全阴性背景；task0池不变。新版正式运行另有每task更新/样本预算断言，以及30epoch条件下task0 gate逐值复现断言。
+
+正式batch `calibration_support_seed0_val_gpu0_20261009_01` 已在GPU0启动，tmux `ml_cal_support_gpu0_20261009`；复用原三任务B0模型，仅补导出背景预测和缓存拟合，不重训CLIP/MULTI-LANE。运行期间不更新代码、不持续监控，结果完成后统一同步分析。
