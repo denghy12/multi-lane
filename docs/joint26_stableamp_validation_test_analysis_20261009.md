@@ -38,6 +38,8 @@
 
 最后一行表示，test 上 ParaX 对三视图的提升与对 Full 单路的提升几乎相同。它不能单独证明三路路由没有作用，但说明当前缺少“ParaX 特别解决跨 level 问题”的强证据。三个 seed 也不足以作普遍性保证。
 
+本轮也没有相同参数规模、在同一联合训练协议下的静态参数变换对照，因此不能把全部增益归因于动态路由，而排除新增适配参数本身的作用。此前增量学习下的静态对照不直接补齐这个全量学习对照。
+
 | Seed | Full 无 ParaX：Val / Test | 三路无 ParaX：Val / Test | Full 加 ParaX：Val / Test | 三路加 ParaX：Val / Test |
 | --- | ---: | ---: | ---: | ---: |
 | 0 | 49.3023 / 38.3315 | 50.5669 / 39.2814 | 49.2460 / 38.4113 | 50.7906 / 39.7908 |
@@ -59,6 +61,8 @@
 | 固定三路融合 | 50.7980 | 50.9451 | +0.1471 | 39.2278 | 39.6299 | +0.4021 |
 
 融合 test 比各自 Full 端点高约 1.4574 / 1.7817 点，说明“不同路由的特征完全融合不起来”与本轮数据不符。单路 mAP 的升降不能直接相加预测融合 mAP：互补错误和排序会共同影响结果。Face 单路弱也不等于 Face 对融合无用。
+
+按三 seed 每类 AP 差值的均值统计，无 ParaX 的三路相对 Full 在 validation 的 26 类、test 的 23 类有正变化，部分变化接近零，不能解释为每一类都显著提升。test 上 Happiness/Fatigue/Disconnection 分别约 +4.0886/+2.9394/+2.7213，Sympathy 约 -1.5697。三路 ParaX 相对三路基线在两个划分均有 16 类改善：test 上 Sadness/Fear/Suffering 约 +3.8260/+1.9827/+1.6741，Affection/Embarrassment/Annoyance 约 -1.2850/-0.8176/-0.5974。这是描述性分解，不用其选择专家或调类别权重。
 
 目前三视图与 Full 的对照，只说明 Person、Face **联合加入后**有效。以前从三路已训练模型中移除一路的推理诊断，不能替代 Full+Person、Full+Face 从头训练；这正是下一步需要补齐的证据。
 
@@ -97,3 +101,9 @@
 详细配置见 [两种辅助视图独立贡献实验](joint26_auxiliary_view_contribution_plan_20261009.md)。只新增 Full+Person、Full+Face 两种训练，seed0/1/2；沿用已完成的稳定 AMP Full 和三路模型作配对参照，避免重跑。各组仍共享同一冻结 CLIP、Selector、Prompt 和分类头，两个 Adapter 均关闭，固定权重由原先验删除缺失视图后归一，不搜索新权重。
 
 本轮用于定位问题：哪一路能独立产生收益，两路同时加入是否互补。它不直接解决增量共享中心漂移，也不宣称固定权重是瓶颈。只有辅助视图的贡献明确后，再决定是否值得引入受限、按任务冻结的融合模块；不会仅凭当前 test 收益重新放大内部 ParaX。
+
+## 本次执行状态
+
+新代码运行 HEAD=`76a2d37`；远程273/273单测和两个shell入口语法检查通过。真实ViT两组smoke各4updates/zero skipped、配对hash审计通过，日志与smoke产物已同步本地。
+
+正式batch=`joint26_auxiliary_view_multiseed_20261009_01`已于2026-10-09 16:52 CST启动，tmux=`ml_joint26_aux_views_20261009`，服务器worktree=`/mnt/haoyuan/workspace/multi-lane-main-joint26-auxiliary-view-contribution`。GPU0从seed0的Full+Person与Full+Face并行开始，按seed0→1→2推进，每seed后GPU1补固定test。后续只做启动确认，不持续监控训练；新实验结果尚未产生。

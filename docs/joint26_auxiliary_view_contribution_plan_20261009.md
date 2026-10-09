@@ -26,3 +26,9 @@ validation配对均值与各seed方向为主，test仅锁定报告，不据其�
 若两个辅助视图都独立有效，保留三路，后续关注稳定融合；若只有一个稳定有效，优先保留有效的两路简化模型；若两路都弱但三路有效，保留互补性解释并进一步做错误分析。这些是下一轮决策条件，不预先自动扩展实验。即使全量两路有效，也需之后单独验证增量任务；本轮不提供增量遗忘结论。
 
 源码版本发生变化，但参照模型不重训；比较必须核验关键超参数、初始参数、样本ID和冻结权重的实际hash，明确记录各自Git来源，不能声称相同Git HEAD。
+
+## 启动记录
+
+- 运行代码`76a2d37`，远程273项unittest通过，两入口bash语法检查通过。
+- smoke=`joint26_auxiliary_view_smoke_20261009_01`，seed0两组各4updates/zero skipped，初始参数/首批ID/全量ID/CLIP与原参照一致；不运行test。
+- 正式batch=`joint26_auxiliary_view_multiseed_20261009_01`，tmux=`ml_joint26_aux_views_20261009`，2026-10-09 16:52 CST启动，GPU0两组训练、GPU1固定最终checkpoint评估；不持续监督。
