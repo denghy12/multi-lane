@@ -16,6 +16,7 @@ import os
 import random
 import subprocess
 import time
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Union
@@ -51,6 +52,7 @@ CLASS_ORDER: Tuple[str, ...] = (
 )
 TASK_SIZES: Tuple[int, ...] = (5, 3, 3, 3, 3, 3, 3, 3)
 PROTOCOL_ID = "emotic_b5c3_v0.1"
+TRAINING_PROTOCOL = "incremental"
 METHOD_NAME = "MULTI-LANE"
 TRACK = "A"
 CLIP_IMAGE_MEAN: Tuple[float, ...] = (
@@ -63,6 +65,36 @@ CLIP_IMAGE_STD: Tuple[float, ...] = (
     0.26130258,
     0.27577711,
 )
+
+
+@contextmanager
+def using_training_protocol(protocol: str):
+    """Scope the single-process protocol; never overwrite the incremental default."""
+    global TASK_SIZES, PROTOCOL_ID, TRAINING_PROTOCOL
+    if protocol not in {"incremental", "joint26"}:
+        raise ValueError("Unknown training protocol")
+    previous = TASK_SIZES, PROTOCOL_ID, TRAINING_PROTOCOL
+    TASK_SIZES = (26,) if protocol == "joint26" else (5, 3, 3, 3, 3, 3, 3, 3)
+    PROTOCOL_ID = "emotic_joint26_v0.1" if protocol == "joint26" else "emotic_b5c3_v0.1"
+    TRAINING_PROTOCOL = protocol
+    try:
+        yield
+    finally:
+        TASK_SIZES, PROTOCOL_ID, TRAINING_PROTOCOL = previous
+
+
+def tensor_state_digest(state: Dict[str, torch.Tensor]) -> str:
+    digest = hashlib.sha256()
+    for name, value in sorted(state.items()):
+        tensor = value.detach().cpu().contiguous()
+        digest.update(name.encode())
+        digest.update(str((tuple(tensor.shape), tensor.dtype)).encode())
+        digest.update(tensor.reshape(-1).view(torch.uint8).numpy().tobytes())
+    return digest.hexdigest()
+
+
+def ids_digest(sample_ids: Sequence[str]) -> str:
+    return hashlib.sha256(json.dumps(list(sample_ids), ensure_ascii=False).encode()).hexdigest()
 
 
 def task_indices(task_id: int) -> Tuple[int, ...]:
@@ -108,7 +140,7 @@ def dataset_view(
     class_indices: Sequence[int],
     include_sample_id: bool = False,
 ) -> LabelView:
-    indices = [
+    indices = list(range(len(source))) if TRAINING_PROTOCOL == "joint26" else [
         index
         for index, target in enumerate(source.targets)
         if _intersects(target, class_indices)
@@ -127,7 +159,7 @@ def fit_calibration_indices(
     """Deterministically hold out image groups across every view and seed."""
     if not 0.0 <= calibration_fraction < 0.5:
         raise ValueError("Calibration fraction must be in [0, 0.5)")
-    eligible = [
+    eligible = list(range(len(source))) if TRAINING_PROTOCOL == "joint26" else [
         index
         for index, target in enumerate(source.targets)
         if _intersects(target, class_indices)
@@ -1592,7 +1624,12 @@ def train_task(
     parax_distillation_weight: float = 0.0,
     parax_residual_penalty_weight: float = 0.0,
     parax_projector_alignment_weight: float = 0.0,
+    supervised_loss_scale: float = 1.0,
 ) -> List[Dict[str, float]]:
+    if not math.isfinite(supervised_loss_scale) or supervised_loss_scale <= 0:
+        raise ValueError("Supervised loss scale must be finite and positive")
+    if supervised_loss_scale != 1.0 and loss_routing != "joint_bce":
+        raise ValueError("Supervised loss scaling requires joint BCE routing")
     if loss_routing not in {
         "joint_bce", "model_asl", "adapter_asl", "both_asl"
     }:
@@ -1837,6 +1874,8 @@ def train_task(
                         float(view_auxiliary_loss_weight)
                         * torch.stack(list(view_bce_losses.values())).mean()
                     )
+                supervised_bce_loss = supervised_loss_scale * supervised_bce_loss
+                base_supervised_bce_loss = supervised_loss_scale * base_supervised_bce_loss
                 oof_distillation_loss = logits.new_zeros(())
                 if teacher_probabilities is not None:
                     oof_distillation_loss = compute_oof_distillation_loss(
@@ -2171,6 +2210,7 @@ def train_task(
                 adapter_regularization_metric_total / batches
             ),
             "supervised_bce_loss": supervised_bce_total / batches,
+            "supervised_loss_scale": float(supervised_loss_scale),
             "base_supervised_bce_loss": (
                 base_supervised_bce_total / batches
             ),
@@ -2283,6 +2323,18 @@ def git_metadata(root: Path) -> Dict[str, object]:
 
 def summarize_tasks(rows: Sequence[TaskMetrics]) -> Dict[str, object]:
     final = rows[-1]
+    if TRAINING_PROTOCOL == "joint26":
+        if len(rows) != 1 or final.seen_classes != 26:
+            raise ValueError("Joint26 summary requires one full 26-class evaluation")
+        return {
+            "final_mAP": final.mAP,
+            "final_cF1": final.cF1,
+            "final_oF1": final.oF1,
+            "average_mAP": None,
+            "forgetting": None,
+            "per_class_forgetting": None,
+            "metric_note": "Joint training has no incremental average or forgetting metric.",
+        }
     forgetting_by_class: Dict[str, float] = {}
     final_task = len(rows) - 1
     for class_id, class_name in enumerate(CLASS_ORDER):
@@ -2311,8 +2363,11 @@ def summarize_tasks(rows: Sequence[TaskMetrics]) -> Dict[str, object]:
     }
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser("MULTI-LANE EMOTIC Track-A reproduction")
+    parser.add_argument("--training-protocol", choices=("incremental", "joint26"),
+                        default="incremental")
+    parser.add_argument("--supervised-loss-scale", type=float, default=1.0)
     parser.add_argument("--seed", type=int, required=True, choices=(0, 1, 2))
     parser.add_argument("--data-root", type=Path, required=True)
     parser.add_argument("--clip-checkpoint", type=Path, required=True)
@@ -2658,7 +2713,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--adapter-regularization-calibration-updates", type=int, default=30
     )
-    parser.add_argument("--max-tasks", type=int, default=len(TASK_SIZES))
+    parser.add_argument("--max-tasks", type=int, default=None)
     parser.add_argument(
         "--reporting-split", choices=("val", "test"), default="test"
     )
@@ -2670,11 +2725,37 @@ def parse_args() -> argparse.Namespace:
         "--skip-validation-eval", action="store_true",
         help="Do not run per-task validation evaluation; useful only for an explicitly locked test run.",
     )
-    return parser.parse_args()
+    args = parser.parse_args(argv)
+    if args.max_tasks is None:
+        args.max_tasks = 1 if args.training_protocol == "joint26" else 8
+    return args
 
 
 def main() -> None:
     args = parse_args()
+    with using_training_protocol(args.training_protocol):
+        run(args)
+
+
+def run(args: argparse.Namespace) -> None:
+    if TRAINING_PROTOCOL == "joint26":
+        if args.max_tasks != 1:
+            raise ValueError("Joint26 requires one jointly trained 26-class pathway")
+        if (args.calibration_fraction != 0 or args.crossfit_folds
+                or args.selector_conditioning != "disabled"
+                or args.adapter_mode != "disabled"
+                or args.parax_mode not in {"disabled", "image"}
+                or args.parax_freeze_center_after_task0 or args.parax_task_local_gate
+                or args.parax_projector_bottleneck_dim or args.parax_distillation_weight
+                or args.loss_routing != "joint_bce"
+                or args.input_mode != "full"
+                or args.view_fusion not in {"disabled", "fixed_three_view"}
+                or args.view_classifier_mode != "shared_post_fusion"
+                or args.selector_mode != "shared" or args.prompt_mode != "shared"
+                or args.view_gradient_routing != "joint"):
+            raise ValueError("Joint26 ablation requires shared Full/three-view paths without calibration or extra adapters")
+    if not math.isfinite(args.supervised_loss_scale) or args.supervised_loss_scale <= 0:
+        raise ValueError("Supervised loss scale must be finite and positive")
     if args.also_report_test and (args.reporting_split != "val" or args.skip_validation_eval):
         raise ValueError("Dual validation/test reporting requires normal validation evaluation")
     three_view_fusion = args.view_fusion in {
@@ -3038,6 +3119,18 @@ def main() -> None:
     ).float().to(device)
     model.visual_encoder.requires_grad_(False)
     model.assert_visual_frozen()
+    frozen_visual_before = (
+        tensor_state_digest(model.visual_encoder.state_dict())
+        if TRAINING_PROTOCOL == "joint26" else None
+    )
+    base_initialization_digest = (
+        tensor_state_digest({
+            name: value for name, value in model.state_dict().items()
+            if name == "selectors" or name.startswith(("prompts.", "head."))
+        }) if TRAINING_PROTOCOL == "joint26" else None
+    )
+    if TRAINING_PROTOCOL == "joint26":
+        torch.cuda.reset_peak_memory_stats(device)
     lane_parameters = model.selectors.numel() + sum(p.numel() for p in model.prompts)
     if model.selector_view_residuals is not None:
         lane_parameters += model.selector_view_residuals.numel()
@@ -3224,6 +3317,8 @@ def main() -> None:
     )
     config = {
         "protocol_id": PROTOCOL_ID,
+        "training_protocol": TRAINING_PROTOCOL,
+        "task_pathway_count": model.num_tasks,
         "track": TRACK,
         "method": METHOD_NAME,
         "seed": args.seed,
@@ -3234,7 +3329,13 @@ def main() -> None:
         "reporting_split": args.reporting_split,
         "also_report_test": bool(args.also_report_test),
         "skip_validation_eval": bool(args.skip_validation_eval),
-        "training_label_scope": "current_classes_only",
+        "training_label_scope": (
+            "all_26_classes_simultaneously" if TRAINING_PROTOCOL == "joint26"
+            else "current_classes_only"
+        ),
+        "supervised_loss_scale": args.supervised_loss_scale,
+        "initial_selector_prompt_classifier_sha256": base_initialization_digest,
+        "frozen_visual_sha256_before": frozen_visual_before,
         "training_loss_mode": args.training_loss_mode,
         "parameter_group_loss_routing": args.loss_routing,
         "model_parameter_objective": (
@@ -3258,6 +3359,7 @@ def main() -> None:
             if args.loss_routing != "joint_bce" else None
         ),
         "training_loss_reduction_classes": (
+            "all_26_without_hidden_classes" if TRAINING_PROTOCOL == "joint26" else
             "current_task_only"
             if args.training_loss_mode == "current_only"
             else "all_26_with_zeroed_hidden_logits"
@@ -3269,7 +3371,10 @@ def main() -> None:
         "training_loss_optimizer_scale_note": (
             "Adam moment normalization can largely cancel constant gradient scaling"
         ),
-        "evaluation_scope": "samples_intersect_seen_classes",
+        "evaluation_scope": (
+            "all_annotated_person_instances" if TRAINING_PROTOCOL == "joint26"
+            else "samples_intersect_seen_classes"
+        ),
         "save_checkpoints": save_checkpoints,
         "threshold": args.threshold,
         "training_budget_mode": (
@@ -3761,7 +3866,43 @@ def main() -> None:
         train_loader = DataLoader(
             train_view, batch_size=args.train_batch_size, shuffle=True,
             num_workers=args.workers, pin_memory=True, drop_last=False,
+            generator=(torch.Generator().manual_seed(args.seed)
+                       if TRAINING_PROTOCOL == "joint26" else None),
         )
+        if TRAINING_PROTOCOL == "joint26":
+            # Match the real sampler without consuming its generator or any
+            # global RNG. All four arms use exactly the same instance order.
+            index_loader = DataLoader(
+                list(range(len(train_view))), batch_size=args.train_batch_size,
+                shuffle=True, num_workers=0,
+                generator=torch.Generator().manual_seed(args.seed),
+            )
+            first_positions = next(iter(index_loader)).tolist()
+            train_ids = [str(train_source.sample_ids[i]) for i in fit_indices]
+            val_ids = [str(val_source.sample_ids[i]) for i in range(len(val_source))]
+            protocol_audit = {
+                "training_protocol": TRAINING_PROTOCOL, "task_sizes": list(TASK_SIZES),
+                "train_instances": len(train_view), "validation_instances": len(val_source),
+                "train_sample_ids_sha256": ids_digest(train_ids),
+                "validation_sample_ids_sha256": ids_digest(val_ids),
+                "first_train_batch_sample_ids": [train_ids[i] for i in first_positions],
+                "first_train_batch_ids_sha256": ids_digest([train_ids[i] for i in first_positions]),
+                "initial_selector_prompt_classifier_sha256": base_initialization_digest,
+                "frozen_visual_sha256_before": frozen_visual_before,
+                "label_dimensions": len(task_indices(task_id)),
+                "test_loaded": test_source is not None,
+                "loss": (
+                    f"{args.supervised_loss_scale} * (BCE(fused) + "
+                    f"{args.view_auxiliary_loss_weight} * mean(BCE(available views)))"
+                    if three_view_fusion else f"{args.supervised_loss_scale} * BCE(Full)"
+                ),
+            }
+            (output / "joint_protocol_audit.json").write_text(
+                json.dumps(protocol_audit, indent=2) + "\n", encoding="utf-8"
+            )
+            print(f"JOINT26_AUDIT train={len(train_view)} val={len(val_source)} labels=26 "
+                  f"initial_base_sha256={base_initialization_digest} test_loaded={test_source is not None}",
+                  flush=True)
         val_loader = None if args.skip_validation_eval else DataLoader(
             val_view, batch_size=args.eval_batch_size, shuffle=False,
             num_workers=args.workers, pin_memory=False, drop_last=False,
@@ -3855,6 +3996,7 @@ def main() -> None:
             parax_distillation_weight=args.parax_distillation_weight,
             parax_residual_penalty_weight=args.parax_residual_penalty_weight,
             parax_projector_alignment_weight=args.parax_projector_alignment_weight,
+            supervised_loss_scale=args.supervised_loss_scale,
         )
         if model.parax_staged_mode:
             # Keep baseline training, initialization, and DataLoader RNG
@@ -4009,6 +4151,20 @@ def main() -> None:
             flush=True,
         )
 
+    if TRAINING_PROTOCOL == "joint26":
+        model.assert_visual_frozen()
+        frozen_visual_after = tensor_state_digest(model.visual_encoder.state_dict())
+        if frozen_visual_after != frozen_visual_before:
+            raise RuntimeError("Joint26 training modified frozen CLIP weights")
+        protocol_audit.update({
+            "frozen_visual_sha256_after": frozen_visual_after,
+            "frozen_visual_unchanged": True,
+            "peak_allocated_mib": torch.cuda.max_memory_allocated(device) / (1024 ** 2),
+            "peak_reserved_mib": torch.cuda.max_memory_reserved(device) / (1024 ** 2),
+        })
+        (output / "joint_protocol_audit.json").write_text(
+            json.dumps(protocol_audit, indent=2) + "\n", encoding="utf-8"
+        )
     summary = {
         "schema_version": 1,
         "status": "complete",
