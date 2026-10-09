@@ -60,6 +60,8 @@ ParaX 插在 **Frozen Forward 的第 11 个 transformer block 完整输出之后
 
 ## 执行状态
 
+本批次已经结束，后续实测状态覆盖下面保留的启动记录：四组均完成30epochs，但各有2次AMP跳步，实际有效更新7528而非原计划7530。原严格零跳步汇总拒绝生成报告；显式允许跳步后仅作带警告的探索性分析。完整结果、异常、离线诊断和下一步见 `docs/joint26_parax_results_and_next_plan_20261009.md`。不得把短程smoke的zero skipped转述为正式训练也zero skipped。
+
 已完成修改，并在 GPU0 同时启动四组正式训练。
 
 - 分支：`exp/joint26-parax-view-ablation`；训练代码提交：`1f482dc`。
