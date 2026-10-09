@@ -82,8 +82,10 @@ def main():
     parent = resolve_dataset_parent(args.data_root)
     if (parent / "EMOTIC").resolve() != Path(cfg["data_root"]).resolve():
         raise ValueError("Dataset differs from source")
-    if args.face_manifest_root.resolve() != Path(cfg["face_manifest_root"]).resolve():
+    if args.face_manifest_root.resolve() != Path(cfg["face_manifest"]["root"]).resolve():
         raise ValueError("Face manifest differs from source")
+    if _sha256(args.face_manifest_root / "manifests" / "train.jsonl") != cfg["face_manifest"]["artifact_sha256"]["train_manifest"]:
+        raise ValueError("Train Face manifest content changed")
     metadata = git_metadata(Path(__file__).resolve().parents[2])
     if metadata["dirty"]:
         raise ValueError("Export requires clean source code")
