@@ -29,3 +29,11 @@
 主要比较三seed配对的final/average mAP、遗忘和固定旧样本漂移，报告每seed方向，不只看单个最高分。两路与三路参数量相同，计算量不同；联合与增量的路径数、训练预算不同，不直接用绝对mAP相减归因。
 
 如果三路收益保留且稳定性没有明显损失，保留三路；若Person两路已达到相近水平而Face带来不稳定，则后续优先简化并验证Face质量，而非继续改写CLIP内部特征。未预设根据test自动启动后续结构，不做test融合权重搜索。
+
+## 执行状态：2026-10-10
+
+- 运行代码HEAD：`d85e2fa`；服务器独立worktree：`/mnt/haoyuan/workspace/multi-lane-main-incremental-auxiliary-view-contribution`。主工作树和test-only工作树的既有改动未修改。
+- 服务器完整单测275/275、两脚本bash语法检查通过；真实ViT四组各task0–2×4updates，共12updates/组，全部zero skipped、scale1024、CLIP不变、初始参数/首批和全量样本hash配对通过，test_loaded全部为false。smoke batch=`incremental_auxiliary_view_smoke_20261010_01`。
+- smoke峰值allocated显存Full约1283MiB、两路约1968MiB、三路约2575MiB。固定旧样本最大logit差约0.00049–0.00146；同样本在扩展评估集中的batch组成可能变化，加上AMP精度，存在数值底噪，不能把任何非零差异都认定为表征漂移。后续结合漂移量级、旧类AP和全精度复核判断。
+- 正式队列已于09:29 CST启动：batch=`incremental_auxiliary_view_multiseed_test_20261010_01`，tmux=`ml_incremental_aux_views_20261010`，GPU0四组并行，seed0→1→2。最终实验尚未完成，不宣称精度改善。
+- 正式输出：`./output/emotic_incremental_view_contribution/incremental_auxiliary_view_multiseed_test_20261010_01/`；日志：对应`./logs/emotic_incremental_view_contribution/`目录。仅做一次启动检查，随后停止监督，结束后统一同步分析。
