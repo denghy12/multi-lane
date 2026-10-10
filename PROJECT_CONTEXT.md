@@ -1,5 +1,9 @@
 # 项目上下文
 
+## 2026-10-10：291项双端单测通过，八任务smoke与正式队列衔接
+
+业务eb04972；本地/服务器291项全测通过，四组真实八任务smoke运行中，16updates/组预期，无test选参。GPU0–5被其他任务占用，当前只用空闲6/7，其他组排队。新增versioned WAIT_FOR_SMOKE门禁，正式队列独立checkout multi-lane-main-parax-freezing-eight-task-formal，不更新运行中smoke代码；smoke全部完成且比较通过才启动seed012四策略×8task正式val/test，失败则停止。正式处于等待预检时不声称训练已开始。计划docs/protected_parax_freezing_summary_and_eight_task_plan_20261010.md，三个上下文同步更新；不涉及另一会话三路全量实验。
+
 ## 2026-10-10：只研究专家冻结，扩展八任务三seed val+test
 
 用户明确本会话不涉及三路全量实验，并授权修改、运行八任务validation/test及使用全部空闲GPU。新独立managed worktree分支exp/parax-freezing-eight-task-locked，从25fc861出发，避免混入主工作树并发未提交image-stream代码，保留原工作树所有改动。四种冻结/复用策略不变，16专家槽位、seed0/1/2、task0–7、30epochs/task、固定融合、双split同权重、test不选参。新增显式full-evaluation开关保持旧pilot限制；test残差消融/单路分数、固定所有旧任务cohort及三seedJSON/CSV；空闲GPU调度最多8并行。完整计划docs/protected_parax_freezing_summary_and_eight_task_plan_20261010.md。正在单测与真实八任务smoke，尚未正式启动；正式batch protected_parax_freezing_8task_seed012_valtest_20261010_01。启动后不监督，不加入动态融合/蒸馏/分阶段/视图增删。

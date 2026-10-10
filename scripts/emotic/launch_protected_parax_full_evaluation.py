@@ -30,6 +30,25 @@ def idle_gpus(allowed):
     return result
 
 
+def wait_for_smoke(source: Path, controller_pid: int | None, seconds: int):
+    """Require a completed audited prerequisite, without inspecting live metrics."""
+    deadline = time.monotonic() + seconds
+    while not (source/'control/completed.txt').is_file():
+        if (source/'control/failed.json').exists():
+            raise RuntimeError('Prerequisite smoke failed; formal training was not started')
+        if controller_pid is not None:
+            try:
+                os.kill(controller_pid, 0)
+            except ProcessLookupError as error:
+                raise RuntimeError('Smoke controller ended without passing comparison') from error
+        if time.monotonic() >= deadline:
+            raise TimeoutError('Prerequisite smoke wait expired; formal training was not started')
+        time.sleep(15)
+    data = json.loads((source/'multiseed_comparison.json').read_text())
+    if set(data['methods']) != set(METHODS):
+        raise RuntimeError('Prerequisite comparison is incomplete')
+
+
 def main():
     root = Path(__file__).resolve().parents[2]
     os.chdir(root)
@@ -69,8 +88,20 @@ def main():
         'excluded': 'Image-token Adapter, patch Projector, level embedding, distillation, staged training, dynamic fusion',
         'inputs': {k: os.environ[k] for k in ('DATA_ROOT','CLIP_CHECKPOINT','FACE_MANIFEST_ROOT')},
         'output': str(output/batch), 'logs': str(logs/batch),
+        'prerequisite_smoke': os.environ.get('WAIT_FOR_SMOKE'),
     }
     (control/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
+    (control/'queued.txt').write_text(timestamp()+'\n')
+    if os.environ.get('WAIT_FOR_SMOKE'):
+        source = Path(os.environ['WAIT_FOR_SMOKE'])
+        pid = int(os.environ['SMOKE_CONTROLLER_PID']) if os.environ.get('SMOKE_CONTROLLER_PID') else None
+        print(timestamp(), 'waiting for audited smoke', str(source), flush=True)
+        try:
+            wait_for_smoke(source, pid, int(os.environ.get('MAX_WAIT_SECONDS','21600')))
+        except Exception as error:
+            (control/'prerequisite_failed.json').write_text(json.dumps({'error': str(error)})+'\n')
+            raise
+        (control/'prerequisite_passed.txt').write_text(timestamp()+'\n')
     (control/'started.txt').write_text(timestamp()+'\n')
     pending = [(seed,method) for seed in seeds for method in METHODS]
     active = {}; results = {}; last_dispatch = time.monotonic()

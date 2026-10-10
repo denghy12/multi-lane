@@ -59,7 +59,7 @@ ParaX在 **Task Forward输出后**，不在Frozen Forward内部。CLIP、Image-t
 - GPU：只使用核实空闲的GPU0–7，每GPU同时一组；最多8组并行，其余组自动分配到完成后重新核实空闲的卡。不终止其他进程。
 - 相对输入路径（相对于服务器新worktree）：数据`../multi-lane-main/datasets/EMOTIC`；权重`../CODE_DDP-benchmark/pretrained/clip/ViT-B-16.pt`；完整Face清单`../emotic_benchmark_runs/multi_lane_face_test_manifest_v0.1/face_manifest_train_val_test_v1_20260909`。
 - 完整Face清单的train/val文件与旧三任务清单SHA相同，新增test输入；CLIP实际解析权重SHA沿用已核验5806e77c…。
-- 分支：`exp/parax-freezing-eight-task-locked`。独立本地managed worktree避免混入主工作树另一条路线的未提交代码；服务器新worktree名`multi-lane-main-parax-freezing-eight-task-locked`，通过Git-only同步。
+- 分支：`exp/parax-freezing-eight-task-locked`。独立本地managed worktree避免混入主工作树另一条路线的未提交代码；服务器smoke worktree名`multi-lane-main-parax-freezing-eight-task-locked`，正式队列使用独立的`multi-lane-main-parax-freezing-eight-task-formal`，通过Git-only同步。
 - 正式batch：`protected_parax_freezing_8task_seed012_valtest_20261010_01`。
 - 输出`./output/emotic_protected_parax_full/<batch>/seed<seed>/<method>/`；日志`./logs/emotic_protected_parax_full/<batch>/seed<seed>/`；control记录配置、GPU映射、退出码和最终汇总。
 - 产物：每task compact checkpoint；val/test融合和单路分数、AP；两split残差开关对照；旧参数/访问范围/CLIP/hash及固定anchor审计；全部旧task同人物AP；三seed平均/标准差JSON及CSV。
@@ -87,3 +87,9 @@ export UPDATES_PER_TASK=0
 ## 实验结束后的判断
 
 主要比较同seed、同split的Final/Average mAP；旧类稳定性用固定人物和原forgetting共同判断；拆分当次新增类AP，防止总体增益只来自早期任务。复用组必须优于只学新专家且旧路径稳定，才能支持知识复用。如果冻结池稳定领先或接近，优先选择其较小增量预算。如果只有seed0提升，不能宣称收益稳定。任何test结果都不反向用于本轮配置或后续权重搜索。
+
+## 预检与后台执行状态
+
+业务实现eb04972已通过本地和服务器291项完整单测。真实四组八任务smoke已启动（smoke batch protected_parax_freezing_8task_smoke_20261010_01），当前GPU0–5由其他任务使用，调度器只分配空闲GPU6、7，其他组自动排队。smoke尚未完成，不把其小步精度当作正式结果。
+
+正式队列使用另一个独立checkout运行，不更新正在预检的工作树。增加WAIT_FOR_SMOKE门禁：必须看到smoke completed与完整比较产物，才开始正式GPU调度；smoke失败或控制器提前退出则记录prerequisite_failed并停止。正式控制流程放入tmux后台，预检和训练无需持续人工监督。尚未开始30epoch训练时，必须称“已排队等待预检”，不能称12组已经训练。

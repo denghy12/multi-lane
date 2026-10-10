@@ -1,5 +1,7 @@
 from pathlib import Path
 import tempfile
+import json
+from scripts.emotic.launch_protected_parax_full_evaluation import wait_for_smoke, METHODS
 import numpy as np
 from multi_lane.track_a.protected_parax_compare import fixed_old_cohort
 import unittest
@@ -32,6 +34,22 @@ class ProtectedFullEvaluationTest(unittest.TestCase):
             if extra[0]=='--adapter-mode': args.adapter_mode='not_disabled'
             else: args=self.args(*flags,*extra)
             with self.subTest(extra=extra), self.assertRaises(ValueError): validate_protected_protocol(args)
+
+    def test_formal_gate_rejects_failed_or_unfinished_smoke(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source=Path(directory);(source/'control').mkdir()
+            with self.assertRaises(TimeoutError): wait_for_smoke(source,None,0)
+            (source/'control/failed.json').write_text('{}')
+            with self.assertRaisesRegex(RuntimeError,'smoke failed'):wait_for_smoke(source,None,0)
+
+    def test_formal_gate_requires_all_four_audited_policies(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source=Path(directory);(source/'control').mkdir()
+            (source/'control/completed.txt').write_text('done')
+            (source/'multiseed_comparison.json').write_text(json.dumps({'methods':{'baseline':{}}}))
+            with self.assertRaisesRegex(RuntimeError,'incomplete'):wait_for_smoke(source,None,0)
+            (source/'multiseed_comparison.json').write_text(json.dumps({'methods':dict.fromkeys(METHODS,{})}))
+            wait_for_smoke(source,None,0)
 
     def test_fixed_cohort_uses_selected_old_task_and_split(self):
         with tempfile.TemporaryDirectory() as directory:
