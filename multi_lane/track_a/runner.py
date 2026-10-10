@@ -2775,6 +2775,8 @@ def run(args: argparse.Namespace) -> None:
         or args.parax_projector_alignment_weight or args.parax_residual_penalty_weight
     ):
         raise ValueError("Protected pilot requires seed0 task0-2 validation, shared frozen base and fixed fusion")
+    if args.parax_mode in PROTECTED_MODES and args.parax_mode != "post_task_protected_frozen" and args.parax_num_experts < 2 * args.max_tasks:
+        raise ValueError("Protected expansion needs two expert slots per task")
     if args.fixed_view_paired_audit and (
         TRAINING_PROTOCOL != "incremental" or args.adapter_mode != "disabled" or args.parax_mode != "disabled"
         or args.selector_mode != "shared" or args.prompt_mode != "shared" or args.selector_conditioning != "disabled"

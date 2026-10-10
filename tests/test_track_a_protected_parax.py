@@ -2,10 +2,14 @@ from __future__ import annotations
 import copy
 import io
 import unittest
+import tempfile
+import json
+from pathlib import Path
 
 import torch
 from multi_lane.track_a.model import MultiLaneModel
 from multi_lane.track_a.protected_parax import ProtectedParaXBank, PROTECTED_MODES
+from multi_lane.track_a.protected_parax_audit import ProtectedRouteAudit
 from test_track_a_reproduction import FakeVisual
 
 
@@ -18,7 +22,7 @@ class ProtectedParaXTest(unittest.TestCase):
 
     def update(self, bank, steps=5):
         optimizer = torch.optim.AdamW(bank.active_parameters(), lr=.02, weight_decay=.2)
-        x = torch.randn(4, 2, 8)
+        x = torch.randn(4, 2, bank.hidden_dim)
         target = torch.randn_like(x)
         for _ in range(steps):
             optimizer.zero_grad(set_to_none=True)
@@ -107,6 +111,32 @@ class ProtectedParaXTest(unittest.TestCase):
             torch.testing.assert_close(bank(0,x,task_id=task)[0],other(0,x,task_id=task)[0],atol=0,rtol=0)
         other.activate_task(2)
         with self.assertRaises(ValueError): other(0,x,task_id=3)
+
+    def test_task_boundary_audit_and_rng_isolation(self):
+        torch.manual_seed(93)
+        model=MultiLaneModel(FakeVisual(), task_sizes=(2,1), num_selectors=2,
+            num_prompts=2, num_prompt_layers=1, view_fusion="fixed_three_view",
+            parax_mode="post_task_protected_reuse", parax_layer_indices=(0,),
+            parax_rank=2,parax_num_experts=4,parax_initialization="zero_output",
+            parax_output_scale_mode="fixed",parax_residual_scale=1.,parax_smooth_ratio_bound=.02)
+        images={v:torch.randn(3,3,4,4) for v in ("full","person","face")}
+        images["face_reliable"]=torch.tensor([True,False,True])
+        loader=[(images,torch.zeros(3,2),["sample0","sample1","sample2"])]
+        with tempfile.TemporaryDirectory() as directory:
+            audit=ProtectedRouteAudit(Path(directory),torch.device('cpu'))
+            for task in (0,1):
+                model.activate_task(task)
+                rng=torch.get_rng_state().clone()
+                audit.begin(model,loader,task)
+                self.assertTrue(torch.equal(rng,torch.get_rng_state()))
+                self.update(model.parax_bank)
+                rng=torch.get_rng_state().clone()
+                audit.finish(model,task)
+                self.assertTrue(torch.equal(rng,torch.get_rng_state()))
+            rows=json.loads((Path(directory)/'protected_route_audit.json').read_text())['tasks']
+            self.assertTrue(rows['1']['protected_tensors_unchanged'])
+            self.assertLess(rows['1']['old_task_anchor_drift']['0']['logit_max_absolute_difference'],1e-6)
+            self.assertLess(rows['0']['initial_logit_max_difference'],1e-6)
 
     def test_model_rng_identity_and_old_logits_after_new_learning(self):
         torch.manual_seed(91)
