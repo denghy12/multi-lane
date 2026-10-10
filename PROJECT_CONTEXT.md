@@ -1,5 +1,9 @@
 # 项目上下文
 
+## 2026-10-10：只研究专家冻结，扩展八任务三seed val+test
+
+用户明确本会话不涉及三路全量实验，并授权修改、运行八任务validation/test及使用全部空闲GPU。新独立managed worktree分支exp/parax-freezing-eight-task-locked，从25fc861出发，避免混入主工作树并发未提交image-stream代码，保留原工作树所有改动。四种冻结/复用策略不变，16专家槽位、seed0/1/2、task0–7、30epochs/task、固定融合、双split同权重、test不选参。新增显式full-evaluation开关保持旧pilot限制；test残差消融/单路分数、固定所有旧任务cohort及三seedJSON/CSV；空闲GPU调度最多8并行。完整计划docs/protected_parax_freezing_summary_and_eight_task_plan_20261010.md。正在单测与真实八任务smoke，尚未正式启动；正式batch protected_parax_freezing_8task_seed012_valtest_20261010_01。启动后不监督，不加入动态融合/蒸馏/分阶段/视图增删。
+
 ## 2026-10-10：ParaX 新版验证全部通过，准备正式四组
 
 业务代码c440321；本地/服务器287项单测通过。新worktree `multi-lane-main-parax-audit-paired-staged` clean。四组真实ViT三task smoke各12updates/zero skipped，配对初始化/采样、identity、旧参数保护和新增残差关闭比较通过，peak reserved2712/2754MiB。原30epochs/task task1 checkpoint重建task2，新审计三组均通过且源SHA不变，0训练更新。分阶段真实smoke完成B0 12updates＋train缓存校准167updates，当前新专家实际改变/梯度非零、B0和旧参数hash不变，与基线配对一致。79个静态产物同步SHA一致；正式分阶段未启动。接下来从头运行batch `protected_parax_audit_v2_seed0_val_20261010_01`，GPU0四组、seed0 task0–2、30epochs/task、OMP1，validation-only，fixed fusion/.02界，不持续监督。配置及产物详见 `docs/protected_parax_audit_paired_staged_plan_20261010.md`。

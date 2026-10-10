@@ -1,5 +1,9 @@
 # 工作日志
 
+## 2026-10-10：只研究专家冻结，扩展八任务三seed val+test
+
+用户明确本会话不涉及三路全量实验，并授权修改、运行八任务validation/test及使用全部空闲GPU。新独立managed worktree分支exp/parax-freezing-eight-task-locked，从25fc861出发，避免混入主工作树并发未提交image-stream代码，保留原工作树所有改动。四种冻结/复用策略不变，16专家槽位、seed0/1/2、task0–7、30epochs/task、固定融合、双split同权重、test不选参。新增显式full-evaluation开关保持旧pilot限制；test残差消融/单路分数、固定所有旧任务cohort及三seedJSON/CSV；空闲GPU调度最多8并行。完整计划docs/protected_parax_freezing_summary_and_eight_task_plan_20261010.md。正在单测与真实八任务smoke，尚未正式启动；正式batch protected_parax_freezing_8task_seed012_valtest_20261010_01。启动后不监督，不加入动态融合/蒸馏/分阶段/视图增删。
+
 ## 2026-10-10：Git-only同步、远程全测与真实smoke完成
 
 业务提交c440321已推送，服务器新独立worktree同HEAD且clean，主/test-only及运行中其他worktree保持原样。287项本地/远程单测通过。四组smoke各12updates/0skips、peak2712/2754MiB，三task全部identity/旧值和mask保护/paired审计/残差消融/比较器通过。另从原训练30轮task1 checkpoint重建task2，三组新审计通过，源权重SHA前后相同、零训练更新。分阶段真实smoke三task共12次B0更新＋167缓存校准更新，新专家改变且梯度非零有限，B0/旧路径hash不变、初始化及采样与基线一致。79个静态产物同步SHA核验一致。准备新batch正式四组task0–2 validation（从头训练、仅GPU0、OMP1），正式分阶段仅备好实现未启动，不自动扩大8-task/test。

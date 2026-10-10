@@ -2387,6 +2387,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
                         help="Audit frozen fixed-view incremental ablations with isolated per-task samplers.")
     parser.add_argument("--protected-parax-paired-audit", action="store_true",
                         help="Validation-only paired protected-expert pilot with fixed-anchor audits.")
+    parser.add_argument("--protected-parax-full-evaluation", action="store_true",
+                        help="Explicit locked eight-task protected val+test evaluation, seeds 0/1/2.")
     parser.add_argument("--protected-parax-staged-training", action="store_true",
                         help="Train B0 first, then learn current protected experts on cached train features.")
     parser.add_argument("--protected-parax-residual-ablation", action="store_true",
@@ -2763,6 +2765,29 @@ def main() -> None:
         run(args)
 
 
+def validate_protected_protocol(args: argparse.Namespace) -> None:
+    """Do not implicitly relax the original validation-only pilot guard."""
+    full = args.protected_parax_full_evaluation
+    if full and (not args.protected_parax_paired_audit or args.max_tasks != 8
+                 or not args.also_report_test or args.skip_validation_eval
+                 or args.protected_parax_staged_training
+                 or (args.parax_mode != "disabled" and args.parax_num_experts != 16)):
+        raise ValueError("Protected full evaluation requires paired eight-task val+test, 16 slots and joint training")
+    if args.protected_parax_paired_audit and (
+        TRAINING_PROTOCOL != "incremental"
+        or (not full and (args.max_tasks > 3 or args.seed != 0 or args.also_report_test))
+        or args.adapter_mode != "disabled" or args.parax_mode not in {"disabled", *PROTECTED_MODES}
+        or args.reporting_split != "val"
+        or args.view_fusion != "fixed_three_view" or args.view_classifier_mode != "shared_post_fusion"
+        or args.selector_mode != "shared" or args.prompt_mode != "shared"
+        or args.selector_conditioning != "disabled" or args.view_gradient_routing != "joint"
+        or args.loss_routing != "joint_bce" or args.calibration_fraction != 0 or args.crossfit_folds
+        or args.parax_distillation_weight or args.parax_projector_bottleneck_dim
+        or args.parax_projector_alignment_weight or args.parax_residual_penalty_weight
+    ):
+        raise ValueError("Protected pilot requires seed0 task0-2 validation; full evaluation must be explicit with shared frozen base and fixed fusion")
+
+
 def run(args: argparse.Namespace) -> None:
     paired_protocol_audit = TRAINING_PROTOCOL == "joint26" or args.fixed_view_paired_audit or args.protected_parax_paired_audit
     if args.parax_mode in PROTECTED_MODES and not args.protected_parax_paired_audit:
@@ -2771,18 +2796,7 @@ def run(args: argparse.Namespace) -> None:
         not args.protected_parax_paired_audit or args.parax_mode not in PROTECTED_MODES
     ):
         raise ValueError("Protected staging/ablation requires a protected ParaX pilot")
-    if args.protected_parax_paired_audit and (
-        TRAINING_PROTOCOL != "incremental" or args.max_tasks > 3 or args.seed != 0
-        or args.adapter_mode != "disabled" or args.parax_mode not in {"disabled", *PROTECTED_MODES}
-        or args.reporting_split != "val" or args.also_report_test
-        or args.view_fusion != "fixed_three_view" or args.view_classifier_mode != "shared_post_fusion"
-        or args.selector_mode != "shared" or args.prompt_mode != "shared"
-        or args.selector_conditioning != "disabled" or args.view_gradient_routing != "joint"
-        or args.loss_routing != "joint_bce" or args.calibration_fraction != 0 or args.crossfit_folds
-        or args.parax_distillation_weight or args.parax_projector_bottleneck_dim
-        or args.parax_projector_alignment_weight or args.parax_residual_penalty_weight
-    ):
-        raise ValueError("Protected pilot requires seed0 task0-2 validation, shared frozen base and fixed fusion")
+    validate_protected_protocol(args)
     if args.parax_mode in PROTECTED_MODES and args.parax_mode != "post_task_protected_frozen" and args.parax_num_experts < 2 * args.max_tasks:
         raise ValueError("Protected expansion needs two expert slots per task")
     if args.fixed_view_paired_audit and (
@@ -3753,6 +3767,8 @@ def run(args: argparse.Namespace) -> None:
         "parax_freeze_center_after_task0": bool(args.parax_freeze_center_after_task0) if args.parax_mode != "disabled" else False,
         "parax_task_local_router": args.parax_mode in {"post_task_router", "post_task_staged", "post_task_staged_static", *PROTECTED_MODES},
         "protected_parax_paired_audit": bool(args.protected_parax_paired_audit),
+        "protected_parax_full_evaluation": bool(args.protected_parax_full_evaluation),
+        "held_out_test_policy": "fixed_config_same_task_checkpoint_no_selection" if args.also_report_test else None,
         "protected_parax_identity_audit_version": 2 if args.protected_parax_paired_audit else None,
         "protected_post_normalization": "h+(normalize(h+delta)-normalize(h))" if model.parax_protected_mode else None,
         "protected_parax_staged_training": args.protected_parax_staged_training,
@@ -3881,6 +3897,8 @@ def run(args: argparse.Namespace) -> None:
     test_view_diagnostics: Dict[str, object] = {}
     residual_disabled_rows: List[TaskMetrics] = []
     residual_disabled_views: Dict[str, object] = {}
+    residual_disabled_test_rows: List[TaskMetrics] = []
+    residual_disabled_test_views: Dict[str, object] = {}
     start = time.time()
     paired_task_audits = {}
     protected_audit = ProtectedRouteAudit(output, device) if args.protected_parax_paired_audit else None
@@ -4002,6 +4020,10 @@ def run(args: argparse.Namespace) -> None:
                 test_view, batch_size=args.eval_batch_size, shuffle=False,
                 num_workers=args.workers, pin_memory=False, drop_last=False,
             )
+            if paired_protocol_audit:
+                protocol_audit["test_instances"] = len(test_view)
+                protocol_audit["test_sample_ids_sha256"] = ids_digest(
+                    [str(test_source.sample_ids[i]) for i in test_view.indices])
         calibration_loader = None
         if args.save_calibration_scores:
             if calibration_source is None:
@@ -4167,26 +4189,40 @@ def run(args: argparse.Namespace) -> None:
             (output / "residual_disabled_view_diagnostics.json").write_text(
                 json.dumps(residual_disabled_views, indent=2) + "\n")
         if test_loader is not None:
-            # The extra DataLoader and evaluation may draw RNG seeds. Restore
-            # CPU/GPU RNG so task-(t+1) training matches the val-only run.
-            python_rng = random.getstate()
-            numpy_rng = np.random.get_state()
-            try:
-                with torch.random.fork_rng(devices=[torch.cuda.current_device()]):
-                    test_row = evaluate(
+            # Extra test inference cannot consume the next task's training RNG.
+            with isolated_rng(device):
+                test_row = evaluate(
+                    model, test_loader, device, task_id, args.threshold, amp,
+                    score_output_path=(output / "test_scores" / f"task{task_id}.npz"
+                                       if args.save_evaluation_scores else None),
+                )
+                if args.view_evaluation_diagnostics:
+                    test_view_diagnostics[str(task_id)] = evaluate_view_diagnostics(
                         model, test_loader, device, task_id, args.threshold, amp,
-                        score_output_path=(
-                            output / "test_scores" / f"task{task_id}.npz"
-                            if args.save_evaluation_scores else None
-                        ),
+                        score_output_path=(output / "view_test_scores" / f"task{task_id}.npz"
+                                           if args.save_view_evaluation_scores else None),
                     )
-                    if args.view_evaluation_diagnostics:
-                        test_view_diagnostics[str(task_id)] = evaluate_view_diagnostics(
+            if args.protected_parax_residual_ablation:
+                runtime, training = model.parax_runtime_enabled, model.training
+                try:
+                    with isolated_rng(device), torch.no_grad():
+                        model.set_parax_runtime_enabled(False)
+                        residual_disabled_test_rows.append(evaluate(
                             model, test_loader, device, task_id, args.threshold, amp,
-                        )
-            finally:
-                random.setstate(python_rng)
-                np.random.set_state(numpy_rng)
+                            score_output_path=output / "residual_disabled_test_scores" / f"task{task_id}.npz",
+                        ))
+                        if args.view_evaluation_diagnostics:
+                            residual_disabled_test_views[str(task_id)] = evaluate_view_diagnostics(
+                                model, test_loader, device, task_id, args.threshold, amp,
+                                score_output_path=output / "residual_disabled_view_test_scores" / f"task{task_id}.npz",
+                            )
+                finally:
+                    model.set_parax_runtime_enabled(runtime)
+                    model.train(training)
+                (output / "residual_disabled_test_task_metrics.json").write_text(
+                    json.dumps([asdict(value) for value in residual_disabled_test_rows], indent=2) + "\n")
+                (output / "residual_disabled_test_view_diagnostics.json").write_text(
+                    json.dumps(residual_disabled_test_views, indent=2) + "\n")
             test_rows.append(test_row)
             print(f"task={task_id} test_mAP={test_row.mAP:.6f}", flush=True)
         if calibration_loader is not None:
@@ -4307,6 +4343,8 @@ def run(args: argparse.Namespace) -> None:
         "base_metrics_without_routing": summarize_tasks(base_task_rows) if base_task_rows else None,
         "residual_disabled_metrics": summarize_tasks(residual_disabled_rows) if residual_disabled_rows else None,
         "residual_disabled_task_metrics": [asdict(value) for value in residual_disabled_rows],
+        "residual_disabled_test_metrics": summarize_tasks(residual_disabled_test_rows) if residual_disabled_test_rows else None,
+        "residual_disabled_test_task_metrics": [asdict(value) for value in residual_disabled_test_rows],
         "completed_route_calibration_epochs": sum(len(value["history"]) for value in route_calibration.values()),
         "completed_route_calibration_updates": sum(row["optimizer_steps"] for value in route_calibration.values() for row in value["history"]),
         "test_metrics": summarize_tasks(test_rows) if test_rows else None,

@@ -1,5 +1,9 @@
 # 下一步任务
 
+## 2026-10-10：只研究专家冻结，扩展八任务三seed val+test
+
+用户明确本会话不涉及三路全量实验，并授权修改、运行八任务validation/test及使用全部空闲GPU。新独立managed worktree分支exp/parax-freezing-eight-task-locked，从25fc861出发，避免混入主工作树并发未提交image-stream代码，保留原工作树所有改动。四种冻结/复用策略不变，16专家槽位、seed0/1/2、task0–7、30epochs/task、固定融合、双split同权重、test不选参。新增显式full-evaluation开关保持旧pilot限制；test残差消融/单路分数、固定所有旧任务cohort及三seedJSON/CSV；空闲GPU调度最多8并行。完整计划docs/protected_parax_freezing_summary_and_eight_task_plan_20261010.md。正在单测与真实八任务smoke，尚未正式启动；正式batch protected_parax_freezing_8task_seed012_valtest_20261010_01。启动后不监督，不加入动态融合/蒸馏/分阶段/视图增删。
+
 ## 2026-10-10：全套preflight通过，正式四组启动后停止监督
 
 业务c440321：287项本地/远程全测、四组真实三task smoke每组12updates/zero skips、原已训练task1→task2新版审计及可学习新专家分阶段smoke全部通过；79个静态产物已同步SHA一致。四组smoke配对、旧保护、残差关闭导出和比较器均通过。下一步GPU0正式 `protected_parax_audit_v2_seed0_val_20261010_01`（task0–2 seed0，30epochs，固定融合，OMP1），显存不足有限排队，不干预其他任务。启动后停止监督。分阶段正式实验未启动；本轮先收齐四组及残差开关新/旧类AP，再决定是否比较分阶段，不升级8-task/test/更多专家/level embedding。计划与检查证据见 `docs/protected_parax_audit_paired_staged_plan_20261010.md`。

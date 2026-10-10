@@ -19,6 +19,15 @@ case "${METHOD}" in
   *) echo "Unknown method: ${METHOD}" >&2; exit 2 ;;
 esac
 extra=()
+max_tasks=3
+experts=6
+seed=0
+if [[ "${FULL_EVALUATION:-0}" == 1 ]]; then
+  max_tasks=8
+  experts=16
+  seed="${SEED:-0}"
+  extra+=(--protected-parax-full-evaluation --also-report-test)
+fi
 if [[ "${METHOD}" != baseline ]]; then
   extra+=(--protected-parax-residual-ablation)
   if [[ "${STAGED_TRAINING:-0}" == 1 ]]; then
@@ -30,14 +39,21 @@ for path in "${DATA_ROOT}/CVPR17_Annotations.mat" "${CLIP_CHECKPOINT}" \
   "${FACE_MANIFEST_ROOT}/manifests/train.jsonl" "${FACE_MANIFEST_ROOT}/manifests/val.jsonl"; do
   [[ -f "${path}" ]] || { echo "Missing input: ${path}" >&2; exit 2; }
 done
-run_root="${OUTPUT_ROOT}/${RUN_ID}/${METHOD}"
+if [[ "${FULL_EVALUATION:-0}" == 1 ]]; then
+  [[ -f "${FACE_MANIFEST_ROOT}/manifests/test.jsonl" ]] || { echo "Missing test manifest" >&2; exit 2; }
+  run_root="${OUTPUT_ROOT}/${RUN_ID}/seed${seed}/${METHOD}"
+  LOG_ROOT="${LOG_ROOT}/${RUN_ID}/seed${seed}"
+else
+  run_root="${OUTPUT_ROOT}/${RUN_ID}/${METHOD}"
+  LOG_ROOT="${LOG_ROOT}/${RUN_ID}"
+fi
 [[ ! -e "${run_root}" ]] || { echo "Output already exists: ${run_root}" >&2; exit 2; }
-mkdir -p "${LOG_ROOT}/${RUN_ID}"
+mkdir -p "${LOG_ROOT}"
 CUDA_VISIBLE_DEVICES="${GPU}" "${PYTHON}" -m multi_lane.track_a.runner \
-  --protected-parax-paired-audit --seed 0 --training-protocol incremental \
+  --protected-parax-paired-audit --seed "${seed}" --training-protocol incremental \
   --data-root "${DATA_ROOT}" --clip-checkpoint "${CLIP_CHECKPOINT}" \
   --face-manifest-root "${FACE_MANIFEST_ROOT}" --output-root "${run_root}" \
-  --epochs "${EPOCHS:-30}" --max-tasks 3 --scheduler-mode cosine \
+  --epochs "${EPOCHS:-30}" --max-tasks "${max_tasks}" --scheduler-mode cosine \
   --scheduler-min-lr-ratio 0 --scheduler-warmup-ratio 0 \
   --train-batch-size 64 --eval-batch-size 64 --workers 2 \
   --threshold 0.5 --source-learning-rate 0.05 --source-reference-batch-size 256 \
@@ -52,10 +68,10 @@ CUDA_VISIBLE_DEVICES="${GPU}" "${PYTHON}" -m multi_lane.track_a.runner \
   --view-evaluation-diagnostics --save-evaluation-scores --save-view-evaluation-scores \
   --evaluation-score-purpose validation_search --adapter-mode disabled \
   --adapter-learning-rate 0.0004 --adapter-weight-decay 0 \
-  --parax-mode "${mode}" --parax-layer-indices 0 --parax-rank 32 --parax-num-experts 6 \
+  --parax-mode "${mode}" --parax-layer-indices 0 --parax-rank 32 --parax-num-experts "${experts}" \
   --parax-router-hidden 16 --parax-initialization zero_output \
   --parax-residual-scale 1 --parax-output-scale-mode fixed --parax-smooth-ratio-bound 0.02 \
   --parax-trainable-components all --parax-residual-ratio-cap 0 \
   --selector-mode shared --prompt-mode shared --num-selectors 10 \
   --amp-initial-scale 1024 --amp-growth-interval 1000000000 \
-  --reporting-split val "${extra[@]}" 2>&1 | tee "${LOG_ROOT}/${RUN_ID}/${METHOD}.log"
+  --reporting-split val "${extra[@]}" 2>&1 | tee "${LOG_ROOT}/${METHOD}.log"
