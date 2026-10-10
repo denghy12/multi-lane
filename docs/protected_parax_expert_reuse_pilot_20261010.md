@@ -42,11 +42,18 @@ ParaX 在 Task Forward 完成后，不在 Frozen Forward 的第11个 Transformer
 
 四组同seed初始化与独立task sampler。ParaX初始化不推进全局RNG。固定16个validation样本仅用于评估，不参与优化，额外审计隔离Python/NumPy/CPU/CUDA RNG。
 
-每任务结束逐值检查所有旧路径ParaX参数及mask；不变条件失败直接中止。报告旧类别logit漂移、三视图feature cosine和gate漂移；FP32评估仍有CUDA数值误差，须与同批基线漂移比较，不用“绝对零”误判正常浮点差异。当前任务ParaX初始logits须与关闭ParaX路径对齐。
+每任务结束逐值检查所有旧路径ParaX参数及mask；不变条件失败直接中止。报告旧类别logit漂移、三视图feature cosine和gate漂移；FP32评估仍有CUDA数值误差，须与同批基线漂移比较，不用“绝对零”误判正常浮点差异。当前任务ParaX初始logits须与关闭ParaX路径对齐。审计独立关闭TF32并恢复训练设置。若逐task报告的样本集合发生变化，旧类AP/forgetting也可能随评估人群变化；须结合固定样本logits和导出sample ID分析，不能把指标变化都解释为旧参数遗忘。
 
 - 旧参数不变但旧预测明显变化：检查上游Selector/Prompt/head及访问路径，不能宣称论文策略失效。
 - 旧预测稳定但低于基线：增量保护有效，当前任务适配收益不足。
 - 复用组不优于仅新增组：没有知识复用收益证据。
 - 复用组优于仅新增和基线且旧预测稳定：才支持继续八任务validation，仍需后续多seed确认。
 
-首次先顺序运行四组真实三任务smoke，每任务4次优化更新。确认配对、无skip/NaN/OOM、梯度和旧状态保护，再按显存预算在GPU0四组并行。若已有任务占用导致不足，启动器有限等待显存，不终止现有进程，不使用GPU1–7。正式实验启动后不持续监督。
+首次先运行基线真实三任务smoke，再运行三组路由smoke；修正审计精度后四组以相同代码并行重跑，每任务4次优化更新。确认配对、无skip/NaN/OOM、梯度和旧状态保护，再按显存预算在GPU0四组并行。若已有任务占用导致不足，启动器有限等待显存，不终止现有进程，不使用GPU1–7。正式实验启动后不持续监督。
+
+## 实现检查进展
+
+- 本地分支已通过 Git push 同步至服务器独立、clean worktree；未覆盖主工作树或 test-only 工作树中的已有改动。
+- 最终业务代码截至 `fd1cde4`；完整远程 unittest **282/282 passed**，本地新增7项机制测试通过，compileall/bash语法检查通过。
+- 初次路由smoke在task0训练前因严格对齐检查停止（未进入正式训练）。排查发现TF32开启时关闭ParaX的同一路径重复前向也有约1.3e-4的logit差异，ParaX残差实际为0。修正为审计独立关闭TF32、结束后恢复原flag，保留1e-5对齐阈值；不是放宽阈值。新增测试覆盖异常时也恢复flag。
+- 修正后的同代码四组smoke批次 `protected_parax_smoke_20261010_02`：GPU0并行，每任务4次更新；首批进入训练，四组均zero skipped；当时GPU0总占用21.8GB（含原有任务），剩余约2.3GB。完成检查与正式启动状态后补充。

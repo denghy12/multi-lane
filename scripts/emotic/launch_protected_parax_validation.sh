@@ -16,6 +16,7 @@ cat > "${control}/manifest.txt" <<EOF
 branch=$(git branch --show-current)
 commit=$(git rev-parse HEAD)
 methods=baseline frozen_pool fresh_only reuse_old
+gpu=0; four arms concurrently; min_free_mib=${MIN_FREE_MIB:-18000}; finite_wait_seconds=${MAX_WAIT_SECONDS:-21600}
 dataset=EMOTIC Track-A; train and validation only; no test
 seed=0; tasks=0-2; epochs=30/task; train/eval batch=64; workers=2
 optimizer=Adam reset/task; base_lr=0.0125; ParaX_lr=0.0004; weight_decay=0; cosine min0 warmup0
