@@ -57,3 +57,19 @@ ParaX 在 Task Forward 完成后，不在 Frozen Forward 的第11个 Transformer
 - 最终业务代码截至 `fd1cde4`；完整远程 unittest **282/282 passed**，本地新增7项机制测试通过，compileall/bash语法检查通过。
 - 初次路由smoke在task0训练前因严格对齐检查停止（未进入正式训练）。排查发现TF32开启时关闭ParaX的同一路径重复前向也有约1.3e-4的logit差异，ParaX残差实际为0。修正为审计独立关闭TF32、结束后恢复原flag，保留1e-5对齐阈值；不是放宽阈值。新增测试覆盖异常时也恢复flag。
 - 修正后的同代码四组smoke批次 `protected_parax_smoke_20261010_02`：GPU0并行，每任务4次更新；首批进入训练，四组均zero skipped；当时GPU0总占用21.8GB（含原有任务），剩余约2.3GB。完成检查与正式启动状态后补充。
+
+
+### 2026-10-10 Protected ParaX preflight and GPU0 launch
+
+- Branch: exp/parax-protected-expert-reuse. Launch commit: 3aa6447; model/audit code fd1cde4. Remote clean worktree: /mnt/haoyuan/workspace/multi-lane-main-parax-protected-expert-reuse.
+- Full remote unittest: 282/282 passed; seven new local mechanism tests passed. Four-arm smoke protected_parax_smoke_20261010_02 completed tasks0-2, 12 updates/arm, zero skips, no NaN/OOM. Initialization/sample-ID pairing and frozen CLIP/protected old parameters passed.
+- New expert A/B and Router gradients nonzero/finite; initial logit difference about1e-7, fixed old-anchor logit drift below1e-6, comparable to baseline numerical floor. Audits disable TF32 and restore training flags.
+- Smoke peak reserved memory2756MiB; four arms fit GPU0 alongside existing work. Formal minimum free memory14500MiB, finite queue if needed, never stop existing processes or useGPU1-7.
+- Formal batch protected_parax_expert_reuse_seed0_val_20261010_01; tmux ml_protected_parax_20261010. Baseline/frozen_pool/fresh_only/reuse_old run concurrently onGPU0, seed0 tasks0-2,30epochs/task, expected5010updates/arm, validation only, no test.
+- Results: output/emotic_protected_parax_val/<batch>/<method>; logs: logs/emotic_protected_parax_val/<batch>. Smoke scores are implementation checks, not efficacy evidence. Do not continuously monitor formal training.
+
+## 正式实验已启动
+
+2026-10-10 12:41:41（北京时间）已启动正式四组，launch commit为`3aa6447`，同一独立clean worktree、GPU0并行。已确认四组进入task0，初始化hash一致，`test_loaded=False`；GPU0总占用约21.8GB，原有任务未中断。正式每组task0–2、30epoch/task，预期5010次更新。训练结束后统一分析，不持续监督。
+
+smoke检查产物已同步到本地`output/emotic_protected_parax_val/protected_parax_smoke_20261010_02/`；正式实验结果尚未产生。

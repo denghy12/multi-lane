@@ -4072,3 +4072,22 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - 审查`TaskImageTokenAdapterBank`/`_lane_block`确认当前是共享Selector证据Adapter，视觉CLIP冻结、无ParaX、三视图固定融合；该实验没有证明encoder层级动态路由。
 - 由于只有seed0且final增益未达预注册`+0.5`，下一步用seed1/2复现b32/b97 8-task validation，GPU0/1、validation-only、无checkpoint/test；seed0 test继续在GPU2/3。完整结果见`docs/shared_capacity_residual_scale_validation_results_20260926.md`。
 - 提交`1df3398`并推送`exp/shared-capacity-multiseed-validation`；服务器创建clean worktree并通过245项unittest、bash -n、两组真实ViT smoke。正式 batch `shared_capacity_residual_scale_multiseed_seed12_20260926` 已在tmux `ml_caps12_20260926`启动，seed1 b32/b97进入GPU0/1；完成后自动执行seed2，test仍在GPU2/3。
+
+
+## 2026-10-10 ParaX 受保护专家复用三任务 pilot（用户授权执行）
+
+- 新分支 `exp/parax-protected-expert-reuse`，起点 `8b6475d`；新增独立专家参数、task-local Router/零输出投影、永久访问 mask、task结束封存与旧路径逐值审计。
+- 四组：无ParaX基线、task0学中心后冻结、只用新专家、复用旧专家并学新专家；两个扩展组每任务新增2个rank32参数矩阵对。
+- 接入最终归一化 Task Forward CLS 后、固定三视图特征融合前；CLIP冻结、Image-token Adapter/Projector关闭；task0–2 seed0 validation，30epoch/task，batch64，base lr0.0125/ParaX lr0.0004，Adam/cosine/WD0，smooth bound0.02；无test。
+- 本地 compile/bash 检查已完成，单测与真实数据smoke待运行；服务器SSH已恢复，GPU0已有其他任务，禁止中断，按实际显存决定启动或有限排队。尚无新实验指标。
+- 完整设计与输入/输出/日志见 `docs/protected_parax_expert_reuse_pilot_20261010.md`。保留本地既有未提交文档及远端主/test-only工作树改动。
+
+
+### 2026-10-10 Protected ParaX preflight and GPU0 launch
+
+- Branch: exp/parax-protected-expert-reuse. Launch commit: 3aa6447; model/audit code fd1cde4. Remote clean worktree: /mnt/haoyuan/workspace/multi-lane-main-parax-protected-expert-reuse.
+- Full remote unittest: 282/282 passed; seven new local mechanism tests passed. Four-arm smoke protected_parax_smoke_20261010_02 completed tasks0-2, 12 updates/arm, zero skips, no NaN/OOM. Initialization/sample-ID pairing and frozen CLIP/protected old parameters passed.
+- New expert A/B and Router gradients nonzero/finite; initial logit difference about1e-7, fixed old-anchor logit drift below1e-6, comparable to baseline numerical floor. Audits disable TF32 and restore training flags.
+- Smoke peak reserved memory2756MiB; four arms fit GPU0 alongside existing work. Formal minimum free memory14500MiB, finite queue if needed, never stop existing processes or useGPU1-7.
+- Formal batch protected_parax_expert_reuse_seed0_val_20261010_01; tmux ml_protected_parax_20261010. Baseline/frozen_pool/fresh_only/reuse_old run concurrently onGPU0, seed0 tasks0-2,30epochs/task, expected5010updates/arm, validation only, no test.
+- Results: output/emotic_protected_parax_val/<batch>/<method>; logs: logs/emotic_protected_parax_val/<batch>. Smoke scores are implementation checks, not efficacy evidence. Do not continuously monitor formal training.

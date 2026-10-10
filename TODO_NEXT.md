@@ -1446,3 +1446,22 @@ VOC 对照实验，不应在现阶段合并到 `main`。
 - 完成后同步两组 JSON/NPZ、日志和 status，核对8 tasks、240 epochs、13,950 updates、zero skipped、无OOM/NaN/traceback，再判断 b97 是否跨后期任务保持收益。
 - 2026-09-25: shared-capacity full validation ended with A0 complete and A-cap failing at the start of task3 cycle18, after 17 completed cycles and 140 skipped AMP updates. A-cap's task0--2 gain is real but is not a full-sequence result. Full analysis: `docs/shared_capacity_full_validation_results_20260925.md`.
 - Active batch `shared_capacity_residual_scale_validation_20260925_222440` on `exp/shared-capacity-residual-control`: seed0, EMOTIC Track-A tasks0--7, validation-only, b32 vs b97, residual scale `0.03`, 30 epochs/task, batch64, main LR0.0125, Adapter LR4e-4, BCE+ASL, auxiliary view loss0.1, AMP/TF32, no checkpoint/test. Full 245-test suite and both real ViT task0 smokes passed; each arm entered cycle1 with 84 updates and zero skips. Wait for natural completion before analysis; do not test or tune during the run.
+
+
+## 2026-10-10 ParaX 受保护专家复用三任务 pilot（用户授权执行）
+
+- 新分支 `exp/parax-protected-expert-reuse`，起点 `8b6475d`；新增独立专家参数、task-local Router/零输出投影、永久访问 mask、task结束封存与旧路径逐值审计。
+- 四组：无ParaX基线、task0学中心后冻结、只用新专家、复用旧专家并学新专家；两个扩展组每任务新增2个rank32参数矩阵对。
+- 接入最终归一化 Task Forward CLS 后、固定三视图特征融合前；CLIP冻结、Image-token Adapter/Projector关闭；task0–2 seed0 validation，30epoch/task，batch64，base lr0.0125/ParaX lr0.0004，Adam/cosine/WD0，smooth bound0.02；无test。
+- 本地 compile/bash 检查已完成，单测与真实数据smoke待运行；服务器SSH已恢复，GPU0已有其他任务，禁止中断，按实际显存决定启动或有限排队。尚无新实验指标。
+- 完整设计与输入/输出/日志见 `docs/protected_parax_expert_reuse_pilot_20261010.md`。保留本地既有未提交文档及远端主/test-only工作树改动。
+
+
+### 2026-10-10 Protected ParaX preflight and GPU0 launch
+
+- Branch: exp/parax-protected-expert-reuse. Launch commit: 3aa6447; model/audit code fd1cde4. Remote clean worktree: /mnt/haoyuan/workspace/multi-lane-main-parax-protected-expert-reuse.
+- Full remote unittest: 282/282 passed; seven new local mechanism tests passed. Four-arm smoke protected_parax_smoke_20261010_02 completed tasks0-2, 12 updates/arm, zero skips, no NaN/OOM. Initialization/sample-ID pairing and frozen CLIP/protected old parameters passed.
+- New expert A/B and Router gradients nonzero/finite; initial logit difference about1e-7, fixed old-anchor logit drift below1e-6, comparable to baseline numerical floor. Audits disable TF32 and restore training flags.
+- Smoke peak reserved memory2756MiB; four arms fit GPU0 alongside existing work. Formal minimum free memory14500MiB, finite queue if needed, never stop existing processes or useGPU1-7.
+- Formal batch protected_parax_expert_reuse_seed0_val_20261010_01; tmux ml_protected_parax_20261010. Baseline/frozen_pool/fresh_only/reuse_old run concurrently onGPU0, seed0 tasks0-2,30epochs/task, expected5010updates/arm, validation only, no test.
+- Results: output/emotic_protected_parax_val/<batch>/<method>; logs: logs/emotic_protected_parax_val/<batch>. Smoke scores are implementation checks, not efficacy evidence. Do not continuously monitor formal training.
