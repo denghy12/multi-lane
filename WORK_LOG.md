@@ -4099,3 +4099,8 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - Smoke peak reserved memory2756MiB; four arms fit GPU0 alongside existing work. Formal minimum free memory14500MiB, finite queue if needed, never stop existing processes or useGPU1-7.
 - Formal batch protected_parax_expert_reuse_seed0_val_20261010_01; tmux ml_protected_parax_20261010. Baseline/frozen_pool/fresh_only/reuse_old run concurrently onGPU0, seed0 tasks0-2,30epochs/task, expected5010updates/arm, validation only, no test.
 - Results: output/emotic_protected_parax_val/<batch>/<method>; logs: logs/emotic_protected_parax_val/<batch>. Smoke scores are implementation checks, not efficacy evidence. Do not continuously monitor formal training.
+
+
+## 2026-10-10 三视图全量配置迁移至八任务（本会话独立范围）
+
+用户授权本会话只针对原三路全量学习，修改并运行8task validation+test，可用全部空闲GPU。原全量三seed：无ParaX val50.7980/test39.2278，内部ParaX val50.9451/test39.6299；小幅收益，不证明视图专门化。新分支exp/three-view-joint-to-incremental-val-test，独立本地worktree避免其他会话分支切换。计划两组原image-stream配置×seed012，8task×30epochs，固定三视图融合，Image-token Adapter关闭，ParaX在Frozen Forward索引10之后，rank32/3矩阵对/official/learnable scale0.1/shared-live；不混入protected post-task路线。任务末同权重val+test，新增固定val-anchor FP32漂移、旧任务参数hash、样本/初始化配对，test不参与选择。完整配置见docs/three_view_joint_to_incremental_val_test_plan_20261010.md；先单测及两组三任务4updates/task smoke，通过后六张空闲卡各一组。当前尚未启动训练。

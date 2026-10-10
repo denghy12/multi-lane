@@ -2385,6 +2385,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
                         default="incremental")
     parser.add_argument("--fixed-view-paired-audit", action="store_true",
                         help="Audit frozen fixed-view incremental ablations with isolated per-task samplers.")
+    parser.add_argument("--image-stream-transfer-audit", action="store_true",
+                        help="Paired eight-task transfer of joint26 image-stream ParaX, with fixed anchors.")
     parser.add_argument("--protected-parax-paired-audit", action="store_true",
                         help="Validation-only paired protected-expert pilot with fixed-anchor audits.")
     parser.add_argument("--protected-parax-staged-training", action="store_true",
@@ -2764,7 +2766,10 @@ def main() -> None:
 
 
 def run(args: argparse.Namespace) -> None:
-    paired_protocol_audit = TRAINING_PROTOCOL == "joint26" or args.fixed_view_paired_audit or args.protected_parax_paired_audit
+    from .image_stream_transfer_audit import ImageStreamTransferAudit, validate_transfer_config
+    if args.image_stream_transfer_audit:
+        validate_transfer_config(args)
+    paired_protocol_audit = TRAINING_PROTOCOL == "joint26" or args.fixed_view_paired_audit or args.protected_parax_paired_audit or args.image_stream_transfer_audit
     if args.parax_mode in PROTECTED_MODES and not args.protected_parax_paired_audit:
         raise ValueError("Protected ParaX requires its paired pilot audit")
     if (args.protected_parax_staged_training or args.protected_parax_residual_ablation) and (
@@ -2813,7 +2818,7 @@ def run(args: argparse.Namespace) -> None:
             raise ValueError("Joint26 two-view contribution ablation disables ParaX")
     if not math.isfinite(args.supervised_loss_scale) or args.supervised_loss_scale <= 0:
         raise ValueError("Supervised loss scale must be finite and positive")
-    if args.also_report_test and (args.reporting_split != "val" or args.skip_validation_eval):
+    if args.also_report_test and (args.reporting_split != "val" or (args.skip_validation_eval and not args.image_stream_transfer_audit)):
         raise ValueError("Dual validation/test reporting requires normal validation evaluation")
     # Fixed two-view ablations retain the original three-view data/RNG protocol.
     three_view_fusion = args.view_fusion in {
@@ -3396,7 +3401,8 @@ def run(args: argparse.Namespace) -> None:
         "amp_growth_interval": args.amp_growth_interval,
         "initial_selector_prompt_classifier_sha256": base_initialization_digest,
         "fixed_view_paired_audit": bool(args.fixed_view_paired_audit),
-        "fixed_view_sampler_protocol": "seed_plus_1009_times_task" if (args.fixed_view_paired_audit or args.protected_parax_paired_audit) else None,
+        "fixed_view_sampler_protocol": "seed_plus_1009_times_task" if (args.fixed_view_paired_audit or args.protected_parax_paired_audit or args.image_stream_transfer_audit) else None,
+        "image_stream_transfer_audit": bool(args.image_stream_transfer_audit),
         "frozen_visual_sha256_before": frozen_visual_before,
         "training_loss_mode": args.training_loss_mode,
         "parameter_group_loss_routing": args.loss_routing,
@@ -3884,6 +3890,7 @@ def run(args: argparse.Namespace) -> None:
     start = time.time()
     paired_task_audits = {}
     protected_audit = ProtectedRouteAudit(output, device) if args.protected_parax_paired_audit else None
+    transfer_audit = ImageStreamTransferAudit(output, device) if args.image_stream_transfer_audit else None
     for task_id in range(args.max_tasks):
         print(f"begin_task={task_id}", flush=True)
         model.activate_task(task_id)
@@ -3937,7 +3944,7 @@ def run(args: argparse.Namespace) -> None:
             seen_indices(task_id),
             include_sample_id=args.save_evaluation_scores,
         )
-        sampler_seed = fixed_view_sampler_seed(args.seed, task_id, TRAINING_PROTOCOL, args.fixed_view_paired_audit or args.protected_parax_paired_audit)
+        sampler_seed = fixed_view_sampler_seed(args.seed, task_id, TRAINING_PROTOCOL, args.fixed_view_paired_audit or args.protected_parax_paired_audit or args.image_stream_transfer_audit)
         train_loader = DataLoader(
             train_view, batch_size=args.train_batch_size, shuffle=True,
             num_workers=args.workers, pin_memory=True, drop_last=False,
@@ -4033,6 +4040,8 @@ def run(args: argparse.Namespace) -> None:
         )
         if protected_audit is not None:
             protected_audit.begin(model, reporting_loader, task_id)
+        if transfer_audit is not None:
+            transfer_audit.begin(model, reporting_loader, task_id)
         if model.parax_staged_mode or args.protected_parax_staged_training:
             model.set_parax_runtime_enabled(False)
             # Exclude the current expert pool from B0's optimizer entirely.
@@ -4183,6 +4192,8 @@ def run(args: argparse.Namespace) -> None:
                     if args.view_evaluation_diagnostics:
                         test_view_diagnostics[str(task_id)] = evaluate_view_diagnostics(
                             model, test_loader, device, task_id, args.threshold, amp,
+                            score_output_path=(output / "view_test_scores" / f"task{task_id}.npz"
+                                               if args.image_stream_transfer_audit and args.save_view_evaluation_scores else None),
                         )
             finally:
                 random.setstate(python_rng)
@@ -4208,6 +4219,8 @@ def run(args: argparse.Namespace) -> None:
                         model, calibration_loader, device, task_id, args.threshold, amp,
                         score_output_path=output / "calibration_view_scores" / f"task{task_id}.npz",
                     )
+        if transfer_audit is not None:
+            transfer_audit.finish(model, task_id)
         training_history[str(task_id)] = history
         if save_checkpoints:
             torch.save(
