@@ -60,7 +60,7 @@ ParaX在 **Task Forward输出后**，不在Frozen Forward内部。CLIP、Image-t
 - 相对输入路径（相对于服务器新worktree）：数据`../multi-lane-main/datasets/EMOTIC`；权重`../CODE_DDP-benchmark/pretrained/clip/ViT-B-16.pt`；完整Face清单`../emotic_benchmark_runs/multi_lane_face_test_manifest_v0.1/face_manifest_train_val_test_v1_20260909`。
 - 完整Face清单的train/val文件与旧三任务清单SHA相同，新增test输入；CLIP实际解析权重SHA沿用已核验5806e77c…。
 - 分支：`exp/parax-freezing-eight-task-locked`。独立本地managed worktree避免混入主工作树另一条路线的未提交代码；服务器smoke worktree名`multi-lane-main-parax-freezing-eight-task-locked`，正式队列使用独立的`multi-lane-main-parax-freezing-eight-task-formal`，通过Git-only同步。
-- 正式batch：`protected_parax_freezing_8task_seed012_valtest_20261010_01`。
+- 正式batch：`protected_parax_freezing_8task_seed012_valtest_20261010_02`。
 - 输出`./output/emotic_protected_parax_full/<batch>/seed<seed>/<method>/`；日志`./logs/emotic_protected_parax_full/<batch>/seed<seed>/`；control记录配置、GPU映射、退出码和最终汇总。
 - 产物：每task compact checkpoint；val/test融合和单路分数、AP；两split残差开关对照；旧参数/访问范围/CLIP/hash及固定anchor审计；全部旧task同人物AP；三seed平均/标准差JSON及CSV。
 
@@ -74,7 +74,7 @@ export CLIP_CHECKPOINT=../CODE_DDP-benchmark/pretrained/clip/ViT-B-16.pt
 export FACE_MANIFEST_ROOT=../emotic_benchmark_runs/multi_lane_face_test_manifest_v0.1/face_manifest_train_val_test_v1_20260909
 export OUTPUT_ROOT=./output/emotic_protected_parax_full
 export LOG_ROOT=./logs/emotic_protected_parax_full
-export BATCH_ID=protected_parax_freezing_8task_seed012_valtest_20261010_01
+export BATCH_ID=protected_parax_freezing_8task_seed012_valtest_20261010_02
 export GPU_POOL=0,1,2,3,4,5,6,7
 export SEEDS=0,1,2
 export EPOCHS=30
@@ -93,3 +93,5 @@ export UPDATES_PER_TASK=0
 业务实现eb04972已通过本地和服务器291项完整单测。真实四组八任务smoke已启动（smoke batch protected_parax_freezing_8task_smoke_20261010_01），当前GPU0–5由其他任务使用，调度器只分配空闲GPU6、7，其他组自动排队。smoke尚未完成，不把其小步精度当作正式结果。
 
 正式队列使用另一个独立checkout运行，不更新正在预检的工作树。增加WAIT_FOR_SMOKE门禁：必须看到smoke completed与完整比较产物，才开始正式GPU调度；smoke失败或控制器提前退出则记录prerequisite_failed并停止。正式控制流程放入tmux后台，预检和训练无需持续人工监督。尚未开始30epoch训练时，必须称“已排队等待预检”，不能称12组已经训练。
+
+正式控制器首次尝试在创建日志目录时因目录已存在而退出，未启动任何训练；已修复日志目录可复用，保留该失败记录并使用新batch后缀02，不覆盖原产物。完整双端单测293项通过，smoke业务版本不变。

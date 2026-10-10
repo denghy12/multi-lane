@@ -66,7 +66,7 @@ def main():
         if not os.environ.get(key):
             raise ValueError(f'Set {key}')
     control.mkdir(parents=True)
-    (logs/batch).mkdir(parents=True)
+    (logs/batch).mkdir(parents=True, exist_ok=True)
     manifest = {
         'branch': subprocess.check_output(['git','branch','--show-current'],text=True).strip(),
         'commit': subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),

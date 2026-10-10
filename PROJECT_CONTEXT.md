@@ -1,5 +1,9 @@
 # 项目上下文
 
+## 2026-10-10：修复正式控制器预先存在的日志目录
+
+正式控制器首次尝试仅创建control目录后因日志目录已存在退出，未启动任何正式训练。修复logs mkdir为exist_ok，输出目录防重复保护不变；失败batch01保留不删除，实际正式batch改为protected_parax_freezing_8task_seed012_valtest_20261010_02。预检smoke仍在原eb04972独立worktree运行不改代码。双端293项单测已通过；修复后重新核验门禁队列状态，不把排队称为正式已训练。
+
 ## 2026-10-10：291项双端单测通过，八任务smoke与正式队列衔接
 
 业务eb04972；本地/服务器291项全测通过，四组真实八任务smoke运行中，16updates/组预期，无test选参。GPU0–5被其他任务占用，当前只用空闲6/7，其他组排队。新增versioned WAIT_FOR_SMOKE门禁，正式队列独立checkout multi-lane-main-parax-freezing-eight-task-formal，不更新运行中smoke代码；smoke全部完成且比较通过才启动seed012四策略×8task正式val/test，失败则停止。正式处于等待预检时不声称训练已开始。计划docs/protected_parax_freezing_summary_and_eight_task_plan_20261010.md，三个上下文同步更新；不涉及另一会话三路全量实验。
