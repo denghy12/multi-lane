@@ -1483,3 +1483,8 @@ VOC 对照实验，不应在现阶段合并到 `main`。
 ### 2026-10-10 三视图原始内部ParaX八任务预检通过
 
 独立worktree /Users/denghaoyuan/.codex/worktrees/three-view-joint-transfer/multi-lane-main；服务器 /mnt/haoyuan/workspace/multi-lane-main-three-view-joint-to-incremental。代码879dc47，远程289/289 unittest通过，local compile/bash/diff检查通过。真实两组三任务各4updates smoke batch three_view_joint_transfer_smoke_20261010_01 完成退出0：每组12有效updates、零skips、AMP1024，初始Selector/Prompt/head hash与样本配对、CLIP hash和旧任务参数hash通过，test未加载。峰值allocated基线2575MiB、内部ParaX3270MiB。固定16样本FP32旧task0最大logit变化基线2.68e-7、ParaX1.12e-4，说明诊断可用，不作为短程性能/遗忘结论。正式batch three_view_joint_to_incremental_val_test_20261010_01，tmux ml_three_view_joint_transfer_20261010，计划GPU0/1 seed0无/有ParaX，GPU2/3 seed1，GPU4/5 seed2，8×30epochs，任务末同权重val+test；启动前再次检查空闲，不持续监控。与protected post-task实验分开。
+
+
+### 2026-10-10 正式八任务三视图迁移实验已启动
+
+正式训练HEAD=5f2fefab7a3374636ed7c53ef5c86d434ab21256（在879dc47通过289项单测及真实配对smoke后仅更新文档）。batch=three_view_joint_to_incremental_val_test_20261010_01，tmux=ml_three_view_joint_transfer_20261010。GPU0/1分别seed0无/有内部ParaX，GPU2/3 seed1，GPU4/5 seed2，六进程已全部进入task0，配置均8tasks、30epochs/task、AMP1024、双val/test报告、Git dirty=false；每seed初始化hash配对一致。GPU6/7未占用。正式输出/日志在独立服务器worktree的output/emotic_three_view_joint_transfer/<batch>和logs/emotic_three_view_joint_transfer/<batch>。不在运行worktree更新代码，不持续监控，不基于中间test调参；结束后同步产物并比较逐task差值、固定旧样本AP/logit和FP32特征漂移，不能把常规Forgetting全部解释为权重遗忘。预检产物已同步主本地项目，tar SHA256=0a0a4d6303e704f948ae88e15b55e5d8202788d7e876223fe46fae576d46f8ff，两端一致，未复制checkpoint。新报告docs/three_view_joint_to_incremental_val_test_plan_20261010.md已记录全量结果及判读规则。
