@@ -1,5 +1,9 @@
 # 下一步任务
 
+## 2026-10-10：执行统一修正版四组，暂不启动正式分阶段
+
+分支 `exp/parax-audit-paired-staged`；完整计划 `docs/protected_parax_audit_paired_staged_plan_20261010.md`。代码实现/本地287项单测完成，下一步远程全测、四组真实task0–2×4updates smoke与一组可学习新专家分阶段smoke，再GPU0四组30epochs/task正式validation。新batch `protected_parax_audit_v2_seed0_val_20261010_01`；先确认是否已存在，避免重复。旧失败batch不恢复，旧参数/mask逐值保护不能取消。新审计拆分缓存exact identity与完整前向数值底噪。每任务保存同模型关闭全部残差的分数以区分残差输出与联合训练轨迹影响，固定同人群旧AP。分阶段仅实现和smoke，不自动正式启动；待四组仍低B0且消融定位后再比较相同专家预算的联合/分阶段学习。仅GPU0，不干预已有任务，不持续监督，不访问test、不升级8-task/level embedding/更多专家。
+
 ## 下一阶段：shared Adapter 容量 seed1/2 复现（2026-09-26）
 
 seed0 residual-scale validation 已同步并通过SHA核验。b97提高mean task mAP `+1.3077`但final只`+0.2654`，低于注册`+0.5`门槛；收益主要来自Full/Person，reliable-Face无提升，forgetting略差。先不扩结构，以seed1、seed2复现b32/b97配对8-task validation。固定scale0.03、冻结ViT-B/16、layer1 shared Image-token Adapter、30 epochs/task、batch64、BCE+Adapter ASL、auxiliary loss0.1、AMP/TF32，其余与seed0完全一致；validation-only、无checkpoint/test。

@@ -909,19 +909,29 @@ class MultiLaneModel(nn.Module):
         if self.normalize == "pre-head":
             lane_cls = F.normalize(lane_cls, dim=-1)
         if self.parax_runtime_enabled and (self.parax_staged_mode or self.parax_protected_mode):
-            routed = []
-            for index, task_id in enumerate(lane_ids):
-                before = lane_cls[:, index:index + 1]
-                after, gates = self.parax_bank(
-                    self.parax_bank.layer_indices[0], before,
-                    view_name=image_view, task_id=task_id,
-                )
-                routed.append(F.normalize(after, dim=-1))
-                # A distinct diagnostic group for each task avoids mixing
-                # old and new Routers during all-seen-lane evaluation.
-                self._record_parax_gates(task_id, image_view, before, after, gates)
-            lane_cls = torch.cat(routed, dim=1)
+            lane_cls = self.route_final_task_features(lane_cls, lane_ids, image_view)
         return lane_cls
+
+    def normalize_routed_task_features(self, before, after):
+        if self.parax_protected_mode:
+            # Preserve the incoming floating-point value exactly at delta=0,
+            # while retaining projection gradients. No data-dependent bypass.
+            return before + (F.normalize(after, dim=-1) - F.normalize(before, dim=-1))
+        return F.normalize(after, dim=-1)
+
+    def route_final_task_features(self, features, lane_ids, image_view, record=True):
+        """The shared post-Task-Forward path for inference and cached audits."""
+        routed = []
+        for index, task_id in enumerate(lane_ids):
+            before = features[:, index:index + 1]
+            after, gates = self.parax_bank(
+                self.parax_bank.layer_indices[0], before,
+                view_name=image_view, task_id=task_id,
+            )
+            routed.append(self.normalize_routed_task_features(before, after))
+            if record:
+                self._record_parax_gates(task_id, image_view, before, after, gates)
+        return torch.cat(routed, dim=1)
 
     def encode_lanes_with_views(
         self, images: ModelInputs, all_seen_lanes: bool

@@ -33,6 +33,65 @@ class ProtectedRouteAudit:
         self.references, self.rows = {}, {}
         self.protected_before = {}
         self.initial_difference = 0.0
+        self.identity = {}
+
+    def _identity_check(self, model, images, task):
+        """Separate exact cached-input identity from independent CUDA forwards."""
+        bank = model.parax_bank
+        result = {"schema_version": 2, "passed": False, "views": {}}
+        self.identity = result
+        projection = bank.task_projections[task]
+        for name, parameter in projection.named_parameters():
+            if not bool(torch.isfinite(parameter).all()) or bool(torch.count_nonzero(parameter)):
+                raise RuntimeError(f"New task output projection is not strictly zero: {name}")
+        result["projection_strictly_zero"] = True
+        model.set_parax_runtime_enabled(False)
+        fused, features = model.encode_lanes_with_views(images, False)
+        lane_ids = model._lane_ids(False)
+        baseline, _ = model._lane_logits_with_views(fused, features, images, lane_ids)
+        routed = {}
+        for name, before in features.items():
+            after, gate = bank(bank.layer_indices[0], before, view_name=name, task_id=task)
+            if not bool(torch.isfinite(after).all()) or not torch.equal(before, after):
+                raise RuntimeError(f"New task raw ParaX residual is not strictly zero: {name}")
+            if not bool(torch.isfinite(gate).all()) or bool((gate[:, ~bank.expert_access[task]] != 0).any()):
+                raise RuntimeError(f"Invalid initial expert gate/access: {name}")
+            routed[name] = model.route_final_task_features(before, lane_ids, name, record=False)
+            feature_delta = float((routed[name] - before).abs().max())
+            second_norm_delta = float((F.normalize(after, dim=-1) - before).abs().max())
+            result["views"][name] = {"raw_residual_max": 0.0,
+                "identity_feature_max": feature_delta,
+                "plain_second_normalize_feature_max": second_norm_delta}
+            if not torch.equal(routed[name], before):
+                raise RuntimeError(f"Cached routed features are not exact identity: {name}")
+        routed_fused, _ = model.view_fusion_module(routed, lane_ids, images.get("face_reliable"))
+        actual, _ = model._lane_logits_with_views(routed_fused, routed, images, lane_ids)
+        result["cached_logit_max_difference"] = float((actual - baseline).abs().max())
+        if not torch.equal(baseline, actual):
+            raise RuntimeError("Cached-input zero residual changed logits")
+
+        # Independent full forwards need a measured numerical floor. They do
+        # not replace the exact raw-residual/feature/parameter checks above.
+        disabled = [model.current_all_logits(images) for _ in range(3)]
+        model.set_parax_runtime_enabled(True)
+        enabled = [model.current_all_logits(images) for _ in range(3)]
+        all_logits = disabled + enabled
+        if any(not bool(torch.isfinite(value).all()) for value in all_logits):
+            raise FloatingPointError("Non-finite initial full-forward logits")
+        repeat = lambda rows: max(float((a - b).abs().max())
+                                  for i, a in enumerate(rows) for b in rows[i + 1:])
+        off_floor, on_floor = repeat(disabled), repeat(enabled)
+        difference = max(float((on - off).abs().max()) for on, off in zip(enabled, disabled))
+        magnitude = max(float(value.abs().max()) for value in all_logits)
+        budget = 4 * max(off_floor, on_floor) + 8 * torch.finfo(torch.float32).eps * max(1., magnitude)
+        result.update(disabled_repeat_logit_max=off_floor, enabled_repeat_logit_max=on_floor,
+                      full_forward_logit_max_difference=difference,
+                      full_forward_repeat_budget=budget,
+                      repeat_budget_rule="4*max(off_repeat,on_repeat)+8*FP32_eps*max(1,logit_magnitude)")
+        if difference > budget:
+            raise RuntimeError(f"Initial full-forward mismatch exceeds measured repeat budget: {difference} > {budget}")
+        result["passed"] = True
+        return result
 
     def _capture(self, model):
         training = model.training
@@ -79,22 +138,19 @@ class ProtectedRouteAudit:
         bank = model.parax_bank
         self.protected_before = self._protected_state(model, task)
         self.initial_difference = 0.0
+        self.identity = {"schema_version": 2, "passed": True, "enabled": bank is not None}
         if bank is not None:
             training, runtime = model.training, model.parax_runtime_enabled
             model.eval()
             try:
                 with isolated_rng(self.device), audit_precision(), torch.no_grad():
                     images = move_model_inputs(self.images, self.device)
-                    model.set_parax_runtime_enabled(False)
-                    baseline = model.current_all_logits(images)
-                    model.set_parax_runtime_enabled(True)
-                    actual = model.current_all_logits(images)
-                    self.initial_difference = float((actual - baseline).abs().max().cpu())
-                    if self.initial_difference > 1e-5:
-                        raise RuntimeError(f"New task ParaX path does not start at identity: max_difference={self.initial_difference}")
+                    self.identity = self._identity_check(model, images, task)
+                    self.initial_difference = self.identity["full_forward_logit_max_difference"]
             finally:
                 model.set_parax_runtime_enabled(runtime)
                 model.train(training)
+                (self.output / f"identity_task{task}.json").write_text(json.dumps(self.identity, indent=2) + '\n')
 
     def finish(self, model, task):
         bank = model.parax_bank
@@ -133,6 +189,7 @@ class ProtectedRouteAudit:
                     raise RuntimeError("An old route accessed an ineligible or future expert")
         self.rows[str(task)] = {
             "initial_logit_max_difference": self.initial_difference,
+            "identity_audit": self.identity,
             "protected_parameter_hash_before": parameter_hash(sorted(self.protected_before.items())),
             "protected_parameter_hash_after": parameter_hash(sorted(after.items())),
             "protected_tensors_unchanged": unchanged,

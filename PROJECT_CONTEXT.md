@@ -1,5 +1,9 @@
 # 项目上下文
 
+## 2026-10-10：执行 ParaX 审计修正、残差消融与分阶段实现
+
+新分支 `exp/parax-audit-paired-staged` 从de9b0f8开始，保留全部既有未提交修改。受保护后置ParaX采用精确零残差identity且梯度有效的归一化表达；审计分离零投影/raw delta/缓存特征与独立完整前向重复误差，旧参数/mask逐值检查不变。新增每task关闭全部后置残差的同模型推理分数、固定旧人物/新旧类AP汇总。分阶段能力已实现：B0阶段不含ParaX优化参数，train缓存后冻结B0，只学当前新专家/Router/投影；旧专家保护，非冻结随机center旧方案。正式先统一新代码四组task0–2 seed0 validation、30epochs、GPU0；不加载test、不扩大8-task、不自动启动正式分阶段。完整配置 `docs/protected_parax_audit_paired_staged_plan_20261010.md`。本地287项单测已通过，新增五项机制检查；准备远程全测及真实四组/分阶段smoke，检查通过后正式启动，不持续监督。
+
 ## 2026-09-25：P-post-zero 闭环与后置校准转向
 
 `parax_post_zero_control_20260925_020000` 已完成。B0 与 P-post-zero 的 task0--2 mAP、average mAP、forgetting、F1、所有视图指标、class AP 和 pairwise 统计完全相同，差异为0；ParaX residual ratio/gradient 也为0，初始 logits diff `2.33e-08`。这证明完整训练可比性没有隐藏问题，P-post-tiny 的 `-0.5319` mAP 确实来自非零残差。详细报告见 `docs/parax_post_zero_results_20260925.md`。

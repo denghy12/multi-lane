@@ -1,5 +1,9 @@
 # 工作日志
 
+## 2026-10-10：按用户授权修改 ParaX 审计和后置残差诊断
+
+建立 `exp/parax-audit-paired-staged`，保留原本地/服务器脏工作树和test-only。修改model受保护路径精确identity归一化；审计检查零projection、零raw residual、缓存特征/logit精确对齐，完整前向关闭/开启各三次记录重复误差预算，不再使用固定1e-5唯一判据；失败也保存诊断并恢复TF32/RNG/模式。runner新增RNG隔离的后置残差关闭推理与可选protected staged。缓存校准支持学习新专家、冻结B0及旧参数，记录分项梯度/新矩阵变化，保留旧随机center模式。比较器新增固定同人群/新旧类AP/残差开关相对独立B0，不混入分阶段组。新增五项单测，17项针对性与本地287项全测通过；本地缺timm已仅补入临时venv后全测通过，项目依赖未改。完整配置已声明并写plan；接下来Git-only同步新worktree，远程全测与真实smoke通过才启动四组短程validation。正式分阶段等待四组精度诊断，不改动态融合。
+
 ## 2026-09-25：P-post-zero 闭环与后置校准实验
 
 - `parax_post_zero_control_20260925_020000` 已完成，B0/P-post-zero 90 epochs、5010 updates，所有指标完全一致，差异为0；smoke 初始 logits diff `2.33e-08`。

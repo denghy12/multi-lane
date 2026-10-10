@@ -72,25 +72,64 @@ def cache_current_features(model, loader: Iterable, device: torch.device, amp: b
             "sample_ids": sample_ids, "source_split": "train", "task_id": model.current_task_id}
 
 
+@contextmanager
+def cached_fit_trainability(model):
+    """Freeze B0 during cached fitting; restore its flags even on failure."""
+    base = [(p, p.requires_grad) for name, p in model.named_parameters()
+            if not name.startswith("parax_bank.")]
+    try:
+        for parameter, _ in base:
+            parameter.requires_grad_(False)
+            parameter.grad = None
+        model.parax_bank.restore_task(model.current_task_id)
+        for parameter in model.parax_bank.parameters():
+            parameter.grad = None
+        yield
+    finally:
+        for parameter, enabled in base:
+            parameter.requires_grad_(enabled)
+        model.parax_bank.requires_grad_(False)
+        for parameter in model.parax_bank.parameters():
+            parameter.grad = None
+
+
 def fit_cached_routes(model, cache: Dict, current_classes: Sequence[int], device: torch.device,
                       epochs: int, learning_rate: float, batch_size: int = 64,
                       consistency_weight: float = 0.1, auxiliary_weight: float = 0.1) -> Dict:
-    """Only current task projection/Router learns; the shared center is fixed."""
+    if model.parax_bank is None:
+        raise ValueError("Cached fitting requires a ParaX bank")
+    with cached_fit_trainability(model):
+        return _fit_cached_routes(model, cache, current_classes, device, epochs,
+                                  learning_rate, batch_size, consistency_weight, auxiliary_weight)
+
+
+def _fit_cached_routes(model, cache: Dict, current_classes: Sequence[int], device: torch.device,
+                      epochs: int, learning_rate: float, batch_size: int = 64,
+                      consistency_weight: float = 0.1, auxiliary_weight: float = 0.1) -> Dict:
+    """Fit old frozen-center or protected new-expert routes on train features."""
     if cache.get("source_split") != "train" or cache["task_id"] != model.current_task_id:
         raise ValueError("Route calibration requires current-task train features")
     bank, task = model.parax_bank, model.current_task_id
-    if not model.parax_staged_mode or not bank.freeze_center_from_start:
+    protected = model.parax_protected_mode
+    if not protected and (not model.parax_staged_mode or not bank.freeze_center_from_start):
         raise ValueError("Cached fitting requires staged frozen-center ParaX")
+    if protected and bool(bank.sealed_tasks[task]):
+        raise ValueError("Cannot calibrate a sealed task")
+    if epochs <= 0 or batch_size <= 0 or len(cache["targets"]) == 0:
+        raise ValueError("Cached fitting needs positive epochs, batch size, and nonempty train features")
     classes = tuple(int(value) for value in current_classes)
     if cache["targets"].shape[1] != len(classes):
         raise ValueError("Cached targets must contain only current task classes")
     base_before, center_before = base_hash(model), center_hash(bank)
+    protected_before = parameter_hash(sorted(bank.protected_state(task).items())) if protected else None
+    new_before = {i: (bank.expert_a[i].detach().clone(), bank.expert_b[i].detach().clone())
+                  for i in bank.new_expert_ids(task)} if protected else {}
     old_before = parameter_hash((name, value) for name, value in bank.named_parameters()
                                 if name.startswith(tuple(f"routers.{t}_" for t in range(task)) +
                                                    tuple(f"task_projections.{t}." for t in range(task))))
     bank.restore_task(task)
     parameters = list(bank.active_parameters())
-    if any(value.requires_grad for value in (bank.expert_a, bank.expert_b)):
+    if not protected and any(value.requires_grad for value in (bank.expert_a, bank.expert_b)):
         raise RuntimeError("Shared expert center must remain frozen")
     optimizer = torch.optim.Adam(parameters, lr=learning_rate)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
@@ -106,6 +145,7 @@ def fit_cached_routes(model, cache: Dict, current_classes: Sequence[int], device
         gate_entropy = {name: 0.0 for name in names}
         gate_square_sum = {name: torch.zeros(bank.num_experts) for name in names}
         grad_sq, steps, samples = 0.0, 0, 0
+        component_grad_sq = {"expert": 0.0, "router": 0.0, "projection": 0.0}
         for indices in torch.randperm(len(cache["targets"])).split(batch_size):
             features = {name: cache["features"][name][indices].to(device) for name in names}
             labels = cache["targets"][indices].to(device)
@@ -115,10 +155,10 @@ def fit_cached_routes(model, cache: Dict, current_classes: Sequence[int], device
             for name in names:
                 value, gate = bank(bank.layer_indices[0], features[name], name, task_id=task)
                 if epoch == 0 and steps == 0:
-                    max_initial_difference = max(max_initial_difference, float((value - features[name]).abs().max()))
+                    max_initial_difference = max(max_initial_difference, float((value - features[name]).detach().abs().max()))
                 ratios[name] += bank.last_raw_residual_ratio * len(indices)
                 gates[name] = gate
-                routed[name] = F.normalize(value, dim=-1)
+                routed[name] = model.normalize_routed_task_features(features[name], value)
             fused, _ = model.view_fusion_module(routed, [task], reliable)
             reference, _ = model.view_fusion_module(features, [task], reliable)
             logits = F.linear(fused[:, 0], weight, bias)
@@ -136,7 +176,14 @@ def fit_cached_routes(model, cache: Dict, current_classes: Sequence[int], device
                     view_consistency.append(F.mse_loss(view_logits, original_logits))
             bce = bce + auxiliary_weight * torch.stack(auxiliary).mean()
             consistency = 0.5 * (consistency + torch.stack(view_consistency).mean())
+            if protected:
+                # Match the current-class contribution of legacy_full_zero.
+                # Omitted inactive-class constants have zero gradient.
+                factor = len(classes) / sum(model.task_sizes)
+                bce, consistency = factor * bce, factor * consistency
             loss = bce + consistency_weight * consistency
+            if not bool(torch.isfinite(loss)):
+                raise FloatingPointError("Non-finite cached route loss")
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
             for parameter in parameters:
@@ -144,6 +191,13 @@ def fit_cached_routes(model, cache: Dict, current_classes: Sequence[int], device
                     if not bool(torch.isfinite(parameter.grad).all()):
                         raise FloatingPointError("Non-finite route calibration gradient")
                     grad_sq += float(parameter.grad.float().square().sum())
+            for name, parameter in bank.named_parameters():
+                if parameter.grad is not None:
+                    component = ("expert" if name.startswith(("expert_a.", "expert_b."))
+                                 else "router" if name.startswith("routers.")
+                                 else "projection" if name.startswith("task_projections.") else None)
+                    if component:
+                        component_grad_sq[component] += float(parameter.grad.float().square().sum())
             torch.nn.utils.clip_grad_norm_(parameters, 1.0)
             optimizer.step()
             for key, value in (("loss", loss), ("bce", bce), ("consistency", consistency)):
@@ -159,6 +213,7 @@ def fit_cached_routes(model, cache: Dict, current_classes: Sequence[int], device
                "learning_rate": optimizer.param_groups[0]["lr"],
                **{key: value / samples for key, value in totals.items()},
                "gradient_rms_norm_before_clip": (grad_sq / steps) ** 0.5,
+               "component_gradient_rms_norm_before_clip": {k: (v / steps) ** 0.5 for k, v in component_grad_sq.items()},
                "views": {name: {"residual_ratio": ratios[name] / samples,
                                 "gate_mean": (gate_sum[name] / samples).tolist(),
                                 "gate_std": (gate_square_sum[name] / samples - (gate_sum[name] / samples).square()).clamp_min(0).sqrt().tolist(),
@@ -170,7 +225,10 @@ def fit_cached_routes(model, cache: Dict, current_classes: Sequence[int], device
     old_after = parameter_hash((name, value) for name, value in bank.named_parameters()
                                if name.startswith(tuple(f"routers.{t}_" for t in range(task)) +
                                                   tuple(f"task_projections.{t}." for t in range(task))))
-    if base_before != base_after or center_before != center_after or old_before != old_after:
+    protected_after = parameter_hash(sorted(bank.protected_state(task).items())) if protected else None
+    if (base_before != base_after or old_before != old_after
+            or (not protected and center_before != center_after)
+            or protected_before != protected_after):
         raise RuntimeError("Route calibration changed base, center, or old-task parameters")
     bank.requires_grad_(False)
     for parameter in bank.parameters():
@@ -180,4 +238,8 @@ def fit_cached_routes(model, cache: Dict, current_classes: Sequence[int], device
             "initial_output_max_difference": max_initial_difference,
             "base_hash_before": base_before, "base_hash_after": base_after,
             "center_hash_before": center_before, "center_hash_after": center_after,
+            "protected_state_hash_before": protected_before,
+            "protected_state_hash_after": protected_after,
+            "new_experts_changed": {str(i): not (torch.equal(a, bank.expert_a[i]) and torch.equal(b, bank.expert_b[i]))
+                                    for i, (a, b) in new_before.items()},
             "old_route_hash_before": old_before, "old_route_hash_after": old_after}

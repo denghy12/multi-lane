@@ -5,6 +5,7 @@ cd "${ROOT}"
 BATCH_ID="${BATCH_ID:-protected_parax_seed0_val_$(date +%Y%m%d_%H%M%S)}"
 GPU="${GPU:-0}"
 [[ "${GPU}" == 0 ]] || { echo 'Only GPU0 is authorized' >&2; exit 2; }
+[[ "${STAGED_TRAINING:-0}" == 0 ]] || { echo 'This launcher is the joint-training four-arm comparison; run staged pilots separately' >&2; exit 2; }
 export GPU
 OUTPUT_ROOT="${OUTPUT_ROOT:-./output/emotic_protected_parax_val}"
 LOG_ROOT="${LOG_ROOT:-./logs/emotic_protected_parax_val}"
@@ -30,6 +31,9 @@ output=task-local zero-initialized rank32 projection; fixed scale1; differentiab
 fusion=fixed features reliableFace[0.64,0.16,0.20] otherwise[0.8,0.2,0]; current fused BCE+0.1 reliable-view BCE
 other=CLIP frozen; Image-token Adapter off; Projector off; distillation off
 artifacts=paired hashes and sampler IDs; immutable protected state audit; fixed16 validation images/features/logits/gates; per-view scores; task metrics; training history; compact checkpoints
+identity_audit=exact zero projection/raw residual/cached features; FP32 full-forward measured repeat budget; protected-path identity-preserving normalization
+residual_ablation=each trained ParaX model also evaluated with all post-task residuals disabled; RNG isolated; no extra training
+staged_training=off for this four-arm joint-training batch; separate staged implementation awaits efficacy diagnosis
 output=${OUTPUT_ROOT}/${BATCH_ID}; logs=${LOG_ROOT}/${BATCH_ID}
 EOF
 # Finite resource queue; never stop or modify another user's process.

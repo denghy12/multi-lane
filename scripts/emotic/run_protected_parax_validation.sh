@@ -19,6 +19,12 @@ case "${METHOD}" in
   *) echo "Unknown method: ${METHOD}" >&2; exit 2 ;;
 esac
 extra=()
+if [[ "${METHOD}" != baseline ]]; then
+  extra+=(--protected-parax-residual-ablation)
+  if [[ "${STAGED_TRAINING:-0}" == 1 ]]; then
+    extra+=(--protected-parax-staged-training --parax-calibration-epochs "${CALIBRATION_EPOCHS:-5}" --parax-calibration-consistency-weight 0.1)
+  fi
+fi
 [[ "${UPDATES_PER_TASK:-0}" == 0 ]] || extra+=(--optimizer-updates-per-task "${UPDATES_PER_TASK}")
 for path in "${DATA_ROOT}/CVPR17_Annotations.mat" "${CLIP_CHECKPOINT}" \
   "${FACE_MANIFEST_ROOT}/manifests/train.jsonl" "${FACE_MANIFEST_ROOT}/manifests/val.jsonl"; do

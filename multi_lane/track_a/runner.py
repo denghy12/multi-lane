@@ -2387,6 +2387,10 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
                         help="Audit frozen fixed-view incremental ablations with isolated per-task samplers.")
     parser.add_argument("--protected-parax-paired-audit", action="store_true",
                         help="Validation-only paired protected-expert pilot with fixed-anchor audits.")
+    parser.add_argument("--protected-parax-staged-training", action="store_true",
+                        help="Train B0 first, then learn current protected experts on cached train features.")
+    parser.add_argument("--protected-parax-residual-ablation", action="store_true",
+                        help="Evaluate each trained protected model with all post-task residuals disabled.")
     parser.add_argument("--supervised-loss-scale", type=float, default=1.0)
     parser.add_argument("--seed", type=int, required=True, choices=(0, 1, 2))
     parser.add_argument("--data-root", type=Path, required=True)
@@ -2763,6 +2767,10 @@ def run(args: argparse.Namespace) -> None:
     paired_protocol_audit = TRAINING_PROTOCOL == "joint26" or args.fixed_view_paired_audit or args.protected_parax_paired_audit
     if args.parax_mode in PROTECTED_MODES and not args.protected_parax_paired_audit:
         raise ValueError("Protected ParaX requires its paired pilot audit")
+    if (args.protected_parax_staged_training or args.protected_parax_residual_ablation) and (
+        not args.protected_parax_paired_audit or args.parax_mode not in PROTECTED_MODES
+    ):
+        raise ValueError("Protected staging/ablation requires a protected ParaX pilot")
     if args.protected_parax_paired_audit and (
         TRAINING_PROTOCOL != "incremental" or args.max_tasks > 3 or args.seed != 0
         or args.adapter_mode != "disabled" or args.parax_mode not in {"disabled", *PROTECTED_MODES}
@@ -2859,7 +2867,7 @@ def run(args: argparse.Namespace) -> None:
         raise ValueError("ParaX layer indices must be valid CLIP block indices")
     if args.parax_residual_scale < 0:
         raise ValueError("ParaX residual scale must be non-negative")
-    if args.parax_mode in {"post_task_staged", "post_task_staged_static"}:
+    if args.parax_mode in {"post_task_staged", "post_task_staged_static"} or args.protected_parax_staged_training:
         if (args.view_fusion != "fixed_three_view" or args.view_classifier_mode != "shared_post_fusion"
                 or args.adapter_mode != "disabled" or args.loss_routing != "joint_bce"
                 or args.reporting_split != "val" or args.also_report_test
@@ -3281,7 +3289,7 @@ def run(args: argparse.Namespace) -> None:
             face_min_training_short_side=args.face_min_training_short_side,
             face_min_training_score=args.face_min_training_score,
         )
-        if args.calibration_fraction > 0 or crossfit_enabled or model.parax_staged_mode
+        if args.calibration_fraction > 0 or crossfit_enabled or model.parax_staged_mode or args.protected_parax_staged_training
         else None
     )
     val_source = EMOTIC(
@@ -3745,13 +3753,17 @@ def run(args: argparse.Namespace) -> None:
         "parax_freeze_center_after_task0": bool(args.parax_freeze_center_after_task0) if args.parax_mode != "disabled" else False,
         "parax_task_local_router": args.parax_mode in {"post_task_router", "post_task_staged", "post_task_staged_static", *PROTECTED_MODES},
         "protected_parax_paired_audit": bool(args.protected_parax_paired_audit),
+        "protected_parax_identity_audit_version": 2 if args.protected_parax_paired_audit else None,
+        "protected_post_normalization": "h+(normalize(h+delta)-normalize(h))" if model.parax_protected_mode else None,
+        "protected_parax_staged_training": args.protected_parax_staged_training,
+        "protected_parax_residual_ablation": args.protected_parax_residual_ablation,
         "protected_expert_policy": PROTECTED_MODES.get(args.parax_mode),
         "protected_initial_experts": 2 if model.parax_protected_mode else None,
         "protected_new_experts_per_task": (0 if args.parax_mode.endswith("frozen") else 2) if model.parax_protected_mode else None,
-        "parax_staged_calibration": model.parax_staged_mode,
+        "parax_staged_calibration": model.parax_staged_mode or args.protected_parax_staged_training,
         "parax_smooth_ratio_bound": args.parax_smooth_ratio_bound,
-        "parax_calibration_epochs": args.parax_calibration_epochs if model.parax_staged_mode else 0,
-        "parax_calibration_consistency_weight": args.parax_calibration_consistency_weight if model.parax_staged_mode else 0.0,
+        "parax_calibration_epochs": args.parax_calibration_epochs if (model.parax_staged_mode or args.protected_parax_staged_training) else 0,
+        "parax_calibration_consistency_weight": args.parax_calibration_consistency_weight if (model.parax_staged_mode or args.protected_parax_staged_training) else 0.0,
         "parax_center_frozen_from_start": model.parax_staged_mode,
         "parax_task_local_projection": model.parax_staged_mode or model.parax_protected_mode,
         "parax_distillation_weight": args.parax_distillation_weight,
@@ -3867,6 +3879,8 @@ def run(args: argparse.Namespace) -> None:
     base_task_rows: List[TaskMetrics] = []
     view_diagnostics: Dict[str, object] = {}
     test_view_diagnostics: Dict[str, object] = {}
+    residual_disabled_rows: List[TaskMetrics] = []
+    residual_disabled_views: Dict[str, object] = {}
     start = time.time()
     paired_task_audits = {}
     protected_audit = ProtectedRouteAudit(output, device) if args.protected_parax_paired_audit else None
@@ -4019,8 +4033,11 @@ def run(args: argparse.Namespace) -> None:
         )
         if protected_audit is not None:
             protected_audit.begin(model, reporting_loader, task_id)
-        if model.parax_staged_mode:
+        if model.parax_staged_mode or args.protected_parax_staged_training:
             model.set_parax_runtime_enabled(False)
+            # Exclude the current expert pool from B0's optimizer entirely.
+            if args.protected_parax_staged_training:
+                model.parax_bank.requires_grad_(False)
         history = train_task(
             model, train_loader, val_loader, device, task_id,
             args.epochs, learning_rate, args.weight_decay,
@@ -4069,7 +4086,7 @@ def run(args: argparse.Namespace) -> None:
             amp_initial_scale=args.amp_initial_scale,
             amp_growth_interval=args.amp_growth_interval,
         )
-        if model.parax_staged_mode:
+        if model.parax_staged_mode or args.protected_parax_staged_training:
             # Keep baseline training, initialization, and DataLoader RNG
             # identical across tasks. All extra route work is isolated.
             with isolated_rng(device):
@@ -4123,6 +4140,32 @@ def run(args: argparse.Namespace) -> None:
                     if args.save_view_evaluation_scores else None
                 ),
             )
+        if args.protected_parax_residual_ablation:
+            # Extra inference has no effect on the next task's RNG or weights.
+            runtime, training = model.parax_runtime_enabled, model.training
+            try:
+                with isolated_rng(device), torch.no_grad():
+                    model.set_parax_runtime_enabled(False)
+                    disabled_dir = output / "residual_disabled_val_scores"
+                    disabled_dir.mkdir(exist_ok=True)
+                    residual_disabled_rows.append(evaluate(
+                        model, reporting_loader, device, task_id, args.threshold, amp,
+                        score_output_path=disabled_dir / f"task{task_id}.npz",
+                    ))
+                    if args.view_evaluation_diagnostics:
+                        disabled_views_dir = output / "residual_disabled_view_val_scores"
+                        disabled_views_dir.mkdir(exist_ok=True)
+                        residual_disabled_views[str(task_id)] = evaluate_view_diagnostics(
+                            model, reporting_loader, device, task_id, args.threshold, amp,
+                            score_output_path=disabled_views_dir / f"task{task_id}.npz",
+                        )
+            finally:
+                model.set_parax_runtime_enabled(runtime)
+                model.train(training)
+            (output / "residual_disabled_task_metrics.json").write_text(
+                json.dumps([asdict(value) for value in residual_disabled_rows], indent=2) + "\n")
+            (output / "residual_disabled_view_diagnostics.json").write_text(
+                json.dumps(residual_disabled_views, indent=2) + "\n")
         if test_loader is not None:
             # The extra DataLoader and evaluation may draw RNG seeds. Restore
             # CPU/GPU RNG so task-(t+1) training matches the val-only run.
@@ -4262,6 +4305,8 @@ def run(args: argparse.Namespace) -> None:
         )),
         "metrics": summarize_tasks(task_rows),
         "base_metrics_without_routing": summarize_tasks(base_task_rows) if base_task_rows else None,
+        "residual_disabled_metrics": summarize_tasks(residual_disabled_rows) if residual_disabled_rows else None,
+        "residual_disabled_task_metrics": [asdict(value) for value in residual_disabled_rows],
         "completed_route_calibration_epochs": sum(len(value["history"]) for value in route_calibration.values()),
         "completed_route_calibration_updates": sum(row["optimizer_steps"] for value in route_calibration.values() for row in value["history"]),
         "test_metrics": summarize_tasks(test_rows) if test_rows else None,
