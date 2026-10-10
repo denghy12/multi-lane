@@ -16,7 +16,7 @@ class ImageStreamTransferTest(unittest.TestCase):
         return parse_args(['--seed','0','--data-root','.', '--clip-checkpoint','clip.pt',
                            '--output-root','output','--image-stream-transfer-audit',
                            '--view-fusion','fixed_three_view','--view-auxiliary-loss-weight','0.1',
-                           '--skip-validation-eval', *extra])
+                           '--skip-validation-eval', '--reporting-split', 'val', *extra])
 
     def test_protocol_rejects_different_route_and_changed_center_policy(self):
         base = parse_args(['--seed','0','--data-root','.', '--clip-checkpoint','clip.pt','--output-root','output'])

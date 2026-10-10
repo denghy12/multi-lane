@@ -58,6 +58,8 @@ class ImageStreamTransferAudit:
                 images, _, ids = next(iter(loader))
             self.images = {key: value[:16].detach().cpu().clone() for key, value in images.items()}
             self.sample_ids = [str(value) for value in ids[:16]]
+            torch.save(dict(images=self.images, sample_ids=self.sample_ids, source_split="val",
+                            optimization_use=False), self.output/"fixed_anchor_inputs.pt")
         self.before = old_lane_state(model, task)
         self.bank_before = parameter_hash(model.parax_bank.named_parameters()) if model.parax_bank else None
 
