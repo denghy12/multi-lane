@@ -16,6 +16,8 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
+from .protected_parax import PROTECTED_MODES, ProtectedParaXBank
+
 from .adapter import (
     ParaXImageAdapterBank, TaskImageTokenAdapterBank, TaskLaneTransformerAdapterBank,
 )
@@ -106,9 +108,10 @@ class MultiLaneModel(nn.Module):
             )
         post_modes = {"post", "post_static", "post_task_router", "post_task_staged", "post_task_staged_static"}
         staged_modes = {"post_task_staged", "post_task_staged_static"}
+        post_modes |= set(PROTECTED_MODES)
         if parax_mode not in {"disabled", "image", "image_level", "static"} | post_modes:
             raise ValueError("Invalid ParaX mode")
-        if parax_mode in staged_modes and (
+        if parax_mode in (staged_modes | set(PROTECTED_MODES)) and (
             parax_initialization != "zero_output" or parax_output_scale_mode != "fixed"
             or parax_smooth_ratio_bound <= 0 or parax_task_local_gate
             or parax_level_conditioned or normalize != "pre-head"
@@ -221,6 +224,7 @@ class MultiLaneModel(nn.Module):
         self.parax_mode = parax_mode
         self.parax_post_mode = parax_mode in post_modes
         self.parax_staged_mode = parax_mode in staged_modes
+        self.parax_protected_mode = parax_mode in PROTECTED_MODES
         self.parax_runtime_enabled = parax_mode != "disabled"
         self.parax_bank = None
         self._parax_gate_records = []
@@ -228,7 +232,8 @@ class MultiLaneModel(nn.Module):
             # ParaX has additional random parameters, but they must not shift
             # the shared Selector/Prompt/head or DataLoader RNG stream.
             with torch.random.fork_rng(devices=[]):
-                self.parax_bank = ParaXImageAdapterBank(
+                bank_class = ProtectedParaXBank if self.parax_protected_mode else ParaXImageAdapterBank
+                self.parax_bank = bank_class(
                     hidden_dim=(output_dim if self.parax_post_mode else self.width), rank=parax_rank,
                     num_experts=parax_num_experts, layer_indices=parax_layer_indices,
                     router_hidden=parax_router_hidden, residual_scale=parax_residual_scale,
@@ -242,10 +247,11 @@ class MultiLaneModel(nn.Module):
                     task_local_gate=parax_task_local_gate,
                     freeze_center_after_task0=parax_freeze_center_after_task0,
                     projector_bottleneck_dim=parax_projector_bottleneck_dim,
-                    task_local_router=(parax_mode == "post_task_router" or self.parax_staged_mode),
-                    task_local_projection=self.parax_staged_mode,
+                    task_local_router=(parax_mode == "post_task_router" or self.parax_staged_mode or self.parax_protected_mode),
+                    task_local_projection=(self.parax_staged_mode or self.parax_protected_mode),
                     freeze_center_from_start=self.parax_staged_mode,
                     smooth_ratio_bound=parax_smooth_ratio_bound,
+                    **({"policy": PROTECTED_MODES[parax_mode]} if self.parax_protected_mode else {}),
                 )
         self._task_sizes = tuple(int(size) for size in task_sizes)
         self._current_task_id = -1
@@ -479,7 +485,7 @@ class MultiLaneModel(nn.Module):
             grouped.setdefault((record["view"], record["layer_id"]), []).append(record)
         for (view, layer_id), records in grouped.items():
             gates = torch.cat([record["gates"] for record in records], dim=0)
-            prefix = f"parax_{view}_task{layer_id}" if self.parax_staged_mode else f"parax_{view}_layer{layer_id}"
+            prefix = f"parax_{view}_task{layer_id}" if (self.parax_staged_mode or self.parax_protected_mode) else f"parax_{view}_layer{layer_id}"
             mean = gates.mean(dim=0)
             entropy = -(gates.clamp_min(1e-12) * gates.clamp_min(1e-12).log()).sum(dim=-1).mean()
             top_frequency = torch.bincount(gates.argmax(dim=-1), minlength=gates.shape[1]).float() / gates.shape[0]
@@ -878,7 +884,7 @@ class MultiLaneModel(nn.Module):
         if self.visual_encoder.proj is not None:
             lane_tokens = lane_tokens @ self.visual_encoder.proj
         lane_cls = lane_tokens[:, :, 0].permute(1, 0, 2).float()
-        if self.parax_runtime_enabled and self.parax_bank is not None and self.parax_post_mode and not self.parax_staged_mode:
+        if self.parax_runtime_enabled and self.parax_bank is not None and self.parax_post_mode and not (self.parax_staged_mode or self.parax_protected_mode):
             before_lane_features = lane_cls
             if self.parax_mode == "post_task_router":
                 routed = [
@@ -902,7 +908,7 @@ class MultiLaneModel(nn.Module):
             )
         if self.normalize == "pre-head":
             lane_cls = F.normalize(lane_cls, dim=-1)
-        if self.parax_runtime_enabled and self.parax_staged_mode:
+        if self.parax_runtime_enabled and (self.parax_staged_mode or self.parax_protected_mode):
             routed = []
             for index, task_id in enumerate(lane_ids):
                 before = lane_cls[:, index:index + 1]

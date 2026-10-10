@@ -237,6 +237,12 @@ class ParaXImageAdapterBank(nn.Module):
             return self.output_scale.new_zeros(())
         return torch.stack(self._last_alignment_penalties).mean()
 
+    def _expert_matrices(self, tokens: torch.Tensor):
+        return self.expert_a.to(tokens), self.expert_b.to(tokens)
+
+    def _router_gates(self, key: str, inputs: torch.Tensor, task_id):
+        return torch.softmax(self.routers[key](inputs), dim=-1)
+
     def forward(
         self, layer_id: int, tokens: torch.Tensor, view_name: str = "full",
         task_id: Optional[int] = None,
@@ -262,10 +268,11 @@ class ParaXImageAdapterBank(nn.Module):
                 router_key = f"{route_task}_{layer_id}"
             else:
                 router_key = str(layer_id)
-            gates = torch.softmax(self.routers[router_key](router_input.float()), dim=-1)
+            gates = self._router_gates(router_key, router_input.float(), route_task if self.task_local_router else None)
             gates = gates.to(dtype=tokens.dtype)
-        a = torch.einsum("be,erk->brk", gates, self.expert_a.to(tokens))
-        b = torch.einsum("be,ekr->bkr", gates, self.expert_b.to(tokens))
+        expert_a, expert_b = self._expert_matrices(tokens)
+        a = torch.einsum("be,erk->brk", gates, expert_a)
+        b = torch.einsum("be,ekr->bkr", gates, expert_b)
         x = self.norm(tokens)
         low = torch.einsum("blk,brk->blr", x, a)
         route_task = self._current_task_id if task_id is None else int(task_id)
