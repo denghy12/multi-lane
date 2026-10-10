@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from pathlib import Path
 
 import torch
@@ -9,6 +10,19 @@ import torch.nn.functional as F
 
 from .paired_transforms import move_model_inputs
 from .post_task_calibration import isolated_rng, parameter_hash
+
+
+@contextmanager
+def audit_precision():
+    """Use full FP32 for alignment audits, restoring training TF32 flags."""
+    matmul, cudnn = torch.backends.cuda.matmul.allow_tf32, torch.backends.cudnn.allow_tf32
+    try:
+        torch.backends.cuda.matmul.allow_tf32 = False
+        torch.backends.cudnn.allow_tf32 = False
+        yield
+    finally:
+        torch.backends.cuda.matmul.allow_tf32 = matmul
+        torch.backends.cudnn.allow_tf32 = cudnn
 
 
 class ProtectedRouteAudit:
@@ -24,7 +38,7 @@ class ProtectedRouteAudit:
         training = model.training
         model.eval()
         try:
-            with isolated_rng(self.device), torch.no_grad():
+            with isolated_rng(self.device), audit_precision(), torch.no_grad():
                 images = move_model_inputs(self.images, self.device)
                 fused, features = model.encode_lanes_with_views(images, True)
                 lane_ids = model._lane_ids(True)
@@ -69,7 +83,7 @@ class ProtectedRouteAudit:
             training, runtime = model.training, model.parax_runtime_enabled
             model.eval()
             try:
-                with isolated_rng(self.device), torch.no_grad():
+                with isolated_rng(self.device), audit_precision(), torch.no_grad():
                     images = move_model_inputs(self.images, self.device)
                     model.set_parax_runtime_enabled(False)
                     baseline = model.current_all_logits(images)
@@ -77,7 +91,7 @@ class ProtectedRouteAudit:
                     actual = model.current_all_logits(images)
                     self.initial_difference = float((actual - baseline).abs().max().cpu())
                     if self.initial_difference > 1e-5:
-                        raise RuntimeError("New task ParaX path does not start at identity")
+                        raise RuntimeError(f"New task ParaX path does not start at identity: max_difference={self.initial_difference}")
             finally:
                 model.set_parax_runtime_enabled(runtime)
                 model.train(training)
@@ -130,5 +144,5 @@ class ProtectedRouteAudit:
         torch.save(current, self.output / f"fixed_anchor_after_task{task}.pt")
         (self.output / "protected_route_audit.json").write_text(json.dumps({
             "anchor_split": "val", "anchor_sample_ids": self.sample_ids,
-            "anchor_used_for_training": False, "FP32_evaluation": True, "tasks": self.rows,
+            "anchor_used_for_training": False, "FP32_evaluation": True, "TF32_evaluation": False, "tasks": self.rows,
         }, indent=2) + '\n')

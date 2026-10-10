@@ -9,7 +9,7 @@ from pathlib import Path
 import torch
 from multi_lane.track_a.model import MultiLaneModel
 from multi_lane.track_a.protected_parax import ProtectedParaXBank, PROTECTED_MODES
-from multi_lane.track_a.protected_parax_audit import ProtectedRouteAudit
+from multi_lane.track_a.protected_parax_audit import ProtectedRouteAudit, audit_precision
 from test_track_a_reproduction import FakeVisual
 
 
@@ -111,6 +111,15 @@ class ProtectedParaXTest(unittest.TestCase):
             torch.testing.assert_close(bank(0,x,task_id=task)[0],other(0,x,task_id=task)[0],atol=0,rtol=0)
         other.activate_task(2)
         with self.assertRaises(ValueError): other(0,x,task_id=3)
+
+    def test_audit_precision_restores_training_flags_on_error(self):
+        before=(torch.backends.cuda.matmul.allow_tf32,torch.backends.cudnn.allow_tf32)
+        with self.assertRaises(RuntimeError):
+            with audit_precision():
+                self.assertFalse(torch.backends.cuda.matmul.allow_tf32)
+                self.assertFalse(torch.backends.cudnn.allow_tf32)
+                raise RuntimeError('test')
+        self.assertEqual(before,(torch.backends.cuda.matmul.allow_tf32,torch.backends.cudnn.allow_tf32))
 
     def test_task_boundary_audit_and_rng_isolation(self):
         torch.manual_seed(93)
