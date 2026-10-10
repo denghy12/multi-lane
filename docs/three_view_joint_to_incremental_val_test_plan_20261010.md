@@ -32,7 +32,7 @@ ParaX仅改变patch tokens，CLS直接旁路；之后的冻结block与Summarize�
 
 共享ParaX的矩阵、Router、归一化及可学习输出scale在全部任务中持续训练；每个旧任务的Selector、Prompt和分类头旧行按原协议冻结。通过同时检查这两类参数，判断旧任务变化是否确实发生在其输入变换上。
 
-已有八任务辅助视图贡献实验保留，不重复Full、Full+Person、Full+Face四组。本轮重新训练三路无ParaX，是为了与新ParaX组使用完全一致的运行代码、采样和双划分评估，并新增固定anchor诊断；不表示已有结果无效。
+已完成的无ParaX八任务视图贡献实验中，三路最终test为32.3065，Full为32.0477，Full+Face为32.5061（均为三seed均值）。三路仍有小幅平均收益，但并非最优组合，说明全量学习中的视图收益不一定完整迁移到增量学习。这组结果没有ParaX，不能据此判断ParaX崩塌。已有八任务辅助视图贡献实验保留，不重复Full、Full+Person、Full+Face四组。本轮重新训练三路无ParaX，是为了与新ParaX组使用完全一致的运行代码、采样和双划分评估，并新增固定anchor诊断；不表示已有结果无效。
 
 ## 4. 完整实验配置
 
@@ -61,6 +61,13 @@ ParaX仅改变patch tokens，CLS直接旁路；之后的冻结block与Summarize�
 4. 若融合提升但Face持续下降，只能说整体模型改善，不能称三level专门化成功。
 5. 三seed同时报告validation/test，不根据test另选rank、scale或seed。全量与增量的绝对mAP差同时受类别监督、训练数据分配、总更新预算和任务路径数影响，不能全部算作遗忘。
 
+Forgetting还会混入评价人群扩大效应：后续任务纳入含新类别的人物，旧类AP可能因新增负例变化。必须把原协议Forgetting与固定旧样本、固定旧类AP/logit漂移分别报告。
+
 ## 6. 代码与运行记录
 
 本轮新增的是独立实验入口、配对校验与漂移诊断，不改变原始ParaX前向结构。正式运行前完成单测、真实短程验证；通过后启动六组，启动核查后停止轮询，结束时统一分析。
+
+
+### 2026-10-10 三视图原始内部ParaX八任务预检通过
+
+独立worktree /Users/denghaoyuan/.codex/worktrees/three-view-joint-transfer/multi-lane-main；服务器 /mnt/haoyuan/workspace/multi-lane-main-three-view-joint-to-incremental。代码879dc47，远程289/289 unittest通过，local compile/bash/diff检查通过。真实两组三任务各4updates smoke batch three_view_joint_transfer_smoke_20261010_01 完成退出0：每组12有效updates、零skips、AMP1024，初始Selector/Prompt/head hash与样本配对、CLIP hash和旧任务参数hash通过，test未加载。峰值allocated基线2575MiB、内部ParaX3270MiB。固定16样本FP32旧task0最大logit变化基线2.68e-7、ParaX1.12e-4，说明诊断可用，不作为短程性能/遗忘结论。正式batch three_view_joint_to_incremental_val_test_20261010_01，tmux ml_three_view_joint_transfer_20261010，计划GPU0/1 seed0无/有ParaX，GPU2/3 seed1，GPU4/5 seed2，8×30epochs，任务末同权重val+test；启动前再次检查空闲，不持续监控。与protected post-task实验分开。

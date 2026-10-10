@@ -1478,3 +1478,8 @@ VOC 对照实验，不应在现阶段合并到 `main`。
 ## 2026-10-10 三视图全量配置迁移至八任务（本会话独立范围）
 
 用户授权本会话只针对原三路全量学习，修改并运行8task validation+test，可用全部空闲GPU。原全量三seed：无ParaX val50.7980/test39.2278，内部ParaX val50.9451/test39.6299；小幅收益，不证明视图专门化。新分支exp/three-view-joint-to-incremental-val-test，独立本地worktree避免其他会话分支切换。计划两组原image-stream配置×seed012，8task×30epochs，固定三视图融合，Image-token Adapter关闭，ParaX在Frozen Forward索引10之后，rank32/3矩阵对/official/learnable scale0.1/shared-live；不混入protected post-task路线。任务末同权重val+test，新增固定val-anchor FP32漂移、旧任务参数hash、样本/初始化配对，test不参与选择。完整配置见docs/three_view_joint_to_incremental_val_test_plan_20261010.md；先单测及两组三任务4updates/task smoke，通过后六张空闲卡各一组。当前尚未启动训练。
+
+
+### 2026-10-10 三视图原始内部ParaX八任务预检通过
+
+独立worktree /Users/denghaoyuan/.codex/worktrees/three-view-joint-transfer/multi-lane-main；服务器 /mnt/haoyuan/workspace/multi-lane-main-three-view-joint-to-incremental。代码879dc47，远程289/289 unittest通过，local compile/bash/diff检查通过。真实两组三任务各4updates smoke batch three_view_joint_transfer_smoke_20261010_01 完成退出0：每组12有效updates、零skips、AMP1024，初始Selector/Prompt/head hash与样本配对、CLIP hash和旧任务参数hash通过，test未加载。峰值allocated基线2575MiB、内部ParaX3270MiB。固定16样本FP32旧task0最大logit变化基线2.68e-7、ParaX1.12e-4，说明诊断可用，不作为短程性能/遗忘结论。正式batch three_view_joint_to_incremental_val_test_20261010_01，tmux ml_three_view_joint_transfer_20261010，计划GPU0/1 seed0无/有ParaX，GPU2/3 seed1，GPU4/5 seed2，8×30epochs，任务末同权重val+test；启动前再次检查空闲，不持续监控。与protected post-task实验分开。
