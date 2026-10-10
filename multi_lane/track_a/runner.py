@@ -93,6 +93,13 @@ def tensor_state_digest(state: Dict[str, torch.Tensor]) -> str:
     return digest.hexdigest()
 
 
+def fixed_view_sampler_seed(seed: int, task_id: int, protocol: str, paired_audit: bool):
+    """Isolate matched fixed-view samplers without changing legacy defaults."""
+    if protocol == "joint26":
+        return int(seed)
+    return int(seed) + 1009 * int(task_id) if paired_audit else None
+
+
 def ids_digest(sample_ids: Sequence[str]) -> str:
     return hashlib.sha256(json.dumps(list(sample_ids), ensure_ascii=False).encode()).hexdigest()
 
@@ -2374,6 +2381,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser("MULTI-LANE EMOTIC Track-A reproduction")
     parser.add_argument("--training-protocol", choices=("incremental", "joint26"),
                         default="incremental")
+    parser.add_argument("--fixed-view-paired-audit", action="store_true",
+                        help="Audit frozen fixed-view incremental ablations with isolated per-task samplers.")
     parser.add_argument("--supervised-loss-scale", type=float, default=1.0)
     parser.add_argument("--seed", type=int, required=True, choices=(0, 1, 2))
     parser.add_argument("--data-root", type=Path, required=True)
@@ -2747,6 +2756,15 @@ def main() -> None:
 
 
 def run(args: argparse.Namespace) -> None:
+    paired_protocol_audit = TRAINING_PROTOCOL == "joint26" or args.fixed_view_paired_audit
+    if args.fixed_view_paired_audit and (
+        TRAINING_PROTOCOL != "incremental" or args.adapter_mode != "disabled" or args.parax_mode != "disabled"
+        or args.selector_mode != "shared" or args.prompt_mode != "shared" or args.selector_conditioning != "disabled"
+        or args.view_fusion not in {"disabled", "fixed_full_person", "fixed_full_face", "fixed_three_view"}
+        or args.view_classifier_mode != "shared_post_fusion" or args.view_gradient_routing != "joint"
+        or args.loss_routing != "joint_bce" or args.calibration_fraction != 0 or args.crossfit_folds
+    ):
+        raise ValueError("Fixed-view paired audit requires frozen shared incremental paths and fixed fusion without adapters/calibration")
     if TRAINING_PROTOCOL == "joint26":
         if args.max_tasks != 1:
             raise ValueError("Joint26 requires one jointly trained 26-class pathway")
@@ -2856,7 +2874,7 @@ def run(args: argparse.Namespace) -> None:
         not args.view_evaluation_diagnostics
         or not args.save_evaluation_scores
         or not three_view_fusion
-        or args.reporting_split != "val"
+        or (args.reporting_split != "val" and not (args.fixed_view_paired_audit and args.reporting_split == "test"))
     ):
         raise ValueError(
             "View score export requires three-view validation diagnostics and "
@@ -3078,7 +3096,7 @@ def run(args: argparse.Namespace) -> None:
     if args.save_compact_checkpoints:
         (output / "compact_checkpoints").mkdir()
     if args.save_view_evaluation_scores:
-        (output / "view_val_scores").mkdir()
+        (output / f"view_{args.reporting_split}_scores").mkdir()
 
     metadata = git_metadata(root)
     visual = load_openai_clip_visual(args.clip_checkpoint)
@@ -3133,15 +3151,15 @@ def run(args: argparse.Namespace) -> None:
     model.assert_visual_frozen()
     frozen_visual_before = (
         tensor_state_digest(model.visual_encoder.state_dict())
-        if TRAINING_PROTOCOL == "joint26" else None
+        if paired_protocol_audit else None
     )
     base_initialization_digest = (
         tensor_state_digest({
             name: value for name, value in model.state_dict().items()
             if name == "selectors" or name.startswith(("prompts.", "head."))
-        }) if TRAINING_PROTOCOL == "joint26" else None
+        }) if paired_protocol_audit else None
     )
-    if TRAINING_PROTOCOL == "joint26":
+    if paired_protocol_audit:
         torch.cuda.reset_peak_memory_stats(device)
     lane_parameters = model.selectors.numel() + sum(p.numel() for p in model.prompts)
     if model.selector_view_residuals is not None:
@@ -3349,6 +3367,8 @@ def run(args: argparse.Namespace) -> None:
         "amp_initial_scale": args.amp_initial_scale,
         "amp_growth_interval": args.amp_growth_interval,
         "initial_selector_prompt_classifier_sha256": base_initialization_digest,
+        "fixed_view_paired_audit": bool(args.fixed_view_paired_audit),
+        "fixed_view_sampler_protocol": "seed_plus_1009_times_task" if args.fixed_view_paired_audit else None,
         "frozen_visual_sha256_before": frozen_visual_before,
         "training_loss_mode": args.training_loss_mode,
         "parameter_group_loss_routing": args.loss_routing,
@@ -3824,6 +3844,7 @@ def run(args: argparse.Namespace) -> None:
     view_diagnostics: Dict[str, object] = {}
     test_view_diagnostics: Dict[str, object] = {}
     start = time.time()
+    paired_task_audits = {}
     for task_id in range(args.max_tasks):
         print(f"begin_task={task_id}", flush=True)
         model.activate_task(task_id)
@@ -3877,19 +3898,19 @@ def run(args: argparse.Namespace) -> None:
             seen_indices(task_id),
             include_sample_id=args.save_evaluation_scores,
         )
+        sampler_seed = fixed_view_sampler_seed(args.seed, task_id, TRAINING_PROTOCOL, args.fixed_view_paired_audit)
         train_loader = DataLoader(
             train_view, batch_size=args.train_batch_size, shuffle=True,
             num_workers=args.workers, pin_memory=True, drop_last=False,
-            generator=(torch.Generator().manual_seed(args.seed)
-                       if TRAINING_PROTOCOL == "joint26" else None),
+            generator=torch.Generator().manual_seed(sampler_seed) if sampler_seed is not None else None,
         )
-        if TRAINING_PROTOCOL == "joint26":
+        if paired_protocol_audit:
             # Match the real sampler without consuming its generator or any
             # global RNG. All four arms use exactly the same instance order.
             index_loader = DataLoader(
                 list(range(len(train_view))), batch_size=args.train_batch_size,
                 shuffle=True, num_workers=0,
-                generator=torch.Generator().manual_seed(args.seed),
+                generator=torch.Generator().manual_seed(sampler_seed),
             )
             first_positions = next(iter(index_loader)).tolist()
             train_ids = [str(train_source.sample_ids[i]) for i in fit_indices]
@@ -3904,6 +3925,9 @@ def run(args: argparse.Namespace) -> None:
                 "initial_selector_prompt_classifier_sha256": base_initialization_digest,
                 "frozen_visual_sha256_before": frozen_visual_before,
                 "label_dimensions": len(task_indices(task_id)),
+                "task_id": task_id, "sampler_seed": sampler_seed,
+                "reporting_instances": len(reporting_view),
+                "reporting_sample_ids_sha256": ids_digest([str(reporting_source.sample_ids[i]) for i in reporting_view.indices]),
                 "test_loaded": test_source is not None,
                 "loss": (
                     f"{args.supervised_loss_scale} * (BCE(fused) + "
@@ -3911,10 +3935,14 @@ def run(args: argparse.Namespace) -> None:
                     if three_view_fusion else f"{args.supervised_loss_scale} * BCE(Full)"
                 ),
             }
-            (output / "joint_protocol_audit.json").write_text(
-                json.dumps(protocol_audit, indent=2) + "\n", encoding="utf-8"
-            )
-            print(f"JOINT26_AUDIT train={len(train_view)} val={len(val_source)} labels=26 "
+            if TRAINING_PROTOCOL == "joint26":
+                (output / "joint_protocol_audit.json").write_text(
+                    json.dumps(protocol_audit, indent=2) + "\n", encoding="utf-8"
+                )
+            else:
+                paired_task_audits[str(task_id)] = protocol_audit
+            audit_name = "JOINT26" if TRAINING_PROTOCOL == "joint26" else "FIXED_VIEW"
+            print(f"{audit_name}_AUDIT train={len(train_view)} val={len(val_source)} labels={len(task_indices(task_id))} "
                   f"initial_base_sha256={base_initialization_digest} test_loaded={test_source is not None}",
                   flush=True)
         val_loader = None if args.skip_validation_eval else DataLoader(
@@ -4062,7 +4090,7 @@ def run(args: argparse.Namespace) -> None:
                 args.threshold,
                 amp,
                 score_output_path=(
-                    output / "view_val_scores" / f"task{task_id}.npz"
+                    output / f"view_{args.reporting_split}_scores" / f"task{task_id}.npz"
                     if args.save_view_evaluation_scores else None
                 ),
             )
@@ -4167,20 +4195,26 @@ def run(args: argparse.Namespace) -> None:
             flush=True,
         )
 
-    if TRAINING_PROTOCOL == "joint26":
+    if paired_protocol_audit:
         model.assert_visual_frozen()
         frozen_visual_after = tensor_state_digest(model.visual_encoder.state_dict())
         if frozen_visual_after != frozen_visual_before:
-            raise RuntimeError("Joint26 training modified frozen CLIP weights")
-        protocol_audit.update({
+            raise RuntimeError("Paired training modified frozen CLIP weights")
+        final_audit = {
             "frozen_visual_sha256_after": frozen_visual_after,
             "frozen_visual_unchanged": True,
             "peak_allocated_mib": torch.cuda.max_memory_allocated(device) / (1024 ** 2),
             "peak_reserved_mib": torch.cuda.max_memory_reserved(device) / (1024 ** 2),
-        })
-        (output / "joint_protocol_audit.json").write_text(
-            json.dumps(protocol_audit, indent=2) + "\n", encoding="utf-8"
-        )
+        }
+        if TRAINING_PROTOCOL == "joint26":
+            protocol_audit.update(final_audit)
+            (output / "joint_protocol_audit.json").write_text(
+                json.dumps(protocol_audit, indent=2) + "\n", encoding="utf-8"
+            )
+        else:
+            final_audit.update(tasks=paired_task_audits, frozen_visual_sha256_before=frozen_visual_before,
+                               initial_selector_prompt_classifier_sha256=base_initialization_digest)
+            (output / "paired_protocol_audit.json").write_text(json.dumps(final_audit, indent=2) + "\n")
     summary = {
         "schema_version": 1,
         "status": "complete",
