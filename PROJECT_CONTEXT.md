@@ -2373,3 +2373,6 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 ### 2026-10-10 正式八任务三视图迁移实验已启动
 
 正式训练HEAD=5f2fefab7a3374636ed7c53ef5c86d434ab21256（在879dc47通过289项单测及真实配对smoke后仅更新文档）。batch=three_view_joint_to_incremental_val_test_20261010_01，tmux=ml_three_view_joint_transfer_20261010。GPU0/1分别seed0无/有内部ParaX，GPU2/3 seed1，GPU4/5 seed2，六进程已全部进入task0，配置均8tasks、30epochs/task、AMP1024、双val/test报告、Git dirty=false；每seed初始化hash配对一致。GPU6/7未占用。正式输出/日志在独立服务器worktree的output/emotic_three_view_joint_transfer/<batch>和logs/emotic_three_view_joint_transfer/<batch>。不在运行worktree更新代码，不持续监控，不基于中间test调参；结束后同步产物并比较逐task差值、固定旧样本AP/logit和FP32特征漂移，不能把常规Forgetting全部解释为权重遗忘。预检产物已同步主本地项目，tar SHA256=0a0a4d6303e704f948ae88e15b55e5d8202788d7e876223fe46fae576d46f8ff，两端一致，未复制checkpoint。新报告docs/three_view_joint_to_incremental_val_test_plan_20261010.md已记录全量结果及判读规则。
+
+
+启动核查完成：六组task0首轮均84次有效更新、skipped=0，无Traceback/OOM；每seed两组基础初始化hash一致。bootstrap_audit.json及六组config已同步主本地项目。至此停止正式训练轮询，等待用户在结束后要求统一分析。运行代码保持5f2fefa；后续仅本地/远端分支文档提交，未pull运行worktree。
