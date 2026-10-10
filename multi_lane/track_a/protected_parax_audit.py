@@ -41,6 +41,19 @@ class ProtectedRouteAudit:
         finally:
             model.train(training)
 
+    def _protected_state(self, model, task):
+        result = ({f"parax.{k}": v for k, v in model.parax_bank.protected_state(task).items()}
+                  if model.parax_bank is not None else {})
+        old_classes = sum(model.task_sizes[:task])
+        result["old_selectors"] = model.selectors[:task]
+        for index, prompt in enumerate(model.prompts):
+            result[f"old_prompts.{index}"] = prompt[:, :task]
+        result["old_head.weight"] = model.head.weight[:old_classes]
+        if model.head.bias is not None:
+            result["old_head.bias"] = model.head.bias[:old_classes]
+        result["old_task_class_mask"] = model.task_class_mask[:task]
+        return {k: v.detach().cpu().clone() for k, v in result.items()}
+
     def begin(self, model, loader, task):
         if self.images is None:
             with isolated_rng(self.device):
@@ -50,8 +63,7 @@ class ProtectedRouteAudit:
             torch.save({"images": self.images, "sample_ids": self.sample_ids,
                         "source_split": "val", "optimization_use": False}, self.output / "fixed_anchor_inputs.pt")
         bank = model.parax_bank
-        self.protected_before = ({k: v.detach().cpu().clone() for k, v in bank.protected_state(task).items()}
-                                 if bank is not None else {})
+        self.protected_before = self._protected_state(model, task)
         self.initial_difference = 0.0
         if bank is not None:
             training, runtime = model.training, model.parax_runtime_enabled
@@ -72,8 +84,7 @@ class ProtectedRouteAudit:
 
     def finish(self, model, task):
         bank = model.parax_bank
-        after = ({k: v.detach().cpu().clone() for k, v in bank.protected_state(task).items()}
-                 if bank is not None else {})
+        after = self._protected_state(model, task)
         changes = {k: float((v.float() - after[k].float()).abs().max()) if v.numel() else 0.0
                    for k, v in self.protected_before.items()}
         unchanged = self.protected_before.keys() == after.keys() and all(

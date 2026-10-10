@@ -2,6 +2,7 @@
 from __future__ import annotations
 import argparse
 import json
+import math
 from pathlib import Path
 
 METHODS=("baseline", "frozen_pool", "fresh_only", "reuse_old")
@@ -19,6 +20,14 @@ def compare(root: Path):
         if not a['frozen_visual_unchanged'] or a['initial_selector_prompt_classifier_sha256']!=expected['initial_selector_prompt_classifier_sha256']:
             raise RuntimeError(f'{method}: unpaired initialization or changed CLIP')
         history=json.loads((root/method/'training_history.json').read_text())
+        if any(not math.isfinite(value) for value in s['metrics'].values() if isinstance(value, (int, float))):
+            raise RuntimeError(f'{method}: non-finite summary metric')
+        for rows in history.values():
+            for row in rows:
+                if method != 'baseline' and row.get('parax_grad_finite') != 1.0:
+                    raise RuntimeError(f'{method}: invalid ParaX gradient')
+                if any(value > .02001 for key, value in row.items() if key.endswith('_residual_ratio') and key.startswith('parax_')):
+                    raise RuntimeError(f'{method}: actual residual exceeded bound')
         if any(row['skipped_optimizer_steps'] for rows in history.values() for row in rows):
             raise RuntimeError(f'{method}: AMP skipped updates')
         if s['completed_optimizer_updates']!=summaries['baseline']['completed_optimizer_updates']:
