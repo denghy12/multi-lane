@@ -1,5 +1,9 @@
 # 下一步任务
 
+## 2026-10-10：全套preflight通过，正式四组启动后停止监督
+
+业务c440321：287项本地/远程全测、四组真实三task smoke每组12updates/zero skips、原已训练task1→task2新版审计及可学习新专家分阶段smoke全部通过；79个静态产物已同步SHA一致。四组smoke配对、旧保护、残差关闭导出和比较器均通过。下一步GPU0正式 `protected_parax_audit_v2_seed0_val_20261010_01`（task0–2 seed0，30epochs，固定融合，OMP1），显存不足有限排队，不干预其他任务。启动后停止监督。分阶段正式实验未启动；本轮先收齐四组及残差开关新/旧类AP，再决定是否比较分阶段，不升级8-task/test/更多专家/level embedding。计划与检查证据见 `docs/protected_parax_audit_paired_staged_plan_20261010.md`。
+
 ## 2026-10-10：执行统一修正版四组，暂不启动正式分阶段
 
 分支 `exp/parax-audit-paired-staged`；完整计划 `docs/protected_parax_audit_paired_staged_plan_20261010.md`。代码实现/本地287项单测完成，下一步远程全测、四组真实task0–2×4updates smoke与一组可学习新专家分阶段smoke，再GPU0四组30epochs/task正式validation。新batch `protected_parax_audit_v2_seed0_val_20261010_01`；先确认是否已存在，避免重复。旧失败batch不恢复，旧参数/mask逐值保护不能取消。新审计拆分缓存exact identity与完整前向数值底噪。每任务保存同模型关闭全部残差的分数以区分残差输出与联合训练轨迹影响，固定同人群旧AP。分阶段仅实现和smoke，不自动正式启动；待四组仍低B0且消融定位后再比较相同专家预算的联合/分阶段学习。仅GPU0，不干预已有任务，不持续监督，不访问test、不升级8-task/level embedding/更多专家。

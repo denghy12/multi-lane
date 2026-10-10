@@ -1,5 +1,9 @@
 # 项目上下文
 
+## 2026-10-10：ParaX 新版验证全部通过，准备正式四组
+
+业务代码c440321；本地/服务器287项单测通过。新worktree `multi-lane-main-parax-audit-paired-staged` clean。四组真实ViT三task smoke各12updates/zero skipped，配对初始化/采样、identity、旧参数保护和新增残差关闭比较通过，peak reserved2712/2754MiB。原30epochs/task task1 checkpoint重建task2，新审计三组均通过且源SHA不变，0训练更新。分阶段真实smoke完成B0 12updates＋train缓存校准167updates，当前新专家实际改变/梯度非零、B0和旧参数hash不变，与基线配对一致。79个静态产物同步SHA一致；正式分阶段未启动。接下来从头运行batch `protected_parax_audit_v2_seed0_val_20261010_01`，GPU0四组、seed0 task0–2、30epochs/task、OMP1，validation-only，fixed fusion/.02界，不持续监督。配置及产物详见 `docs/protected_parax_audit_paired_staged_plan_20261010.md`。
+
 ## 2026-10-10：执行 ParaX 审计修正、残差消融与分阶段实现
 
 新分支 `exp/parax-audit-paired-staged` 从de9b0f8开始，保留全部既有未提交修改。受保护后置ParaX采用精确零残差identity且梯度有效的归一化表达；审计分离零投影/raw delta/缓存特征与独立完整前向重复误差，旧参数/mask逐值检查不变。新增每task关闭全部后置残差的同模型推理分数、固定旧人物/新旧类AP汇总。分阶段能力已实现：B0阶段不含ParaX优化参数，train缓存后冻结B0，只学当前新专家/Router/投影；旧专家保护，非冻结随机center旧方案。正式先统一新代码四组task0–2 seed0 validation、30epochs、GPU0；不加载test、不扩大8-task、不自动启动正式分阶段。完整配置 `docs/protected_parax_audit_paired_staged_plan_20261010.md`。本地287项单测已通过，新增五项机制检查；准备远程全测及真实四组/分阶段smoke，检查通过后正式启动，不持续监督。

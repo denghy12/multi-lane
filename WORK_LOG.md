@@ -1,5 +1,9 @@
 # 工作日志
 
+## 2026-10-10：Git-only同步、远程全测与真实smoke完成
+
+业务提交c440321已推送，服务器新独立worktree同HEAD且clean，主/test-only及运行中其他worktree保持原样。287项本地/远程单测通过。四组smoke各12updates/0skips、peak2712/2754MiB，三task全部identity/旧值和mask保护/paired审计/残差消融/比较器通过。另从原训练30轮task1 checkpoint重建task2，三组新审计通过，源权重SHA前后相同、零训练更新。分阶段真实smoke三task共12次B0更新＋167缓存校准更新，新专家改变且梯度非零有限，B0/旧路径hash不变、初始化及采样与基线一致。79个静态产物同步SHA核验一致。准备新batch正式四组task0–2 validation（从头训练、仅GPU0、OMP1），正式分阶段仅备好实现未启动，不自动扩大8-task/test。
+
 ## 2026-10-10：按用户授权修改 ParaX 审计和后置残差诊断
 
 建立 `exp/parax-audit-paired-staged`，保留原本地/服务器脏工作树和test-only。修改model受保护路径精确identity归一化；审计检查零projection、零raw residual、缓存特征/logit精确对齐，完整前向关闭/开启各三次记录重复误差预算，不再使用固定1e-5唯一判据；失败也保存诊断并恢复TF32/RNG/模式。runner新增RNG隔离的后置残差关闭推理与可选protected staged。缓存校准支持学习新专家、冻结B0及旧参数，记录分项梯度/新矩阵变化，保留旧随机center模式。比较器新增固定同人群/新旧类AP/残差开关相对独立B0，不混入分阶段组。新增五项单测，17项针对性与本地287项全测通过；本地缺timm已仅补入临时venv后全测通过，项目依赖未改。完整配置已声明并写plan；接下来Git-only同步新worktree，远程全测与真实smoke通过才启动四组短程validation。正式分阶段等待四组精度诊断，不改动态融合。

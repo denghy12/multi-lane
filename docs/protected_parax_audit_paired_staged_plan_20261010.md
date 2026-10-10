@@ -53,3 +53,14 @@ CLIP ViT-B/16完全冻结；Selector10、Prompt10、前5层prefix；两种额外
 - 全部仍低：再正式比较相同专家预算的联合训练/分阶段学习，不同时改动态融合或扩大专家。
 
 启动后停止监督，结束后统一分析。不会根据test调结构或融合权重。
+
+## 启动前验证已完成
+
+业务代码 `c440321`，本地和远程完整单测均 **287/287 passed**，compileall/bash检查通过。独立服务器worktree clean；主工作树/test-only以及原实验工作树未改动。
+
+- 四组真实ViT smoke `protected_parax_audit_v2_smoke_20261010_01`：每组task0–2共12updates、zero skipped；初始化和采样配对、CLIP冻结、identity及旧参数审计、残差关闭分数导出和四组比较器均通过。峰值reserved基线2712MiB，三组ParaX2754MiB。
+- 读取上轮真正训练30epochs/task后的task1 checkpoint、重建task2入口，三组新版审计全部通过；源checkpoint SHA未变，零训练更新。全前向最大差约9.54e-6/1.14e-5/1.28e-5，实测预算约4.98e-5/5.69e-5/5.31e-5；缓存原始残差、受保护特征与logits均严格identity。证明检查修正在原失败场景下成立，而非只通过未训练模型。
+- 分阶段真实smoke `protected_parax_learned_expert_staged_smoke_20261010_01`：三task基线更新12次，缓存校准167次、每task1轮；所有新专家确实改变，分项专家梯度非零有限，B0和旧路径hash不变，与四组基线初始化/采样配对一致；无test。此为实现验证，不视为精度证据或正式分阶段比较。
+- 79个静态日志/JSON/审计产物同步至本地并SHA一致；checkpoint/特征缓存/分数数组留在服务器。汇总 `logs/emotic_protected_parax_val/preflight_20261010_02/validation_summary.json`。
+
+正式四组使用同一业务代码、从头训练，不续原失败任务。进程环境统一`OMP_NUM_THREADS=1`。正式启动后只确认进入训练，随后停止监督；分阶段正式实验仍未自动启动。
