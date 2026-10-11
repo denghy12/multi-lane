@@ -23,7 +23,7 @@ class FixedBaselineRoutesTest(unittest.TestCase):
                 for split in ('train', 'val', 'test'):
                     source_dataset(config, str(root), './face_manifest', split)
                     args, kwargs = factory.call_args
-                    self.assertEqual(args[0], directory)
+                    self.assertEqual(args[0], str(Path(directory).resolve()))
                     self.assertEqual(kwargs['train'], split == 'train')
                     for name in ('face_crop_margin', 'face_min_training_short_side', 'face_min_training_score'):
                         self.assertNotIn(name, kwargs)
