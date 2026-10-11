@@ -18,7 +18,9 @@ from test_track_a_reproduction import FakeVisual
 class WholeParaXFreezeTest(unittest.TestCase):
     def model(self, freeze):
         torch.manual_seed(9)
-        return MultiLaneModel(FakeVisual(), (2,2,2), num_selectors=2, num_prompts=2,
+        visual=FakeVisual()
+        visual.transformer.resblocks.append(copy.deepcopy(visual.transformer.resblocks[0]))
+        return MultiLaneModel(visual, (2,2,2), num_selectors=2, num_prompts=2,
                               num_prompt_layers=1, view_fusion='fixed_three_view',parax_mode='image',
                               parax_layer_indices=(0,),parax_rank=2,parax_num_experts=3,
                               parax_router_hidden=2,parax_freeze_all_after_task0=freeze)
