@@ -4127,3 +4127,8 @@ User requested implementing the staged next plan. New independent branch exp/thr
 ### 2026-10-11 验证通过，完整评估准备排队
 
 实现提交bd8410d。服务器独立worktree通过291/291 unittest；本地Python编译、两份Shell语法和git diff检查通过。seed0无ParaX与内部ParaX分别恢复task0/task7，四次原validation首批重放最大logit差均为0；完整validation首批各64人前向通过，源文件/CLIP/方法权重hash未变、无参数梯度、无优化更新、未读取test图像或test NPZ。预检批次snapshot_validation_preflight_20261011_01，GPU2短串行推理已结束。8张卡仍被其他训练使用，正式批次three_view_snapshot_full_validation_seed012_20261011_01将通过tmux有限等待空闲GPU（>=20000MiB且util<=15%，最多12小时），随后依次评估六个来源；这不是重新训练。下一阶段完全冻结ParaX的三任务控制尚未实现/启动，先等待完整validation结论。禁止将预检64人当作完整评估结果。
+
+
+### 2026-10-11 完整validation历史变换保护评估已排队
+
+正式评估已在tmux ml_snapshot_validation_20261011启动队列，当前state=waiting_for_idle_gpu，尚未开始完整推理；batch=three_view_snapshot_full_validation_seed012_20261011_01，运行HEAD=70aa575dc2bdb85690d7c68c34bd9d025d7001e2。服务器worktree /mnt/haoyuan/workspace/multi-lane-main-snapshot-validation。等待空闲>=20000MiB/util<=15%的GPU，最多12小时，自动串行六组；源训练、其他GPU任务、test-only均未修改。评估代码在exp/three-view-snapshot-validation独立本地worktree /Users/denghaoyuan/.codex/worktrees/three-view-snapshot-validation/multi-lane-main：snapshot_validation.py、compare_snapshot_validation.py、两份emotic shell入口和测试；joint26 builder仅增加task_sizes可选参数，旧默认不变。291项测试通过，seed0两方法task0/task7四次真实重放最大logit差全部0，64人预检通过，非完整性能结果。预检日志/分数/摘要已同步主本地项目，未同步checkpoint；同步包SHA256 edaa6374702fafd7cd555cd32fd577a97657f99d67bfaebece547a6b6014d69b，两端一致。正式产物保存output/emotic_snapshot_validation/<batch>，日志logs/emotic_snapshot_validation/<batch>。本次只落实计划第一步，未重训、未新增test评估、未启动完全冻结ParaX训练；完整validation结果出来后再决定是否需要阶段二。详细计划docs/three_view_snapshot_full_validation_plan_20261011.md。运行工作树保持70aa575干净，不拉取启动后的文档提交。主本地工作树保留所有其他会话改动。
