@@ -36,7 +36,7 @@ def fixed_old_cohort(root, method, last_task=2, first_task=0, split="val"):
                 'saved_AMP_logit_max_absolute_change':float(np.abs(delta).max())}
 
 
-def compare(root: Path, full_evaluation=False):
+def compare(root: Path, full_evaluation=False, report_root=None):
     count = 8 if full_evaluation else 3
     last_task = count - 1
     summaries={method: json.loads((root/method/'seed_summary.json').read_text()) for method in METHODS}
@@ -60,7 +60,10 @@ def compare(root: Path, full_evaluation=False):
         if full_evaluation:
             config = s['config']
             for key in ('seed', 'training_protocol', 'epochs_per_task', 'optimizer_updates_per_task',
-                        'train_batch_size', 'eval_batch_size', 'view_fusion', 'training_loss_mode', 'loss_routing'):
+                        'train_batch_size', 'eval_batch_size', 'view_fusion', 'training_loss_mode',
+                        'parameter_group_loss_routing'):
+                if key not in config or key not in summaries['baseline']['config']:
+                    raise RuntimeError(f'{method}: missing required configuration {key}')
                 if config[key] != summaries['baseline']['config'][key]:
                     raise RuntimeError(f'{method}: unpaired configuration {key}')
             if [row['task_id'] for row in s['task_metrics']] != list(range(count)) or [row['task_id'] for row in s['test_task_metrics']] != list(range(count)):
@@ -155,19 +158,23 @@ def compare(root: Path, full_evaluation=False):
                     'disabled_minus_independent_baseline_mAP': off['mAP'] - base['mAP'],
                     'new_class_enabled_minus_disabled_mAP': new_class_map(row, summary['config']['task_sizes']) - new_class_map(off, summary['config']['task_sizes']),
                 } for row, off, base in zip(summary['test_task_metrics'], disabled, summaries['baseline']['test_task_metrics'])]
-    (root/'comparison.json').write_text(json.dumps(result,indent=2)+'\n')
+    report_root = root if report_root is None else Path(report_root)
+    report_root.mkdir(parents=True, exist_ok=True)
+    (report_root/'comparison.json').write_text(json.dumps(result,indent=2)+'\n')
     print(json.dumps(result,indent=2))
     return result
 
 
-def compare_seeds(root: Path, seeds):
+def compare_seeds(root: Path, seeds, report_root=None):
     if len(set(seeds)) != len(seeds) or not seeds:
         raise ValueError("Need unique nonempty seeds")
     for seed in seeds:
         source=json.loads((root/f'seed{seed}'/'baseline/seed_summary.json').read_text())
         if source['seed'] != seed:
             raise RuntimeError('Seed directory does not match run seed')
-    results = {str(seed): compare(root/f'seed{seed}', full_evaluation=True) for seed in seeds}
+    report_root = root if report_root is None else Path(report_root)
+    results = {str(seed): compare(root/f'seed{seed}', full_evaluation=True,
+                                report_root=report_root/f'seed{seed}') for seed in seeds}
     aggregate = {'seeds': list(seeds), 'test_policy': 'fixed configurations; no selection', 'methods': {}}
     rows = []
     for method in METHODS:
@@ -182,8 +189,8 @@ def compare_seeds(root: Path, seeds):
                 metrics = results[str(seed)][method][key]
                 rows.append({'seed': seed, 'method': method, 'split': split,
                              **{metric: metrics[metric] for metric in values}})
-    (root/'multiseed_comparison.json').write_text(json.dumps(aggregate, indent=2)+'\n')
-    with (root/'multiseed_comparison.csv').open('w', newline='') as handle:
+    (report_root/'multiseed_comparison.json').write_text(json.dumps(aggregate, indent=2)+'\n')
+    with (report_root/'multiseed_comparison.csv').open('w', newline='') as handle:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
         writer.writeheader(); writer.writerows(rows)
     return aggregate
@@ -194,10 +201,12 @@ if __name__=='__main__':
     parser.add_argument('root',type=Path)
     parser.add_argument('--full-evaluation', action='store_true')
     parser.add_argument('--seeds', type=int, nargs='+')
+    parser.add_argument('--report-root', type=Path,
+                        help='Write derived comparisons separately; leave source run artifacts unchanged')
     args = parser.parse_args()
     if args.seeds is not None:
         if not args.full_evaluation:
             parser.error('--seeds requires --full-evaluation')
-        compare_seeds(args.root, args.seeds)
+        compare_seeds(args.root, args.seeds, args.report_root)
     else:
-        compare(args.root, args.full_evaluation)
+        compare(args.root, args.full_evaluation, args.report_root)

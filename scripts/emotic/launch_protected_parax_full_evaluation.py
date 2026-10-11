@@ -14,6 +14,57 @@ def timestamp():
     return datetime.now().astimezone().isoformat()
 
 
+def run_comparison(source: Path, seeds, control: Path, prerequisite_source=None):
+    """Record audit failures explicitly; never mark worker-only success complete."""
+    control.mkdir(parents=True, exist_ok=True)
+    log_path = control/'comparison.log'
+    command = [sys.executable, '-m', 'multi_lane.track_a.protected_parax_compare',
+               str(source), '--full-evaluation', '--seeds', *[str(s) for s in seeds]]
+    if prerequisite_source is not None:
+        command += ['--report-root', str(control/'reports')]
+    try:
+        with log_path.open('w') as handle:
+            subprocess.run(command, check=True, stdout=handle, stderr=subprocess.STDOUT)
+    except Exception as error:
+        details = {
+            'phase': 'comparison', 'time': timestamp(),
+            'exit_code': getattr(error, 'returncode', None),
+            'error': str(error), 'command': command,
+            'comparison_log': str(log_path),
+            'error_summary': log_path.read_text()[-4000:],
+            'source': str(source),
+        }
+        (control/'failed.json').write_text(json.dumps(details, indent=2)+'\n')
+        raise RuntimeError(f'Comparison failed; see {log_path}: {details["error_summary"]}') from error
+    training_commits = sorted({json.loads((source/f'seed{seed}'/method/'seed_summary.json').read_text())
+                               ['config']['git']['commit'] for seed in seeds for method in METHODS})
+    record = {'time': timestamp(), 'source': str(source), 'seeds': list(seeds),
+              'training_commits': training_commits,
+              'auditor_commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+              'comparison_log': str(log_path)}
+    if prerequisite_source is not None:
+        record['prerequisite_source'] = str(prerequisite_source)
+    (control/'comparison_passed.json').write_text(json.dumps(record, indent=2)+'\n')
+    return record
+
+
+def verify_reaudit_source(source: Path):
+    """Existing smoke is reusable only when the model/training code is identical."""
+    commits = {json.loads((source/'seed0'/method/'seed_summary.json').read_text())
+               ['config']['git']['commit'] for method in METHODS}
+    if len(commits) != 1:
+        raise RuntimeError('Prerequisite smoke arms used different training commits')
+    commit = next(iter(commits))
+    checked_paths = ['multi_lane', 'scripts/emotic/run_protected_parax_validation.sh']
+    changes = subprocess.check_output(
+        ['git', 'diff', '--name-only', commit, 'HEAD', '--', *checked_paths], text=True).splitlines()
+    training_changes = [p for p in changes if p != 'multi_lane/track_a/protected_parax_compare.py']
+    if training_changes:
+        raise RuntimeError('Training code changed; rerun smoke: '+', '.join(training_changes))
+    return {'training_commit': commit, 'checked_paths': checked_paths,
+            'training_paths_unchanged': True, 'permitted_comparator_changes': changes}
+
+
 def idle_gpus(allowed):
     query = subprocess.check_output([
         'nvidia-smi', '--query-gpu=index,uuid,memory.used,memory.free,utilization.gpu',
@@ -34,8 +85,10 @@ def wait_for_smoke(source: Path, controller_pid: int | None, seconds: int):
     """Require a completed audited prerequisite, without inspecting live metrics."""
     deadline = time.monotonic() + seconds
     while not (source/'control/completed.txt').is_file():
-        if (source/'control/failed.json').exists():
-            raise RuntimeError('Prerequisite smoke failed; formal training was not started')
+        failure = source/'control/failed.json'
+        if failure.exists():
+            raise RuntimeError('Prerequisite smoke failed; formal training was not started: '
+                               + failure.read_text())
         if controller_pid is not None:
             try:
                 os.kill(controller_pid, 0)
@@ -57,6 +110,8 @@ def main():
     allowed = os.environ.get('GPU_POOL', '0,1,2,3,4,5,6,7').split(',')
     if len(set(seeds)) != len(seeds) or not seeds or any(s not in (0,1,2) for s in seeds):
         raise ValueError('SEEDS must be unique members of 0,1,2')
+    if os.environ.get('REAUDIT_SMOKE') and os.environ.get('WAIT_FOR_SMOKE'):
+        raise ValueError('Choose REAUDIT_SMOKE or WAIT_FOR_SMOKE, not both')
     output = Path(os.environ.get('OUTPUT_ROOT', './output/emotic_protected_parax_full'))
     logs = Path(os.environ.get('LOG_ROOT', './logs/emotic_protected_parax_full'))
     control = output/batch/'control'
@@ -88,11 +143,25 @@ def main():
         'excluded': 'Image-token Adapter, patch Projector, level embedding, distillation, staged training, dynamic fusion',
         'inputs': {k: os.environ[k] for k in ('DATA_ROOT','CLIP_CHECKPOINT','FACE_MANIFEST_ROOT')},
         'output': str(output/batch), 'logs': str(logs/batch),
-        'prerequisite_smoke': os.environ.get('WAIT_FOR_SMOKE'),
+        'prerequisite_smoke': os.environ.get('WAIT_FOR_SMOKE') or os.environ.get('REAUDIT_SMOKE'),
+        'prerequisite_mode': 'reaudit_existing_outputs' if os.environ.get('REAUDIT_SMOKE') else 'wait_for_smoke',
     }
     (control/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
     (control/'queued.txt').write_text(timestamp()+'\n')
-    if os.environ.get('WAIT_FOR_SMOKE'):
+    if os.environ.get('REAUDIT_SMOKE'):
+        source = Path(os.environ['REAUDIT_SMOKE'])
+        try:
+            compatibility = verify_reaudit_source(source)
+            (control/'prerequisite_source_compatibility.json').write_text(
+                json.dumps(compatibility, indent=2)+'\n')
+            run_comparison(source, [0], control/'prerequisite_audit', prerequisite_source=source)
+        except Exception as error:
+            (control/'prerequisite_failed.json').write_text(json.dumps(
+                {'phase': 'prerequisite_comparison', 'error': str(error),
+                 'failure_record': str(control/'prerequisite_audit/failed.json')}, indent=2)+'\n')
+            raise
+        (control/'prerequisite_passed.txt').write_text(timestamp()+'\n')
+    elif os.environ.get('WAIT_FOR_SMOKE'):
         source = Path(os.environ['WAIT_FOR_SMOKE'])
         pid = int(os.environ['SMOKE_CONTROLLER_PID']) if os.environ.get('SMOKE_CONTROLLER_PID') else None
         print(timestamp(), 'waiting for audited smoke', str(source), flush=True)
@@ -102,7 +171,7 @@ def main():
             (control/'prerequisite_failed.json').write_text(json.dumps({'error': str(error)})+'\n')
             raise
         (control/'prerequisite_passed.txt').write_text(timestamp()+'\n')
-    (control/'started.txt').write_text(timestamp()+'\n')
+    (control/'dispatch_ready.txt').write_text(timestamp()+'\n')
     pending = [(seed,method) for seed in seeds for method in METHODS]
     active = {}; results = {}; last_dispatch = time.monotonic()
     while pending or active:
@@ -126,6 +195,8 @@ def main():
             handle = (logdir/f'{method}.launcher.log').open('w')
             process = subprocess.Popen(['bash','scripts/emotic/run_protected_parax_validation.sh'],
                                        env=env, stdout=handle, stderr=subprocess.STDOUT)
+            if not (control/'started.txt').exists():
+                (control/'started.txt').write_text(timestamp()+'\n')
             active[gpu] = (process,handle,seed,method)
             (control/f'seed{seed}_{method}.started.json').write_text(json.dumps(
                 {'time':timestamp(),'gpu':gpu,'pid':process.pid},indent=2)+'\n')
@@ -136,12 +207,10 @@ def main():
         if pending or active:
             time.sleep(15)
     if any(results.values()):
-        (control/'failed.json').write_text(json.dumps(results,indent=2)+'\n')
+        (control/'failed.json').write_text(json.dumps(
+            {'phase': 'training', 'exit_codes': results}, indent=2)+'\n')
         raise RuntimeError('One or more arms failed; do not publish a complete comparison')
-    with (control/'comparison.log').open('w') as handle:
-        subprocess.run([sys.executable,'-m','multi_lane.track_a.protected_parax_compare',
-                        str(output/batch),'--full-evaluation','--seeds',*[str(s) for s in seeds]],
-                       check=True,stdout=handle,stderr=subprocess.STDOUT)
+    run_comparison(output/batch, seeds, control)
     (control/'completed.txt').write_text(timestamp()+'\n')
     print(timestamp(),'all complete',flush=True)
 

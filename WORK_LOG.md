@@ -1,5 +1,23 @@
 # 工作日志
 
+## 2026-10-11 08:18 CST：已授权修复冻结实验流程并准备正式重启
+
+分支fix/parax-full-comparison-relaunch-20261011在独立managed worktree创建，不修改主工作树其他会话代码。比较器字段/schema修复，新增独立报告路径、控制器比较阶段失败记录和旧预检训练代码一致性检查。11项真实schema/完整比较/门禁回归已补齐，本地完整304项unittest通过；真实八任务旧预检使用修正版比较器重审通过。模型/runner/原训练Shell未改；旧失败记录保留，不伪造完成标记。
+
+原定新batch protected_parax_freezing_8task_seed012_valtest_20261011_01：四方法×seed012、task0–7、30epoch/task，原固定融合、同权重val/test；Git-only服务器同步与重审后后台运行。当前检查GPU0–7均忙，排队只等空闲，不干预其他任务。训练尚未确认启动；后续以control/per-arm started记录为准。计划docs/protected_parax_freezing_relaunch_plan_20261011.md。三个上下文同步更新，用户本轮明确执行，按持续授权提交推送；不合并main、不删除产物。
+
+## 2026-10-11 08:11 CST：冻结八任务正式实验未启动，预检比较器字段不匹配已定位
+
+本会话仅专家冻结/复用。四组八任务smoke（seed0、每task2updates）均exit0、8个短epoch/16updates/zero skips，val/test各8终点，CLIP及受保护旧参数逐值不变、identity通过。最终比较器读取loss_routing，但真实config为parameter_group_loss_routing=joint_bce，触发KeyError；因此没有completed标记。正式batch protected_parax_freezing_8task_seed012_valtest_20261010_02保存prerequisite_failed，0/12正式组启动，不存在30epoch/三seed性能结论。此前“等待预检自动开始”的记录已由本记录更新。
+
+319个非checkpoint产物同步本地主工作树且SHA全部一致。本地仅在内存对应字段名、保留所有其他检查后完整八任务比较通过；远程源码及门槛未改，未伪造完成标记。旧anchor FP32最大logit变化基线7.75e-7、冻结池5.36e-7、仅新专家8.05e-7、复用5.07e-7，只能证明短预检实现正常。旧三任务正式结果仍是冻结池final+0.8773、复用不优于仅新增，不能外推八任务。
+
+下一步建议修比较器schema及比较阶段结构化失败标记，加入真实配置格式的端到端回归；重审现有预检后，以新batch运行已声明四组×seed012、8tasks、30epoch，固定融合、同权重val/test，不新增模型变量。本轮仅检查同步分析/文档，无业务改动、Git提交推送或训练启动。详见docs/protected_parax_freezing_pipeline_status_and_diagnosis_20261011.md；离线复算与SHA在主工作树output/parax_freezing_status_sync_20261011/。
+
+## 2026-10-10 23:07 CST：正式后台队列已核验，等待八任务smoke通过
+
+源码分支exp/parax-freezing-eight-task-locked、HEAD02abe58已推送；服务器正式worktree同HEAD、detached且clean，smoke工作树仍eb04972，未修改运行中代码。tmux ml_parax_freeze8_20261010与正式batch protected_parax_freezing_8task_seed012_valtest_20261010_02已存在，manifest/queued.txt已核验，controller明确waiting for audited smoke，尚无started.txt，不能说30epoch训练已开始。本地/服务器完整293项单测通过，日志目录修复后的6项门禁/八任务检查通过。GPU0–5其他任务未干预，smoke使用6/7；四组八任务smoke完成并比较通过后，自动分配空闲卡运行四方法×seed012、8tasks、30epoch，固定融合、同权重val/test。失败停在门禁，不自动发布结果。正式01仅控制器日志目录错误、未训练，保留原记录。停止监督，结束后统一分析，只研究专家冻结/复用。报告docs/protected_parax_freezing_summary_and_eight_task_plan_20261010.md。
+
 ## 2026-10-10：修复正式控制器预先存在的日志目录
 
 正式控制器首次尝试仅创建control目录后因日志目录已存在退出，未启动任何正式训练。修复logs mkdir为exist_ok，输出目录防重复保护不变；失败batch01保留不删除，实际正式batch改为protected_parax_freezing_8task_seed012_valtest_20261010_02。预检smoke仍在原eb04972独立worktree运行不改代码。双端293项单测已通过；修复后重新核验门禁队列状态，不把排队称为正式已训练。
