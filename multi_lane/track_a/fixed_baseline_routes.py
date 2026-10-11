@@ -29,7 +29,9 @@ from .runner import (build_transforms, compact_model_state_dict, dataset_view, e
 
 def build_model(config, visual, frozen_pool=False):
     keys = set(inspect.signature(MultiLaneModel.__init__).parameters) - {"self", "visual_encoder"}
-    options = {k: v for k, v in config.items() if k in keys}
+    # Serialized configs use null for inactive options (e.g. fixed fusion's
+    # hidden dimension). Constructor defaults, not None, apply to those fields.
+    options = {k: v for k, v in config.items() if k in keys and v is not None}
     if frozen_pool:
         options.update(parax_mode="post_task_protected_frozen", parax_rank=32,
                        parax_num_experts=16, parax_layer_indices=(0,), parax_router_hidden=16,

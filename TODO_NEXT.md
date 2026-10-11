@@ -1,4 +1,6 @@
 
+- GPU smoke发现历史配置的inactive选项为null，已修复为构造默认值，并增加真实配置恢复回归测试。首次smoke未进入训练，保留失败日志；后续使用新smoke输出目录。
+
 ## 2026-10-11 固定真实基线后学习共享专家（执行中）
 
 - 用户授权补旧validation实验seed0 test并实现下一步。已确认最新八任务四组实际含全部三seed test；仅前三任务旧四组缺test，计划补其12份checkpoint推理。
