@@ -12,12 +12,16 @@ BASE_ROOT=${BASE_ROOT:-../multi-lane-main-parax-freezing-eight-task-relaunch/out
 OUTPUT_ROOT=./output/emotic_fixed_baseline_routes/$BATCH
 LOG_ROOT=./logs/emotic_fixed_baseline_routes/$BATCH
 mkdir -p "$LOG_ROOT"
-# Do not overwrite any prior batch or choose a GPU occupied by another experiment.
+# Do not overwrite any prior batch. Shared GPU use requires explicit opt-in.
 test ! -e "$OUTPUT_ROOT"
 "$PYTHON_BIN" - "$GPU" "$LOG_ROOT" <<'PY'
 import json, os, subprocess, sys, time
 from pathlib import Path
 index = sys.argv[1]
+policy = os.environ.get('GPU_START_POLICY', 'idle')
+if policy not in ('idle', 'shared_memory'):
+    raise SystemExit('Unknown GPU_START_POLICY: '+policy)
+minimum_free = int(os.environ.get('GPU_MIN_FREE_MIB', '8192'))
 path = Path(sys.argv[2]) / 'resource_wait.json'
 deadline = time.monotonic() + int(os.environ.get('GPU_IDLE_TIMEOUT_SECONDS', '86400'))
 announced = False
@@ -26,11 +30,16 @@ while True:
     used, free, utilization = map(int, subprocess.check_output(
         ['nvidia-smi','-i',index,'--query-gpu=memory.used,memory.free,utilization.gpu',
          '--format=csv,noheader,nounits'],text=True).strip().split(','))
-    state = dict(gpu=index, timestamp=time.time(), compute_pids=apps.splitlines(),
+    state = dict(gpu=index, timestamp=time.time(), policy=policy, compute_pids=apps.splitlines(),
                  memory_used_mib=used, memory_free_mib=free, utilization=utilization)
-    if not apps and used < 512 and free >= 18000 and utilization <= 5:
+    ready = (free >= minimum_free if policy == 'shared_memory'
+             else not apps and used < 512 and free >= 18000 and utilization <= 5)
+    if ready:
         path.write_text(json.dumps(dict(state, status='ready'), indent=2)+'\n')
         break
+    if policy == 'shared_memory':
+        path.write_text(json.dumps(dict(state, status='insufficient_memory'), indent=2)+'\n')
+        raise SystemExit('Insufficient free GPU memory for both workers: '+str(free)+' MiB')
     if not announced:
         path.write_text(json.dumps(dict(state, status='waiting'), indent=2)+'\n')
         print('Waiting for GPU '+index+' to be idle; other processes are untouched.', flush=True)

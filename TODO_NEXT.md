@@ -1,4 +1,20 @@
 
+## 2026-10-11 用户授权GPU0共用显存、取消空闲排队
+
+- 用户确认只补此前task0–2四组seed0 test，并明确GPU0可与现有任务并行，不要求空卡。
+- 启动脚本新增显式 `GPU_START_POLICY=shared_memory`，只检查可用显存≥8192MiB；不要求无进程或低利用率，显存不足立即报错，不排队。默认idle行为保留用于其他调用。
+- 本次模型、数据、优化器和batch均不改；沿用此前声明完整配置，新旧两条队列并行。只停止本会话尚未启动训练的等待控制器，不停止其他任务。
+- bash语法及模拟忙卡/充足显存放行、显存不足拒绝的检查通过。当前SSH连续握手重置，正恢复连接后进行Git-only同步及启动，不能先称正式任务已运行。
+
+## 2026-10-11 固定基线缓存专家：已提交并排队，未开始正式训练
+
+- 实现/本地309项测试/远程新5项回归及真实GPU smoke已完成。提交 `4337d13`，分支 `exp/parax-fixed-baseline-cached-routing-20261011`；服务器独立worktree同HEAD且clean，业务代码Git-only同步。
+- 实际后台队列已确认：tmux `ml_fixed_cache_20261011`，batch `fixed_baseline_cached_routes_20261011_01`。GPU0已被其他进程占用，resource_wait.json状态waiting；最长等待24h，空闲后并行旧四组seed0/task0–2 test与新三个seed八任务validation缓存拟合。不能说已经正式训练中，未触碰其他任务。
+- 新方法固定原模型，task0学习两个专家后冻结，当前task Router/零初始化32→32投影只在train缓存学习；动态图像/固定常量两组paired，rank32、2%可微界、5epoch/cache、固定特征融合，无新增蒸馏/level/patch Projector。
+- 真实smoke旧task2 test完成；新task7动态/静态都完成5epoch，缓存identity严格0，base/old protected hashes相同；显存peak reserved约1298MiB（新）/1068MiB（旧）。这是64样本smoke，不能据其mAP判断方法效果。
+- smoke非checkpoint产物与日志已同步主工作树 `output/emotic_fixed_baseline_routes/smoke_*_20261011_03/`、`logs/emotic_fixed_baseline_routes/`。正式结果等完成后用户召回再统一同步分析，无实时监督。
+- 最新上一批八任务本已含三seed test；当前补测限真正缺test的旧三任务四组seed0，等待用户可选范围澄清。完整配置见 `docs/fixed_baseline_cached_routes_plan_20261011.md`。
+
 ## 2026-10-11 真实smoke通过，正式任务等待GPU0
 
 - 本地309项unittest通过；远程308项全套与最新5项新入口回归通过。真实ViT task7 smoke完成动态图像/任务常量两组5缓存epoch，初始差异严格0、原模型与旧专家hash一致；旧四组中复用专家task2 checkpoint的test smoke完成。保留前两次配置恢复失败日志，正式训练未受影响。
