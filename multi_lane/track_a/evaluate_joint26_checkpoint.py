@@ -46,8 +46,8 @@ def audit_source(source: Path):
     return config, summary, audit, skipped
 
 
-def build_model(config, visual):
-    options = dict(task_sizes=(26,), num_selectors=config["num_selectors"],
+def build_model(config, visual, task_sizes=(26,)):
+    options = dict(task_sizes=tuple(task_sizes), num_selectors=config["num_selectors"],
                    num_prompts=config["num_prompts"], num_prompt_layers=config["num_prompt_layers"],
                    selector_mode=config["selector_mode"], prompt_mode=config["prompt_mode"],
                    normalize=config["normalize"], adapter_mode="disabled",

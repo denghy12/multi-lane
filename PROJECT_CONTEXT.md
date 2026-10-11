@@ -2376,3 +2376,8 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 
 
 启动核查完成：六组task0首轮均84次有效更新、skipped=0，无Traceback/OOM；每seed两组基础初始化hash一致。bootstrap_audit.json及六组config已同步主本地项目。至此停止正式训练轮询，等待用户在结束后要求统一分析。运行代码保持5f2fefa；后续仅本地/远端分支文档提交，未pull运行worktree。
+
+
+## 2026-10-11 Full-validation historical snapshot protection (authorized first phase)
+
+User requested implementing the staged next plan. New independent branch exp/three-view-snapshot-validation from7563364, local worktree /Users/denghaoyuan/.codex/worktrees/three-view-snapshot-validation/multi-lane-main. Implement immutable8-checkpoint full2397-person validation evaluation for both original image-stream ParaX/no-ParaX, seeds012; no optimization, no new test images/NPZ access. Exact class-owner composition, full-label/ID/mask alignment, checkpoint/source hashes, owned-task-state equality to final, replay checks, paired no-ParaX numerical control. Existing joint26 model builder gains optional task_sizes argument with legacy default(26,), no model/runner/adapter forward changes. New evaluator/comparator/scripts/tests; plan docs/three_view_snapshot_full_validation_plan_20261011.md. Current eight GPUs occupied by other training; formal queue waits12h for idle>=20GB/util<=15%, one GPU sequential six sources. Short real-checkpoint preflight only with>=4500MiB free. Source remains5f2fefa in ../multi-lane-main-three-view-joint-to-incremental/output/emotic_three_view_joint_transfer/three_view_joint_to_incremental_val_test_20261010_01. Fully frozen shared-ParaX training control remains conditional on this first-phase result, not automatically launched. Preserve unrelated dirty local/main/test-only worktrees. Tests/preflight not yet run.
