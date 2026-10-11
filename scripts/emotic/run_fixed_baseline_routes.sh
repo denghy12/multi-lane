@@ -14,12 +14,31 @@ LOG_ROOT=./logs/emotic_fixed_baseline_routes/$BATCH
 mkdir -p "$LOG_ROOT"
 # Do not overwrite any prior batch or choose a GPU occupied by another experiment.
 test ! -e "$OUTPUT_ROOT"
-"$PYTHON_BIN" - "$GPU" <<'PY'
-import subprocess, sys
+"$PYTHON_BIN" - "$GPU" "$LOG_ROOT" <<'PY'
+import json, os, subprocess, sys, time
+from pathlib import Path
 index = sys.argv[1]
-apps = subprocess.check_output(['nvidia-smi','-i',index,'--query-compute-apps=pid','--format=csv,noheader'],text=True).strip()
-if apps:
-    raise SystemExit('Selected GPU has compute processes; refuse to start: '+apps)
+path = Path(sys.argv[2]) / 'resource_wait.json'
+deadline = time.monotonic() + int(os.environ.get('GPU_IDLE_TIMEOUT_SECONDS', '86400'))
+announced = False
+while True:
+    apps = subprocess.check_output(['nvidia-smi','-i',index,'--query-compute-apps=pid','--format=csv,noheader'],text=True).strip()
+    used, free, utilization = map(int, subprocess.check_output(
+        ['nvidia-smi','-i',index,'--query-gpu=memory.used,memory.free,utilization.gpu',
+         '--format=csv,noheader,nounits'],text=True).strip().split(','))
+    state = dict(gpu=index, timestamp=time.time(), compute_pids=apps.splitlines(),
+                 memory_used_mib=used, memory_free_mib=free, utilization=utilization)
+    if not apps and used < 512 and free >= 18000 and utilization <= 5:
+        path.write_text(json.dumps(dict(state, status='ready'), indent=2)+'\n')
+        break
+    if not announced:
+        path.write_text(json.dumps(dict(state, status='waiting'), indent=2)+'\n')
+        print('Waiting for GPU '+index+' to be idle; other processes are untouched.', flush=True)
+        announced = True
+    if time.monotonic() >= deadline:
+        path.write_text(json.dumps(dict(state, status='timed_out'), indent=2)+'\n')
+        raise SystemExit('GPU remained occupied for 24h (or configured timeout); no experiment started.')
+    time.sleep(30)
 PY
 mkdir -p "$OUTPUT_ROOT"
 common=(--data-root "$DATA_ROOT" --clip-checkpoint "$CLIP_CHECKPOINT" --face-manifest-root "$FACE_MANIFEST_ROOT")

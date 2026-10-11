@@ -55,3 +55,9 @@
 先比较各自固定基线的逐seed差值，再看动态相对静态。保留原计划标准：完整validation最终均值至少+0.20、至少两个seed同方向、平均任务性能不下降、旧路径稳定，才考虑扩大。若两者相近，不把收益归为图像路由；若都无稳定收益，停止当前后置ParaX扩展。既有test仅用于报告，不据其选新结构或超参数。
 
 实现：新增`fixed_baseline_routes.py`、专用启动脚本与回归测试；只对protected bank添加可复核的常量Router输入选项，旧默认行为不变。未修改原联合训练入口与比较器。
+
+## 2026-10-11 真实smoke通过，正式任务等待GPU0
+
+- 本地309项unittest通过；远程308项全套与最新5项新入口回归通过。真实ViT task7 smoke完成动态图像/任务常量两组5缓存epoch，初始差异严格0、原模型与旧专家hash一致；旧四组中复用专家task2 checkpoint的test smoke完成。保留前两次配置恢复失败日志，正式训练未受影响。
+- 正式启动前GPU0被其他进程占用（约5.4GB，util83%，NVML PID2585416/2585413），GPU1–7亦忙；安全检查拒绝启动，未停止/改变其他任务。启动脚本改为后台等待GPU0完全空闲，30秒资源检查、最长24h；不做训练实时分析。
+- batch仍 `fixed_baseline_cached_routes_20261011_01`；等待状态在 `./logs/emotic_fixed_baseline_routes/<batch>/resource_wait.json`，空闲后自动并行旧四组seed0 test队列与三seed新缓存拟合队列。正式指标尚未产生，不能表述为已经训练中。

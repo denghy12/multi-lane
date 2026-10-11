@@ -1,4 +1,10 @@
 
+## 2026-10-11 真实smoke通过，正式任务等待GPU0
+
+- 本地309项unittest通过；远程308项全套与最新5项新入口回归通过。真实ViT task7 smoke完成动态图像/任务常量两组5缓存epoch，初始差异严格0、原模型与旧专家hash一致；旧四组中复用专家task2 checkpoint的test smoke完成。保留前两次配置恢复失败日志，正式训练未受影响。
+- 正式启动前GPU0被其他进程占用（约5.4GB，util83%，NVML PID2585416/2585413），GPU1–7亦忙；安全检查拒绝启动，未停止/改变其他任务。启动脚本改为后台等待GPU0完全空闲，30秒资源检查、最长24h；不做训练实时分析。
+- batch仍 `fixed_baseline_cached_routes_20261011_01`；等待状态在 `./logs/emotic_fixed_baseline_routes/<batch>/resource_wait.json`，空闲后自动并行旧四组seed0 test队列与三seed新缓存拟合队列。正式指标尚未产生，不能表述为已经训练中。
+
 - 新入口本地309项测试通过；数据集路径回归覆盖macOS符号链接解析。GPU smoke继续，正式任务未启动。
 
 - 缓存入口数据集恢复同步修正：CLI字符串路径转换Path；full/三视图配置中序列化为null的Face单路选项恢复数据集默认值，新增train/val/test构造回归测试。
