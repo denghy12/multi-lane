@@ -1,4 +1,4 @@
-"""Matched transfer of the joint26 image-stream configuration; no protection of ParaX."""
+"""Matched image-stream transfer, including the whole-transform freeze control."""
 from __future__ import annotations
 
 import json
@@ -51,6 +51,7 @@ class ImageStreamTransferAudit:
         self.output, self.device = output, device
         self.images = None
         self.references, self.rows = {}, {}
+        self.frozen_bank_hash = None
 
     def begin(self, model, loader, task):
         if self.images is None:
@@ -62,6 +63,13 @@ class ImageStreamTransferAudit:
                             optimization_use=False), self.output/"fixed_anchor_inputs.pt")
         self.before = old_lane_state(model, task)
         self.bank_before = parameter_hash(model.parax_bank.named_parameters()) if model.parax_bank else None
+        self.bank_state_before = parameter_hash(model.parax_bank.state_dict().items()) if model.parax_bank else None
+        if model.parax_freeze_all_after_task0 and task > 0:
+            if (self.bank_state_before != self.frozen_bank_hash
+                or model.parax_bank.training
+                or any(p.requires_grad or p.grad is not None for p in model.parax_bank.parameters())
+                or list(model.parax_optimizer_parameters())):
+                raise RuntimeError("Whole ParaX freeze failed during task activation")
 
     def finish(self, model, task):
         after = old_lane_state(model, task)
@@ -91,11 +99,29 @@ class ImageStreamTransferAudit:
                                                      max_absolute_difference=float((previous-now).abs().max()))
         self.references[task] = current
         bank_after = parameter_hash(model.parax_bank.named_parameters()) if model.parax_bank else None
+        bank_state_after = parameter_hash(model.parax_bank.state_dict().items()) if model.parax_bank else None
+        if model.parax_freeze_all_after_task0:
+            if task == 0:
+                self.frozen_bank_hash = bank_state_after
+            elif (bank_state_after != self.frozen_bank_hash or model.parax_bank.training
+                  or any(p.requires_grad or p.grad is not None for p in model.parax_bank.parameters())):
+                raise RuntimeError("Training changed the fully frozen ParaX transform")
+            if task > 0 and any(
+                row['logit_max_absolute_difference'] > 1e-4
+                or any(abs(v['mean_cosine_distance']) > 1e-5 for v in row['views'].values())
+                for row in drift.values()
+            ):
+                raise RuntimeError("Old predictions drifted with a fully frozen shared transform")
         self.rows[str(task)] = dict(old_lane_parameters_unchanged=True,
                                     old_lane_hash_before=parameter_hash(self.before.items()),
                                     old_lane_hash_after=parameter_hash(after.items()),
                                     shared_parax_hash_before=self.bank_before, shared_parax_hash_after=bank_after,
                                     shared_parax_changed=self.bank_before != bank_after,
+                                    shared_parax_state_hash_before=self.bank_state_before,
+                                    shared_parax_state_hash_after=bank_state_after,
+                                    whole_parax_freeze_enabled=model.parax_freeze_all_after_task0,
+                                    whole_parax_freeze_verified=bool(model.parax_freeze_all_after_task0 and task > 0),
+                                    parax_trainable_parameters=sum(p.numel() for p in model.parax_optimizer_parameters()),
                                     fixed_anchor_old_task_drift=drift)
         (self.output/"image_stream_transfer_audit.json").write_text(json.dumps(dict(
             sample_ids=self.sample_ids, source_split="val", precision="FP32_TF32_off",

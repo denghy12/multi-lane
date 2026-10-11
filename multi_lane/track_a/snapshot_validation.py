@@ -58,7 +58,8 @@ def audit_source(source):
     if config['parax_mode'] == 'image':
         require(config['parax_layer_indices'] == [10] and config['parax_rank'] == 32
                 and config['parax_num_experts'] == 3 and not config['parax_freeze_center_after_task0']
-                and not config['parax_task_local_gate'] and not config['parax_level_conditioned'], 'Different ParaX method')
+                and not config['parax_task_local_gate'] and not config['parax_level_conditioned']
+                and not config.get('parax_freeze_all_after_task0', False), 'Different ParaX method')
     return config, summary, audit
 
 
@@ -154,7 +155,8 @@ def replay(model,validation,source,config,task,device):
     return difference
 
 
-def evaluate_snapshots(source,output,data_root,clip_checkpoint,face_manifest_root,preflight=False,device_name='cuda'):
+def evaluate_snapshots(source,output,data_root,clip_checkpoint,face_manifest_root,preflight=False,device_name='cuda',split='val'):
+    require(split in ('val','test'),'Unsupported evaluation split')
     begin=time.time()
     config,summary,audit=audit_source(source)
     require(not output.exists(),'Output already exists')
@@ -162,11 +164,15 @@ def evaluate_snapshots(source,output,data_root,clip_checkpoint,face_manifest_roo
     require(_sha256(clip_checkpoint) == config['clip_checkpoint_sha256'],'CLIP file changed')
     require((Path(config['data_root']).resolve() == data_root.resolve()),'Dataset root changed')
     manifest_paths=[face_manifest_root/'manifests/val.jsonl',face_manifest_root/'detector_config.json']
+    if split=='test':manifest_paths.append(face_manifest_root/'manifests/test.jsonl')
     manifest_hashes={str(p):_sha256(p) for p in manifest_paths}
     require(manifest_hashes[str(manifest_paths[0])] == config['face_manifest']['artifact_sha256']['val_manifest'],'Validation Face manifest changed')
     require(manifest_hashes[str(manifest_paths[1])] == config['face_manifest']['artifact_sha256']['detector_config'],'Face detector config changed')
+    if split=='test':
+        require(manifest_hashes[str(manifest_paths[2])] == config['face_manifest']['artifact_sha256']['test_manifest'],'Test Face manifest changed')
     files=[source/name for name in ('config.json','seed_summary.json','paired_protocol_audit.json','image_stream_transfer_audit.json','training_history.json')]
     files += [source/f'{folder}/task{t}.{suffix}' for t in range(8) for folder,suffix in (('compact_checkpoints','pth'),('val_scores','npz'))]
+    if split=='test':files.append(source/'test_scores/task7.npz')
     hashes={str(p):_sha256(p) for p in files}
     set_seed(config['seed'],config['tf32']);device=torch.device(device_name)
     require(device.type=='cpu' or torch.cuda.is_available(),'CUDA unavailable')
@@ -175,8 +181,8 @@ def evaluate_snapshots(source,output,data_root,clip_checkpoint,face_manifest_roo
     require(visual_hash == audit['frozen_visual_sha256_after'],'Restored CLIP differs')
     validation=make_source(config,data_root,face_manifest_root,'val');validate_classes(validation)
     require(len(validation)==2397,'Expected complete2397-person validation')
-    loader=DataLoader(LabelView(validation,range(len(validation)),range(26),include_sample_id=True),
-                      batch_size=config['eval_batch_size'],shuffle=False,num_workers=config['workers'])
+    loader=None
+    expected_people=2397 if split=='val' else 5368
     final_payload=_torch_load(source/'compact_checkpoints/task7.pth')
     output.mkdir(parents=True);blocks=[];task_rows={}
     for task in ([0,7] if preflight else range(8)):
@@ -185,6 +191,11 @@ def evaluate_snapshots(source,output,data_root,clip_checkpoint,face_manifest_roo
         restore_compact_model_state(model,payload,task,config['git']);model.requires_grad_(False).eval()
         before=tensor_state_digest(compact_model_state_dict(model))
         difference=replay(model,validation,source,config,task,device)
+        if loader is None:
+            cohort=validation if split=='val' else make_source(config,data_root,face_manifest_root,'test')
+            validate_classes(cohort);require(len(cohort)==expected_people,'Incomplete evaluation cohort')
+            loader=DataLoader(LabelView(cohort,range(len(cohort)),range(26),include_sample_id=True),
+                              batch_size=config['eval_batch_size'],shuffle=False,num_workers=config['workers'])
         block,full=infer(model,loader,device,config['amp'],task,config['task_sizes'],1 if preflight else None)
         require(tensor_state_digest(compact_model_state_dict(model))==before,'Inference changed weights')
         require(all(p.grad is None for p in model.parameters()),'Inference created parameter gradients')
@@ -197,22 +208,22 @@ def evaluate_snapshots(source,output,data_root,clip_checkpoint,face_manifest_roo
         if task==7:
             final=dict(full)
             final['targets']=final.pop('full_targets');final['class_indices']=np.arange(26)
-            np.savez_compressed(output/'final_model_validation.npz',**final)
+            np.savez_compressed(output/f'final_model_{split}.npz',**final)
     result=dict(status='preflight_passed' if preflight else 'complete',source=str(source.resolve()),source_config=config,
-                evaluator_git=metadata,seed=config['seed'],preflight=preflight,evaluation_split='val',
-                test_images_or_scores_opened=False,training_performed=False,optimizer_updates=0,
+                evaluator_git=metadata,seed=config['seed'],preflight=preflight,evaluation_split=split,
+                test_images_or_scores_opened=split=='test',test_weight_search=False,training_performed=False,optimizer_updates=0,
                 source_sha256=hashes,face_manifest_sha256=manifest_hashes,tasks=task_rows)
     if not preflight:
         assembled=assemble_blocks(blocks,config['task_sizes'])
         require(np.array_equal(assembled['sample_ids'],final['sample_ids']) and np.array_equal(assembled['targets'],final['targets']),'Final/assembled cohorts differ')
-        np.savez_compressed(output/'assembled_validation.npz',**assembled)
+        np.savez_compressed(output/f'assembled_{split}.npz',**assembled)
         result.update(final_metrics=score_metrics(final,config['threshold']),snapshot_metrics=score_metrics(assembled,config['threshold']),
                       samples=len(assembled['sample_ids']),sample_ids_sha256=ids_digest(assembled['sample_ids'].tolist()))
-        reference=load_scores(source/'val_scores/task7.npz')
+        reference=load_scores(source/f'{split}_scores/task7.npz')
         require(np.array_equal(final['sample_ids'],reference['sample_ids']) and np.array_equal(final['targets'],reference['targets']),'Full final replay cohort differs')
         result['final_replay_max_logit_difference']=float(np.abs(final['logits']-reference['logits']).max())
         require(result['final_replay_max_logit_difference'] <= .01,'Full final checkpoint replay differs')
-        require(abs(result['final_metrics']['fused']['mAP']-summary['metrics']['final_mAP']) <= .02,'Final validation mAP differs')
+        require(abs(result['final_metrics']['fused']['mAP']-summary['metrics' if split=='val' else 'test_metrics']['final_mAP']) <= .02,'Final validation mAP differs')
     require(tensor_state_digest(model.visual_encoder.state_dict())==visual_hash,'Inference changed CLIP')
     require(all(_sha256(Path(p))==v for p,v in hashes.items()),'Source artifact changed')
     require(all(_sha256(Path(p))==v for p,v in manifest_hashes.items()),'Face artifacts changed')
@@ -228,5 +239,6 @@ if __name__=='__main__':
         parser.add_argument('--'+key,type=Path,required=True)
     parser.add_argument('--preflight',action='store_true')
     parser.add_argument('--device',default='cuda')
+    parser.add_argument('--split',choices=('val','test'),default='val')
     args=parser.parse_args()
-    evaluate_snapshots(args.source,args.output,args.data_root,args.clip_checkpoint,args.face_manifest_root,args.preflight,args.device)
+    evaluate_snapshots(args.source,args.output,args.data_root,args.clip_checkpoint,args.face_manifest_root,args.preflight,args.device,args.split)

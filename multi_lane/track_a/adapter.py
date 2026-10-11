@@ -71,6 +71,7 @@ class ParaXImageAdapterBank(nn.Module):
         num_tasks: int = 1,
         task_local_gate: bool = False,
         freeze_center_after_task0: bool = False,
+        freeze_all_after_task0: bool = False,
         projector_bottleneck_dim: int = 0,
         task_local_router: bool = False,
         task_local_projection: bool = False,
@@ -116,6 +117,7 @@ class ParaXImageAdapterBank(nn.Module):
         self.freeze_center_from_start = bool(freeze_center_from_start)
         self.smooth_ratio_bound = float(smooth_ratio_bound)
         self.freeze_center_after_task0 = bool(freeze_center_after_task0)
+        self.freeze_all_after_task0 = bool(freeze_all_after_task0)
         self.num_tasks = int(num_tasks)
         if self.num_tasks <= 0:
             raise ValueError("ParaX num_tasks must be positive")
@@ -189,6 +191,11 @@ class ParaXImageAdapterBank(nn.Module):
 
     def _set_trainability(self) -> None:
         self.requires_grad_(False)
+        if self.freeze_all_after_task0 and self._current_task_id > 0:
+            for parameter in self.parameters():
+                parameter.grad = None
+            self.eval()
+            return
         center_frozen = self.freeze_center_from_start or (
             self.freeze_center_after_task0 and self._current_task_id > 0
         )
@@ -216,6 +223,12 @@ class ParaXImageAdapterBank(nn.Module):
             self.output_scale_mode == "learnable" or self.initialization == "identity"
             or self.task_local_gate
         )
+
+    def train(self, mode: bool = True):
+        # Parent model.train() must not enable stateful training behavior in
+        # the immutable shared image transform after the first task.
+        frozen = self.freeze_all_after_task0 and self._current_task_id > 0
+        return super().train(mode and not frozen)
 
     def active_parameters(self) -> Iterable[nn.Parameter]:
         return (parameter for parameter in self.parameters() if parameter.requires_grad)

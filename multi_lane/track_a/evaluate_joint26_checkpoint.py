@@ -56,7 +56,7 @@ def build_model(config, visual, task_sizes=(26,)):
     if config["parax_mode"] == "image":
         keys = ("rank", "num_experts", "layer_indices", "router_hidden", "residual_scale", "level_conditioned",
                 "initialization", "trainable_components", "output_scale_mode", "residual_ratio_cap",
-                "task_local_gate", "freeze_center_after_task0", "projector_bottleneck_dim", "smooth_ratio_bound")
+                "task_local_gate", "freeze_center_after_task0", "freeze_all_after_task0", "projector_bottleneck_dim", "smooth_ratio_bound")
         for key in keys:
             name = "parax_" + key
             if name in config:

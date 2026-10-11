@@ -2712,6 +2712,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--parax-calibration-consistency-weight", type=float, default=0.1)
     parser.add_argument("--parax-task-local-gate", action="store_true")
     parser.add_argument("--parax-freeze-center-after-task0", action="store_true")
+    parser.add_argument("--parax-freeze-all-after-task0", action="store_true")
     parser.add_argument("--parax-distillation-weight", type=float, default=0.0)
     parser.add_argument("--parax-residual-penalty-weight", type=float, default=0.0)
     parser.add_argument("--parax-projector-bottleneck-dim", type=int, default=0)
@@ -2767,6 +2768,10 @@ def main() -> None:
 
 def run(args: argparse.Namespace) -> None:
     from .image_stream_transfer_audit import ImageStreamTransferAudit, validate_transfer_config
+    if args.parax_freeze_all_after_task0 and (
+        not args.image_stream_transfer_audit or args.parax_mode != "image" or args.also_report_test
+    ):
+        raise ValueError("Whole ParaX freeze control requires image-stream audit and validation only")
     if args.image_stream_transfer_audit:
         validate_transfer_config(args)
     paired_protocol_audit = TRAINING_PROTOCOL == "joint26" or args.fixed_view_paired_audit or args.protected_parax_paired_audit or args.image_stream_transfer_audit
@@ -3177,6 +3182,7 @@ def run(args: argparse.Namespace) -> None:
         parax_residual_ratio_cap=args.parax_residual_ratio_cap,
         parax_task_local_gate=args.parax_task_local_gate,
         parax_freeze_center_after_task0=args.parax_freeze_center_after_task0,
+        parax_freeze_all_after_task0=args.parax_freeze_all_after_task0,
         parax_projector_bottleneck_dim=args.parax_projector_bottleneck_dim,
         parax_smooth_ratio_bound=args.parax_smooth_ratio_bound,
     ).float().to(device)
@@ -3757,6 +3763,8 @@ def run(args: argparse.Namespace) -> None:
         "parax_residual_ratio_cap": args.parax_residual_ratio_cap if args.parax_mode != "disabled" else None,
         "parax_task_local_gate": bool(args.parax_task_local_gate) if args.parax_mode != "disabled" else False,
         "parax_freeze_center_after_task0": bool(args.parax_freeze_center_after_task0) if args.parax_mode != "disabled" else False,
+        "parax_freeze_all_after_task0": bool(args.parax_freeze_all_after_task0),
+        "parax_optimizer_initial_learning_rate": args.adapter_learning_rate if args.parax_mode != "disabled" else None,
         "parax_task_local_router": args.parax_mode in {"post_task_router", "post_task_staged", "post_task_staged_static", *PROTECTED_MODES},
         "protected_parax_paired_audit": bool(args.protected_parax_paired_audit),
         "protected_parax_identity_audit_version": 2 if args.protected_parax_paired_audit else None,

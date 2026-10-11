@@ -19,4 +19,4 @@ CUDA_VISIBLE_DEVICES="${GPU}" "${PYTHON}" -m multi_lane.track_a.snapshot_validat
   --data-root ../multi-lane-main/datasets/EMOTIC \
   --clip-checkpoint ../CODE_DDP-benchmark/pretrained/clip/ViT-B-16.pt \
   --face-manifest-root ../emotic_benchmark_runs/multi_lane_face_test_manifest_v0.1/face_manifest_train_val_test_v1_20260909 \
-  "${extra[@]}" 2>&1 | tee "${LOG_ROOT}/seed${SEED}/${METHOD}.log"
+  --split "${EVAL_SPLIT:-val}" "${extra[@]}" 2>&1 | tee "${LOG_ROOT}/seed${SEED}/${METHOD}.log"

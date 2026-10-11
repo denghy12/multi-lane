@@ -75,6 +75,7 @@ class MultiLaneModel(nn.Module):
         parax_residual_ratio_cap: float = 0.0,
         parax_task_local_gate: bool = False,
         parax_freeze_center_after_task0: bool = False,
+        parax_freeze_all_after_task0: bool = False,
         parax_projector_bottleneck_dim: int = 0,
         parax_smooth_ratio_bound: float = 0.0,
     ) -> None:
@@ -222,6 +223,9 @@ class MultiLaneModel(nn.Module):
         self.adapter_mode = adapter_mode
         self.adapter_runtime_enabled = adapter_mode != "disabled"
         self.parax_mode = parax_mode
+        if parax_freeze_all_after_task0 and parax_mode != "image":
+            raise ValueError("Whole ParaX freeze control requires the image stream")
+        self.parax_freeze_all_after_task0 = bool(parax_freeze_all_after_task0)
         self.parax_post_mode = parax_mode in post_modes
         self.parax_staged_mode = parax_mode in staged_modes
         self.parax_protected_mode = parax_mode in PROTECTED_MODES
@@ -246,6 +250,7 @@ class MultiLaneModel(nn.Module):
                     num_tasks=len(task_sizes),
                     task_local_gate=parax_task_local_gate,
                     freeze_center_after_task0=parax_freeze_center_after_task0,
+                    freeze_all_after_task0=parax_freeze_all_after_task0,
                     projector_bottleneck_dim=parax_projector_bottleneck_dim,
                     task_local_router=(parax_mode == "post_task_router" or self.parax_staged_mode or self.parax_protected_mode),
                     task_local_projection=(self.parax_staged_mode or self.parax_protected_mode),
