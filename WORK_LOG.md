@@ -1,4 +1,37 @@
+
+## 2026-10-11 固定真实基线后学习共享专家（执行中）
+
+- 用户授权补旧validation实验seed0 test并实现下一步。已确认最新八任务四组实际含全部三seed test；仅前三任务旧四组缺test，计划补其12份checkpoint推理。
+- 新独立分支 `exp/parax-fixed-baseline-cached-routing-20261011`；复用managed worktree，保留原有未提交文档；其他会话业务代码不改。
+- 新入口复用24份逐任务基线checkpoint，全冻结原模型，train-only CPU缓存拟合dynamic/constant Router。rank32、两个活跃专家、task0后专家冻结、2%可微界、5缓存epoch、lr4e-4、固定三视图特征融合；无level/蒸馏/patch Projector。
+- 完整配置与审计见 `docs/fixed_baseline_cached_routes_plan_20261011.md`。最新GPU盘点仅GPU0空闲，1–7均为其他任务，不占用。
+- 本地307项unittest通过；真实GPU smoke、Git-only同步与正式启动待完成。旧八任务结果不重复训练/评估；此次新拟合只validation，test请求限旧seed0补测。
+
 # 工作日志
+
+## 2026-10-11 18:20 CST：专家冻结八任务三seed全部完成，旧路径稳定但最终收益未稳定
+
+batch protected_parax_freezing_8task_seed012_valtest_20261011_01于16:33:39 CST结束，6381fa3、服务器clean，12/12 exit0、240epoch/13950updates/zero skips，val/test各8终点，完整比较审计和本地重审通过；963个非checkpoint产物同步SHA一致。更新此前seed0/1阶段性结论，seed2有正收益，不能再说全部seed退步。基线/冻结池/仅新/复用最终val42.6979/42.6134/42.5896/42.3488，test32.0921/32.0563/32.0873/32.1867；冻结池差值val−0.0845/test−0.0358，但average+0.2353/+0.0464。复用对仅新val−0.2409（三seed均负），test+0.0993但不一致，未证明稳定迁移。
+
+旧参数逐值0变，CLIP不变，ParaX FP32旧anchor变化≤2.10e-5（基线3.81e-5），固定同人物旧类变化小；当前不归因共享中心持续更新。task6新增类val三seed均差，冻结/仅新/复用平均−1.1822/−2.8240/−2.6613，是首次适配问题。冻结池残差on−off val+0.0697/test+0.0335，off−基线−0.1543/−0.0693；seed2正面结果在关闭残差时已存在，不能全归功于动态残差。消融不能单独证明原模块被训练坏。
+
+下一步仅建议：复用已核实24份基线逐task compact checkpoints，冻结原Task Forward/Selector/Prompt/head，在train CPU特征缓存上学两专家小池；动态Router与任务常量Router配对，同预算5epoch/LR0.0004/batch64、固定融合/rank32/2%界、无新增正则。先三seed task0–2验证baseline恢复，再低成本覆盖八task并检查task6，不以短程收益宣称完成。新checkpoint拟合入口尚需实现，现有staged runner会重训基线。完整val通过后才固定test，不用本批test调参。本轮无业务代码改动、提交推送或新训练；所有实验已结束，不重复启动。报告docs/protected_parax_eight_task_three_seed_complete_analysis_20261011.md，复算output/parax_freezing_three_seed_analysis_20261011/。
+
+## 2026-10-11 16:01 CST：冻结八任务仅8/12完成，seed0/1阶段性分析，seed2继续运行
+
+正式batch protected_parax_freezing_8task_seed012_valtest_20261011_01（6381fa3、服务器clean）seed0/1各四组exit0，均240epoch/13950updates/zero skips，完整八任务val/test及配对审计通过；645非checkpoint产物同步SHA一致。seed2检查时baseline task7、冻结池task5、仅新/复用task4，未全部结束，没有三seed最终结果，不中断、不重复启动、不持续监控。
+
+两seed基线/冻结池/仅新/复用final val42.7405/42.4490/42.6103/42.2520；test32.1691/32.0098/31.9025/32.0210；后三者两个seed两个split均低同批基线。复用对仅新val−0.3583，test+0.1185但seed方向相反，未证明迁移。旧参数逐值不变；FP32 anchor变化≤2.10e-5（基线3.81e-5），固定旧人物旧类基本稳定，不再归因共享中心漂移。冻结池残差on−off val+0.1142/test+0.0639，但off−独立基线−0.4056/−0.2232，联合训练状态差距超过直接残差收益；可能含共同适配，尚非模块因果证明。Face略改善/Full退步，固定融合未改。
+
+下一步阶段性建议：等seed2完整审计；再只针对冻结小池做先基线后冻结原Task Forward/head、训练集CPU特征缓存上学专家的分阶段validation，并以同预算静态常量Router区分动态价值；记录额外拟合预算，保留旧路径。不先扩池/蒸馏/改融合/内部CLIP。此次仅分析维护文档，无训练代码改动/提交推送/新训练。报告docs/protected_parax_eight_task_seed01_partial_analysis_20261011.md，复算output/parax_freezing_seed01_analysis_20261011/analysis.json。
+
+## 2026-10-11 08:22 CST：修复已部署，真实预检重审通过，正式12组已排队等待空闲GPU
+
+用户授权执行的四步已落实：fix/parax-full-comparison-relaunch-20261011提交6381fa3f300bd4329f4e9ea84a0fbdc9442f35fb已push；服务器Git-only新worktree /mnt/haoyuan/workspace/multi-lane-main-parax-freezing-eight-task-relaunch 与本地同分支/HEAD、upstream匹配且clean。两端完整304项unittest通过、原Shell语法/输入/实际CLIP SHA通过。无模型、runner或原训练Shell改动。
+
+新batch protected_parax_freezing_8task_seed012_valtest_20261011_01、tmux ml_parax_freeze8_fix_20261011已运行。服务器重新审核旧真实八任务预检通过，prerequisite_source_compatibility确认仅比较器变更，comparison_passed记录训练来源eb04972与审核器6381fa3。旧失败日志SHA和旧完成标记缺失状态均保持原样。新control已有manifest、prerequisite_passed、dispatch_ready；核验时无started.txt、无任何per-arm started，即正式0/12组实际启动，因为GPU0–7各被其他任务占用约19GB。控制器存活，无需用户再启动；自动只在空闲卡派发，最长无空闲等待24小时，不清理其他任务。不能把排队状态说成已经训练。
+
+仍为四方法×seed012、task0–7、30epoch/task、固定三视图特征融合、同权重validation/test，不新增变量、不从预检续跑。启动证据同步本地output/parax_freezing_status_sync_20261011与对应batch control/logs；停止实时监督，用户下次要求检查时再统一查看。计划docs/protected_parax_freezing_relaunch_plan_20261011.md。此次只在独立工作树提交源码，主工作树其他会话代码和服务器test-only未改；无main合并或数据删除。部署后状态仅补充本地文档，训练运行源码仍6381fa3。
 
 ## 2026-10-11 08:18 CST：已授权修复冻结实验流程并准备正式重启
 

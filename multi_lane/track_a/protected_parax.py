@@ -32,6 +32,7 @@ class ProtectedParaXBank(ParaXImageAdapterBank):
         if self.num_experts < 2:
             raise ValueError("Task0 needs two initial experts")
         self.policy = policy
+        self.router_input_mode = "image"
         # Independent Parameters prevent optimizer momentum/weight decay from
         # touching frozen slices of an otherwise trainable stacked tensor.
         a, b = self.expert_a.detach().clone(), self.expert_b.detach().clone()
@@ -94,6 +95,10 @@ class ProtectedParaXBank(ParaXImageAdapterBank):
 
     def _router_gates(self, key, inputs, task_id):
         self._check_task(task_id)
+        if self.router_input_mode == "constant":
+            inputs = torch.ones_like(inputs)
+        elif self.router_input_mode != "image":
+            raise ValueError("Router input must be image or constant")
         logits = self.routers[key](inputs)
         return torch.softmax(logits.masked_fill(~self.expert_access[task_id], -torch.inf), dim=-1)
 
@@ -112,7 +117,8 @@ class ProtectedParaXBank(ParaXImageAdapterBank):
         return result
 
     def policy_summary(self, task_id):
-        return {"policy": self.policy, "eligible_experts": self.expert_access[task_id].nonzero().flatten().tolist(),
+        return {"policy": self.policy, "router_input_mode": self.router_input_mode,
+                "eligible_experts": self.expert_access[task_id].nonzero().flatten().tolist(),
                 "new_experts": list(self.new_expert_ids(task_id)),
                 "trainable_parameters": sum(p.numel() for p in self.active_parameters()),
                 "total_parameters": self.parameter_count(), "sealed": bool(self.sealed_tasks[task_id])}
