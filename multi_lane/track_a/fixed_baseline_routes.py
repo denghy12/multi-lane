@@ -65,12 +65,12 @@ def source_dataset(config, data_root, face_root, split):
                               jitter_strength=config["person_color_jitter_strength"],
                               jitter_probability=config["person_color_jitter_probability"],
                               full_crop_mode=config["full_crop_mode"])
-    return EMOTIC(str(resolve_dataset_parent(data_root)), train=split == "train", transform=transform,
+    face_options = {k: config[k] for k in ("face_crop_margin", "face_min_training_short_side", "face_min_training_score")
+                    if config.get(k) is not None}
+    return EMOTIC(str(resolve_dataset_parent(Path(data_root))), train=split == "train", transform=transform,
                   eval_splits=(split,) if split != "train" else ("val",), input_mode="full",
                   person_crop_margin=config["person_crop_margin"], multi_view_transform=multi,
-                  face_manifest_root=face_root, face_crop_margin=config.get("face_crop_margin"),
-                  face_min_training_short_side=config.get("face_min_training_short_side"),
-                  face_min_training_score=config.get("face_min_training_score"))
+                  face_manifest_root=face_root, **face_options)
 
 
 def loader(source, classes, config, smoke=False):

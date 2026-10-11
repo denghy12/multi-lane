@@ -2,9 +2,11 @@ import copy
 import unittest
 import json
 from pathlib import Path
+import tempfile
+from unittest.mock import patch
 
 import torch
-from multi_lane.track_a.fixed_baseline_routes import restore_base, cached_identity, validate_source, build_model
+from multi_lane.track_a.fixed_baseline_routes import restore_base, cached_identity, validate_source, build_model, source_dataset
 from multi_lane.track_a.model import MultiLaneModel
 from multi_lane.track_a.post_task_calibration import fit_cached_routes, base_hash
 from multi_lane.track_a.runner import compact_model_state_dict
@@ -12,6 +14,22 @@ from test_track_a_reproduction import FakeVisual
 
 
 class FixedBaselineRoutesTest(unittest.TestCase):
+    def test_dataset_factory_resolves_string_paths_and_restores_null_face_defaults(self):
+        config = json.loads((Path(__file__).parent / 'fixtures/protected_full_runner_config.json').read_text())
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / 'EMOTIC'; root.mkdir()
+            (root / 'CVPR17_Annotations.mat').touch()
+            with patch('multi_lane.track_a.fixed_baseline_routes.EMOTIC') as factory:
+                for split in ('train', 'val', 'test'):
+                    source_dataset(config, str(root), './face_manifest', split)
+                    args, kwargs = factory.call_args
+                    self.assertEqual(args[0], directory)
+                    self.assertEqual(kwargs['train'], split == 'train')
+                    for name in ('face_crop_margin', 'face_min_training_short_side', 'face_min_training_score'):
+                        self.assertNotIn(name, kwargs)
+                    if split != 'train':
+                        self.assertEqual(kwargs['eval_splits'], (split,))
+
     def test_real_serialized_config_handles_inactive_null_options(self):
         config = json.loads((Path(__file__).parent / 'fixtures/protected_full_runner_config.json').read_text())
         config.update(num_prompt_layers=1, prompt_private_layers=1, parax_layer_indices=[0])
