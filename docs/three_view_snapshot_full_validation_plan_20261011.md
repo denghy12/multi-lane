@@ -49,3 +49,8 @@
 ## 版本与运行记录
 
 本地独立工作树：`/Users/denghaoyuan/.codex/worktrees/three-view-snapshot-validation/multi-lane-main`，分支`exp/three-view-snapshot-validation`，起点7563364。保留主本地工作树及其他会话所有改动。服务器拟创建`/mnt/haoyuan/workspace/multi-lane-main-snapshot-validation`，通过Git-only同步；不修改已完成来源工作树或test-only工作树。
+
+
+### 2026-10-11 验证通过，完整评估准备排队
+
+实现提交bd8410d。服务器独立worktree通过291/291 unittest；本地Python编译、两份Shell语法和git diff检查通过。seed0无ParaX与内部ParaX分别恢复task0/task7，四次原validation首批重放最大logit差均为0；完整validation首批各64人前向通过，源文件/CLIP/方法权重hash未变、无参数梯度、无优化更新、未读取test图像或test NPZ。预检批次snapshot_validation_preflight_20261011_01，GPU2短串行推理已结束。8张卡仍被其他训练使用，正式批次three_view_snapshot_full_validation_seed012_20261011_01将通过tmux有限等待空闲GPU（>=20000MiB且util<=15%，最多12小时），随后依次评估六个来源；这不是重新训练。下一阶段完全冻结ParaX的三任务控制尚未实现/启动，先等待完整validation结论。禁止将预检64人当作完整评估结果。
