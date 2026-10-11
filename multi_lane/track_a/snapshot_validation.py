@@ -204,7 +204,7 @@ def evaluate_snapshots(source,output,data_root,clip_checkpoint,face_manifest_roo
         task_rows[str(task)]=dict(checkpoint_sha256=hashes[str(source/f'compact_checkpoints/task{task}.pth')],
                                   replay_max_logit_difference=difference,owned_parameters_equal_final=True,
                                   weights_unchanged=True,samples=len(block['sample_ids']))
-        print(f'SNAPSHOT_VAL task={task} samples={len(block["sample_ids"])} replay={difference:.8g}',flush=True)
+        print(f'SNAPSHOT_{split.upper()} task={task} samples={len(block["sample_ids"])} replay={difference:.8g}',flush=True)
         if task==7:
             final=dict(full)
             final['targets']=final.pop('full_targets');final['class_indices']=np.arange(26)
@@ -229,7 +229,7 @@ def evaluate_snapshots(source,output,data_root,clip_checkpoint,face_manifest_roo
     require(all(_sha256(Path(p))==v for p,v in manifest_hashes.items()),'Face artifacts changed')
     result.update(source_unchanged=True,clip_unchanged=True,elapsed_seconds=time.time()-begin)
     (output/'evaluation_summary.json').write_text(json.dumps(result,indent=2,ensure_ascii=False)+'\n')
-    print('SNAPSHOT_VALIDATION_COMPLETE '+result['status'],flush=True)
+    print(f'SNAPSHOT_{split.upper()}_COMPLETE '+result['status'],flush=True)
     return result
 
 

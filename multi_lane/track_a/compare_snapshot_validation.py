@@ -55,7 +55,7 @@ def summarize(root, seeds=(0,1,2), split='val'):
                 decision_note='Historical composition isolates post-introduction changes but does not undo how later tasks were trained; not an upper bound for all stability methods.')
     (root/'summary.json').write_text(json.dumps(result,indent=2,ensure_ascii=False)+'\n')
     lines=[f'# 完整{expected_people}人{split}的历史任务变换保护对照','',f'全部26类；seed={list(seeds)}；没有新训练或权重搜索。单seed不计算标准差。','',
-           '| 三路模型与预测方式 | Validation mAP |','| --- | ---: |']
+           f'| 三路模型与预测方式 | {split} mAP |','| --- | ---: |']
     for method,kind,title in [('THREE_VIEW','final_metrics','无ParaX，最终模型'),('THREE_VIEW','snapshot_metrics','无ParaX，各类别取出生任务checkpoint'),
                               ('THREE_VIEW_PARAX','final_metrics','内部共享ParaX，最终模型'),('THREE_VIEW_PARAX','snapshot_metrics','内部ParaX，各类别取出生任务checkpoint')]:
         value=metrics[method][kind]['fused'];formatted=f'{value["mean"]:.4f}'

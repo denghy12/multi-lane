@@ -54,3 +54,8 @@
 - 三任务不能直接回答task6（627人）的适配问题。
 
 当前实现完毕，远程单测/smoke/正式启动记录待补；本轮新增实际ParaX优化器初始lr字段，避免Image-token Adapter关闭时adapter_learning_rate=None产生误读。
+
+
+### 2026-10-11 Whole-freeze checks passed; declared jobs ready for GPU0
+
+Production code a347ed0, fixture correction d06e46a. Remote294/294 unittest passed (initial new gradient fixture needed two transformer blocks to exercise an internal insertion, corrected; no algorithm correction). Local compile/bash/diff passed. Real smoke whole_parax_freeze_smoke_20261011_01: tasks0-2 each4updates/total12, zero skips, task0 bank162404 trainable and grad finite/nonzero; task1/2 bank0 trainable, grad norms0, complete state unchanged. Maximum old FP32 logit drift8.046627e-7, reserved3342MiB. Pairing to original seed0 initial hash/train IDs passes; no test loaded in training smoke. Separate seed0 baseline/live test preflight task0/task7 passed four original validation replays maxdifference0,64test people per snapshot, source/CLIP unchanged. Not performance evidence. GPU0 idle24GB; formal two processes to launch after doc-only/report-label sync. Freeze batch three_view_whole_parax_freeze_seed0_val_20261011_01 and test batch three_view_snapshot_test_seed0_20261011_01; tmux ml_whole_parax_freeze_20261011. Complete control/post-training full2397val comparator will run automatically. No continuous training/test monitoring.
