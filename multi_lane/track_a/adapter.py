@@ -446,6 +446,8 @@ class TaskLaneTransformerAdapterBank(nn.Module):
             self.task_gates = nn.ParameterList()
         self._auxiliary_residual_ratios = []
         self._auxiliary_cosine_distances = []
+        self._runtime_residual_scope = "all"
+        self._runtime_residual_multiplier = 1.0
         self.requires_grad_(False)
 
     @property
@@ -478,12 +480,28 @@ class TaskLaneTransformerAdapterBank(nn.Module):
                 self.task_gates[task_id].requires_grad_(True)
         self._current_task_id = int(task_id)
 
-    def residual_multiplier(self, task_id: int) -> torch.Tensor | float:
+    def set_residual_ablation(self, scope: str = "all", multiplier: float = 1.0) -> None:
+        if scope not in {"all", "full", "auxiliary"}:
+            raise ValueError("Residual ablation scope must be all, full, or auxiliary")
+        if not math.isfinite(float(multiplier)) or float(multiplier) < 0:
+            raise ValueError("Residual ablation multiplier must be finite and non-negative")
+        self._runtime_residual_scope = str(scope)
+        self._runtime_residual_multiplier = float(multiplier)
+
+    def residual_multiplier(self, task_id: int, view_name: str = "full") -> torch.Tensor | float:
         if not 0 <= int(task_id) < self.num_tasks:
             raise ValueError("Adapter task id is outside the protocol")
+        if hasattr(self, "view_names") and view_name not in self.view_names:
+            raise ValueError("Unknown Image-token Adapter view")
+        active = (
+            self._runtime_residual_scope == "all"
+            or (hasattr(self, "view_names") and self._runtime_residual_scope == "full" and view_name == "full")
+            or (hasattr(self, "view_names") and self._runtime_residual_scope == "auxiliary" and view_name != "full")
+        )
+        runtime = self._runtime_residual_multiplier if active else 1.0
         if self.residual_gate_mode == "learnable":
-            return torch.sigmoid(self.task_gates[int(task_id)])
-        return self.residual_scale
+            return torch.sigmoid(self.task_gates[int(task_id)]) * runtime
+        return self.residual_scale * runtime
 
     def gate_values(self) -> Tuple[float, ...]:
         if self.residual_gate_mode == "learnable":
@@ -738,7 +756,7 @@ class TaskImageTokenAdapterBank(TaskLaneTransformerAdapterBank):
                     delta = delta + self.view_task_adapters[int(task_id)][view_name][
                         str(layer_id)
                     ](frozen_image_tokens)
-            delta = self.residual_multiplier(int(task_id)) * delta
+            delta = self.residual_multiplier(int(task_id), view_name) * delta
             adapted_tokens = frozen_image_tokens + delta
             frozen_float = frozen_image_tokens.detach().float()
             delta_float = delta.detach().float()

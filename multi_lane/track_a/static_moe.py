@@ -34,11 +34,19 @@ class OutputExpertPool(nn.Module):
         super().__init__()
         self.experts = nn.ModuleList([OutputExpert(width, rank, activation) for _ in range(3)])
         self.output_bias = nn.Parameter(torch.zeros(width))
+        self.last_output_correlation = 0.0
 
     def forward(self, value, weights):
         # Evaluate all three in v1: uniform/overlap have the same forward graph
         # and FLOPs. A zero route coefficient still gives that expert zero gradient.
         outputs = torch.stack([expert(value) for expert in self.experts])
+        flat = outputs.detach().float().reshape(3, -1)
+        centered = flat - flat.mean(dim=1, keepdim=True)
+        normalized = centered / centered.norm(dim=1, keepdim=True).clamp_min(1e-12)
+        corr = normalized @ normalized.transpose(0, 1)
+        self.last_output_correlation = float(
+            torch.stack((corr[0, 1], corr[0, 2], corr[1, 2])).mean().cpu()
+        )
         weights = weights.to(outputs).view(3, *([1] * value.ndim))
         return (outputs * weights).sum(dim=0) + self.output_bias
 
@@ -86,12 +94,31 @@ class StaticMoEImageTokenAdapterBank(TaskImageTokenAdapterBank):
         self._current_task_id = -1
         self.reset_auxiliary_metrics()
         self.reset_view_diagnostics()
+        self._runtime_residual_scope = "all"
+        self._runtime_residual_multiplier = 1.0
+        self._cumulative_expert_correlations = []
         self.requires_grad_(False)
 
     def validate_routes(self):
         expected = self.route_weights.new_tensor(ROUTES[self.routing])
         if not torch.equal(self.route_weights, expected):
             raise RuntimeError("Static expert routing table changed")
+
+    def set_residual_ablation(self, scope: str = "all", multiplier: float = 1.0) -> None:
+        if scope not in {"all", "full", "auxiliary"}:
+            raise ValueError("Residual ablation scope must be all, full, or auxiliary")
+        if not math.isfinite(float(multiplier)) or float(multiplier) < 0:
+            raise ValueError("Residual ablation multiplier must be finite and non-negative")
+        self._runtime_residual_scope = str(scope)
+        self._runtime_residual_multiplier = float(multiplier)
+
+    def reset_ablation_diagnostics(self) -> None:
+        self._cumulative_expert_correlations = []
+
+    def expert_output_correlation(self) -> float | None:
+        if not self._cumulative_expert_correlations:
+            return None
+        return float(sum(self._cumulative_expert_correlations) / len(self._cumulative_expert_correlations))
 
     def adapted_tokens_for_layer(self, layer_id, frozen_image_tokens, lane_ids, view_name="full"):
         if (frozen_image_tokens.ndim != 3 or frozen_image_tokens.shape[-1] != self.hidden_dim
@@ -106,7 +133,15 @@ class StaticMoEImageTokenAdapterBank(TaskImageTokenAdapterBank):
         weights = self.route_weights[self.view_names.index(view_name)]
         adapted, ratios = [], []
         for task in lane_ids:
-            delta = self.residual_scale * self.task_adapters[int(task)][str(layer_id)](frozen_image_tokens, weights)
+            active = (
+                self._runtime_residual_scope == "all"
+                or (self._runtime_residual_scope == "full" and view_name == "full")
+                or (self._runtime_residual_scope == "auxiliary" and view_name != "full")
+            )
+            multiplier = self._runtime_residual_multiplier if active else 1.0
+            pool = self.task_adapters[int(task)][str(layer_id)]
+            delta = self.residual_scale * multiplier * pool(frozen_image_tokens, weights)
+            self._cumulative_expert_correlations.append(pool.last_output_correlation)
             adapted.append(frozen_image_tokens + delta)
             ratios.append((delta.detach().float().square().sum(-1)
                            / frozen_image_tokens.detach().float().square().sum(-1).clamp_min(1e-8)).mean())

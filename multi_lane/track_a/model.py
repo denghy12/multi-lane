@@ -397,6 +397,9 @@ class MultiLaneModel(nn.Module):
             )
         self._last_fusion_weights: Optional[torch.Tensor] = None
         self._last_base_fused_logits: Optional[torch.Tensor] = None
+        self._adapter_attention_entropy_sum = 0.0
+        self._adapter_attention_max_sum = 0.0
+        self._adapter_attention_count = 0
 
     @property
     def task_sizes(self) -> Tuple[int, ...]:
@@ -466,6 +469,25 @@ class MultiLaneModel(nn.Module):
         if enabled and self.adapter_bank is None:
             raise RuntimeError("Cannot enable an adapter that was not configured")
         self.adapter_runtime_enabled = bool(enabled)
+
+    def reset_adapter_ablation_diagnostics(self) -> None:
+        self._adapter_attention_entropy_sum = 0.0
+        self._adapter_attention_max_sum = 0.0
+        self._adapter_attention_count = 0
+        if self.adapter_bank is not None and hasattr(self.adapter_bank, "reset_ablation_diagnostics"):
+            self.adapter_bank.reset_ablation_diagnostics()
+
+    def adapter_ablation_diagnostics(self) -> Dict[str, float | None]:
+        count = max(1, int(self._adapter_attention_count))
+        result: Dict[str, float | None] = {
+            "selector_attention_entropy": self._adapter_attention_entropy_sum / count,
+            "selector_attention_max": self._adapter_attention_max_sum / count,
+        }
+        if self.adapter_bank is not None and hasattr(self.adapter_bank, "expert_output_correlation"):
+            result["expert_output_correlation"] = self.adapter_bank.expert_output_correlation()
+        else:
+            result["expert_output_correlation"] = None
+        return result
 
     def set_parax_runtime_enabled(self, enabled: bool) -> None:
         if enabled and self.parax_bank is None:
@@ -768,10 +790,16 @@ class MultiLaneModel(nn.Module):
             similarity = torch.einsum(
                 "tbsc,tbnc->tbsn", queries, selector_image_tokens
             ) * (self.width**-0.5)
+            selector_weights = torch.softmax(similarity, dim=-1)
+            selector_weights_float = selector_weights.float().clamp_min(1e-12)
+            entropy = -(selector_weights_float * selector_weights_float.log()).sum(dim=-1).mean()
+            self._adapter_attention_entropy_sum += float(entropy.detach().cpu())
+            self._adapter_attention_max_sum += float(selector_weights.float().amax(dim=-1).mean().detach().cpu())
+            self._adapter_attention_count += 1
             selected = torch.einsum(
                 "tbnc,tbsn->tbsc",
                 selector_image_tokens,
-                torch.softmax(similarity, dim=-1),
+                selector_weights,
             )
         else:
             # Preserve the historical contraction path exactly for disabled
