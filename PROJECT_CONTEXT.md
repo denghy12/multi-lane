@@ -1,3 +1,149 @@
+## 2026-10-12 已授权阶段化旧功能＋TRAIN原图留出：实现与验证中
+
+- 新分支codex/staged-old-functions-holdout-20261012，沿用managed工作树，用户已有dirty文档不覆盖。新增staged_functional_experts.py、staged_functional_fit.py、fixed_baseline_staged_functions.py、Shell和回归测试；model.py仅为带符号输出系数取消概率熵/top频率诊断。
+- 四组：固定B0；只新专家新5+新5；只旧函数旧5（task0等B0）；先旧5再新5（task0新5+新5）。旧功能两组读取共同供体：本轮只新组fit分组训练、任务结束后封存，下一任务可用；不使用历史全TRAIN专家。新阶段66594可训练参数，旧阶段2t；总步数配对不等于等容量。
+- TRAIN按原图SHA256固定约80/20，task0起跨任务一致，同图人物不跨组。holdout只诊断、不选轮次开关。原基线仍完整TRAIN训练，因此这是模块留出，外部val/test独立报告。
+- 计划docs/staged_old_function_holdout_plan_20261012.md，seed0完整8task val/test、rank32/2新/2%界/固定融合、Adam4e-4 batch64 FP32、每阶段5epoch、cosine/clip1、BCE+.1辅助，无level/图像Router/蒸馏/回放/新损失。
+- 新增3项复合单测通过（内部覆盖8task×3组完整训练、恢复、旧函数保护），全Track-A回归进行中。下一步Git-only独立远程worktree验证与真实8task smoke，通过才启动staged_old_functions_seed0_val_test_20261012_01。GPU0当前空闲，其余卡运行他人任务不改。
+
+## 2026-10-12 完整函数输出组合：正式八任务Validation/Test结束并复核
+
+- batch `functional_output_reuse_seed0_val_test_20261012_01`，HEAD c4bb189，exit0、complete/tasks8；两组各2325更新，16份checkpoint只读test。源checkpoint/cache不变。152份产物日志同步SHA一致，archive SHA b713b7916d4dd6eff70afe334bf85bd5baabcdf9a31a31f6b10ff6cfa671fed6；48融合score＋6最终view score独立复算一致。
+- 同源seed0最终val/test：固定真实基线42.1912/32.0610；只新完整函数41.9486/31.8460；旧完整函数复用＋新41.9474/31.8456。复用未超过只新或基线；不声称跨seed结论。
+- 旧参数和旧完整函数逐值变化0，缓存identity0，旧FP32 anchor最大logit变化fresh2.8610e-5/reuse6.5804e-5；test更新0。task0两组输出完全相同，训练69.4496→69.9210、val58.8817→58.2567、test54.2717→54.0257；八任务TRAIN mAP全部提高，泛化未改善。
+- CPU只读诊断：reuse task7旧系数.01513，Full/Person/Face旧残差对新残差平均范数比仅1.68%/1.81%/1.53%（总限幅前）。全体softmax旧权重.8612不是实际贡献。task1–7旧系数梯度有效，不能说路径没接通；不能据小贡献就断言充分旧功能复用无效。
+- TRAIN当前缓存没有当前类全负人物；task6仅627TRAIN样本，外部已见类评估全负人物占多数。是需控制的条件分布因素，非已证明唯一原因；task0同条件也退步，旧融合补负例支线亦未奏效。
+- 新报告 `docs/functional_output_expert_reuse_results_20261012.md`；导师版第九节加入本轮、第十节重整逻辑。上一轮详细报告纠正task5/task6正文的情绪名，与配置及表格一致。分析CSV/JSON/脚本在output/functional_output_expert_analysis_20261012。
+- 下一步仅建议：暂停扩容；从task0开始统一TRAIN原图分组留出，先单独拟合冻结旧函数的少量输出系数，再允许新函数补充，配只新专家与原基线，匹配优化预算；先证明旧功能价值，再研究图像Router。已有全TRAIN专家不能冒充没看过留出数据。正式仍seed0八任务val/test，不能按test选任务开关。
+- 本次只读同步分析和文档更新，没有业务代码修改、新训练、commit/push/main合并。原用户dirty改动保留；全量学习支线不纳入。
+
+## 2026-10-12 完整输出专家：预检通过，seed0八任务正式实验已运行
+
+- 新实现4977baa＋资源选择c4bb189已push；分支 `codex/frozen-functional-expert-output-reuse-20261012`。服务器 `/mnt/haoyuan/workspace/multi-lane-main-functional-output-experts` clean、HEAD c4bb1899442d97f9dd01124b69501871450032c3。其他工作树与运行任务未改。
+- 本地/服务器323测试通过、bash语法通过。真实ViT smoke_02完成8task×两组×5轮/64TRAIN-val-test样本、80updates、16checkpoint只读test、exit0；源checkpoint/cache不变，strict identity0、旧参数和完整旧函数逐值变化0、新expert/router/P梯度非零有限、reuse task1–7旧贡献beta梯度非零。旧FP32 anchor最大logit变化4.5776367e-5。
+- 155份预检非checkpoint产物/日志已同步本地并逐文件SHA核验；归档 `output/emotic_functional_output_experts/preflight_20261012.tar.gz` SHA48ea4276901241def7f0f7e774c1c63dfdec339b0f28a6950e0a454a21acf7e1，核验JSON在output/functional_output_expert_preflight_20261012。预检不作为性能结果。
+- 正式batch `functional_output_reuse_seed0_val_test_20261012_01` 已由tmux `ml_functional_outputs8_20261012` 启动，GPU0/shared经用户明确确认；启动空余17019MiB，原任务不停止或修改。首选GPU1的smoke_01只是资源检查拒绝，无训练，保留记录。
+- 完整配置确认smoke=False、seed0、tasks8、5epoch/cache、complete_residual_outputs_v1、固定真实基线和融合。启动收尾检查时两组8任务拟合/validation已经完成，16份checkpoint已保存，只读test仍在继续（fresh_only日志至task6，无退出码）；本条不是完成全部Test的声明，不报告正式精度。
+- 仍不分析未完结性能，不持续监督；待结束后用户召回，再同步正式原始分数并对比同源B0/只新完整函数/旧完整函数复用＋新，审查泛化、旧路径和带符号beta，不把global gate当实际输出系数。只更新本次文档，不纳入全量学习支线。
+- 计划 `docs/functional_output_expert_reuse_plan_20261012.md`，业务代码在managed分支，原primary用户dirty文件保留；三个上下文均维护，未合并main。
+
+## 2026-10-12 输出组合实验资源选择：用户确认共享GPU0立即运行
+
+- 本地/服务器323测试均通过；实现4977baa经Git-only进入独立远程worktree，源工作树clean。
+- 初次预检 `functional_output_reuse_smoke_20261012_01` 仅检查资源，因GPU1已经被其他并行任务占用而退出，无训练/output；保留resource.json，不覆盖该日志。
+- 用户明确选择“共享GPU0显存立即运行（沿用之前的并行方式）”，无需等待完全空闲卡。新Shell支持GPU_POLICY=idle/shared，shared仅要求至少8192MiB空余；本轮GPU0约17GiB空余，其他任务不停止或修改。
+- 下一步预检batch改为 `functional_output_reuse_smoke_20261012_02`，GPU0/shared；通过后正式仍 `functional_output_reuse_seed0_val_test_20261012_01`。仅资源设置变化，模型/优化配置不变，bash语法已复核。
+
+## 2026-10-12 已授权完整残差输出组合：实现与本地回归完成
+
+- 用户要求开始修改并在空闲GPU运行；新分支 `codex/frozen-functional-expert-output-reuse-20261012`，从5b14c05创建，原managed/user dirty文件保留。只研究增量冻结复用，不纳入全量支线。
+- 新增functional_output_experts.py、fixed_baseline_functional_experts.py、Shell入口、7项回归与完整计划；不修改旧ParaX算法/训练入口。函数E_i使用归属任务P_owner，旧A/B/P/norm/scale全部保护；当前只组合完整函数输出。
+- 严格identity：新P_t零初始化，旧贡献tanh(beta_t)零起点；beta可取负且在0处梯度有效。旧/新组各自softmax，新组mass1；raw gate记录不等于实际带符号输出系数。每组当前75073参数，完整bank602665；可访问Router输出行不等，不声称与历史矩阵混合是仅一处差异或精确等容量。
+- 本地323项Track-A测试通过、bash语法通过，包含八任务完整旧函数/旧路径不变、初始有效梯度、2%界及错误owner/combination恢复检查。
+- 配置 `docs/functional_output_expert_reuse_plan_20261012.md`：复用真实基线与TRAIN缓存、seed0 task0–7、5epoch/cache、rank32/hidden16/2新专家/2%界、Adam4e-4/batch64/FP32/cosine/clip1、辅助BCE.1/consistency0/原固定融合；Image-token Adapter与旧patch Projector关闭，无level/蒸馏/动态融合。
+- 下一步Git-only新远程worktree验证323测试和真实八任务64样本smoke，全部通过再启动 `functional_output_reuse_seed0_val_test_20261012_01`。空闲GPU优先1，GPU0其他任务不改。所有拟合完成才只读test，启动后不持续监督。正式未启动前不得填成绩。
+
+## 2026-10-12 固定真实基线＋新增/复用专家：seed0八任务validation/test完成
+
+- batch `fixed_baseline_expanding_experts_seed0_val_test_20261012_01` 正常退出0，summary complete/tasks8；运行HEAD `5b14c05b47b57b2336131978375264bade52fc36`，服务器独立worktree clean。两组各2325次缓存拟合更新，16份任务checkpoint完成只读test；原基线不重训。
+- 同源seed0最终val/test：基线42.1912/32.0610，只学新专家41.9417/31.8895，复用旧专家＋新专家41.9687/31.8734。复用相对只新增val+0.0270/test−0.0161；不能证明复用收益，不用历史三seed均值替换本批基线。
+- 旧参数逐值最大变化0，strict缓存identity和logit差0，新专家均实际更新；FP32旧anchor最大logit变化fresh3.8147e-5/reuse3.1948e-5，test状态不变。源checkpoint/TRAIN cache SHA不变；152产物日志同步逐文件SHA一致，archive b52f466142611e0a849310bbf7e357f921d5d471b6acfba0bafb768c86f3cde0。
+- 独立复算48份融合score＋6份最终view score，AP/平均mAP/forgetting一致。旧固定人群AMP分数变化接近基线数值级，常规forgetting受人群扩展影响，不能当共享中心灾难遗忘。
+- CPU只读TRAIN诊断：task0训练69.4496→69.9510，val58.8817→58.1552，test54.2717→53.9959；task0两组输出相同。两组最终单路均低于基线，主要是适配泛化未改善。reuse task7 Full旧gate权重.87729，均匀基准14/16=.875，熵.99751、样本gate平均std.000499；高旧权重不等于有效复用。
+- 新详细报告 `docs/fixed_baseline_new_expert_reuse_results_20261012.md`，导师版新增第八节并重整结论；分析脚本/CSV/JSON/SHA在 `output/fixed_baseline_new_expert_analysis_20261012/`。
+- 下一步仅建议完整残差函数的输出组合：固定真实B0、只新完整专家vs旧完整专家复用＋新专家、同新增预算、旧路径封存/零起点/2%界/固定融合；完整冻结含P/norm/scale及依赖Router。seed0仍须8task val/test，不再用前三任务替代。矩阵混合与输出混合参数自由度/初始化可能不同，需明报并做匹配控制；训练留出保护另行验证，不能按test逐任务开关。
+- 本轮只同步/CPU复算/更新文档，无模型修改、新训练、提交、push或自动扩seed。现有dirty用户文件保留。全量学习支线不纳入，其他GPU/会话进程未干预。
+
+## 2026-10-12 八任务历史补齐全部完成，导师文档重整
+
+- 本轮仅历史补齐batch `parax_eight_task_test_completion_20261012_01`：北京时间2026-10-12 16:18:29全部完成，completion.status=complete、failures=[]、smoke=false，20子进程exit0，运行HEADf77b7ac且服务器clean。
+- 最后一组Task Forward输出后/最终归一化前ParaX八任务val41.9026/test32.0908；同批B0 val42.7995/test32.3663。240epochs/13950updates完整，尚未结束的旧记录已由本条替代，本批不需再等待/补测。
+- 最终692非checkpoint产物/日志同步SHA一致；归档639f1df8c112bd069d0e6b837af830fa08d5fa8d9332a4c24b10d42c6c391132。312份逐任务分数独立AP复算误差0，88份模型只读审计state不变，日志无Traceback/OOM；checkpoint保留服务器。
+- 按用户要求重写导师文档 `docs/advisor_parax_projector_to_freezing_experiments_20261012.md`：统一八任务主表、保留各同批基线/原始val和test、明确单次与三seed均值，按动机—改动—结果—下一轮原因串联。删除过多参数细节，融合改为解释任务固定参考比例/按图片及情绪调整参考程度、标签学习与同类情绪正负样本排序；解释补背景是增加旧类别留出图片，非改变图像背景。
+- 用户空缺行完整数据43.2444/32.3279已写入；完整技术记录 `docs/parax_eight_task_completion_complete_results_20261012.md`，复算及原文备份在 `output/emotic_completion_sync_20261012/final_analysis/`。不把八任务成绩填进三任务结果，不纳入全量类别联合学习。
+- 本次仅同步/CPU复算/文档更新，无业务源码修改、训练重启或Git提交推送。另一路固定真实基线后新增/复用专家计划及进程保持独立，不用本批已完成状态替代新方案状态。三个上下文同步维护。
+
+## 2026-10-12 固定基线＋新专家复用：八任务正式validation/test已启动
+
+- 新实现提交 `5b14c05b47b57b2336131978375264bade52fc36` 已push，分支 `codex/fixed-baseline-new-expert-reuse-20261012`；服务器新干净工作树 `/mnt/haoyuan/workspace/multi-lane-main-fixed-baseline-expert-reuse` 同HEAD，旧补齐/test-only工作树不改。
+- 本地/服务器316项Track-A测试通过；真实ViT预检覆盖全部8task×两组×5个64样本缓存epoch，并恢复16个checkpoint只读test，exit0。新专家和Router梯度非零有限，旧参数逐值不变，strict identity0，FP32旧anchor最大logit变化3.9101e-5；源checkpoint/cache未改变。
+- 152个预检产物/日志同步本地逐文件SHA一致，archive SHA bd84861cc9127b31b392d20ae1fbbe9b18c5e26355100728654870246c8ea3a0。预检不是正式性能，不写入导师结果表。
+- 正式batch `fixed_baseline_expanding_experts_seed0_val_test_20261012_01` 已在tmux `ml_fixed_new_reuse8_20261012` 启动，GPU0按已授权显存共享；config确认smoke=False、seed0、tasks8、5epoch/cache、parameter_matrices，真实task0已完成一组5轮/84updates每轮。仅做启动检查，后续不实时监督。
+- 两组相同新增2专家预算：fresh_only仅当前新专家，reuse_old组合冻结旧专家＋当前新专家；固定对应任务真实基线、原固定融合，rank32/hidden16/2%界/Adam4e-4/batch64。新专家/Router/投影初始化及requires_grad张量数一致；可访问Router输出数量不同，不能声称有效函数自由度完全相同。
+- 全部8任务拟合/validation完成才创建test数据集，恢复同一批checkpoint只读test；不按test筛组/挑epoch/调参。原基线不重训，test参照为同源seed0；不把历史三seed均值混成此批seed0基线。
+- 入口和回归为新增文件，原模型/ParaX组合算法未改；MoE完整输出组合尚未实现。本轮先分离联合训练因素，后续是否验证输出组合另定。
+- 计划 `docs/fixed_baseline_new_expert_reuse_plan_20261012.md`；输出/日志在 `emotic_fixed_baseline_expert_reuse/<batch>/`，checkpoint留服务器。导师报告新增已启动下一轮说明，未填未完成成绩。三个上下文均已更新；本地主工作树用户改动保留，代码只在managed分支修改。
+
+## 2026-10-12 已授权：固定真实基线后新增/复用专家，seed0八任务val/test
+
+- 用户要求开始修改该方向，并明确不做task0–2正式validation，直接seed0、task0–7 validation/test。
+- 新分支 `codex/fixed-baseline-new-expert-reuse-20261012`，独立managed工作树；新增 `fixed_baseline_expert_reuse.py`、Shell入口和4项回归，保留旧训练/补测代码不变。
+- 复用已有基线和完整TRAIN缓存；两组fresh_only/reuse_old逐任务新增2专家，16槽位、rank32、hidden16、2%界、5epoch/cache、Adam4e-4、batch64、固定融合；原模型完全冻结，两组初始化/可训练预算/缓存和batch RNG相同。
+- 只改复用策略，仍是A/B参数矩阵组合；完整专家输出MoE尚未实现。所有拟合结束后才创建test dataset，恢复同一checkpoint只读test；当前不得写成实验已完成。
+- 本地316项Track-A测试通过（含新增八任务保护、预算/初始化、cache来源、错误checkpoint恢复）。下一步Git-only独立服务器worktree验证、真实ViT八任务64样本预检，再启动完整正式批次；不修改正在补齐历史test的工作树/进程。
+- 计划 `docs/fixed_baseline_new_expert_reuse_plan_20261012.md`。预计正式batch `fixed_baseline_expanding_experts_seed0_val_test_20261012_01`，output/logs在emotic_fixed_baseline_expert_reuse；GPU0显存充足时共享，不干预其他任务，启动后不实时监督。
+
+## 2026-10-12 15:36 八任务补齐部分完成：新方法test仍无稳定收益
+
+- 本会话batch `parax_eight_task_test_completion_20261012_01`（f77b7ac、服务器clean）18个子进程exit0；旧POST_TASK_ROUTER检查时task3第25/30轮仍运行，无完整summary/completion，未重启/修改/停止训练。
+- 最新固定真实基线两组seed012八任务test全部完成：基线32.0921、动态图像路由32.0134(−0.0787)、任务固定组合32.0034(−0.0887)；两个方法三个seed均低对应基线。validation均值原42.6979/42.5865/42.5837，Test动态−静态仅+0.0100，不能主张动态收益。这批只用task0两专家冻结池，不是新增专家复用组。
+- 原短程规则统一重做seed0八任务：B0 val42.7995/test32.3663，随机冻结专家动态val42.7758/test32.3512，均匀val42.7770/test32.3521，均接近且略低基线。
+- 独立80%TRAIN源融合八任务完成：fixed val43.2287/test32.3218；原池静态/动态BCE/排序test32.3190/32.3261/32.3285；补背景32.3172/32.3253/32.3279，所有动态提升小于0.007点，单seed不能称有效。与全TRAIN基线不得直接相减。
+- 650非checkpoint产物/日志同步逐文件SHA一致；archive SHA2241106b536b5d1456d29cf523cfe21e5d019abf70d796ae6e428dcf95e8b9c3。296份逐任务validation/test独立AP复算误差0，配对ID/标签/类顺序一致，80份只读模型审计state前后相同；已完成日志无Traceback/OOM。
+- 更新导师文档 `docs/advisor_parax_projector_to_freezing_experiments_20261012.md`，保留用户改过的措辞；历史三任务列不塞入八任务Test，新增完整八任务复核表及latest逐seedTest。新明细 `docs/parax_eight_task_completion_partial_results_20261012.md`；复算脚本/JSON/CSV在 `output/emotic_completion_sync_20261012/analysis/`。
+- 下一步只等原早期后置路由组及只读test自动完成，用户召回后补最后一行；不新增训练、test调参或全量学习实验。本轮仅只读检查同步、CPU复算和文档更新，无业务源码修改/提交推送；三个上下文同步维护。
+
+## 2026-10-12 八任务 Test 补齐正式启动
+
+- 用户授权全部空闲GPU。完整311项Track-A测试、20个真实预检子进程均通过；仅资源派发修正的6项回归也通过。
+- Git-only独立服务器工作树已fast-forward至 `f77b7ac7d4218b0b7811bdd93ff55e9b070393d4`，分支 `codex/parax-eight-task-test-completion-20261012`。
+- 正式batch `parax_eight_task_test_completion_20261012_01`，tmux `ml_parax_test8_20261012`；manifest确认非smoke、8任务、30 epoch/task。
+- 派发时GPU1–7被其他任务占用，未干预。GPU0按最多4个pipeline并行，已启动seed0/1/2动态图像路由test及配对基线训练；静态组合test、旧短程方法八任务扩展和融合支线自动接续。
+- 最终只按task7/26类test mAP判断，validation及历史前三任务仅辅助诊断。全量类别联合学习不纳入；已有完整test不重复。
+- 输出 `./output/emotic_eight_task_completion/<batch>/`，日志 `./logs/emotic_eight_task_completion/<batch>/`（相对于新服务器工作树）；正式结果尚未完成，不填写虚构数值。启动后不实时监督，用户召回时统一同步分析。
+
+## 2026-10-12 已授权补齐所有缺项，优先八任务test
+
+- 用户明确最终只认八任务test，并授权所有空闲GPU。本轮排除全量联合学习；旧前三任务只作诊断，不补更多短程test，不根据test改参数。
+- 新分支 `codex/parax-eight-task-test-completion-20261012`，提交51e61b0已push；服务器Git-only独立worktree `/mnt/haoyuan/workspace/multi-lane-main-parax-eight-task-test-completion` 同HEAD且clean，旧工作树和test-only未修改。主工作树业务代码未改，managed既有脏文档保留。
+- 新只读checkpoint/test入口与冻结gate推理支持cached/compact/fusion；恢复constant Router属性、逐值原模型对齐、源SHA/模型state不变检查；真实runner epochs_per_task schema及短程/错误来源回归。两端311项unittest通过，Shell/Python语法及diff检查通过。
+- 第一轮latest dynamic/static seed012已有48份八任务checkpoint，直接test；随后seed0四组基线/早期后置Router/随机冻结中心动态与均匀完成八任务，原30epoch/task。融合支线独立80%训练源、三种校准/补历史背景，全都train拟合后固定test。
+- tmux `ml_parax_test8_20261012` 已启动真实GPU预检 `parax_eight_task_completion_smoke_20261012_01`；最新6个task7/64样本恢复预检全部exit0，四组八任务×2updates及融合预检仍在进行，不能说正式完成。全部通过后自动启动 `parax_eight_task_test_completion_20261012_01`，否则保留失败原因、不启动正式。
+- 输出/日志 `output/emotic_eight_task_completion/`、`logs/emotic_eight_task_completion/`；完整计划 `docs/parax_eight_task_test_completion_plan_20261012.md`；导师报告新增最终口径与补齐说明。启动后不持续监督、不新增通知自动化，结束用户召回再分析。
+
+## 2026-10-12 导师版报告补齐原始 validation/test mAP
+
+- 按用户追加要求，更新 `docs/advisor_parax_projector_to_freezing_experiments_20261012.md`：各轮结果表末尾补原始 Validation/Test 最终mAP，四位小数；明确前三任务11类、八任务26类，以及单seed和三seed均值口径。
+- 内部Projector五组、后置两组、随机中心分步三组、融合及补背景各四组、初版四组状态、修正版四组含后补test、完整八任务四组、固定真实基线三组均列原始结果或缺失说明。最新新增拟合两组test未测；原基线32.0921沿用此前同checkpoint评估，不能冒充新方法test。
+- 初版后两组task2未完成，task1的57.8988/58.0348只作中断记录，不当成三任务最终分数；其他未测test均标未测。继续排除全量类别联合学习。
+- 已逐表核对既有来源报告和Markdown列数；仅文档及上下文更新，无业务代码、训练、测试评估或Git提交推送。
+
+## 2026-10-12 导师版整理：Projector 至专家冻结，排除全量学习
+
+- 新增 `docs/advisor_parax_projector_to_freezing_experiments_20261012.md`，仅整理本会话增量学习主线，明确排除全量类别联合学习及其他会话的三路全量迁移实验；八任务均指 task0–7 顺序增量。
+- 按动机、每个分组的具体位置/训练冻结范围、效果及转入下一轮的原因组织；涵盖内部Projector五组、后置路由、冻结随机专家分步校正、独立融合/补背景支线、保护旧专家四组及审计修复、三seed八任务复核、固定真实基线的动态/静态缓存拟合。
+- 保留少量代表性差值；短程validation正信号与后补test未重现并列，当前新缓存拟合只有validation，未冒充已有test。共享主干/共享专家池、两类投影、参数路由/特征融合/分数校准均分开解释。
+- 未改变既有科研结论：旧路径保护有效，当前ParaX没有稳定额外收益；极小分类权重修正仍只是建议。仅新增说明文档并维护上下文，无业务代码修改、训练、提交或推送。
+
+
+## 2026-10-12 完整结果分析：旧路径保护成功，固定基线后ParaX无稳定收益
+
+- batch `fixed_baseline_cached_routes_20261011_01` 于10-11 20:36:34 CST结束，两队列exit0；旧seed0四组各3个test终点、新seed012各8任务完成。7份日志无Traceback/OOM/非有限异常；289非checkpoint产物及日志同步SHA一致。新72份val分数+旧12份test分数独立AP复算与保存指标相符；48份拟合审计通过。
+- 新八任务三seed validation：固定基线final42.6979/average49.5975，动态final42.5865(−0.1114)/average49.3837(−0.2138)，静态final42.5837(−0.1142)/average49.3871(−0.2104)。动态/静态三个seed均略负；动态相对静态仅+0.0028，不支持图像路由贡献。
+- 原checkpoint恢复完整val logits差异0，缓存identity0，base/旧专家/router/projection/mask逐值不变；task1后center hash不变。FP32旧anchor max动态7.25e−5/静态3.81e−5；固定完整task0人群旧五类mAP变化在−0.0109～+0.0158，当前不能再归因共享中心漂移。
+- 只读CPU复算48个现有checkpoint/train cache，无训练无GPU：两组24/24训练目标改善、train mAP动态22/24静态21/24提高；task0 train mAP均值动态+0.4090/静态+0.4448，但val−0.5137/−0.4550，符合残差拟合训练集而未泛化。动态真实post-fit gate标准差均值.00546、归一化熵.993；静态真实gate近常量，训练历史std含参数更新，不能拿来当样本路由证据。首次五类贡献最终负差约76%/71%。
+- 旧前三任务seed0补test：基线36.5478，冻结池36.4149(−.1329)、仅新36.3944(−.1534)、复用36.4607(−.0871)；原val提升+.8773/+.8374/+.7130未重现。此表11类、单seed，不能混作新八任务26类test。
+- 按停止规则，停止当前后置ParaX扩展，保留原基线。不优先蒸馏/放宽bound/扩expert/level/融合搜索。本轮只给下一步方案未启动新训练：若继续，先seed0 task0/6固定特征上的极小任务分类权重修正诊断；按原图分组train cache80/20作为额外模块留出、epoch0候选，检验泛化而不是再修冻结。它是待验证诊断，不是路由已成功，也不能称整模型独立holdout。
+- 报告 `docs/fixed_baseline_cached_routes_results_analysis_20261012.md`；分析/CSV/48例CPU诊断/源SHA清单在 `output/fixed_baseline_analysis_20261012/`。主/managed三个上下文文档均已更新；无业务代码改动、提交推送、新训练。
+
+## 2026-10-11 19:49 CST GPU0显存共享并行已启动（替代空闲排队）
+
+- 用户明确允许GPU0与现有任务并行、无需排队，并确认test范围是此前task0–2四组seed0。
+- 启动脚本已修改并提交push：`b3d902e`，`GPU_START_POLICY=shared_memory GPU_MIN_FREE_MIB=8192`；只检查可用显存，不要求空卡/低利用率，显存不足立即报错。模型/数据/优化器配置不变。bash语法及模拟显存充足/不足检查通过，沿用已通过309项测试与真实smoke。
+- 已仅向本会话等待中的tmux控制器发送Ctrl-C（当时无正式launch_state），其已退出；其他任务未停止、未修改。
+- 正式任务已启动：batch `fixed_baseline_cached_routes_20261011_01`，tmux `ml_fixed_cache_shared_20261011`，服务器独立worktree `/mnt/haoyuan/workspace/multi-lane-main-parax-fixed-baseline-cached-routing`，Git-only更新至b3d902e。
+- 两条队列同时GPU0运行：旧四组seed0/task0–2已有checkpoint只做test；新seed0→1→2顺序、每seed固定基线/动态图像Router/常量固定组合八任务validation，train-only缓存拟合。队列PID2881665/2881666，两边日志均已加载真实ViT，无启动traceback；启动后GPU0约6934MiB占用、17148MiB空闲。resource_wait.json状态ready、policy shared_memory。
+- 输出 `./output/emotic_fixed_baseline_routes/fixed_baseline_cached_routes_20261011_01/`，日志 `./logs/emotic_fixed_baseline_routes/fixed_baseline_cached_routes_20261011_01/`，控制器日志 `./logs/emotic_fixed_baseline_routes/controller_20261011_01_shared.log`。不实时监督，不把启动状态当作训练完成或效果结论；完成后再统一同步分析。
 
 ## 2026-10-11 用户授权GPU0共用显存、取消空闲排队
 

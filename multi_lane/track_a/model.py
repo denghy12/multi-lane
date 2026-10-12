@@ -491,9 +491,13 @@ class MultiLaneModel(nn.Module):
             top_frequency = torch.bincount(gates.argmax(dim=-1), minlength=gates.shape[1]).float() / gates.shape[0]
             for expert, value in enumerate(mean):
                 result[f"{prefix}_gate_mean_e{expert}"] = float(value)
-            for expert, value in enumerate(top_frequency):
-                result[f"{prefix}_top_frequency_e{expert}"] = float(value)
-            result[f"{prefix}_entropy"] = float(entropy)
+            if getattr(self.parax_bank, "signed_output_coefficients", False):
+                # Signed residual coefficients are not a categorical distribution.
+                result[f"{prefix}_coefficient_abs_sum"] = float(gates.abs().sum(-1).mean())
+            else:
+                for expert, value in enumerate(top_frequency):
+                    result[f"{prefix}_top_frequency_e{expert}"] = float(value)
+                result[f"{prefix}_entropy"] = float(entropy)
             result[f"{prefix}_residual_ratio"] = float(
                 sum(record["residual_ratio"] for record in records) / len(records)
             )
