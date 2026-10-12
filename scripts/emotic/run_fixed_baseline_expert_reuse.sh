@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Fixed seed0 baselines; only current new experts/router/projection are fitted.
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$ROOT"
+PYTHON_BIN=${PYTHON_BIN:-/opt/conda/envs/ddp/bin/python}
+GPU=${GPU:-0}
+SMOKE=${SMOKE:-0}
+BATCH=${BATCH:?Set a new immutable BATCH}
+SOURCE=${SOURCE:-../multi-lane-main-parax-freezing-eight-task-relaunch/output/emotic_protected_parax_full/protected_parax_freezing_8task_seed012_valtest_20261011_01/seed0/baseline}
+CACHE_SOURCE=${CACHE_SOURCE:-../multi-lane-main-parax-fixed-baseline-cached-routing/output/emotic_fixed_baseline_routes/fixed_baseline_cached_routes_20261011_01/cached_fit/seed0}
+DATA_ROOT=${DATA_ROOT:-../multi-lane-main/datasets/EMOTIC}
+CLIP_CHECKPOINT=${CLIP_CHECKPOINT:-../CODE_DDP-benchmark/pretrained/clip/ViT-B-16.pt}
+FACE_MANIFEST_ROOT=${FACE_MANIFEST_ROOT:-../emotic_benchmark_runs/multi_lane_face_test_manifest_v0.1/face_manifest_train_val_test_v1_20260909}
+OUTPUT=./output/emotic_fixed_baseline_expert_reuse/$BATCH
+LOGS=./logs/emotic_fixed_baseline_expert_reuse/$BATCH
+test ! -e "$OUTPUT"
+test ! -e "$LOGS"
+mkdir -p "$LOGS"
+"$PYTHON_BIN" - "$GPU" "$LOGS/resource.json" <<'PY'
+import json,subprocess,sys,time
+from pathlib import Path
+used,free,util=map(int,subprocess.check_output(['nvidia-smi','-i',sys.argv[1],
+    '--query-gpu=memory.used,memory.free,utilization.gpu','--format=csv,noheader,nounits'],text=True).strip().split(','))
+record=dict(gpu=sys.argv[1],used_mib=used,free_mib=free,utilization=util,time=time.time(),
+            policy='authorized shared memory; existing processes untouched',minimum_free_mib=8192)
+Path(sys.argv[2]).write_text(json.dumps(record,indent=2)+'\n')
+if free<8192:raise SystemExit('Insufficient free memory; no training started')
+PY
+extra=()
+case "$SMOKE" in 0) ;; 1) extra+=(--smoke) ;; *) echo 'SMOKE must be 0 or 1' >&2; exit 2 ;; esac
+set +e
+CUDA_VISIBLE_DEVICES="$GPU" OMP_NUM_THREADS=1 "$PYTHON_BIN" -u -m multi_lane.track_a.fixed_baseline_expert_reuse \
+ --source "$SOURCE" --cache-source "$CACHE_SOURCE" --output "$OUTPUT" \
+ --data-root "$DATA_ROOT" --clip-checkpoint "$CLIP_CHECKPOINT" --face-manifest-root "$FACE_MANIFEST_ROOT" \
+ "${extra[@]}" > "$LOGS/experiment.log" 2>&1
+rc=$?
+set -e
+printf '%s\n' "$rc" > "$LOGS/exit_code"
+exit "$rc"
