@@ -127,11 +127,21 @@ def audit_pairing(batch, smoke_updates=0):
     return configs, audits
 
 
-def preceding_validation(batch, split, metadata, smoke_updates=0, preflight=False):
+def source_hashes(source):
+    paths = [source / name for name in ("config.json", "seed_summary.json", "paired_protocol_audit.json",
+                                       "static_moe_audit.json", "training_history.json")]
+    paths += [source / f"{folder}/task{task}.{suffix}" for task in range(8)
+              for folder, suffix in (("compact_checkpoints", "pth"), ("val_scores", "npz"))]
+    return {str(p): _sha256(p) for p in paths}
+
+
+def preceding_validation(batch, split, metadata, smoke_updates=0, preflight=False, parallel_splits=False):
     require(split in ("val", "test"), "Invalid split")
     if split == "val":
         return None
     require(not smoke_updates and not preflight, "No test in preflight")
+    if parallel_splits:
+        return None
     path = batch / "full_val" / "comparison.json"
     require(path.is_file(), "All methods must complete full validation before test is loaded")
     result = read(path)
@@ -142,10 +152,20 @@ def preceding_validation(batch, split, metadata, smoke_updates=0, preflight=Fals
 
 
 def evaluate_batch(batch, output, data_root, clip_checkpoint, face_manifest_root,
-                   split="val", preflight=False, smoke_updates=0):
+                   split="val", preflight=False, smoke_updates=0, parallel_splits=False, source_lock=None):
     metadata = git_metadata(Path(__file__).resolve().parents[2])
     require(not metadata["dirty"] and not output.exists(), "Dirty evaluator or existing output")
-    previous = preceding_validation(batch, split, metadata, smoke_updates, preflight)
+    previous = preceding_validation(batch, split, metadata, smoke_updates, preflight, parallel_splits)
+    locked = None
+    if parallel_splits:
+        require(source_lock is not None, "Parallel evaluation requires a shared immutable source lock")
+        locked = read(source_lock)
+        require(locked["evaluation_mode"] == "parallel_fixed_checkpoints"
+                and locked["batch"] == str(batch.resolve())
+                and locked["evaluator_git"] == metadata
+                and locked["smoke_updates"] == smoke_updates
+                and set(locked["source_sha256"]) == set(METHODS), "Invalid parallel source lock")
+        lock_hash = _sha256(source_lock)
     configs, audits = audit_pairing(batch, smoke_updates)
     output.mkdir(parents=True)
     results, expected_ids, expected_targets, expected_face = {}, None, None, None
@@ -153,11 +173,9 @@ def evaluate_batch(batch, output, data_root, clip_checkpoint, face_manifest_root
         source, c = batch / method, configs[method]
         require(_sha256(clip_checkpoint) == c["clip_checkpoint_sha256"], "CLIP checkpoint changed")
         require(Path(c["data_root"]).resolve() == data_root.resolve(), "Dataset root changed")
-        paths = [source / name for name in ("config.json", "seed_summary.json", "paired_protocol_audit.json",
-                                           "static_moe_audit.json", "training_history.json")]
-        paths += [source / f"{folder}/task{task}.{suffix}" for task in range(8)
-                  for folder, suffix in (("compact_checkpoints", "pth"), ("val_scores", "npz"))]
-        hashes = {str(p): _sha256(p) for p in paths}
+        hashes = source_hashes(source)
+        if locked:
+            require(hashes == locked["source_sha256"][method], "Parallel source changed after locking")
         if previous:
             require(previous["results"][method]["source_sha256"] == hashes, "Source changed after validation")
         manifest_paths = {"detector_config": face_manifest_root / "detector_config.json",
@@ -184,7 +202,7 @@ def evaluate_batch(batch, output, data_root, clip_checkpoint, face_manifest_root
             if c["static_moe_mode"] != "disabled":
                 model.adapter_bank.validate_routes()
             difference = replay(model, validation, source, c, task, device)
-            # All four complete val sources were audited before any test dataset is created.
+            # All four training sources are audited; parallel splits use the same fixed source lock.
             if loader is None:
                 cohort = validation if split == "val" else make_source(c, data_root, face_manifest_root, "test")
                 validate_classes(cohort)
@@ -226,9 +244,14 @@ def evaluate_batch(batch, output, data_root, clip_checkpoint, face_manifest_root
         torch.cuda.empty_cache()
     result = dict(status="preflight_passed" if preflight else "complete", split=split,
                   seed=configs["BASELINE"]["seed"], samples=len(expected_ids), evaluator_git=metadata,
-                  training_performed=False, optimizer_updates=0, checkpoint_selection="fixed_final_epoch30",
+                  training_performed=False, optimizer_updates=0,
+                  checkpoint_selection="fixed_smoke_updates" if smoke_updates else "fixed_final_epoch30",
                   test_loaded=split == "test", test_weight_search=False, results=results,
-                  validation_preceded_test=previous is not None, smoke_updates=smoke_updates)
+                  validation_preceded_test=previous is not None, smoke_updates=smoke_updates,
+                  evaluation_mode="parallel_fixed_checkpoints" if parallel_splits else "sequential",
+                  evaluation_source_lock_sha256=lock_hash if locked else None)
+    if locked:
+        require(_sha256(source_lock) == lock_hash, "Parallel source lock changed during evaluation")
     (output / "comparison.json").write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n")
     if not preflight:
         lines = [f"# Static MoE v1: seed0 complete {split}", "",
@@ -250,5 +273,7 @@ if __name__ == "__main__":
     parser.add_argument("--split", choices=("val", "test"), default="val")
     parser.add_argument("--preflight", action="store_true")
     parser.add_argument("--smoke-updates", type=int, default=0)
+    parser.add_argument("--parallel-splits", action="store_true")
+    parser.add_argument("--source-lock", type=Path)
     evaluate_batch(**vars(parser.parse_args()))
 

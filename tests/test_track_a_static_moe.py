@@ -209,6 +209,14 @@ class StaticMoETest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 preceding_validation(root, "test", dict(commit="x"), preflight=True)
 
+    def test_parallel_test_does_not_wait_for_validation_but_rejects_smoke(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.assertIsNone(preceding_validation(root, "test", dict(commit="x"), parallel_splits=True))
+            for options in (dict(preflight=True), dict(smoke_updates=2)):
+                with self.subTest(options=options), self.assertRaises(ValueError):
+                    preceding_validation(root, "test", dict(commit="x"), parallel_splits=True, **options)
+
     def test_actual_update_budget_schema_and_formal_budget(self):
         for smoke in (0, 2):
             with self.subTest(smoke=smoke), tempfile.TemporaryDirectory() as tmp:

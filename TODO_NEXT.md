@@ -1,3 +1,11 @@
+## 2026-10-12 用户改为 validation/test 并行评价
+
+- 用户明确要求validation和test并行，覆盖本批原先val-before-test顺序限制。保留四组固定第30轮checkpoint、不选择组别/轮次、不调test权重；全部训练完成及配对审计通过后，在GPU0同时运行val2397人与test5368人只读评价（各batch64/workers2/OMP1），分别写full_val/full_test和日志。
+- 新实现分支 `exp/three-view-static-moe-parallel-eval`，复用本地managed worktree。原服务器训练worktree和运行HEAD9578326保持不变，四组训练不重启、不更新代码；另建评价worktree部署调度修改。
+- 接管程序为旧评价目标full_val预留显式handoff标记，旧控制器完成全部训练后由已有fresh-output检查退出，不执行旧顺序评价；保留该预期退出/日志/标记，再并行评价。不会停止任何训练进程，也不会覆盖已有结果。
+- 两个评价进程须读取同一份四组32个checkpoint/配置/训练审计/val score的SHA清单；评价前后源文件不变，结束后交叉核对val/test与清单一致。smoke仍禁止test。新增并发启动、任一评价失败、检查点变化、接管保护及错误控制器回归。
+- 本次修改验证/部署尚待完成，原训练仍在运行。配置与接管细节见 `docs/static_moe_parallel_evaluation_20261012.md`；正式启动与训练配置仍见原v1计划。
+
 ## 2026-10-12 静态 MoE 第一版正式实验已启动
 
 - 运行分支 `exp/three-view-static-moe-v1`，固定运行 HEAD `957832632a372936b5cb752f788a617f77a42443`；本地独立实现worktree与服务器新worktree通过Git-only同步，启动时两端同HEAD，服务器clean。原主/test-only及其他工作树保持原样。

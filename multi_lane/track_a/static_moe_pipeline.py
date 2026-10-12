@@ -1,4 +1,4 @@
-"""Run the locked v1 groups; full validation for all groups precedes any test."""
+"""Run the locked v1 groups, then evaluate fixed checkpoints on val/test in parallel."""
 from __future__ import annotations
 
 import argparse
@@ -82,7 +82,10 @@ def launch(batch_id, gpu="0", smoke=False, parallel=2):
         audit_pairing(output, 2 if smoke else 0)
         state["phases"]["pairing"] = "passed"
 
-        splits = ("val",) if smoke else ("val", "test")
+        if not smoke:
+            from .static_moe_parallel_evaluation import run_parallel_evaluations
+            run_parallel_evaluations(output, logs, data, clip, face, gpu, state, state_path)
+        splits = ("val",) if smoke else ()
         for split in splits:
             state["status"] = "preflight_evaluation" if smoke else "evaluating_" + split
             write(state_path, state)

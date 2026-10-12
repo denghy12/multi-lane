@@ -1,5 +1,7 @@
 # 三视图静态 MoE 第一版：seed0 八任务配对实验
 
+2026-10-12最新修订：用户要求validation和test并行，覆盖本文原先val-before-test顺序。训练配置及固定checkpoint均不变；接管/并行来源锁和新评价分支详见 `docs/static_moe_parallel_evaluation_20261012.md`，本文其余顺序描述保留为最初启动历史。
+
 授权日期：2026-10-12。用户要求开始修改第一版并启动实验；依据 AGENTS.md 的实验执行持续授权，可提交/push、Git-only 同步独立服务器 worktree、完成单元测试和 smoke 后启动本批非破坏性实验。不合并 main，不修改主/test-only/其他工作树。
 
 ## 目标和四组
