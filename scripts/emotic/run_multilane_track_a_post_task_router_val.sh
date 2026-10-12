@@ -17,6 +17,7 @@ OUTPUT_ROOT="${OUTPUT_ROOT:-./output/emotic_track_a_post_task_router_val}"
 LOG_DIR="${LOG_DIR:-./logs/emotic_track_a_post_task_router_val}"
 
 parax_args=()
+[[ "${UPDATES_PER_TASK:-0}" == 0 ]] || parax_args+=(--optimizer-updates-per-task "${UPDATES_PER_TASK}")
 PARAX_SCALE=0.001
 PARAX_BOUND=0
 PARAX_LAYER_KEY=10
