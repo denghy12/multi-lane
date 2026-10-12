@@ -1,5 +1,6 @@
 import copy
 import json
+import importlib.util
 from pathlib import Path
 import unittest
 
@@ -14,6 +15,20 @@ from test_track_a_reproduction import FakeVisual
 
 
 class EightTaskCompletionTest(unittest.TestCase):
+    def test_resource_layout_uses_all_idle_cards_or_bounds_same_gpu_parallelism(self):
+        path=Path(__file__).parents[1]/'scripts/emotic/launch_eight_task_completion.py'
+        spec=importlib.util.spec_from_file_location('completion_launcher',path)
+        module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+        inventory='\n'.join(f'{g},0,24071,0' for g in range(8))
+        layout,limits=module.gpu_layout(inventory)
+        self.assertEqual(layout,list(range(7)))
+        self.assertEqual(limits,{g:1 for g in range(7)})
+        inventory='0,35,24047,0\n'+'\n'.join(f'{g},20900,3170,95' for g in range(1,8))
+        layout,limits=module.gpu_layout(inventory)
+        self.assertEqual(layout,[0]*7)
+        self.assertEqual(limits,{0:4})
+        with self.assertRaises(RuntimeError): module.gpu_layout('0,20900,3170,95')
+
     def test_actual_runner_budget_fields_accept_formal_and_reject_short_update_smoke(self):
         cfg=json.loads((Path(__file__).parent/'fixtures/protected_full_runner_config.json').read_text())
         with self.assertRaises(ValueError): require_formal_budget(cfg)

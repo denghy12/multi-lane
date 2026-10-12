@@ -6,7 +6,27 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import threading
 import time
+
+
+def gpu_layout(inventory):
+    idle=[]
+    free_by_gpu={}
+    for line in inventory.splitlines():
+        gpu,used,free,util=map(int,line.split(','))
+        if used<512 and free>=18000 and util<=5:
+            idle.append(gpu)
+            free_by_gpu[gpu]=free
+    if not idle:
+        raise RuntimeError('No idle GPU has 18GiB free; other tasks are untouched')
+    if len(idle)>=7:
+        return idle[:7],{gpu:1 for gpu in idle[:7]}
+    # Same-user workers may share an idle card, with a conservative 4GiB slot
+    # plus 3GiB reserve; at most four inference/training pipelines per card.
+    layout=[idle[i%len(idle)] for i in range(7)]
+    limits={gpu:min(4,(free_by_gpu[gpu]-3072)//4096) for gpu in set(layout)}
+    return layout,limits
 
 
 def main():
@@ -36,17 +56,11 @@ def main():
     # Only genuinely idle cards are claimed. GPU0's other worker is untouched.
     inventory = subprocess.check_output(['nvidia-smi','--query-gpu=index,memory.used,memory.free,utilization.gpu',
                                          '--format=csv,noheader,nounits'],text=True)
-    available=[]
-    for line in inventory.splitlines():
-        gpu,used,free,util=map(int,line.split(','))
-        if used<512 and free>=18000 and util<=5:
-            available.append(gpu)
-    if len(available)<7:
-        raise RuntimeError(f'This declared parallel batch needs seven idle GPUs; available={available}')
-    gpus=available[:7]
+    gpus,limits=gpu_layout(inventory)
+    reservations={gpu:threading.Semaphore(count) for gpu,count in limits.items()}
     output.mkdir(parents=True); logs.mkdir(parents=True)
     manifest=dict(batch=args.batch, git=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
-                  gpu_inventory=inventory, allocated_gpus=gpus, smoke=args.smoke,
+                  gpu_inventory=inventory, allocated_gpus=gpus, concurrent_pipeline_limits=limits, smoke=args.smoke,
                   priority='existing eight-task dynamic/static test first',
                   tasks=8, final_decision='task7 test 26-class mAP; validation diagnostic only',
                   cached_seeds=[0,1,2], extension_seed=0,
@@ -64,13 +78,15 @@ def main():
         (output/f'{name}.exit_code').write_text(str(code)+'\n')
         if code:
             raise RuntimeError(f'{name} failed with exit {code}; see {logs/name}.log')
-    def test_cached(seed,gpu):
+    def test_cached_unlocked(seed,gpu):
         for arm in ('dynamic','static'):
             cmd=[py,'-u','-m','multi_lane.track_a.complete_eight_task_test','--kind','cached',
                  '--source',str(fitted/f'seed{seed}'),'--baseline-source',str(base/f'seed{seed}'/'baseline'),
                  '--arm',arm,'--output',str(output/'cached_test'/f'seed{seed}'/arm),*common]
             if args.smoke: cmd.append('--smoke')
             call(f'cached_seed{seed}_{arm}',cmd,gpu)
+    def test_cached(seed,gpu):
+        with reservations[gpu]: test_cached_unlocked(seed,gpu)
     def train(method,gpu,heldout=False):
         run_root=output/('heldout_train' if heldout else 'eight_task_train')
         extra=dict(METHOD=method,GPU=str(gpu),RUN_ID='paired',PYTHON=py,MAX_TASKS='8',SEED='0',
@@ -91,9 +107,10 @@ def main():
         call(name+'_test',cmd,gpu)
         return destination
     def model_pipeline(method,gpu):
-        source=train(method,gpu)
-        test_compact(source,method,gpu)
-    def fusion_pipeline(gpu):
+        with reservations[gpu]:
+            source=train(method,gpu)
+            test_compact(source,method,gpu)
+    def fusion_pipeline_unlocked(gpu):
         source=train('B0',gpu,True)
         fusion=source.parent/'fusion'
         epochs='1' if args.smoke else '30'
@@ -110,6 +127,8 @@ def main():
                  '--output',str(output/'fusion_test'/name)]
             if args.smoke: cmd.append('--preflight')
             call('fusion_test_'+name,cmd,gpu)
+    def fusion_pipeline(gpu):
+        with reservations[gpu]: fusion_pipeline_unlocked(gpu)
     failures=[]
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
         # Test-only submissions happen first, before new training submissions.

@@ -27,7 +27,9 @@
 - 分支 `codex/parax-eight-task-test-completion-20261012`，本地沿用managed工作树；远程新独立worktree `/mnt/haoyuan/workspace/multi-lane-main-parax-eight-task-test-completion`，Git-only同步，旧工作树/test-only不改。
 - 正式batch `parax_eight_task_test_completion_20261012_01`，tmux `ml_parax_test8_20261012`；入口 `/opt/conda/envs/ddp/bin/python -u scripts/emotic/launch_eight_task_completion.py --batch parax_eight_task_test_completion_20261012_01`。
 - 输出 `./output/emotic_eight_task_completion/<batch>/`，日志 `./logs/emotic_eight_task_completion/<batch>/`。保存源SHA、恢复审计、逐任务test及各视图分数、metric/summary、模型参数不变检查、每job退出码和控制器完成/失败原因。
-- 资源：启动时选择7张真正空闲卡（used<512MiB/free≥18000MiB/util≤5%），三卡先做seed012 test，各卡dynamic→static；另四卡并行四组八任务训练。seed0 test结束后该卡运行80%训练源及融合/补背景，其他卡有任务不清理。若空闲不足，显式报错，不私自抢占。
+- 资源：优先选择7张真正空闲卡（used<512MiB/free≥18000MiB/util≤5%），三卡先做seed012 test，各卡dynamic→static；另四卡并行四组八任务训练。seed0 test结束后该卡运行80%训练源及融合/补背景。若只剩部分空闲卡，则这些自己的worker按每卡4GiB/worker、另留3GiB、最多4个pipeline的预算并行，其他有任务的卡不抢占。没有足够显存的空闲卡才报错。
+
+2026-10-12实际预检51e61b0已全部通过，20个子进程exit0。正式派发前GPU1–7被其他任务占用，原七空闲卡门槛停止；没有开始正式训练。只调整上述资源布局/信号量，新增单卡与七卡资源回归；不改变模型、checkpoint恢复或超参数，不重复真实训练预检。
 
 ## 验证与缺项处理
 
