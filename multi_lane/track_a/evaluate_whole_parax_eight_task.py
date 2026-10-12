@@ -12,7 +12,7 @@ from .compare_whole_parax_freeze import audit_control
 from .evaluate_joint26_checkpoint import build_model, make_source
 from .export_compact_test_scores import _sha256, _torch_load, restore_compact_model_state
 from .openai_clip_loader import load_openai_clip_visual
-from .runner import CLASS_ORDER, TASK_SIZES, LabelView, compact_model_state_dict, git_metadata, set_seed, tensor_state_digest, validate_classes
+from .runner import CLASS_ORDER, TASK_SIZES, LabelView, compact_model_state_dict, dataset_view, git_metadata, seen_indices, set_seed, tensor_state_digest, validate_classes
 from .snapshot_validation import audit_source, infer, load_scores, replay, score_metrics
 
 
@@ -39,6 +39,30 @@ def metrics_at_task(data, threshold, task):
 def filter_seen_people(data):
     mask = data['targets'].any(axis=1)
     return {k: (v if k == 'class_indices' else v[mask]) for k, v in data.items()}
+
+
+def replay_saved_cohort(model, cohort, saved_path, config, task, device):
+    """Strictly replay saved predictions with their original people and batch boundaries.
+
+    Filtering a full-cohort forward afterwards does not restore its batch layout.
+    AMP kernels may round differently after unseen-only people change the batches.
+    """
+    expected = load_scores(saved_path)
+    loader = DataLoader(dataset_view(cohort, seen_indices(task), include_sample_id=True),
+                        batch_size=config['eval_batch_size'], shuffle=False, num_workers=config['workers'])
+    _, actual = infer(model, loader, device, config['amp'], task, config['task_sizes'])
+    require(np.array_equal(expected['sample_ids'], actual['sample_ids'])
+            and np.array_equal(expected['targets'], actual['full_targets'])
+            and np.array_equal(expected['class_indices'], np.arange(sum(config['task_sizes'][:task+1]))),
+            'Saved-score replay cohort/classes mismatch')
+    require(np.array_equal(expected['batch_lengths'], actual['batch_lengths']),
+            'Saved-score replay batch boundaries differ')
+    require(expected['logits'].shape == actual['logits'].shape
+            and np.isfinite(expected['logits']).all() and np.isfinite(actual['logits']).all(),
+            'Invalid saved-score replay logits')
+    delta = float(np.abs(expected['logits']-actual['logits']).max())
+    require(delta <= .01, f'Complete saved-score replay differs with original batches: {delta}')
+    return delta
 
 
 def summarize_curve(tasks):
@@ -127,6 +151,11 @@ def evaluate(source, reference_root, pilot_reference, output, clip_checkpoint, d
             destination.mkdir(exist_ok=True)
             np.savez_compressed(destination/f'task{task}.npz', **data)
             row = dict(samples=len(data['sample_ids']), validation_replay_max_logit_difference=difference)
+            if preflight:
+                # Cover the original failure mode, not just a first-batch smoke.
+                row['saved_filtered_replay_max_logit_difference'] = replay_saved_cohort(
+                    model, validation, root/f'val_scores/task{task}.npz', c, task, device)
+                row['saved_score_replay_batch_policy'] = 'original_filtered_cohort_and_batch_boundaries'
             if not preflight:
                 metrics = metrics_at_task(data, c['threshold'], task)
                 filtered = filter_seen_people(data)
@@ -138,9 +167,12 @@ def evaluate(source, reference_root, pilot_reference, output, clip_checkpoint, d
                 if saved_path.exists():
                     saved = load_scores(saved_path)
                     require(np.array_equal(saved['sample_ids'], filtered['sample_ids']) and np.array_equal(saved['targets'], filtered['targets']), 'Saved-score cohort mismatch')
-                    delta = float(np.abs(saved['logits']-filtered['logits']).max())
-                    require(delta <= .01, 'Complete saved-score replay differs')
-                    row['saved_filtered_replay_max_logit_difference'] = delta
+                    # Compare the saved function in exactly its original batch layout.
+                    # Full-cohort scores remain independently computed, without replacement.
+                    row['full_cohort_vs_saved_max_logit_difference'] = float(np.abs(saved['logits']-filtered['logits']).max())
+                    row['saved_filtered_replay_max_logit_difference'] = replay_saved_cohort(
+                        model, cohort, saved_path, c, task, device)
+                    row['saved_score_replay_batch_policy'] = 'original_filtered_cohort_and_batch_boundaries'
             rows[str(task)] = row
             print(f'WHOLE_FROZEN_{split.upper()} method={name} task={task} samples={row["samples"]}', flush=True)
         require(tensor_state_digest(model.visual_encoder.state_dict()) == clip_hash, 'CLIP changed during inference')

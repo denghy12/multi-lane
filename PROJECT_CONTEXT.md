@@ -2423,3 +2423,8 @@ Both processes confirmed running on GPU0, tmux ml_whole_parax_freeze_20261011. R
 GPU0确认state=training、runner PID2923566、tmux ml_whole_parax_eight_task_20261012。正式干净运行HEAD7e1daccfabc3e90b7a114f01c696b5ee199ad46f，分支exp/three-view-whole-parax-freeze-eight-task；远程新worktree /mnt/haoyuan/workspace/multi-lane-main-whole-parax-eight-task。batch three_view_whole_parax_eight_task_seed0_val_test_20261012_01。seed0/8×30epochs/13950updates，task0原配置学习，task1-7整个ParaX冻结；原Image-token Adapter关闭，固定三视图融合。训练val-only，完成后自动完整2397人val三方法比较、固定5368人test三方法比较（复用baseline/live检查点），保存各任务全人群及原筛选口径、新旧类/单路/可靠Face指标和同人群forgetting。强制验证pilot前三任务配对、所有后期整bank状态与FP32旧函数稳定；不挑checkpoint，不按test调参，不训练其他seed。原来源worktree、主/test-only和其他GPU任务未修改。
 
 298项测试/真实32update八任务smoke/六次val replay0通过；preflight产物包SHA256 a31445e0d0d375f9e0cf8e3352362f8769a5ba37490d599025e97bdb7b7a3a29两端一致并已同步本地。正式output/logs按emotic_whole_parax_eight_task/<batch>保存。完整计划docs/three_view_whole_parax_eight_task_val_test_plan_20261012.md。启动后仅提交本地文档记录，不拉取到运行工作树；停止常规监控，等待用户要求结束后统一同步分析。
+
+
+## 2026-10-12 授权修复完整冻结八任务评价并启动test
+
+分支fix/whole-parax-evaluation-batch-replay-20261012，复用干净three-view-whole-parax-freeze本地工作树。修复evaluate_whole_parax_eight_task的完整分数重放：原先完整2397人前向后筛选2285人改变batch组成，baseline/task0 logits最大差0.015625、均值0.00005336、首64人差0；新增原筛选人群和原batch完整重放，阈值0.01保持，完整人群预测仍独立计算。新增batch依赖/真实预测变化及ID/标签/类别/batch不匹配回归测试；preflight覆盖三模型task0/task7原人群完整重放。新增仅评价launcher，复用已完成八任务checkpoint，先完整val后自动固定test，不训练。配置docs/whole_parax_eight_task_evaluation_repair_plan_20261012.md；新batch three_view_whole_parax_eight_task_eval_replayfix_seed0_20261012_01，GPU0，batch64/workers2/seed0/AMP原设置，output/logs在emotic_whole_parax_eight_task。当前待验证、Git-only同步与正式启动，不宣称test已开始；保留原失败产物，不修改原训练/test-only/其他工作树。

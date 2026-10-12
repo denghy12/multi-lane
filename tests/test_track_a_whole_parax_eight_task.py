@@ -4,10 +4,33 @@ import unittest
 from pathlib import Path
 
 import numpy as np
+import torch
+from torch.utils.data import DataLoader
 
 from multi_lane.track_a.compare_whole_parax_freeze import audit_control
-from multi_lane.track_a.evaluate_whole_parax_eight_task import evaluate, filter_seen_people, seen_payload, summarize_curve
-from multi_lane.track_a.runner import TASK_SIZES
+from multi_lane.track_a.evaluate_whole_parax_eight_task import evaluate, filter_seen_people, replay_saved_cohort, seen_payload, summarize_curve
+from multi_lane.track_a.runner import TASK_SIZES, LabelView
+from multi_lane.track_a.snapshot_validation import infer
+
+
+class ReplayPeople:
+    sample_ids = ['a', 'b', 'c', 'd']
+    targets = [[0], [20], [0], [0]]
+
+    def __len__(self):
+        return len(self.sample_ids)
+
+    def __getitem__(self, index):
+        target = torch.zeros(26)
+        target[self.targets[index]] = 1
+        return {'full': torch.zeros(1), 'face_reliable': torch.tensor(True)}, target
+
+
+class BatchSensitiveModel:
+    def seen_logits_with_views(self, images):
+        size = len(images['full'])
+        logits = torch.full((size, 5), float(size))
+        return logits, {name: logits for name in ('full', 'person', 'face')}
 
 
 class WholeParaXEightTaskTest(unittest.TestCase):
@@ -92,6 +115,47 @@ class WholeParaXEightTaskTest(unittest.TestCase):
             p = Path(tmp)
             with self.assertRaisesRegex(ValueError, 'complete locked run'):
                 evaluate(p,p,None,p/'output',p,p,p,split='test',preflight=True)
+
+    def replay_fixture(self, path):
+        config = dict(eval_batch_size=2, workers=0, amp=False, task_sizes=list(TASK_SIZES))
+        expected = dict(sample_ids=np.array(['a', 'c', 'd']),
+                        targets=np.array([[1, 0, 0, 0, 0]]*3, dtype=np.float32),
+                        class_indices=np.arange(5), batch_lengths=np.array([2, 1]),
+                        logits=np.array([[2.]*5, [2.]*5, [1.]*5], dtype=np.float32))
+        np.savez(path, **expected)
+        return config, expected
+
+    def test_original_cohort_replay_preserves_batches_instead_of_filtering_full_forward(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)/'scores.npz'
+            config, expected = self.replay_fixture(path)
+            cohort, model, device = ReplayPeople(), BatchSensitiveModel(), torch.device('cpu')
+            full_loader = DataLoader(LabelView(cohort, range(4), range(26), True), batch_size=2)
+            _, full = infer(model, full_loader, device, False, 0, TASK_SIZES)
+            filtered = filter_seen_people(seen_payload(full, 0))
+            np.testing.assert_array_equal(expected['sample_ids'], filtered['sample_ids'])
+            self.assertGreater(np.abs(expected['logits']-filtered['logits']).max(), .01)
+            self.assertEqual(replay_saved_cohort(model, cohort, path, config, 0, device), 0.)
+
+    def test_original_cohort_replay_still_rejects_changed_predictions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)/'scores.npz'
+            config, expected = self.replay_fixture(path)
+            expected['logits'][-1, -1] += .02
+            np.savez(path, **expected)
+            with self.assertRaisesRegex(ValueError, 'original batches'):
+                replay_saved_cohort(BatchSensitiveModel(), ReplayPeople(), path, config, 0, torch.device('cpu'))
+
+    def test_original_cohort_replay_rejects_changed_batches_classes_ids_and_labels(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)/'scores.npz'
+            for field in ('batch_lengths', 'class_indices', 'sample_ids', 'targets'):
+                with self.subTest(field=field):
+                    config, expected = self.replay_fixture(path)
+                    expected[field].flat[0] = 'z' if field == 'sample_ids' else 9
+                    np.savez(path, **expected)
+                    with self.assertRaises(ValueError):
+                        replay_saved_cohort(BatchSensitiveModel(), ReplayPeople(), path, config, 0, torch.device('cpu'))
 
 
 if __name__ == '__main__':
