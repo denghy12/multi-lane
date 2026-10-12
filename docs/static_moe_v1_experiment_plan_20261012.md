@@ -66,9 +66,21 @@
 
 预期保存：32个compact checkpoint、训练history/逐任务val和view scores、配对采样/旧函数/专家审计、四组完整val/test NPZ、最终mAP及各视图/可靠Face/新旧类/固定cohort遗忘曲线、pipeline manifest/state和退出码。checkpoint留服务器，结束后提醒同步日志和非checkpoint结果再分析。
 
-本轮首版seed0属于结构筛查，不能声称多seed稳定；最终研究结论仍需后续配对多seed复核。当前文档为启动配置，尚未宣称测试通过或实验已启动。
+本轮首版seed0属于结构筛查，不能声称多seed稳定；最终研究结论仍需后续配对多seed复核。正式实验已于2026-10-12 17:40:31（北京时间）启动，运行HEAD固定957832632a372936b5cb752f788a617f77a42443；下面保留预检修复历史及启动证据。
 
 ## 预检进展及评价schema修复
 
 实现4f89854已push并Git-only同步新服务器worktree；307项Track-A测试通过。smoke四组八任务各2updates共64updates全部训练exit0。统一评价校验器把更新预算smoke的epochs_per_task错误要求为30，而实际runner写null；配对损失路由字段实际为parameter_group_loss_routing。保留初次failed状态/日志和32个checkpoint，修复校验schema、补正式/更新预算及配对负例回归；直接补恢复评价，不重训，不改模型/超参数/数值阈值。正式调度先BASELINE和MOE_OVERLAP，让主候选从开始就与基线并行，再SHARED/MOE_UNIFORM。
+
+## 最终预检与正式启动证据
+
+9578326通过309项服务器Track-A测试。现有四组smoke共64成功updates/0 skipped，32个checkpoint全部恢复/同batch validation重放成功，最大logit差异0；raw token identity差异0、独立完整前向identity最大6.26e-7、旧logit漂移最大9.24e-7、mean cosine distance绝对值最大1.12e-7，均低于声明阈值。初始化/采样配对、74544参数/task、旧参数/专家/路由表保护、当前专家学习和冻结CLIP检查通过。未加载test、未报告smoke精度。
+
+初始failed状态备份为smoke batch的pipeline_initial_failure.json，最终pipeline_state.json=smoke_passed，并在smoke_acceptance.json记录复用检查点补评价；preflight_val/comparison.json记录所有32次只读重放。非checkpoint产物147文件已同步本地主工作树，归档logs/emotic_static_moe/verification/static_moe_v1_preflight_20261012.tar.gz的两端SHA256均为d51e9e0e3647aece520dace14c577adfcab92a7975c1132e655d5ed430774bc8；checkpoint/anchor留服务器。
+
+正式tmux为ml_static_moe_v1_20261012，pipeline_state=training、smoke=false，GPU0最多2组并行。17:42启动确认时BASELINE/MOE_OVERLAP均完成task0第1轮，各84updates/0 skipped，loss=.67747971/.67737051，分别36.5/45.5秒。GPU0占用约8146MiB，未见OOM/Traceback。完整配置均为8task/30epochs/batch64，预期13950updates/组，两组原始Selector/Prompt/head初始化hash相同。startup_receipt.json保存完整启动配置及首轮日志。
+
+正式运行固定clean HEAD957832632a372936b5cb752f788a617f77a42443；后续仅文档提交不pull进运行中的服务器worktree。四组按固定来源继续完成；自然结束后同步logs/output，再核对完成状态、source/hash、完整val2397/test5368人群、总更新数/0 skipped和各项审计。当前未取得正式mAP结果。
+
+实现文件：static_moe.py提供任务专属完整输出专家池，model.py/runner.py接入静态视图路由及采样/预算元数据；static_moe_audit.py检查identity和旧任务保护；evaluate_static_moe.py实现四组固定checkpoint只读评价及val-before-test条件；static_moe_pipeline.py与scripts/emotic/run_static_moe_v1.sh提供锁定配置和两组调度；tests/test_track_a_static_moe.py提供新增回归。以上Python模块均在multi_lane/track_a/下。
 

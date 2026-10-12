@@ -1,3 +1,15 @@
+## 2026-10-12 静态 MoE 第一版正式实验已启动
+
+- 运行分支 `exp/three-view-static-moe-v1`，固定运行 HEAD `957832632a372936b5cb752f788a617f77a42443`；本地独立实现worktree与服务器新worktree通过Git-only同步，启动时两端同HEAD，服务器clean。原主/test-only及其他工作树保持原样。
+- 309项Track-A单元测试通过。smoke四组×8task×2updates共64次成功更新、0 skipped；32个checkpoint恢复/同batch validation重放全部通过，最大logit差异0。raw token identity差异0，独立完整前向identity最大6.26e-7，旧任务最大logit漂移9.24e-7、mean cosine distance绝对值最大1.12e-7；旧参数/旧专家/静态路由表及冻结CLIP均不变。
+- 初始smoke评价校验schema错误已修正（更新预算epochs_per_task=null及parameter_group_loss_routing字段），补回归后复用32个checkpoint完成评价，没有重训、改变模型或放宽阈值；初始失败state另存pipeline_initial_failure.json，最终smoke_acceptance.json和preflight_val/comparison.json记录通过。
+- 正式batch `static_moe_v1_seed0_eight_task_val_test_20261012_01` 于北京时间2026-10-12 17:40:31启动；tmux `ml_static_moe_v1_20261012`，GPU0最多两组并行。BASELINE与MOE_OVERLAP均已完成task0第一轮，各84updates、0 skipped，loss分别.67747971/.67737051；随后自动SHARED/MOE_UNIFORM。每组8task×30epochs，预期13950updates；全部四组full validation完成后才加载test，尚无正式精度结论。
+- 服务器运行目录 `/mnt/haoyuan/workspace/multi-lane-main-three-view-static-moe-v1`；日志/结果为其 `logs/emotic_static_moe/<batch>/`、`output/emotic_static_moe/<batch>/`，控制日志 `logs/emotic_static_moe/verification/formal_controller.log`。
+- smoke非checkpoint产物147文件已同步主本地工作树，归档SHA256 `d51e9e0e3647aece520dace14c577adfcab92a7975c1132e655d5ed430774bc8`一致。正式startup_receipt.json记录第一轮/配置/运行HEAD，checkpoint及anchor .pt留服务器。
+- 完整配置、实现范围和结果路径见 `docs/static_moe_v1_experiment_plan_20261012.md`。后续文档提交不pull进正在运行的服务器worktree，运行固定9578326，保证四组来源一致。
+
+- 下一步等待本批自然结束后，同步正式logs/output（优先非checkpoint诊断），核对四组240epochs/13950updates、0 skipped、32个旧函数/专家审计、full_val与full_test比较文件及来源hash，再分析总体/三视图/可靠Face/新旧类AP和固定人群遗忘。首版仅seed0结构筛查，不能据此宣称多seed稳定；不追加调参或持续监督。
+
 ## 2026-10-12 静态 MoE：307项测试通过，64更新训练预检完成，补评价校验修复
 
 - 实现4f89854已push，服务器Git-only新worktree `/mnt/haoyuan/workspace/multi-lane-main-three-view-static-moe-v1` 同HEAD且clean。
