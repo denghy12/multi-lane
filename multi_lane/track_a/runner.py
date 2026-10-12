@@ -2383,6 +2383,9 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser("MULTI-LANE EMOTIC Track-A reproduction")
     parser.add_argument("--training-protocol", choices=("incremental", "joint26"),
                         default="incremental")
+    parser.add_argument("--static-moe-paired-audit", action="store_true")
+    parser.add_argument("--static-moe-mode", choices=("disabled", "uniform", "overlap"), default="disabled")
+    parser.add_argument("--static-moe-smoke-samples", type=int, default=0)
     parser.add_argument("--fixed-view-paired-audit", action="store_true",
                         help="Audit frozen fixed-view incremental ablations with isolated per-task samplers.")
     parser.add_argument("--image-stream-transfer-audit", action="store_true",
@@ -2767,6 +2770,13 @@ def main() -> None:
 
 
 def run(args: argparse.Namespace) -> None:
+    from .static_moe_audit import StaticMoEAudit, validate_static_config
+    if args.static_moe_mode != "disabled" and not args.static_moe_paired_audit:
+        raise ValueError("Static MoE requires its paired task-owned audit")
+    if args.static_moe_smoke_samples and not args.static_moe_paired_audit:
+        raise ValueError("Sample-limited smoke requires the static MoE audit")
+    if args.static_moe_paired_audit:
+        validate_static_config(args)
     from .image_stream_transfer_audit import ImageStreamTransferAudit, validate_transfer_config
     if args.parax_freeze_all_after_task0 and (
         not args.image_stream_transfer_audit or args.parax_mode != "image" or args.also_report_test
@@ -2774,7 +2784,7 @@ def run(args: argparse.Namespace) -> None:
         raise ValueError("Whole ParaX freeze control requires image-stream audit and validation only")
     if args.image_stream_transfer_audit:
         validate_transfer_config(args)
-    paired_protocol_audit = TRAINING_PROTOCOL == "joint26" or args.fixed_view_paired_audit or args.protected_parax_paired_audit or args.image_stream_transfer_audit
+    paired_protocol_audit = TRAINING_PROTOCOL == "joint26" or args.fixed_view_paired_audit or args.protected_parax_paired_audit or args.image_stream_transfer_audit or args.static_moe_paired_audit
     if args.parax_mode in PROTECTED_MODES and not args.protected_parax_paired_audit:
         raise ValueError("Protected ParaX requires its paired pilot audit")
     if (args.protected_parax_staged_training or args.protected_parax_residual_ablation) and (
@@ -3160,6 +3170,7 @@ def run(args: argparse.Namespace) -> None:
         adapter_auxiliary_metric_mode=args.adapter_regularization,
         adapter_view_bottleneck_dim=args.adapter_view_bottleneck_dim,
         adapter_view_mode=args.adapter_view_mode,
+        static_moe_mode=args.static_moe_mode,
         selector_conditioning=args.selector_conditioning,
         selector_condition_layers=args.selector_condition_layers,
         selector_condition_hidden_dim=args.selector_condition_hidden_dim,
@@ -3407,7 +3418,16 @@ def run(args: argparse.Namespace) -> None:
         "amp_growth_interval": args.amp_growth_interval,
         "initial_selector_prompt_classifier_sha256": base_initialization_digest,
         "fixed_view_paired_audit": bool(args.fixed_view_paired_audit),
-        "fixed_view_sampler_protocol": "seed_plus_1009_times_task" if (args.fixed_view_paired_audit or args.protected_parax_paired_audit or args.image_stream_transfer_audit) else None,
+        "fixed_view_sampler_protocol": "seed_plus_1009_times_task" if (args.fixed_view_paired_audit or args.protected_parax_paired_audit or args.image_stream_transfer_audit or args.static_moe_paired_audit) else None,
+        "static_moe_paired_audit": bool(args.static_moe_paired_audit),
+        "static_moe_mode": args.static_moe_mode,
+        "static_moe_smoke_samples": args.static_moe_smoke_samples,
+        "static_moe_route_weights": (model.adapter_bank.route_weights.cpu().tolist() if args.static_moe_mode != "disabled" else None),
+        "static_moe_num_experts": 3 if args.static_moe_mode != "disabled" else 0,
+        "initial_adapter_parameters_sha256": (tensor_state_digest(dict(model.adapter_bank.named_parameters())) if model.adapter_bank is not None else None),
+        "static_moe_expert_bottleneck": args.adapter_bottleneck_dim // 3 if args.static_moe_mode != "disabled" else None,
+        "static_moe_output_combination": "complete_expert_outputs_shared_output_bias" if args.static_moe_mode != "disabled" else None,
+        "static_moe_evaluation": "all_three_experts_evaluated" if args.static_moe_mode != "disabled" else None,
         "image_stream_transfer_audit": bool(args.image_stream_transfer_audit),
         "frozen_visual_sha256_before": frozen_visual_before,
         "training_loss_mode": args.training_loss_mode,
@@ -3899,6 +3919,7 @@ def run(args: argparse.Namespace) -> None:
     paired_task_audits = {}
     protected_audit = ProtectedRouteAudit(output, device) if args.protected_parax_paired_audit else None
     transfer_audit = ImageStreamTransferAudit(output, device) if args.image_stream_transfer_audit else None
+    static_audit = StaticMoEAudit(output, device) if args.static_moe_paired_audit else None
     for task_id in range(args.max_tasks):
         print(f"begin_task={task_id}", flush=True)
         model.activate_task(task_id)
@@ -3952,7 +3973,9 @@ def run(args: argparse.Namespace) -> None:
             seen_indices(task_id),
             include_sample_id=args.save_evaluation_scores,
         )
-        sampler_seed = fixed_view_sampler_seed(args.seed, task_id, TRAINING_PROTOCOL, args.fixed_view_paired_audit or args.protected_parax_paired_audit or args.image_stream_transfer_audit)
+        if args.static_moe_smoke_samples:
+            reporting_view.indices = reporting_view.indices[:args.static_moe_smoke_samples]
+        sampler_seed = fixed_view_sampler_seed(args.seed, task_id, TRAINING_PROTOCOL, args.fixed_view_paired_audit or args.protected_parax_paired_audit or args.image_stream_transfer_audit or args.static_moe_paired_audit)
         train_loader = DataLoader(
             train_view, batch_size=args.train_batch_size, shuffle=True,
             num_workers=args.workers, pin_memory=True, drop_last=False,
@@ -4050,6 +4073,8 @@ def run(args: argparse.Namespace) -> None:
             protected_audit.begin(model, reporting_loader, task_id)
         if transfer_audit is not None:
             transfer_audit.begin(model, reporting_loader, task_id)
+        if static_audit is not None:
+            static_audit.begin(model, reporting_loader, task_id)
         if model.parax_staged_mode or args.protected_parax_staged_training:
             model.set_parax_runtime_enabled(False)
             # Exclude the current expert pool from B0's optimizer entirely.
@@ -4229,6 +4254,8 @@ def run(args: argparse.Namespace) -> None:
                     )
         if transfer_audit is not None:
             transfer_audit.finish(model, task_id)
+        if static_audit is not None:
+            static_audit.finish(model, task_id)
         training_history[str(task_id)] = history
         if save_checkpoints:
             torch.save(

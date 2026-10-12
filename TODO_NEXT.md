@@ -1,3 +1,11 @@
+## 2026-10-12 已授权实现并启动静态 MoE 第一版
+
+- 用户要求开始第一版修改并跑实验；新独立分支 `exp/three-view-static-moe-v1`，本地managed worktree `/Users/denghaoyuan/.codex/worktrees/three-view-static-moe/multi-lane-main`，基于815d949，保留主工作树用户改动。
+- seed0四组（无Adapter/共享b48/三路相同输出MoE/三路两两重叠输出MoE），完整8tasks×30epochs，batch64、Adam主LR.0125/Adapter.0004、cosine、WD0、scale.03、joint BCE+aux.1；保留原固定可靠性融合。三个Adapter组精确74544参数/task；池内3×b16专家，共享一个输出bias，不做跨任务复用，不用ParaX。
+- 新模块位于Task Forward索引1的Selector证据读取路径，旧任务专家/静态表整体保护。新增配对/identity/旧函数审计及全部组full-val完成后才加载test的只读评价流水线。
+- 配置见 `docs/static_moe_v1_experiment_plan_20261012.md`；output/logs分别在emotic_static_moe对应batch。当前仅本地Python/Shell语法与diff检查通过；完整单测、真实四组×八task smoke及正式启动尚待执行，不能写成已跑。
+- 服务器86个worktree已逐一只读检查，主/test-only为dirty，保持原样；GPU0约24GiB空闲，其余忙。本轮Git-only新独立服务器worktree，不覆盖其他改动。
+
 # 下一步任务
 
 ## 2026-10-10：全套preflight通过，正式四组启动后停止监督

@@ -22,6 +22,7 @@ from .adapter import (
     ParaXImageAdapterBank, TaskImageTokenAdapterBank, TaskLaneTransformerAdapterBank,
 )
 from .selector_conditioning import TaskSelectorConditioner
+from .static_moe import StaticMoEImageTokenAdapterBank
 from .view_fusion import TaskwiseViewFusion
 
 ModelInputs = Union[torch.Tensor, Dict[str, torch.Tensor]]
@@ -53,6 +54,7 @@ class MultiLaneModel(nn.Module):
         adapter_auxiliary_metric_mode: str = "none",
         adapter_view_bottleneck_dim: int = 0,
         adapter_view_mode: str = "shared",
+        static_moe_mode: str = "disabled",
         selector_conditioning: str = "disabled",
         selector_condition_layers: Sequence[int] = (1,),
         selector_condition_hidden_dim: int = 32,
@@ -107,6 +109,14 @@ class MultiLaneModel(nn.Module):
             raise ValueError(
                 "Adapter mode must be disabled, task_lane, or image_token"
             )
+        if static_moe_mode not in {"disabled", "uniform", "overlap"}:
+            raise ValueError("Invalid static MoE mode")
+        if static_moe_mode != "disabled" and (
+            adapter_mode != "image_token" or parax_mode != "disabled"
+            or view_fusion != "fixed_three_view"
+        ):
+            raise ValueError("Static MoE requires task-local image-token adapters, fixed three-view fusion and no ParaX")
+        self.static_moe_mode = static_moe_mode
         post_modes = {"post", "post_static", "post_task_router", "post_task_staged", "post_task_staged_static"}
         staged_modes = {"post_task_staged", "post_task_staged_static"}
         post_modes |= set(PROTECTED_MODES)
@@ -334,7 +344,7 @@ class MultiLaneModel(nn.Module):
             # as the adapter-disabled baseline.
             with torch.random.fork_rng(devices=[]):
                 bank_class = (
-                    TaskImageTokenAdapterBank
+                    (StaticMoEImageTokenAdapterBank if static_moe_mode != "disabled" else TaskImageTokenAdapterBank)
                     if self.adapter_mode == "image_token"
                     else TaskLaneTransformerAdapterBank
                 )
@@ -349,6 +359,7 @@ class MultiLaneModel(nn.Module):
                     bottleneck_dims_per_task=adapter_bottleneck_dims_per_task,
                     residual_gate_mode=adapter_residual_gate_mode,
                     auxiliary_metric_mode=adapter_auxiliary_metric_mode,
+                    **({"routing": static_moe_mode} if static_moe_mode != "disabled" else {}),
                     **(
                         {"view_bottleneck_dim": adapter_view_bottleneck_dim}
                         if self.adapter_mode == "image_token" else {}
@@ -599,6 +610,8 @@ class MultiLaneModel(nn.Module):
             total_sq += group_sq
         result["adapter_grad_total_norm"] = total_sq ** 0.5
         result["adapter_grad_finite"] = 1.0 if finite else 0.0
+        if isinstance(self.adapter_bank, StaticMoEImageTokenAdapterBank):
+            result.update(self.adapter_bank.expert_gradient_diagnostics(gradient_scale))
         return result
 
     def adapter_view_diagnostics(self) -> Dict[str, float]:
