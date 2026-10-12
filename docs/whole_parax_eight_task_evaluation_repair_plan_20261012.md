@@ -31,3 +31,12 @@ BATCH_ID=three_view_whole_parax_eight_task_eval_replayfix_seed0_20261012_01 GPU=
 ## Git与验证
 
 本地复用干净three-view-whole-parax-freeze工作树，先创建`fix/whole-parax-evaluation-batch-replay-20261012`。服务器新建独立`../multi-lane-main-whole-parax-eval-repair`，Git-only同步；不更新原训练和其他工作树。先compile/bash/diff、完整单测，再真实六次checkpoint首批及完整原人群重放preflight，不加载test；通过后启动正式评价链。启动确认后不持续监控，结束后同步分析。正式test必须等待本修复HEAD下完整validation成功。
+
+
+## 2026-10-12 重放修复验证通过，完整val→test评价队列已启动
+
+新分支fix/whole-parax-evaluation-batch-replay-20261012，代码提交/干净运行HEAD b8660514679338eb32a7efb39336091ddd8bd663。服务器独立worktree /mnt/haoyuan/workspace/multi-lane-main-whole-parax-eval-repair，原训练及主/test-only/其他工作树保留。修复完整分数校验使用原筛选人群和原batch边界，人物/标签/类别/batch/有限值均检查，阈值0.01不变；完整人群输出仍独立计算。真实三方法task0/task7六次首批及完整原人群重放差全部0，确认原baseline task0最大差0.015625源于换batch后的AMP舍入；301/301单测与compile/bash/diff通过，无smoke训练或test加载。
+
+正式batch three_view_whole_parax_eight_task_eval_replayfix_seed0_20261012_01，GPU0，tmux ml_whole_parax_evalfix_20261012，确认state=evaluating_val、主PID3120242、baseline task0完整校验已通过；尚未进入test。仅评价现有seed0三方法各8checkpoint，完整2397人val通过后自动完整5368人test；batch64/workers2/AMP/TF32按原config，固定融合，不训练或选择模型。输出/日志在emotic_whole_parax_eight_task/<batch>的新目录，不覆盖原failed批次。完整配置docs/whole_parax_eight_task_evaluation_repair_plan_20261012.md。启动后不持续监控，结束后同步结果并补导师总览。
+
+预检NPZ/JSON/单测与真实重放日志、正式manifest已同步主本地；包logs/emotic_whole_parax_eight_task/verification/whole_parax_eval_repair_preflight_20261012.tar.gz两端SHA2561472c5a684c60ba4d39dad54815007b3d480f161f4966aa12076d8197a1c0de9。checkpoint留远端。导师报告已注明修复和队列实际状态，43.3248仍是训练末val记录，test等待自动阶段。提交推送获本次用户执行授权，仅实验修复分支；后续文档提交不拉取到正在评价的远程工作树。
