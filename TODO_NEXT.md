@@ -4,7 +4,9 @@
 - 新实现分支 `exp/three-view-static-moe-parallel-eval`，复用本地managed worktree。原服务器训练worktree和运行HEAD9578326保持不变，四组训练不重启、不更新代码；另建评价worktree部署调度修改。
 - 接管程序为旧评价目标full_val预留显式handoff标记，旧控制器完成全部训练后由已有fresh-output检查退出，不执行旧顺序评价；保留该预期退出/日志/标记，再并行评价。不会停止任何训练进程，也不会覆盖已有结果。
 - 两个评价进程须读取同一份四组32个checkpoint/配置/训练审计/val score的SHA清单；评价前后源文件不变，结束后交叉核对val/test与清单一致。smoke仍禁止test。新增并发启动、任一评价失败、检查点变化、接管保护及错误控制器回归。
-- 本次修改验证/部署尚待完成，原训练仍在运行。配置与接管细节见 `docs/static_moe_parallel_evaluation_20261012.md`；正式启动与训练配置仍见原v1计划。
+- 并行评价实现ea722ac已Git-only部署新评价worktree，318项Track-A测试通过；带同一来源锁的四组32个smoke checkpoint恢复/64人val预检通过，最大logit重放差异0，不加载test。18:01:10（北京时间）已核对新tmux `ml_static_moe_parallel_eval_20261012`、parallel_evaluation_state=waiting_for_training和旧PID3138735仍训练，实际接管已挂接。
+- 训练继续固定9578326，新评价固定ea722ac625060f303d519bbcc6a36b2e4445da52；所有业务模型/runner/训练入口逐文件无差异。39个新非checkpoint产物已同步主本地工作树，两端归档SHA256=a3826a9e3a2ebd6bf7b89c81b38befec5d70ba3af8bd26ed7727a6b74e0d0750。后续仅文档提交不pull进这两个运行worktree。
+- 接管等待/最终状态看parallel_evaluation_state.json，接管开始评价后实时进度看pipeline_state.json；自然结束后同步完整full_val/full_test及两份评价日志，核对两个split来源锁hash和全部四组/8阶段结果，再分析精度。配置、预期旧评价保护退出与接管细节见 `docs/static_moe_parallel_evaluation_20261012.md`。
 
 ## 2026-10-12 静态 MoE 第一版正式实验已启动
 

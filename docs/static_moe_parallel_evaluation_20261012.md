@@ -10,7 +10,7 @@
 - 输入：源config记录的EMOTIC、CLIP ViT-B/16（SHA5806e77cd80f8b59890b7e101eabd078d9fb84e6937f9e85e4ecb61988df416f）、Face manifest。完整val2397人，test5368人，各阶段全部已见类，不筛选组别/epoch，不用val或test重选权重。
 - 输出仍在原batch的full_val/和full_test/；日志仍在原batch的val_evaluation.log和test_evaluation.log。源训练日志、32个compact checkpoint及旧审计保留。
 - 共享parallel_evaluation_source_lock.json锁定四组固定checkpoint、config、seed_summary、paired/static审计、history和val score的SHA，且记录评价Git版本；两个进程各自检查同清单及前后不可变，完成后再次交叉验证。
-- 最新调度状态：parallel_evaluation_state.json；旧控制器结束接管后pipeline_state.json转为并行评价状态。原training manifest与startup_receipt不改写。
+- 接管等待/最终状态：parallel_evaluation_state.json；旧控制器结束接管后，以pipeline_state.json查看实时并行评价状态。原training manifest与startup_receipt不改写。
 
 ## 正在运行批次的无中断接管
 
@@ -32,4 +32,14 @@
 
 evaluate_static_moe.py保留兼容的顺序模式，新增显式parallel-splits/source-lock模式；并行test解除先完成val限制但仍禁止smoke/test、检查全部训练完成、同来源锁和只读推理。static_moe_pipeline.py的新完整实验默认使用并行评价；static_moe_parallel_evaluation.py提供并行调度与本批接管。训练模型、loss、runner和训练Shell入口未修改。
 
-新增测试验证两个真实工作线程均启动后才完成、任一split失败保留两者退出码、源checkpoint变化拒绝通过、无锁并行test拒绝、错误控制器拒绝、接管归档及意外已有数据保护。计划在新Linux评价worktree运行全套Track-A测试，再复用原smoke的32checkpoint进行带来源锁的64人val预检，不重训、不加载test；通过后实际挂接本批。当前为实施配置，尚未宣称新验证或接管完成。
+新增测试验证两个真实工作线程均启动后才完成、任一split失败保留两者退出码、源checkpoint变化拒绝通过、无锁并行test拒绝、错误控制器拒绝、接管归档及意外已有数据保护。新Linux评价worktree已通过318项Track-A测试；复用原smoke全部32checkpoint完成带来源锁的64人val预检，全部重放差异0、来源/CLIP不变，未重训、未加载test。
+
+## 实际部署与启动确认
+
+实现已提交/push并Git-only部署，评价固定clean HEAD ea722ac625060f303d519bbcc6a36b2e4445da52；原训练仍固定clean HEAD957832632a372936b5cb752f788a617f77a42443。两者model/runner/static_moe/adapter及训练Shell逐文件无差异，四组训练来源不混用新评价版本。
+
+2026-10-12 18:01:10（北京时间）确认：tmux ml_static_moe_parallel_eval_20261012已运行，日志输出STATIC_MOE_PARALLEL_HANDOFF_ARMED waiting_for_training；原控制器PID3138735仍运行，原pipeline_state仍training，新的parallel_evaluation_state为waiting_for_training，training_interrupted=false。接管任务已实际挂接，尚未宣称正式val/test开始或取得精度结果。
+
+源batch的parallel_handoff_receipt.json记录上述验证、两个运行Git版本、318项测试及32个重放结果；原smoke batch的preflight_parallel_val/comparison.json记录带锁恢复评价。39个新非checkpoint诊断文件已同步主本地工作树，归档logs/emotic_static_moe/verification/static_moe_parallel_eval_preflight_20261012.tar.gz两端SHA256均为a3826a9e3a2ebd6bf7b89c81b38befec5d70ba3af8bd26ed7727a6b74e0d0750。
+
+后续文档提交不pull进正在运行的训练/评价worktree。所有训练结束后接管任务自动启动val/test两个进程；结束后同步full_val/full_test和评价日志，检查同一来源锁hash、四组各8checkpoint、完整人群及只读/来源不变结果，再统一分析。
