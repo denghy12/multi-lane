@@ -41,6 +41,7 @@ def evaluate_method_scope(batch: Path, output: Path, method: str, scope: str,
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     source = batch / method
     model = build_static_model(config, load_openai_clip_visual(clip_checkpoint)).float().to(device)
+    model.enable_adapter_ablation_diagnostics(True)
     validation = make_source(config, data_root, face_manifest_root, "val")
     validate_classes(validation)
     require(len(validation) == 2397, "Expected complete validation cohort")

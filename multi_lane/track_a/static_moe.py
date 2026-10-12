@@ -35,18 +35,20 @@ class OutputExpertPool(nn.Module):
         self.experts = nn.ModuleList([OutputExpert(width, rank, activation) for _ in range(3)])
         self.output_bias = nn.Parameter(torch.zeros(width))
         self.last_output_correlation = 0.0
+        self.diagnostics_enabled = False
 
     def forward(self, value, weights):
         # Evaluate all three in v1: uniform/overlap have the same forward graph
         # and FLOPs. A zero route coefficient still gives that expert zero gradient.
         outputs = torch.stack([expert(value) for expert in self.experts])
-        flat = outputs.detach().float().reshape(3, -1)
-        centered = flat - flat.mean(dim=1, keepdim=True)
-        normalized = centered / centered.norm(dim=1, keepdim=True).clamp_min(1e-12)
-        corr = normalized @ normalized.transpose(0, 1)
-        self.last_output_correlation = float(
-            torch.stack((corr[0, 1], corr[0, 2], corr[1, 2])).mean().cpu()
-        )
+        if self.diagnostics_enabled:
+            flat = outputs.detach().float().reshape(3, -1)
+            centered = flat - flat.mean(dim=1, keepdim=True)
+            normalized = centered / centered.norm(dim=1, keepdim=True).clamp_min(1e-12)
+            corr = normalized @ normalized.transpose(0, 1)
+            self.last_output_correlation = float(
+                torch.stack((corr[0, 1], corr[0, 2], corr[1, 2])).mean().cpu()
+            )
         weights = weights.to(outputs).view(3, *([1] * value.ndim))
         return (outputs * weights).sum(dim=0) + self.output_bias
 
@@ -115,6 +117,11 @@ class StaticMoEImageTokenAdapterBank(TaskImageTokenAdapterBank):
     def reset_ablation_diagnostics(self) -> None:
         self._cumulative_expert_correlations = []
 
+    def enable_ablation_diagnostics(self, enabled: bool = True) -> None:
+        for pools in self.task_adapters:
+            for pool in pools.values():
+                pool.diagnostics_enabled = bool(enabled)
+
     def expert_output_correlation(self) -> float | None:
         if not self._cumulative_expert_correlations:
             return None
@@ -141,7 +148,8 @@ class StaticMoEImageTokenAdapterBank(TaskImageTokenAdapterBank):
             multiplier = self._runtime_residual_multiplier if active else 1.0
             pool = self.task_adapters[int(task)][str(layer_id)]
             delta = self.residual_scale * multiplier * pool(frozen_image_tokens, weights)
-            self._cumulative_expert_correlations.append(pool.last_output_correlation)
+            if pool.diagnostics_enabled:
+                self._cumulative_expert_correlations.append(pool.last_output_correlation)
             adapted.append(frozen_image_tokens + delta)
             ratios.append((delta.detach().float().square().sum(-1)
                            / frozen_image_tokens.detach().float().square().sum(-1).clamp_min(1e-8)).mean())

@@ -400,6 +400,7 @@ class MultiLaneModel(nn.Module):
         self._adapter_attention_entropy_sum = 0.0
         self._adapter_attention_max_sum = 0.0
         self._adapter_attention_count = 0
+        self._adapter_ablation_diagnostics_enabled = False
 
     @property
     def task_sizes(self) -> Tuple[int, ...]:
@@ -476,6 +477,11 @@ class MultiLaneModel(nn.Module):
         self._adapter_attention_count = 0
         if self.adapter_bank is not None and hasattr(self.adapter_bank, "reset_ablation_diagnostics"):
             self.adapter_bank.reset_ablation_diagnostics()
+
+    def enable_adapter_ablation_diagnostics(self, enabled: bool = True) -> None:
+        self._adapter_ablation_diagnostics_enabled = bool(enabled)
+        if self.adapter_bank is not None and hasattr(self.adapter_bank, "enable_ablation_diagnostics"):
+            self.adapter_bank.enable_ablation_diagnostics(enabled)
 
     def adapter_ablation_diagnostics(self) -> Dict[str, float | None]:
         count = max(1, int(self._adapter_attention_count))
@@ -791,11 +797,12 @@ class MultiLaneModel(nn.Module):
                 "tbsc,tbnc->tbsn", queries, selector_image_tokens
             ) * (self.width**-0.5)
             selector_weights = torch.softmax(similarity, dim=-1)
-            selector_weights_float = selector_weights.float().clamp_min(1e-12)
-            entropy = -(selector_weights_float * selector_weights_float.log()).sum(dim=-1).mean()
-            self._adapter_attention_entropy_sum += float(entropy.detach().cpu())
-            self._adapter_attention_max_sum += float(selector_weights.float().amax(dim=-1).mean().detach().cpu())
-            self._adapter_attention_count += 1
+            if self._adapter_ablation_diagnostics_enabled:
+                selector_weights_float = selector_weights.float().clamp_min(1e-12)
+                entropy = -(selector_weights_float * selector_weights_float.log()).sum(dim=-1).mean()
+                self._adapter_attention_entropy_sum += float(entropy.detach().cpu())
+                self._adapter_attention_max_sum += float(selector_weights.float().amax(dim=-1).mean().detach().cpu())
+                self._adapter_attention_count += 1
             selected = torch.einsum(
                 "tbnc,tbsn->tbsc",
                 selector_image_tokens,
