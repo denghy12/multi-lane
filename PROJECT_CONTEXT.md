@@ -1,3 +1,11 @@
+## 2026-10-12 静态 MoE：307项测试通过，64更新训练预检完成，补评价校验修复
+
+- 实现4f89854已push，服务器Git-only新worktree `/mnt/haoyuan/workspace/multi-lane-main-three-view-static-moe-v1` 同HEAD且clean。
+- 服务器完整307项Track-A单测通过；真实smoke `static_moe_v1_smoke_seed0_20261012_01` 四组各8task×2updates、共64updates全部训练exit0，32个checkpoint及每task identity/旧参数/旧函数审计已保存。
+- 统一评价前校验器错误要求smoke的epochs_per_task=30，但runner按optimizer_updates预算写null；另外配对字段应为parameter_group_loss_routing。保留原失败state/日志和全部checkpoint，修复schema并补回归；不重训、不改参数、不放宽函数漂移或重放阈值。
+- 当前评价预检和正式训练尚未启动完成；需修复后直接恢复32个现有checkpoint补预检，通过后启动正式四组seed0八任务val/test。正式调度先baseline+overlap，再shared+uniform，最多2组/GPU0。
+- 模型/专家组合算法与已完成smoke一致，修复限校验/配置保护/调度及回归。全部配置见 `docs/static_moe_v1_experiment_plan_20261012.md`。
+
 ## 2026-10-12 已授权实现并启动静态 MoE 第一版
 
 - 用户要求开始第一版修改并跑实验；新独立分支 `exp/three-view-static-moe-v1`，本地managed worktree `/Users/denghaoyuan/.codex/worktrees/three-view-static-moe/multi-lane-main`，基于815d949，保留主工作树用户改动。

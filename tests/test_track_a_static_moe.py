@@ -5,15 +5,16 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import torch
 
 from multi_lane.track_a.adapter import TaskImageTokenAdapterBank
 from multi_lane.track_a.static_moe import StaticMoEImageTokenAdapterBank, OutputExpertPool, ROUTES
 from multi_lane.track_a.model import MultiLaneModel
-from multi_lane.track_a.runner import compact_model_state_dict, parse_args
+from multi_lane.track_a.runner import compact_model_state_dict, parse_args, TASK_SIZES, CLASS_ORDER
 from multi_lane.track_a.static_moe_audit import adapter_old_state, validate_static_config
-from multi_lane.track_a.evaluate_static_moe import preceding_validation, build_static_model
+from multi_lane.track_a.evaluate_static_moe import preceding_validation, build_static_model, audit_source, audit_pairing, METHODS
 from multi_lane.track_a.export_compact_test_scores import restore_compact_model_state
 from test_track_a_reproduction import FakeVisual
 
@@ -207,6 +208,64 @@ class StaticMoETest(unittest.TestCase):
                 preceding_validation(root, "test", dict(commit="x"))
             with self.assertRaises(ValueError):
                 preceding_validation(root, "test", dict(commit="x"), preflight=True)
+
+    def test_actual_update_budget_schema_and_formal_budget(self):
+        for smoke in (0, 2):
+            with self.subTest(smoke=smoke), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                c = dict(static_moe_paired_audit=True, training_protocol="incremental",
+                         task_sizes=list(TASK_SIZES), class_order=list(CLASS_ORDER), max_tasks=8,
+                         epochs_per_task=None if smoke else 30,
+                         training_budget_mode="optimizer_updates" if smoke else "epochs",
+                         optimizer_updates_per_task=smoke or None, static_moe_smoke_samples=64 if smoke else 0,
+                         parax_mode="disabled", view_fusion="fixed_three_view", selector_mode="shared",
+                         prompt_mode="shared", adapter_mode="disabled", reporting_split="val",
+                         also_report_test=False, git=dict(dirty=False), save_compact_checkpoints=True,
+                         train_batch_size=64)
+                row = dict(skipped_optimizer_steps=0, amp_loss_scale_end=1024, current_loss=.6,
+                           optimizer_steps=2 if smoke else 1)
+                history = {str(t): [row] * (1 if smoke else 30) for t in range(8)}
+                pa = dict(frozen_visual_unchanged=True, frozen_visual_sha256_before="a",
+                          frozen_visual_sha256_after="a", tasks={str(t): dict(train_instances=64) for t in range(8)})
+                audit = dict(status="passed", tasks={str(t): dict(old_lane_parameters_unchanged=True,
+                    adapter_old_state_unchanged=True, adapter_old_sha256_before="b", adapter_old_sha256_after="b",
+                    identity=dict(raw_token_max_difference=0.)) for t in range(8)})
+                summary = dict(status="complete", config=c, completed_optimizer_updates=16 if smoke else 240,
+                               completed_epochs=8 if smoke else 240)
+                for name, value in (("config", c), ("seed_summary", summary), ("paired_protocol_audit", pa),
+                                    ("static_moe_audit", audit), ("training_history", history)):
+                    (root / (name + ".json")).write_text(json.dumps(value))
+                audit_source(root, smoke)
+                with self.assertRaises(ValueError):
+                    audit_source(root, 0 if smoke else 2)
+
+    def test_paired_runner_schema_and_negative_controls(self):
+        common = dict(seed=0, class_order=list(CLASS_ORDER), task_sizes=list(TASK_SIZES), max_tasks=8,
+            epochs_per_task=None, train_batch_size=64, eval_batch_size=64, adapter_layer_indices=[1],
+            adapter_residual_scale=.03, view_fusion="fixed_three_view", view_auxiliary_loss_weight=.1,
+            parameter_group_loss_routing="joint_bce", training_loss_mode="legacy_full_zero",
+            learning_rate=.0125, optimizer="Adam_reset_per_task", scheduler_mode="cosine",
+            scheduler_min_lr_ratio=0., scheduler_warmup_ratio=0., input_normalization="clip",
+            full_crop_mode="legacy", train_crop_scale=[.05, 1.], person_crop_margin=.15,
+            amp_initial_scale=1024., amp_growth_interval=1000000000, clip_checkpoint_sha256="clip",
+            face_manifest=dict(root="face"), static_moe_smoke_samples=64, optimizer_updates_per_task=2,
+            git=dict(commit="a", dirty=False), adapter_learning_rate=.0004, adapter_weight_decay=0.,
+            adapter_parameter_counts_per_task=[74544] * 8, initial_adapter_parameters_sha256="experts")
+        configs = {}
+        for method, mode in zip(METHODS, ("disabled", "disabled", "uniform", "overlap")):
+            configs[method] = dict(common, static_moe_mode=mode,
+                adapter_mode="disabled" if method == "BASELINE" else "image_token",
+                static_moe_route_weights=ROUTES.get(mode))
+        tasks = {str(t): dict(train_sample_ids_sha256="ids", validation_sample_ids_sha256="val",
+                 first_train_batch_ids_sha256="first", reporting_sample_ids_sha256="report",
+                 train_instances=64, sampler_seed=t * 1009) for t in range(8)}
+        audits = {m: dict(initial_selector_prompt_classifier_sha256="base", tasks=copy.deepcopy(tasks)) for m in METHODS}
+        with patch("multi_lane.track_a.evaluate_static_moe.audit_source",
+                   side_effect=lambda source, updates: (configs[source.name], audits[source.name])):
+            audit_pairing(Path("unused"), 2)
+            audits["MOE_OVERLAP"]["tasks"]["7"]["first_train_batch_ids_sha256"] = "wrong"
+            with self.assertRaises(ValueError):
+                audit_pairing(Path("unused"), 2)
 
 
 if __name__ == "__main__":

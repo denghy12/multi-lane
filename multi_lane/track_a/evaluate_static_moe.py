@@ -51,7 +51,10 @@ def audit_source(source, smoke_updates=0):
     require(s["status"] == "complete" and s["config"] == c, "Source incomplete/config mismatch")
     require(c["static_moe_paired_audit"] and c["training_protocol"] == "incremental"
             and c["task_sizes"] == list(TASK_SIZES) and c["class_order"] == list(CLASS_ORDER)
-            and c["max_tasks"] == 8 and c["epochs_per_task"] == 30, "Wrong source protocol")
+            and c["max_tasks"] == 8
+            and c["epochs_per_task"] == (None if smoke_updates else 30)
+            and c["training_budget_mode"] == ("optimizer_updates" if smoke_updates else "epochs"),
+            "Wrong source protocol/budget schema")
     require(c["parax_mode"] == "disabled" and c["view_fusion"] == "fixed_three_view"
             and c["selector_mode"] == c["prompt_mode"] == "shared"
             and c["adapter_mode"] in ("disabled", "image_token"), "Wrong source architecture")
@@ -94,7 +97,9 @@ def audit_pairing(batch, smoke_updates=0):
     expected_modes = dict(BASELINE="disabled", SHARED="disabled", MOE_UNIFORM="uniform", MOE_OVERLAP="overlap")
     common_keys = ("seed", "class_order", "task_sizes", "max_tasks", "epochs_per_task",
                    "train_batch_size", "eval_batch_size", "adapter_layer_indices", "adapter_residual_scale",
-                   "view_fusion", "view_auxiliary_loss_weight", "loss_routing", "training_loss_mode",
+                   "view_fusion", "view_auxiliary_loss_weight", "parameter_group_loss_routing", "training_loss_mode",
+                   "learning_rate", "optimizer", "scheduler_mode", "scheduler_min_lr_ratio", "scheduler_warmup_ratio",
+                   "input_normalization", "full_crop_mode", "train_crop_scale", "person_crop_margin",
                    "amp_initial_scale", "amp_growth_interval", "clip_checkpoint_sha256", "face_manifest",
                    "static_moe_smoke_samples", "optimizer_updates_per_task", "git")
     task_keys = ("train_sample_ids_sha256", "validation_sample_ids_sha256", "first_train_batch_ids_sha256",
@@ -111,6 +116,8 @@ def audit_pairing(batch, smoke_updates=0):
                     "Paired samples/samplers differ")
     budgets = [configs[m]["adapter_parameter_counts_per_task"] for m in METHODS[1:]]
     require(all(value == [74544] * 8 for value in budgets), "Adapter budgets differ")
+    require(all(configs[m]["adapter_learning_rate"] == .0004 and configs[m]["adapter_weight_decay"] == 0
+                for m in METHODS[1:]), "Adapter optimizer settings differ")
     require(configs["MOE_UNIFORM"]["initial_adapter_parameters_sha256"] ==
             configs["MOE_OVERLAP"]["initial_adapter_parameters_sha256"], "Expert initializations differ")
     for method in METHODS[2:]:

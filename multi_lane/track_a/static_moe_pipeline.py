@@ -72,8 +72,9 @@ def launch(batch_id, gpu="0", smoke=False, parallel=2):
             write(output / (method + ".exit.json"), dict(exit_code=result.returncode))
             return method, result.returncode
 
+        training_order = METHODS if smoke else ("BASELINE", "MOE_OVERLAP", "SHARED", "MOE_UNIFORM")
         with ThreadPoolExecutor(max_workers=parallel) as executor:
-            exits = dict(executor.map(train, METHODS))
+            exits = dict(executor.map(train, training_order))
         state["phases"]["training"] = exits
         write(state_path, state)
         if any(exits.values()):

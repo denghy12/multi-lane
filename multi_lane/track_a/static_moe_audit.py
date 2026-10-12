@@ -23,12 +23,20 @@ def validate_static_config(args):
                     adapter_view_mode="shared", adapter_residual_gate_mode="fixed",
                     adapter_task_init="independent", adapter_regularization="none",
                     save_compact_checkpoints=True, save_evaluation_scores=True)
+    required.update(seed=0, max_tasks=8, epochs=30, train_batch_size=64, eval_batch_size=64,
+                    adapter_bottleneck_dim=48, adapter_residual_scale=.03, adapter_activation="relu",
+                    adapter_learning_rate=.0004, adapter_weight_decay=0., source_learning_rate=.05,
+                    source_reference_batch_size=256, weight_decay=0., scheduler_mode="cosine",
+                    scheduler_min_lr_ratio=0., scheduler_warmup_ratio=0.,
+                    amp_initial_scale=1024., amp_growth_interval=1000000000)
     if any(getattr(args, key) != value for key, value in required.items()):
         raise ValueError("Static MoE v1 requires paired shared three-view validation with task-owned experts")
     if args.adapter_mode not in ("disabled", "image_token"):
         raise ValueError("Static MoE audit supports the baseline or image-token adapters")
     if args.static_moe_mode != "disabled" and args.adapter_mode != "image_token":
         raise ValueError("Static experts require image-token adapters")
+    if tuple(args.adapter_layer_indices) != (1,):
+        raise ValueError("Static MoE v1 locks the Selector evidence adapter to layer index1")
     if args.static_moe_smoke_samples < 0 or (
         args.static_moe_smoke_samples and not args.optimizer_updates_per_task
     ):

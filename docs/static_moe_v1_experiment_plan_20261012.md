@@ -68,3 +68,7 @@
 
 本轮首版seed0属于结构筛查，不能声称多seed稳定；最终研究结论仍需后续配对多seed复核。当前文档为启动配置，尚未宣称测试通过或实验已启动。
 
+## 预检进展及评价schema修复
+
+实现4f89854已push并Git-only同步新服务器worktree；307项Track-A测试通过。smoke四组八任务各2updates共64updates全部训练exit0。统一评价校验器把更新预算smoke的epochs_per_task错误要求为30，而实际runner写null；配对损失路由字段实际为parameter_group_loss_routing。保留初次failed状态/日志和32个checkpoint，修复校验schema、补正式/更新预算及配对负例回归；直接补恢复评价，不重训，不改模型/超参数/数值阈值。正式调度先BASELINE和MOE_OVERLAP，让主候选从开始就与基线并行，再SHARED/MOE_UNIFORM。
+
