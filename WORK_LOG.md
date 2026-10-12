@@ -4157,3 +4157,10 @@ Both processes confirmed running on GPU0, tmux ml_whole_parax_freeze_20261011. R
 ### 2026-10-12 八任务启动检查通过
 
 实现cc71e77。298/298 unittest、compile/bash/diff通过。真实ViT smoke whole_parax_eight_task_smoke_20261012_01八任务各4updates/共32updates，0AMP skips；task1-7整bank冻结，task7 trainable0，固定旧FP32 logits最大差1.1920928955078125e-6，reserved3342MiB。新增评价入口六次来源val重放（baseline/live/frozen task0/task7）最大logit差全部0，64人val preflight通过，无test加载，不作精度证据。正式batch three_view_whole_parax_eight_task_seed0_val_test_20261012_01待启动，GPU0，8×30epochs/13950updates，val-only训练后自动完整val和固定test；原三个任务pilot作为前三任务函数配对对照，源baseline/live不重训。preflight包SHA256 a31445e0d0d375f9e0cf8e3352362f8769a5ba37490d599025e97bdb7b7a3a29，产物同步主本地logs/output，checkpoint留远端。验证后只同步文档提交再启动，不改变模型代码，不占用其他会话/test-only。
+
+
+### 2026-10-12 正式八任务整体冻结seed0已启动
+
+GPU0确认state=training、runner PID2923566、tmux ml_whole_parax_eight_task_20261012。正式干净运行HEAD7e1daccfabc3e90b7a114f01c696b5ee199ad46f，分支exp/three-view-whole-parax-freeze-eight-task；远程新worktree /mnt/haoyuan/workspace/multi-lane-main-whole-parax-eight-task。batch three_view_whole_parax_eight_task_seed0_val_test_20261012_01。seed0/8×30epochs/13950updates，task0原配置学习，task1-7整个ParaX冻结；原Image-token Adapter关闭，固定三视图融合。训练val-only，完成后自动完整2397人val三方法比较、固定5368人test三方法比较（复用baseline/live检查点），保存各任务全人群及原筛选口径、新旧类/单路/可靠Face指标和同人群forgetting。强制验证pilot前三任务配对、所有后期整bank状态与FP32旧函数稳定；不挑checkpoint，不按test调参，不训练其他seed。原来源worktree、主/test-only和其他GPU任务未修改。
+
+298项测试/真实32update八任务smoke/六次val replay0通过；preflight产物包SHA256 a31445e0d0d375f9e0cf8e3352362f8769a5ba37490d599025e97bdb7b7a3a29两端一致并已同步本地。正式output/logs按emotic_whole_parax_eight_task/<batch>保存。完整计划docs/three_view_whole_parax_eight_task_val_test_plan_20261012.md。启动后仅提交本地文档记录，不拉取到运行工作树；停止常规监控，等待用户要求结束后统一同步分析。
