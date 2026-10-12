@@ -17,12 +17,13 @@ from .runner import (LabelView, TASK_SIZES, compact_model_state_dict, git_metada
 from .snapshot_validation import audit_source, infer, load_scores, replay, score_metrics
 
 
-def audit_control(source, reference, smoke_updates=0):
+def audit_control(source, reference, smoke_updates=0, task_count=3, pilot_reference=None):
+    require(task_count in (3, 8), 'Expected three-task pilot or locked eight-task run')
     read=lambda root,name:json.loads((root/name).read_text())
     c,s,a,h,d=[read(source,n) for n in ('config.json','seed_summary.json','paired_protocol_audit.json','training_history.json','image_stream_transfer_audit.json')]
     rc,ra=read(reference,'config.json'),read(reference,'paired_protocol_audit.json')
     require(s['status']=='complete' and s['config']==c and not c['git']['dirty'],'Invalid frozen run')
-    require(c['seed']==0 and c['max_tasks']==3 and c['task_sizes']==list(TASK_SIZES)
+    require(c['seed']==0 and c['max_tasks']==task_count and c['task_sizes']==list(TASK_SIZES)
             and c['parax_mode']=='image' and c['parax_freeze_all_after_task0'] and c['image_stream_transfer_audit']
             and c['reporting_split']=='val' and not c['also_report_test'] and s['test_metrics'] is None,'Wrong freeze protocol')
     require(a['frozen_visual_unchanged'] and a['frozen_visual_sha256_before']==a['frozen_visual_sha256_after'],'CLIP changed')
@@ -34,9 +35,9 @@ def audit_control(source, reference, smoke_updates=0):
           'parax_task_local_gate','parax_level_conditioned','amp_initial_scale','amp_growth_interval','tf32')
     require(all(c[k]==rc[k] for k in keys),'Frozen/source configurations differ beyond the control')
     require(a['initial_selector_prompt_classifier_sha256']==ra['initial_selector_prompt_classifier_sha256'],'Initialization mismatch')
-    require(set(h)==set(d['tasks'])=={'0','1','2'},'Missing task')
+    require(set(h)==set(d['tasks'])=={str(t) for t in range(task_count)},'Missing task')
     total=0
-    for task in range(3):
+    for task in range(task_count):
         x,y=a['tasks'][str(task)],ra['tasks'][str(task)]
         for k in ('sampler_seed','train_instances','train_sample_ids_sha256','first_train_batch_ids_sha256',
                   'validation_sample_ids_sha256','reporting_sample_ids_sha256','frozen_visual_sha256_before'):
@@ -61,9 +62,24 @@ def audit_control(source, reference, smoke_updates=0):
         task0_replay=float(np.abs(p['logits']-q['logits']).max())
         require(task0_replay<=.01,f'Task0 training was not equivalent: {task0_replay}')
         require(c['parax_optimizer_initial_learning_rate']==h['0'][0]['adapter_learning_rate']==.0004,'ParaX lr mismatch')
+    pilot_differences = {}
+    if pilot_reference is not None and not smoke_updates:
+        pc = read(pilot_reference, 'config.json')
+        require(pc['seed'] == c['seed'] and pc['max_tasks'] == 3
+                and pc['parax_freeze_all_after_task0']
+                and all(pc[k] == c[k] for k in keys), 'Pilot configuration mismatch')
+        for task in range(3):
+            p, q = load_scores(source/f'val_scores/task{task}.npz'), load_scores(pilot_reference/f'val_scores/task{task}.npz')
+            require(all(np.array_equal(p[k], q[k]) for k in ('sample_ids', 'targets', 'class_indices')), 'Pilot cohort mismatch')
+            difference = float(np.abs(p['logits'] - q['logits']).max())
+            require(difference <= .01, f'Eight-task prefix differs from pilot: task{task}/{difference}')
+            pilot_differences[str(task)] = difference
+        pd = read(pilot_reference, 'image_stream_transfer_audit.json')
+        require(pd['tasks']['0']['shared_parax_state_hash_after'] == d['tasks']['0']['shared_parax_state_hash_after'], 'Pilot ParaX task0 state differs')
     result=dict(status='passed',optimization_updates=total,smoke_updates=smoke_updates,
                 task0_reference_max_logit_difference=task0_replay,paired_initialization_and_samples=True,
-                whole_freeze_verified=True,test_loaded=False,fixed_anchor=d)
+                whole_freeze_verified=True,test_loaded=False,fixed_anchor=d,
+                task_count=task_count,pilot_prefix_max_logit_differences=pilot_differences)
     (source/'freeze_control_audit.json').write_text(json.dumps(result,indent=2)+'\n')
     print('WHOLE_PARAX_CONTROL_AUDIT_PASSED',flush=True)
     return c,result

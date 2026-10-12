@@ -12,6 +12,8 @@ CLIP_CHECKPOINT="${CLIP_CHECKPOINT:-../CODE_DDP-benchmark/pretrained/clip/ViT-B-
 FACE_MANIFEST_ROOT="${FACE_MANIFEST_ROOT:-../emotic_benchmark_runs/multi_lane_face_test_manifest_v0.1/face_manifest_train_val_test_v1_20260909}"
 SEED="${SEED:-0}"
 EPOCHS="${EPOCHS:-30}"
+MAX_TASKS="${MAX_TASKS:-3}"
+[[ "${MAX_TASKS}" == 3 || "${MAX_TASKS}" == 8 ]] || { echo "MAX_TASKS must be 3 or 8" >&2; exit 2; }
 AMP_INITIAL_SCALE="${AMP_INITIAL_SCALE:-1024}"
 AMP_GROWTH_INTERVAL="${AMP_GROWTH_INTERVAL:-1000000000}"
 PARAX_MODE=disabled
@@ -45,10 +47,10 @@ if [[ "${VIEW_FUSION}" != disabled ]]; then
 fi
 [[ ! -e "${RUN_ROOT}" ]] || { echo "Output already exists: ${RUN_ROOT}" >&2; exit 2; }
 mkdir -p "$(dirname "${LOG_PATH}")"
-echo "INCREMENTAL_TRANSFER method=${METHOD} GPU=${GPU} seed=${SEED} tasks=3 epochs=${EPOCHS} original_image_ParaX=${PARAX_MODE} validation_only_whole_transform_freeze AMP_scale1024"
+echo "INCREMENTAL_TRANSFER method=${METHOD} GPU=${GPU} seed=${SEED} tasks=${MAX_TASKS} epochs=${EPOCHS} original_image_ParaX=${PARAX_MODE} validation_only_whole_transform_freeze AMP_scale1024"
 export OMP_NUM_THREADS=1
 CUDA_VISIBLE_DEVICES="${GPU}" "${PYTHON}" -m multi_lane.track_a.runner \
-  --training-protocol incremental --image-stream-transfer-audit --skip-validation-eval --max-tasks "3" --seed "${SEED}" \
+  --training-protocol incremental --image-stream-transfer-audit --skip-validation-eval --max-tasks "${MAX_TASKS}" --seed "${SEED}" \
   --data-root "${DATA_ROOT}" --clip-checkpoint "${CLIP_CHECKPOINT}" \
   --output-root "${RUN_ROOT}" \
   --epochs "${EPOCHS}" --train-batch-size 64 --eval-batch-size 64 --workers 2 \
