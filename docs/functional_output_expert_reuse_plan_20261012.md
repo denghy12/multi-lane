@@ -46,13 +46,13 @@ y = x + smooth_bound(r_t(x), .02 ||x||)
 - 固定融合：可靠Face [.64,.16,.20]，否则[.8,.2,0]。可靠为有效/无匹配歧义/短边≥24/检测分≥.6。
 - 所有8任务拟合和Validation完成后才创建Test数据集；恢复16份已封存checkpoint只读Test，沿用同源基线Test，不依Test选择模型/轮次或改变配置。
 - 入口：`python -u -m multi_lane.track_a.fixed_baseline_functional_experts`；Shell：`scripts/emotic/run_fixed_baseline_functional_experts.sh`。
-- 正式batch：`functional_output_reuse_seed0_val_test_20261012_01`；预检batch：`functional_output_reuse_smoke_20261012_01`。
+- 正式batch：`functional_output_reuse_seed0_val_test_20261012_01`；预检batch：`functional_output_reuse_smoke_20261012_02`。
 - 产物：`./output/emotic_functional_output_experts/<batch>/`；日志：`./logs/emotic_functional_output_experts/<batch>/`；保存逐任务/单路val-test概率、compact checkpoint、旧函数与旧路径审计、严格identity和梯度/门系数记录。
 - 分支：`codex/frozen-functional-expert-output-reuse-20261012`；服务器独立worktree：`../multi-lane-main-functional-output-experts`。Git-only同步；不触碰主/test-only及其他运行中工作树。
-- GPU：优先当前空闲GPU1；启动要求显存占用≤512MiB、util≤5%、空余≥8192MiB，否则不抢占。一个进程依任务顺序拟合两组，共用CLIP及TRAIN缓存；GPU0现有任务不干预。
+- GPU：准备预检期间GPU1–7已被其他并行实验占用；初次smoke_01被idle资源检查拦截，未发生训练，日志保留。用户明确选择共享GPU0显存立即运行，不排队；GPU_POLICY=shared且空余≥8192MiB，现有任务不停止或修改。一个进程依任务顺序拟合两组，共用CLIP及TRAIN缓存。idle模式仍支持完全空闲卡检查。
 
 ```bash
-GPU=1 BATCH=functional_output_reuse_seed0_val_test_20261012_01 \
+GPU=0 GPU_POLICY=shared BATCH=functional_output_reuse_seed0_val_test_20261012_01 \
  bash scripts/emotic/run_fixed_baseline_functional_experts.sh
 ```
 

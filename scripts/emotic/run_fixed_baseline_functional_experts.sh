@@ -6,6 +6,7 @@ cd "$ROOT"
 PYTHON_BIN=${PYTHON_BIN:-/opt/conda/envs/ddp/bin/python}
 GPU=${GPU:-1}
 SMOKE=${SMOKE:-0}
+GPU_POLICY=${GPU_POLICY:-idle}
 BATCH=${BATCH:?Set a new immutable BATCH}
 SOURCE=${SOURCE:-../multi-lane-main-parax-freezing-eight-task-relaunch/output/emotic_protected_parax_full/protected_parax_freezing_8task_seed012_valtest_20261011_01/seed0/baseline}
 CACHE_SOURCE=${CACHE_SOURCE:-../multi-lane-main-parax-fixed-baseline-cached-routing/output/emotic_fixed_baseline_routes/fixed_baseline_cached_routes_20261011_01/cached_fit/seed0}
@@ -17,15 +18,18 @@ LOGS=./logs/emotic_functional_output_experts/$BATCH
 test ! -e "$OUTPUT"
 test ! -e "$LOGS"
 mkdir -p "$LOGS"
-"$PYTHON_BIN" - "$GPU" "$LOGS/resource.json" <<'PY'
+"$PYTHON_BIN" - "$GPU" "$LOGS/resource.json" "$GPU_POLICY" <<'PY'
 import json,subprocess,sys,time
 from pathlib import Path
 used,free,util=map(int,subprocess.check_output(['nvidia-smi','-i',sys.argv[1],
     '--query-gpu=memory.used,memory.free,utilization.gpu','--format=csv,noheader,nounits'],text=True).strip().split(','))
+policy=sys.argv[3]
+if policy not in ('idle','shared'):raise SystemExit('GPU_POLICY must be idle or shared')
 record=dict(gpu=sys.argv[1],used_mib=used,free_mib=free,utilization=util,time=time.time(),
-            policy='use selected idle GPU; existing processes untouched',minimum_free_mib=8192,maximum_idle_used_mib=512,maximum_idle_utilization=5)
+            policy=policy,existing_processes_untouched=True,minimum_free_mib=8192,maximum_idle_used_mib=512,maximum_idle_utilization=5)
 Path(sys.argv[2]).write_text(json.dumps(record,indent=2)+'\n')
-if free<8192 or used>512 or util>5:raise SystemExit('Selected GPU is not idle or lacks memory; no training started')
+if free<8192 or (policy=='idle' and (used>512 or util>5)):
+    raise SystemExit('Selected GPU violates the declared resource policy; no training started')
 PY
 extra=()
 case "$SMOKE" in 0) ;; 1) extra+=(--smoke) ;; *) echo 'SMOKE must be 0 or 1' >&2; exit 2 ;; esac
