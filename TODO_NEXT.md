@@ -1526,3 +1526,8 @@ Both processes confirmed running on GPU0, tmux ml_whole_parax_freeze_20261011. R
 ## 2026-10-12 用户授权跳过seed复验，直接整体冻结八任务val/test
 
 新分支exp/three-view-whole-parax-freeze-eight-task，复用干净本地three-view-whole-parax-freeze工作树。计划docs/three_view_whole_parax_eight_task_val_test_plan_20261012.md。只扩展run_whole_parax_freeze的MAX_TASKS=3/8、audit_control任务数量及pilot前三任务对齐，并新增独立完整val/test评价和launcher；不改模型/冻结机制。seed0/task0重训/8tasks×30epochs/13950updates，原官方init/rank32/3矩阵对/索引10，task1起整bank冻结。训练val-only，审计及完整2397val后，固定全部8checkpoint完整5368test，不挑checkpoint，不因val胜负取消已授权test。复用原seed0baseline/live来源作对照，不重训其余模型。先全量unittest+真实8task各4updates smoke+三组val preflight；检查通过后GPU0启动，其他GPU无须占用。正式batchthree_view_whole_parax_eight_task_seed0_val_test_20261012_01，output/logs在emotic_whole_parax_eight_task。当前待验证启动；没有启动seed1/2或新增结构。
+
+
+### 2026-10-12 八任务启动检查通过
+
+实现cc71e77。298/298 unittest、compile/bash/diff通过。真实ViT smoke whole_parax_eight_task_smoke_20261012_01八任务各4updates/共32updates，0AMP skips；task1-7整bank冻结，task7 trainable0，固定旧FP32 logits最大差1.1920928955078125e-6，reserved3342MiB。新增评价入口六次来源val重放（baseline/live/frozen task0/task7）最大logit差全部0，64人val preflight通过，无test加载，不作精度证据。正式batch three_view_whole_parax_eight_task_seed0_val_test_20261012_01待启动，GPU0，8×30epochs/13950updates，val-only训练后自动完整val和固定test；原三个任务pilot作为前三任务函数配对对照，源baseline/live不重训。preflight包SHA256 a31445e0d0d375f9e0cf8e3352362f8769a5ba37490d599025e97bdb7b7a3a29，产物同步主本地logs/output，checkpoint留远端。验证后只同步文档提交再启动，不改变模型代码，不占用其他会话/test-only。
