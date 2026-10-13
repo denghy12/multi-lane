@@ -1,5 +1,16 @@
 
 
+## 2026-10-13 old-only seed1/2八任务Validation正式启动
+
+用户授权执行既定方案。本地分支codex/old-function-seed12-validation-20261013，业务实现08dfe33，服务器干净运行HEAD d5eeda2ff70059364c61be517c27060eb0cf43dc，独立worktree `/mnt/haoyuan/workspace/multi-lane-main-old-function-recheck`。tmux `ml_old_function_val12_20261013`，seed1/2各一个窗口，GPU0共享并行（启动free20723MiB），runner PID3540535/3540536。config已核对seed、smoke=False及validation_only/old_only_recheck=True，启动无Traceback/OOM；仅初始化/task0启动确认，不报告完成或精度。batch old_function_recheck_seed{1,2}_validation_20261013_01。
+
+复用各seed真实8task基线及TRAIN缓存，不重训原模型；主比较仅baseline/old-only。fresh-only是fit-only供体控制，每任务2个rank32完整函数new5+new5、封存后下一任务可用；old-only只学少量旧输出系数old5，task0identity。Task Forward最终归一化CLS后、固定三视图融合前；原图fit10353/holdout2562跨seed一致；Adam4e-4/batch64/FP32/2%界不变。Image-token Adapter/旧patch Projector关闭，无新残差阶段/图像Router/level/动态融合，不构造Test数据集或执行Test推理。
+
+本地/远程328项回归通过；seed1/2真实8task smoke均exit0，各115updates/16checkpoint恢复；旧参数/函数/访问及identity检查通过，最大FP32旧anchor漂移2.2888184e-5/2.6702881e-5。预检非checkpoint产物已同步并逐文件SHA核对，归档SHA256=4689309308eb25cc5c97b3e1ebedf26d23adf8a82bc124c70b935f3b6ba6c771。校验output/old_function_recheck_preflight_20261013/sync_verification.json；完整配置docs/old_function_seed12_validation_plan_20261013.md；formal_launch.json保存启动证据。
+
+启动后停止轮询，用户召回再同步正式结果并结合seed0作三seed分析。旧功能无一致Validation收益即停止当前后置专家池扩展，复核有效才讨论极小新残差，不自动Test。原primary/test-only及其他运行任务未修改，无main合并；后续仅本地文档提交，不pull运行工作树。
+
+
 ## 2026-10-13 old-only seed1/2预检通过，准备正式Validation
 
 代码08dfe33，本地及服务器328项单测通过；两个seed真实8task smoke均exit0，各115updates/16checkpoint恢复。旧参数/完整函数冻结、task0 old-only与baseline逐值identity、有效有限梯度、source/cache未变、TRAIN拟合10353/留出2562原图跨seed一致均通过。最大旧anchor FP32漂移seed1=2.2888184e-5、seed2=2.6702881e-5；summary.test_accessed=False，无Test score/audit。按已有GPU0共享并行授权启动两seed八任务Validation，主候选仅baseline/old-only，fresh-only用于供体训练与来源诊断。原primary/test-only及其他GPU任务不改。正式batch old_function_recheck_seed{1,2}_validation_20261013_01；不持续监督，不自动Test或新残差。

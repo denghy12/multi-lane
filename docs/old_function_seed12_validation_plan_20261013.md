@@ -51,3 +51,14 @@ GPU=0 GPU_POLICY=shared SEED=2 VALIDATION_ONLY=1 OLD_ONLY_RECHECK=1 \
 ## 实施记录
 
 实现commit `08dfe33`；本地与服务器均328项Track-A单测通过，compile/bash/diff通过。服务器独立worktree `../multi-lane-main-old-function-recheck`，分支与upstream一致且干净。seed1/2原基线与TRAIN缓存完整各8份、来源config逐值匹配。原primary153个dirty条目、test-only5个dirty条目，均保留不动。GPU3/4资源复查被占用，按已有GPU0共享授权改为GPU0两seed并行。smoke均运行实现08dfe33、Validation-only，无Test。两seed正式运行前验收通过，各115updates与16checkpoint恢复，task0 old-only与baseline预测逐值一致；最大旧FP32 anchor漂移分别2.2888184e-5/2.6702881e-5。正式使用相同代码和仅文档更新后的干净HEAD，不重复预检。
+
+
+## 2026-10-13 old-only seed1/2八任务Validation正式启动
+
+用户授权执行既定方案。本地分支codex/old-function-seed12-validation-20261013，业务实现08dfe33，服务器干净运行HEAD d5eeda2ff70059364c61be517c27060eb0cf43dc，独立worktree `/mnt/haoyuan/workspace/multi-lane-main-old-function-recheck`。tmux `ml_old_function_val12_20261013`，seed1/2各一个窗口，GPU0共享并行（启动free20723MiB），runner PID3540535/3540536。config已核对seed、smoke=False及validation_only/old_only_recheck=True，启动无Traceback/OOM；仅初始化/task0启动确认，不报告完成或精度。batch old_function_recheck_seed{1,2}_validation_20261013_01。
+
+复用各seed真实8task基线及TRAIN缓存，不重训原模型；主比较仅baseline/old-only。fresh-only是fit-only供体控制，每任务2个rank32完整函数new5+new5、封存后下一任务可用；old-only只学少量旧输出系数old5，task0identity。Task Forward最终归一化CLS后、固定三视图融合前；原图fit10353/holdout2562跨seed一致；Adam4e-4/batch64/FP32/2%界不变。Image-token Adapter/旧patch Projector关闭，无新残差阶段/图像Router/level/动态融合，不构造Test数据集或执行Test推理。
+
+本地/远程328项回归通过；seed1/2真实8task smoke均exit0，各115updates/16checkpoint恢复；旧参数/函数/访问及identity检查通过，最大FP32旧anchor漂移2.2888184e-5/2.6702881e-5。预检非checkpoint产物已同步并逐文件SHA核对，归档SHA256=4689309308eb25cc5c97b3e1ebedf26d23adf8a82bc124c70b935f3b6ba6c771。校验output/old_function_recheck_preflight_20261013/sync_verification.json；完整配置docs/old_function_seed12_validation_plan_20261013.md；formal_launch.json保存启动证据。
+
+启动后停止轮询，用户召回再同步正式结果并结合seed0作三seed分析。旧功能无一致Validation收益即停止当前后置专家池扩展，复核有效才讨论极小新残差，不自动Test。原primary/test-only及其他运行任务未修改，无main合并；后续仅本地文档提交，不pull运行工作树。
