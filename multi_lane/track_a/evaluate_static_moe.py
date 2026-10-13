@@ -36,6 +36,7 @@ def build_static_model(config, visual):
         adapter_bottleneck_dim=config["adapter_bottleneck_dim"],
         adapter_layer_indices=config["adapter_layer_indices"],
         adapter_residual_scale=config["adapter_residual_scale"],
+        adapter_residual_bound_ratio=config.get("adapter_residual_bound_ratio", 0.0),
         adapter_activation=config["adapter_activation"],
         adapter_task_initialization=config["adapter_task_initialization"],
         static_moe_mode=config["static_moe_mode"], view_fusion=config["view_fusion"],
