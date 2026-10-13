@@ -598,6 +598,7 @@ class TaskImageTokenAdapterBank(TaskLaneTransformerAdapterBank):
         view_bottleneck_dim: int = 0,
         view_names: Sequence[str] = ("full", "person", "face"),
         view_mode: str = "shared",
+        residual_bound_ratio: float = 0.0,
         **kwargs,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -612,6 +613,9 @@ class TaskImageTokenAdapterBank(TaskLaneTransformerAdapterBank):
         if view_mode == "independent" and not self.view_bottleneck_dim:
             raise ValueError("Independent Adapter views require a positive bottleneck")
         self.view_mode = view_mode
+        if not math.isfinite(float(residual_bound_ratio)) or residual_bound_ratio < 0:
+            raise ValueError("Residual bound ratio must be finite and non-negative")
+        self.residual_bound_ratio = float(residual_bound_ratio)
         self.view_names = names
         self._last_view_residual_ratios: Dict[str, torch.Tensor] = {}
         self.view_task_adapters = nn.ModuleList()
@@ -757,6 +761,9 @@ class TaskImageTokenAdapterBank(TaskLaneTransformerAdapterBank):
                         str(layer_id)
                     ](frozen_image_tokens)
             delta = self.residual_multiplier(int(task_id), view_name) * delta
+            if self.residual_bound_ratio:
+                delta = bound_residual_to_input(delta, frozen_image_tokens,
+                                                self.residual_bound_ratio)
             adapted_tokens = frozen_image_tokens + delta
             frozen_float = frozen_image_tokens.detach().float()
             delta_float = delta.detach().float()
@@ -787,3 +794,29 @@ class TaskImageTokenAdapterBank(TaskLaneTransformerAdapterBank):
             residual_ratios
         ).mean()
         return torch.stack(adapted, dim=0)
+
+
+def bound_residual_to_input(delta: torch.Tensor, inputs: torch.Tensor, ratio: float,
+                            eps: float = 1e-12) -> torch.Tensor:
+    """Smoothly bound each token residual by ``ratio * ||inputs||`` in FP32.
+
+    The tanh radial map is identity to first order around zero, has an identity
+    derivative at a zero-initialized Adapter, and strictly satisfies the bound.
+    It includes every upstream scale and bias because it receives the complete
+    residual immediately before addition to the input.
+    """
+    if not math.isfinite(float(ratio)) or ratio < 0 or eps <= 0:
+        raise ValueError("Residual bound ratio/epsilon is invalid")
+    if delta.shape != inputs.shape:
+        raise ValueError("Residual and input shapes differ")
+    if ratio == 0:
+        return torch.zeros_like(delta)
+    delta32 = delta.float()
+    inputs32 = inputs.float()
+    cap = inputs32.norm(dim=-1, keepdim=True) * float(ratio)
+    norm = delta32.norm(dim=-1, keepdim=True)
+    x = norm / cap.clamp_min(eps)
+    # tanh(x)/x -> 1 as x -> 0; retain identity gradient at zero residual.
+    radial = torch.where(x > 1e-6, torch.tanh(x) / x.clamp_min(eps), torch.ones_like(x))
+    bounded = delta32 * radial
+    return bounded.to(dtype=delta.dtype)

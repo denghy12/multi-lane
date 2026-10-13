@@ -47,6 +47,7 @@ class MultiLaneModel(nn.Module):
         adapter_bottleneck_dim: int = 64,
         adapter_layer_indices: Sequence[int] = (11,),
         adapter_residual_scale: float = 0.1,
+        adapter_residual_bound_ratio: float = 0.0,
         adapter_activation: str = "relu",
         adapter_task_initialization: str = "independent",
         adapter_bottleneck_dims_per_task: Optional[Sequence[int]] = None,
@@ -354,6 +355,8 @@ class MultiLaneModel(nn.Module):
                     bottleneck_dim=adapter_bottleneck_dim,
                     layer_indices=adapter_layers,
                     residual_scale=adapter_residual_scale,
+                    **({"residual_bound_ratio": adapter_residual_bound_ratio}
+                       if self.adapter_mode == "image_token" else {}),
                     activation=adapter_activation,
                     task_initialization=adapter_task_initialization,
                     bottleneck_dims_per_task=adapter_bottleneck_dims_per_task,

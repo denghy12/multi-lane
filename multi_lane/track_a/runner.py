@@ -2680,6 +2680,13 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument("--adapter-residual-scale", type=float, default=0.1)
     parser.add_argument(
+        "--adapter-residual-bound-ratio", type=float, default=0.0,
+        help=(
+            "Per-token bound on the complete Image-token residual relative to "
+            "the input norm; zero disables the bound."
+        ),
+    )
+    parser.add_argument(
         "--adapter-residual-gate-mode",
         choices=("fixed", "learnable"),
         default="fixed",
@@ -3059,6 +3066,8 @@ def run(args: argparse.Namespace) -> None:
         raise ValueError("Independent Adapter views require a positive view bottleneck")
     if args.adapter_view_mode == "independent" and args.adapter_mode != "image_token":
         raise ValueError("Independent Adapter views require Image-token Adapter mode")
+    if not math.isfinite(args.adapter_residual_bound_ratio) or args.adapter_residual_bound_ratio < 0:
+        raise ValueError("adapter-residual-bound-ratio must be finite and non-negative")
     if args.adapter_view_bottleneck_dim and (
         args.adapter_mode != "image_token"
         or args.view_fusion != "fixed_three_view"
@@ -3163,6 +3172,7 @@ def run(args: argparse.Namespace) -> None:
         adapter_bottleneck_dim=args.adapter_bottleneck_dim,
         adapter_layer_indices=args.adapter_layer_indices,
         adapter_residual_scale=args.adapter_residual_scale,
+        adapter_residual_bound_ratio=args.adapter_residual_bound_ratio,
         adapter_activation=args.adapter_activation,
         adapter_task_initialization=args.adapter_task_init,
         adapter_bottleneck_dims_per_task=args.adapter_bottleneck_dims_per_task,
@@ -3833,6 +3843,7 @@ def run(args: argparse.Namespace) -> None:
         ),
         "adapter_layer_indices": list(args.adapter_layer_indices),
         "adapter_residual_scale": args.adapter_residual_scale,
+        "adapter_residual_bound_ratio": args.adapter_residual_bound_ratio,
         "adapter_residual_gate_mode": args.adapter_residual_gate_mode,
         "adapter_residual_gate_initial_value": args.adapter_residual_scale,
         "adapter_activation": args.adapter_activation,

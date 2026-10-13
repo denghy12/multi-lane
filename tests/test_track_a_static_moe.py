@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import torch
 
-from multi_lane.track_a.adapter import TaskImageTokenAdapterBank
+from multi_lane.track_a.adapter import TaskImageTokenAdapterBank, bound_residual_to_input
 from multi_lane.track_a.static_moe import StaticMoEImageTokenAdapterBank, OutputExpertPool, ROUTES
 from multi_lane.track_a.model import MultiLaneModel
 from multi_lane.track_a.runner import compact_model_state_dict, parse_args, TASK_SIZES, CLASS_ORDER
@@ -20,6 +20,19 @@ from test_track_a_reproduction import FakeVisual
 
 
 class StaticMoETest(unittest.TestCase):
+    def test_smooth_residual_bound_is_exact_and_identity_grad_at_zero(self):
+        x = torch.randn(2, 4, 8)
+        d = torch.randn_like(x, requires_grad=True)
+        ratio = 0.1
+        bounded = bound_residual_to_input(d, x, ratio)
+        self.assertTrue(torch.all(bounded.norm(dim=-1) <= ratio * x.norm(dim=-1) + 1e-6))
+        zero = torch.zeros_like(x, requires_grad=True)
+        out = bound_residual_to_input(zero, x, ratio)
+        self.assertTrue(torch.equal(out, zero))
+        out.sum().backward()
+        self.assertTrue(torch.equal(zero.grad, torch.ones_like(zero)))
+        self.assertTrue(torch.equal(bound_residual_to_input(d.detach(), x, 0), torch.zeros_like(x)))
+
     def bank(self, routing="overlap", width=8, tasks=2):
         return StaticMoEImageTokenAdapterBank(tasks, width, 6, (0,), routing=routing)
 

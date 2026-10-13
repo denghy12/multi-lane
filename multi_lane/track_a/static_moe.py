@@ -5,7 +5,7 @@ import math
 import torch
 from torch import nn
 
-from .adapter import TaskImageTokenAdapterBank
+from .adapter import TaskImageTokenAdapterBank, bound_residual_to_input
 
 
 ROUTES = {
@@ -59,7 +59,7 @@ class StaticMoEImageTokenAdapterBank(TaskImageTokenAdapterBank):
                  residual_scale=.03, activation="relu", task_initialization="independent",
                  bottleneck_dims_per_task=None, residual_gate_mode="fixed",
                  auxiliary_metric_mode="none", view_bottleneck_dim=0,
-                 view_mode="shared", routing="overlap"):
+                 view_mode="shared", routing="overlap", residual_bound_ratio=0.0):
         # Reuse the task lifecycle/interface without allocating an unused adapter bank.
         nn.Module.__init__(self)
         if routing not in ROUTES:
@@ -84,6 +84,9 @@ class StaticMoEImageTokenAdapterBank(TaskImageTokenAdapterBank):
         self.auxiliary_metric_mode = auxiliary_metric_mode
         self.view_names = ("full", "person", "face")
         self.view_bottleneck_dim, self.view_mode = 0, "shared"
+        if not math.isfinite(float(residual_bound_ratio)) or residual_bound_ratio < 0:
+            raise ValueError("Residual bound ratio must be finite and non-negative")
+        self.residual_bound_ratio = float(residual_bound_ratio)
         self.view_task_adapters = nn.ModuleList()
         self.task_gates = nn.ParameterList()
         self.routing = routing
@@ -148,6 +151,9 @@ class StaticMoEImageTokenAdapterBank(TaskImageTokenAdapterBank):
             multiplier = self._runtime_residual_multiplier if active else 1.0
             pool = self.task_adapters[int(task)][str(layer_id)]
             delta = self.residual_scale * multiplier * pool(frozen_image_tokens, weights)
+            if self.residual_bound_ratio:
+                delta = bound_residual_to_input(delta, frozen_image_tokens,
+                                                self.residual_bound_ratio)
             if pool.diagnostics_enabled:
                 self._cumulative_expert_correlations.append(pool.last_output_correlation)
             adapted.append(frozen_image_tokens + delta)

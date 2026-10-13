@@ -7,6 +7,7 @@ RUN_ROOT="${RUN_ROOT:?Set fresh RUN_ROOT}"
 LOG_PATH="${LOG_PATH:?Set LOG_PATH}"
 PYTHON="${PYTHON:-/opt/conda/envs/ddp/bin/python}"
 GPU="${GPU:-0}"
+RESIDUAL_BOUND_RATIO="${RESIDUAL_BOUND_RATIO:-0}"
 DATA_ROOT="${DATA_ROOT:-../multi-lane-main/datasets/EMOTIC}"
 CLIP_CHECKPOINT="${CLIP_CHECKPOINT:-../CODE_DDP-benchmark/pretrained/clip/ViT-B-16.pt}"
 FACE_MANIFEST_ROOT="${FACE_MANIFEST_ROOT:-../emotic_benchmark_runs/multi_lane_face_test_manifest_v0.1/face_manifest_train_val_test_v1_20260909}"
@@ -48,6 +49,7 @@ CUDA_VISIBLE_DEVICES="${GPU}" "${PYTHON}" -u -m multi_lane.track_a.runner \
   --view-auxiliary-loss-weight 0.1 --view-gradient-routing joint \
   --adapter-mode "${adapter}" --adapter-bottleneck-dim 48 --adapter-layer-indices 1 \
   --adapter-residual-scale 0.03 --adapter-activation relu --adapter-task-init independent \
+  --adapter-residual-bound-ratio "${RESIDUAL_BOUND_RATIO}" \
   --adapter-residual-gate-mode fixed --adapter-learning-rate 0.0004 --adapter-weight-decay 0 \
   --adapter-regularization none --parax-mode disabled --skip-validation-eval \
   --reporting-split val --save-evaluation-scores --save-view-evaluation-scores \

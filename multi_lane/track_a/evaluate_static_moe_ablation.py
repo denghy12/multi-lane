@@ -32,7 +32,7 @@ ADAPTER_METHODS = ("SHARED", "MOE_UNIFORM", "MOE_OVERLAP")
 
 def evaluate_method_scope(batch: Path, output: Path, method: str, scope: str,
                           multiplier: float, data_root: Path, clip_checkpoint: Path,
-                          face_manifest_root: Path) -> dict:
+                          face_manifest_root: Path, split: str = "val") -> dict:
     require(method in METHODS and scope in SCOPES and method in ADAPTER_METHODS,
             "Ablation requires an Adapter method and a valid scope")
     require(not output.exists(), f"Output exists: {output}")
@@ -45,8 +45,11 @@ def evaluate_method_scope(batch: Path, output: Path, method: str, scope: str,
     validation = make_source(config, data_root, face_manifest_root, "val")
     validate_classes(validation)
     require(len(validation) == 2397, "Expected complete validation cohort")
+    cohort = validation if split == "val" else make_source(config, data_root, face_manifest_root, "test")
+    validate_classes(cohort)
+    require(len(cohort) == (2397 if split == "val" else 5368), f"Expected complete {split} cohort")
     loader = DataLoader(
-        LabelView(validation, range(len(validation)), range(26), include_sample_id=True),
+        LabelView(cohort, range(len(cohort)), range(26), include_sample_id=True),
         batch_size=config["eval_batch_size"], num_workers=config["workers"], shuffle=False,
     )
     source_hashes = {
@@ -86,11 +89,11 @@ def evaluate_method_scope(batch: Path, output: Path, method: str, scope: str,
             "Inference changed source checkpoint/config")
     final = rows["7"]["metrics"]
     result = {
-        "status": "complete", "split": "val", "method": method, "scope": scope,
+        "status": "complete", "split": split, "method": method, "scope": scope,
         "multiplier": float(multiplier), "training_performed": False,
         "optimizer_updates": 0, "source": str(source.resolve()),
         "source_sha256": source_hashes, "tasks": rows,
-        "final_metrics": final, "samples": 2397,
+        "final_metrics": final, "samples": len(cohort),
         "evaluator_git": git_metadata(Path(__file__).resolve().parents[2]),
     }
     output.joinpath("summary.json").write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n")
@@ -99,7 +102,7 @@ def evaluate_method_scope(batch: Path, output: Path, method: str, scope: str,
 
 def run(batch: Path, output_root: Path, data_root: Path, clip_checkpoint: Path,
         face_manifest_root: Path, methods=ADAPTER_METHODS,
-        multipliers=DEFAULT_MULTIPLIERS, scopes=SCOPES) -> dict:
+        multipliers=DEFAULT_MULTIPLIERS, scopes=SCOPES, split="val") -> dict:
     require(not output_root.exists(), "Ablation output root already exists")
     require(not git_metadata(Path(__file__).resolve().parents[2])["dirty"], "Evaluator worktree is dirty")
     audit_pairing(batch)
@@ -111,9 +114,9 @@ def run(batch: Path, output_root: Path, data_root: Path, clip_checkpoint: Path,
                 key = f"{method}__{scope}__m{multiplier:g}"
                 all_results[key] = evaluate_method_scope(
                     batch, output_root / key, method, scope, float(multiplier),
-                    data_root, clip_checkpoint, face_manifest_root,
+                    data_root, clip_checkpoint, face_manifest_root, split,
                 )
-    result = {"status": "complete", "split": "val", "methods": list(methods),
+    result = {"status": "complete", "split": split, "methods": list(methods),
               "scopes": list(scopes), "multipliers": list(map(float, multipliers)),
               "results": all_results}
     output_root.joinpath("comparison.json").write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n")
@@ -127,6 +130,7 @@ if __name__ == "__main__":
     parser.add_argument("--data-root", type=Path, required=True)
     parser.add_argument("--clip-checkpoint", type=Path, required=True)
     parser.add_argument("--face-manifest-root", type=Path, required=True)
+    parser.add_argument("--split", choices=("val", "test"), default="val")
     parser.add_argument("--methods", nargs="+", default=list(ADAPTER_METHODS), choices=ADAPTER_METHODS)
     parser.add_argument("--scopes", nargs="+", default=list(SCOPES), choices=SCOPES)
     parser.add_argument("--multipliers", nargs="+", type=float, default=list(DEFAULT_MULTIPLIERS))
