@@ -1,3 +1,15 @@
+
+## 2026-10-13 静态 MoE v2 与36组test消融：完整结果已复核
+
+本节替代此前“运行中/等待评价”状态。用户召回分析时发现上一轮没有实际挂接自动评价控制器；三组训练完成但正式val/test缺失。本轮明确说明并补跑同一批固定checkpoint的只读并行评价，无重训或调参。独立修复分支 `fix/static-moe-v2-evaluation-analysis-20261013`，evaluator HEAD `b3a051d`，训练仍固定 `aa06f04`；修复控制器误读paired audit.status，强化来源/样本配对与Face manifest检查，24项相关回归通过。
+
+- v2 batch `static_moe_v2_rho01_seed0_eight_task_val_test_20261013_01`，三组各8task×30epochs/13950updates/0skipped；全量val2397/test5368并行，2026-10-13北京时间12:00:09完成，两split exit0。63个checkpoint/来源文件SHA前后一致，旧状态/identity通过。v2 BASELINE八阶段val/test logits和v1逐值差0。实际实现为FP32 tanh径向界，ρ=0.1，非最初平方根候选。
+- 最终val/test：B0 42.1912/32.0610；SHARED-v2 42.6181/32.0209；OVERLAP-v2 42.0629/32.0727。同无界v1，SHARED test+0.2601、OVERLAP test+0.1524，但OVERLAP val−0.7229。OVERLAP test仅高B0+0.0116、SHARED+0.0517，test阶段平均35.8499仍低B0 36.2781（−0.4282），前7阶段均低B0；没有稳定共享结构收益证据。
+- 1000次原图配对bootstrap：OVERLAP−B0 test区间[−0.460,+0.506]，OVERLAP−SHARED[−0.504,+0.589]。仅条件于seed0模型，不含训练seed不确定性。
+- 36组test消融全部complete，3方法×3范围×4系数×8阶段；9条最终响应曲线系数1均最高。关闭Adapter不等于原B0；不据test选开关/ρ/融合。专家输出相关UNIFORM .9868、OVERLAP .7529，不证明语义专门化或梯度冲突缓解。
+- 465份非checkpoint产物/日志同步并核验（初始410、最终55）；独立复算288份test消融及48份v2分数、五视图逐类AP差0。结果 `output/static_moe_v2_analysis_20261013/`，报告 `docs/static_moe_v2_complete_results_analysis_20261013.md`；最终归档SHA44efb9634624416ac836ba04257ad597ed82e4238c3446465dcb860b3531cceb。checkpoint留服务器。
+- 当前建议保留B0，不直接采用ρ=.1重叠MoE，不再缩ρ/堆专家。优先既有checkpoint validation key/value分离、逐样本attention KL与去均值残差诊断；有明确证据再单变量训练value-only候选。若继续论证共享，补有效宽度b32普通Adapter控制，明确总预算不同；若要求复验，原样锁定三组配对seed1/2，避免只扩test略高候选。上述均为建议，本轮不自动新训练/扩seed、不合并main。
+
 ## 2026-10-12 用户改为 validation/test 并行评价
 
 - 用户明确要求validation和test并行，覆盖本批原先val-before-test顺序限制。保留四组固定第30轮checkpoint、不选择组别/轮次、不调test权重；全部训练完成及配对审计通过后，在GPU0同时运行val2397人与test5368人只读评价（各batch64/workers2/OMP1），分别写full_val/full_test和日志。
