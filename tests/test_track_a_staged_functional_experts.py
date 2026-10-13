@@ -1,8 +1,15 @@
 import copy
 import unittest
+import json
+import tempfile
+from pathlib import Path
+from types import SimpleNamespace
+from dataclasses import dataclass
+from unittest.mock import patch
 import torch
 from multi_lane.track_a.fixed_baseline_staged_functions import (
-    build_expanding_model,paired_banks,checkpoint_payload,restore_fitted,capture_functions)
+    build_expanding_model,paired_banks,checkpoint_payload,restore_fitted,capture_functions,
+    experiment_policies,finish_validation_only)
 from multi_lane.track_a.fixed_baseline_routes import build_model,restore_base,cached_identity
 from multi_lane.track_a.runner import compact_model_state_dict
 from multi_lane.track_a.staged_functional_experts import split_cache,held_out,image_group
@@ -11,6 +18,39 @@ from test_track_a_reproduction import FakeVisual
 
 
 class StagedFunctionTest(unittest.TestCase):
+
+    def test_recheck_forbids_test_and_preserves_original_experiment(self):
+        for seed in (0,1,2):
+            self.assertEqual(experiment_policies(SimpleNamespace(validation_only=True,old_only_recheck=True),
+                                                {'seed':seed}),('fresh_only','old_only'))
+            with self.assertRaises(ValueError):
+                experiment_policies(SimpleNamespace(validation_only=False,old_only_recheck=True),{'seed':seed})
+        self.assertEqual(experiment_policies(SimpleNamespace(),{'seed':0}),
+                         ('fresh_only','old_only','old_then_new'))
+        with self.assertRaises(ValueError):experiment_policies(SimpleNamespace(),{'seed':1})
+        with self.assertRaises(ValueError):
+            experiment_policies(SimpleNamespace(validation_only=True,old_only_recheck=True),{'seed':3})
+
+    def test_validation_completion_requires_eight_and_rejects_source_mutation(self):
+        module='multi_lane.track_a.fixed_baseline_staged_functions'
+        @dataclass
+        class Row:
+            mAP: float=42.
+        records={a:[Row() for _ in range(8)] for a in ('baseline','fresh_only','old_only')}
+        hashes={str(t):'unchanged' for t in range(8)}
+        with tempfile.TemporaryDirectory() as folder, patch(module+'._sha256',return_value='unchanged'), \
+                patch(module+'.summarize_tasks',return_value={'final_mAP':42.}), \
+                patch(module+'.source_dataset',side_effect=AssertionError('Must not load Test')):
+            root=Path(folder)
+            finish_validation_only(root,records,root/'base',root/'cache',hashes,hashes,False)
+            summary=json.loads((root/'summary.json').read_text())
+            self.assertFalse(summary['test_accessed']);self.assertNotIn('test',summary)
+            self.assertEqual(summary['candidate_arms'],['baseline','old_only'])
+            with self.assertRaises(ValueError):
+                finish_validation_only(root,{'baseline':[Row()]},root,root,hashes,hashes,False)
+            with patch(module+'._sha256',return_value='changed'),self.assertRaises(RuntimeError):
+                finish_validation_only(root,records,root,root,hashes,hashes,False)
+
     def config(self):
         return dict(task_sizes=(2,)+(1,)*7,num_selectors=2,num_prompts=2,num_prompt_layers=1,
                     view_fusion='fixed_three_view',parax_mode='disabled')

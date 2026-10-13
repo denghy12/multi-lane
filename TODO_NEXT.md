@@ -1,3 +1,8 @@
+
+
+## 2026-10-13 已授权old-only seed1/2八任务Validation复核
+
+用户要求执行下一步；只实施旧功能单独复核，暂不开放新残差、不访问Test。分支codex/old-function-seed12-validation-20261013，新独立本地worktree old-function-recheck保留原dirty工作树。入口增加validation-only/old-only-recheck，种子取来源config，固定seed0原图分区保持跨seed可比。每seed复用同源原基线及TRAIN缓存，训练fit-only供体new5+new5，候选只对比baseline与old-only旧系数old5；完整8task/rank32/2experts/2%界/固定融合/Adam4e-4/batch64/FP32不变。完整配置docs/old_function_seed12_validation_plan_20261013.md。待全Track-A单测和seed1/2真实8task无Test smoke通过后，在两张空闲GPU并行正式Validation；不自动Test或启动条件性新残差。
 ## 2026-10-12 已授权阶段化旧功能＋TRAIN原图留出：实现与验证中
 
 - 新分支codex/staged-old-functions-holdout-20261012，沿用managed工作树，用户已有dirty文档不覆盖。新增staged_functional_experts.py、staged_functional_fit.py、fixed_baseline_staged_functions.py、Shell和回归测试；model.py仅为带符号输出系数取消概率熵/top频率诊断。

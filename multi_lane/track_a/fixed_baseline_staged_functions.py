@@ -76,6 +76,38 @@ def capture_functions(bank,task,features):
         return values
 
 
+def experiment_policies(args, config):
+    """Keep the recheck validation-only, with a separate fit-only donor control."""
+    validation_only = bool(getattr(args, 'validation_only', False))
+    recheck = bool(getattr(args, 'old_only_recheck', False))
+    if recheck and not validation_only:
+        raise ValueError('Old-only recheck requires --validation-only; Test is forbidden')
+    if recheck:
+        if config.get('seed') not in (0, 1, 2):
+            raise ValueError('Declared recheck seeds are 0, 1, 2')
+        return ('fresh_only', 'old_only')
+    if config.get('seed') != 0:
+        raise ValueError('Original four-arm experiment is seed0 only')
+    return POLICIES
+
+
+def finish_validation_only(output, records, source, cached, source_hashes, cache_hashes, smoke):
+    # This function must complete before any Test dataset/score/checkpoint evaluation.
+    if any(len(rows) != 8 for rows in records.values()):
+        raise ValueError('Validation-only completion requires all eight tasks for every recorded arm')
+    if source_hashes != {str(t): _sha256(source / 'compact_checkpoints' / f'task{t}.pth') for t in range(8)}:
+        raise RuntimeError('Source checkpoints changed')
+    if cache_hashes != {str(t): _sha256(cached / 'train_cache' / f'task{t}.pth') for t in range(8)}:
+        raise RuntimeError('Source TRAIN caches changed')
+    write(output / 'summary.json', dict(status='smoke_complete' if smoke else 'complete', completed_tasks=8,
+          source_checkpoints_unchanged=True, source_caches_unchanged=True,
+          validation={k:dict(task_metrics=[asdict(r) for r in rows], **summarize_tasks(rows))
+                      for k, rows in records.items()},
+          test_accessed=False, test_model_selection=False, holdout_used_for_selection=False,
+          candidate_arms=['baseline', 'old_only'] if 'old_then_new' not in records else list(records),
+          donor_control='fresh_only'))
+
+
 def run(args):
     source, cached, output = map(Path, (args.source, args.cache_source, args.output))
     if output.exists():
@@ -84,10 +116,10 @@ def run(args):
     validate_source(config, source_summary, True)
     require_eight(config, source_summary)
     require_formal_budget(config)
-    if source_summary.get("test_metrics") is None or len(source_summary.get("test_task_metrics", [])) != 8:
+    policies = experiment_policies(args, config)
+    validation_only = bool(getattr(args, "validation_only", False))
+    if not validation_only and (source_summary.get("test_metrics") is None or len(source_summary.get("test_task_metrics", [])) != 8):
         raise ValueError("Same-baseline eight-task test reference is required")
-    if config["seed"] != 0:
-        raise ValueError("This declared experiment is seed0 only")
     cache_config, cache_summary = _read_json(cached / "config.json"), _read_json(cached / "summary.json")
     if (cache_config.get("protocol") != "fixed_checkpoint_train_cache_v1"
             or cache_config.get("source_config") != config or cache_config.get("cache_split") != "train"
@@ -108,20 +140,20 @@ def run(args):
     device = torch.device("cuda:0")
     set_seed(config["seed"], config["tf32"])
     model = build_expanding_model(config, load_openai_clip_visual(clip), 'fresh_only').float().to(device)
-    model.requires_grad_(False);banks=paired_banks(model.parax_bank)
+    model.requires_grad_(False);banks={p:b for p,b in paired_banks(model.parax_bank).items() if p in policies}
     datasets={s:source_dataset(config,args.data_root,args.face_manifest_root,s) for s in ('train','val')}
     validate_classes(*datasets.values())
     groups={image_group(s) for s in datasets['train'].sample_ids}
     fit_groups={g for g in groups if not held_out(g+'#person=0')}
     held_groups=groups-fit_groups
-    write(output/'image_group_split.json',dict(source_split='train',seed=0,rule='sha256 module-holdout-seed0-v1 modulo5==0',
+    write(output/'image_group_split.json',dict(source_split='train',seed=0,model_seed=config['seed'],rule='sha256 module-holdout-seed0-v1 modulo5==0',
           fit_groups=sorted(fit_groups),holdout_groups=sorted(held_groups),
           original_baseline_may_have_seen_holdout=True,extra_modules_exclude_holdout_from_task0=True))
-    audits={p:StagedRouteAudit(output/p,device) for p in POLICIES}
-    records={p:[] for p in ('baseline',*POLICIES)}
-    for p in POLICIES:(output/p).mkdir(parents=True,exist_ok=True)
+    audits={p:StagedRouteAudit(output/p,device) for p in policies}
+    records={p:[] for p in ('baseline',*policies)}
+    for p in policies:(output/p).mkdir(parents=True,exist_ok=True)
     write(output/'config.json',dict(protocol=COMBINATION,source=str(source),source_config=config,cache_source=str(cached),
-          git=git,seed=0,tasks=8,phase_epochs=5,batch_size=64,optimizer='Adam',learning_rate=.0004,weight_decay=0.,
+          git=git,seed=config['seed'],tasks=8,phase_epochs=5,batch_size=64,optimizer='Adam',learning_rate=.0004,weight_decay=0.,
           scheduler='cosine reset each five-epoch phase',gradient_clip_norm=1.,auxiliary_weight=.1,consistency_weight=0.,
           rank=32,new_experts_per_task=2,expert_slots=16,residual_bound=.02,residual_scale=1.,
           combination=COMBINATION,donors='same sealed fit-only fresh-control birth functions for all arms',
@@ -131,7 +163,10 @@ def run(args):
           donor_training_cost='shared fresh-control training; included in reported provenance, not free standalone compute',
           holdout_fraction_target=.2,holdout_used_for_selection=False,baseline_retrained=False,
           source_checkpoint_hashes=source_hashes,train_cache_hashes=cache_hashes,
-          face_manifest_hashes=faces,smoke=args.smoke,test_after_all_fitting=True,model_selection=False))
+          face_manifest_hashes=faces,smoke=args.smoke,test_after_all_fitting=not validation_only,validation_only=validation_only,
+          old_only_recheck=bool(getattr(args,'old_only_recheck',False)),
+          candidate_arms=['baseline','old_only'] if getattr(args,'old_only_recheck',False) else ['baseline',*policies],
+          donor_control='fresh_only',partition_seed=0,model_selection=False))
     previous_base=None
     for task in range(8):
         payload=_torch_load(source/'compact_checkpoints'/f'task{task}.pth')
@@ -206,11 +241,32 @@ def run(args):
               arms={k:dict(task_metrics=[asdict(x) for x in rows],**summarize_tasks(rows)) for k,rows in records.items()}))
         print(f'staged fit/holdout/validation completed task={task}',flush=True)
     write(output / "fit_complete.json", {"tasks": 8, "test_accessed": False, "model_selection": False})
+    if validation_only:
+        # Check every saved task module through the same restore used by future
+        # evaluation, without constructing a Test dataset or doing optimization.
+        restored_checkpoints = []
+        for policy in policies:
+            restored_model = build_expanding_model(config, load_openai_clip_visual(clip), policy).float().to(device)
+            for task in range(8):
+                path = output / policy / 'compact_checkpoints' / f'task{task}.pth'
+                before_sha = _sha256(path)
+                payload = _torch_load(path)
+                original = _torch_load(source / 'compact_checkpoints' / f'task{task}.pth')
+                restore_fitted(restored_model, payload, original, task, git, policy)
+                if _sha256(path) != before_sha:
+                    raise RuntimeError('Validation restoration changed checkpoint')
+                restored_checkpoints.append(dict(arm=policy, task=task, checkpoint_sha256=before_sha,
+                                                base_and_access_restored=True, training_updates=0))
+            del restored_model
+        write(output / 'validation_checkpoint_restore_audit.json', dict(checkpoints=restored_checkpoints,
+              test_accessed=False, optimization_updates=0))
+        finish_validation_only(output, records, source, cached, source_hashes, cache_hashes, args.smoke)
+        return
     # No test dataset exists until every training operation has finished.
     test_dataset = source_dataset(config, args.data_root, args.face_manifest_root, "test")
     validate_classes(test_dataset)
-    test_rows = {p: [] for p in POLICIES}
-    for policy in POLICIES:
+    test_rows = {p: [] for p in policies}
+    for policy in policies:
         model = build_expanding_model(config, load_openai_clip_visual(clip), policy).float().to(device)
         for task in range(8):
             path = output / policy / "compact_checkpoints" / f"task{task}.pth"
@@ -245,6 +301,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("source", "cache-source", "output", "data-root", "clip-checkpoint", "face-manifest-root"):
         parser.add_argument("--" + name, required=True)
+    parser.add_argument("--validation-only", action="store_true", help="Never construct or evaluate a Test dataset")
+    parser.add_argument("--old-only-recheck", action="store_true", help="Only baseline/old-only candidates plus fit-only donor control; requires validation-only")
     parser.add_argument("--smoke", action="store_true", help="All eight tasks, only first64 samples per split; not performance")
     run(parser.parse_args())
 
