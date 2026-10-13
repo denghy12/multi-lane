@@ -53,6 +53,7 @@ def evaluate(batch: Path, output: Path, split: str, data_root: Path,
         require(c["data_root"] == base["data_root"] and c["git"] == base["git"],
                 "v2 method source provenance mismatch")
     lock = read(source_lock) if source_lock else None
+    lock_sha = _sha256(source_lock) if source_lock else None
     if lock:
         require(lock["batch"] == str(batch.resolve()) and lock["evaluation_git"] == meta
                 and lock["split_pair"] == ["val", "test"], "Invalid v2 source lock")
@@ -112,10 +113,10 @@ def evaluate(batch: Path, output: Path, split: str, data_root: Path,
     result = {"status": "preflight_passed" if preflight else "complete", "split": split,
               "samples": expected_count, "training_performed": False, "optimizer_updates": 0,
               "validation_preceded_test": False, "evaluation_mode": "parallel_fixed_checkpoints",
-              "source_lock_sha256": _sha256(source_lock) if source_lock else None,
+              "source_lock_sha256": lock_sha,
               "evaluator_git": meta, "results": results}
     if lock:
-        require(_sha256(source_lock) == _sha256(Path(source_lock)), "Source lock unavailable")
+        require(_sha256(source_lock) == lock_sha, "Source lock changed during inference")
     (output / "comparison.json").write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n")
     return result
 
