@@ -26,7 +26,7 @@
 - 入口：`python -u -m multi_lane.track_a.fixed_baseline_staged_functions --validation-only --old-only-recheck ...`；Shell `scripts/emotic/run_fixed_baseline_staged_functions.sh`。
 - 结果：`./output/emotic_staged_functional_experts/old_function_recheck_seed{1,2}_validation_20261013_01/`；日志对应`./logs/emotic_staged_functional_experts/<batch>/`。
 - 预检：每seed八任务，fit/holdout/val各最多64人物，阶段数和更新规则不变；batch `old_function_recheck_seed{1,2}_smoke_20261013_01`。无Test smoke。
-- GPU：优先两张空闲卡3/4，每seed一张；启动前再次资源检查，idle要求used<=512MiB/util<=5/free>=8192MiB，不停止其他任务。若资源变化且不能安全启动则保留未启动状态，不擅自抢占。
+- GPU：初查3/4空闲，但启动复查已被其他任务占用（约8GiB/card），不抢占。沿用用户此前明确的GPU0共享并行授权，两seed在GPU0并行；启动前必须free>=8192MiB，当前约20GiB空余，两个进程依次检查资源后启动，不停止其他任务。
 - 产物：16份模块checkpoint/seed（供体+old_only），旧函数/旧参数/访问范围/FP32旧anchor/identity审计、原图分区、逐任务fit/holdout/Validation/单路scores、source/cache hashes、config/summary/log/exit_code。总结明确candidate_arms仅baseline、old_only。
 
 ## 验收与停止规则
@@ -38,12 +38,16 @@
 5. 本轮不创建Test数据集、不读取Test分数、不执行Test推理、不按既有Test改配置。即使Validation正向，也不自动运行Test或极小新残差，先统一分析与锁定方案。
 
 ```bash
-GPU=3 GPU_POLICY=idle SEED=1 VALIDATION_ONLY=1 OLD_ONLY_RECHECK=1 \
+GPU=0 GPU_POLICY=shared SEED=1 VALIDATION_ONLY=1 OLD_ONLY_RECHECK=1 \
  BATCH=old_function_recheck_seed1_validation_20261013_01 \
  bash scripts/emotic/run_fixed_baseline_staged_functions.sh
-GPU=4 GPU_POLICY=idle SEED=2 VALIDATION_ONLY=1 OLD_ONLY_RECHECK=1 \
+GPU=0 GPU_POLICY=shared SEED=2 VALIDATION_ONLY=1 OLD_ONLY_RECHECK=1 \
  BATCH=old_function_recheck_seed2_validation_20261013_01 \
  bash scripts/emotic/run_fixed_baseline_staged_functions.sh
 ```
 
 分支`codex/old-function-seed12-validation-20261013`。本地独立worktree在`~/.codex/worktrees/old-function-recheck/multi-lane-main`；远程独立worktree `../multi-lane-main-old-function-recheck`。只确认启动，用户召回后统一分析，不持续监控。
+
+## 实施记录
+
+实现commit `08dfe33`；本地与服务器均328项Track-A单测通过，compile/bash/diff通过。服务器独立worktree `../multi-lane-main-old-function-recheck`，分支与upstream一致且干净。seed1/2原基线与TRAIN缓存完整各8份、来源config逐值匹配。原primary153个dirty条目、test-only5个dirty条目，均保留不动。GPU3/4资源复查被占用，按已有GPU0共享授权改为GPU0两seed并行。smoke均运行实现08dfe33、Validation-only，无Test。两seed正式运行前验收通过，各115updates与16checkpoint恢复，task0 old-only与baseline预测逐值一致；最大旧FP32 anchor漂移分别2.2888184e-5/2.6702881e-5。正式使用相同代码和仅文档更新后的干净HEAD，不重复预检。

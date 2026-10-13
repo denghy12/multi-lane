@@ -1,5 +1,10 @@
 
 
+## 2026-10-13 old-only seed1/2预检通过，准备正式Validation
+
+代码08dfe33，本地及服务器328项单测通过；两个seed真实8task smoke均exit0，各115updates/16checkpoint恢复。旧参数/完整函数冻结、task0 old-only与baseline逐值identity、有效有限梯度、source/cache未变、TRAIN拟合10353/留出2562原图跨seed一致均通过。最大旧anchor FP32漂移seed1=2.2888184e-5、seed2=2.6702881e-5；summary.test_accessed=False，无Test score/audit。按已有GPU0共享并行授权启动两seed八任务Validation，主候选仅baseline/old-only，fresh-only用于供体训练与来源诊断。原primary/test-only及其他GPU任务不改。正式batch old_function_recheck_seed{1,2}_validation_20261013_01；不持续监督，不自动Test或新残差。
+
+
 ## 2026-10-13 已授权old-only seed1/2八任务Validation复核
 
 用户要求执行下一步；只实施旧功能单独复核，暂不开放新残差、不访问Test。分支codex/old-function-seed12-validation-20261013，新独立本地worktree old-function-recheck保留原dirty工作树。入口增加validation-only/old-only-recheck，种子取来源config，固定seed0原图分区保持跨seed可比。每seed复用同源原基线及TRAIN缓存，训练fit-only供体new5+new5，候选只对比baseline与old-only旧系数old5；完整8task/rank32/2experts/2%界/固定融合/Adam4e-4/batch64/FP32不变。完整配置docs/old_function_seed12_validation_plan_20261013.md。待全Track-A单测和seed1/2真实8task无Test smoke通过后，在两张空闲GPU并行正式Validation；不自动Test或启动条件性新残差。
