@@ -22,21 +22,26 @@ def require(condition, message):
         raise ValueError(message)
 
 
-def compare(batch_root: Path, allow_skipped_updates: bool = False):
+def compare(batch_root: Path, allow_skipped_updates: bool = False,
+            methods=METHODS, split: str = "val"):
+    methods = tuple(methods)
+    require(split in ("val", "test"), "Invalid comparison split")
+    require(methods and methods[0] == "FULL_ONLY" and len(set(methods)) == len(methods)
+            and all(method in METHODS for method in methods), "Invalid comparison methods")
     runs, reference = {}, None
     shared_config = (
         "seed", "class_order", "task_sizes", "train_batch_size", "eval_batch_size",
         "learning_rate", "scheduler_mode", "epochs_per_task", "optimizer_updates_per_task",
         "training_loss_mode", "parameter_group_loss_routing", "input_normalization",
         "selector_mode", "prompt_mode", "adapter_mode", "git",
-        "amp_initial_scale", "amp_growth_interval",
+        "amp_initial_scale", "amp_growth_interval", "dataset_release", "data_root",
     )
     shared_audit = (
         "train_instances", "validation_instances", "train_sample_ids_sha256",
         "validation_sample_ids_sha256", "first_train_batch_ids_sha256",
         "initial_selector_prompt_classifier_sha256", "frozen_visual_sha256_before",
     )
-    for method in METHODS:
+    for method in methods:
         root = batch_root / method
         summary = json.loads((root / "seed_summary.json").read_text())
         config = summary["config"]
@@ -47,9 +52,14 @@ def compare(batch_root: Path, allow_skipped_updates: bool = False):
                 f"{method}: not joint26")
         require(config["max_tasks"] == 1 and config["task_pathway_count"] == 1,
                 f"{method}: incorrect pathway count")
-        require(config["reporting_split"] == "val" and not config["also_report_test"]
-                and not audit["test_loaded"] and summary["test_metrics"] is None,
-                f"{method}: test was accessed")
+        require(config["reporting_split"] == split and not config["also_report_test"]
+                and audit["test_loaded"] == (split == "test"),
+                f"{method}: incorrect reporting split")
+        if split == "val":
+            require(summary["test_metrics"] is None, f"{method}: test was accessed")
+        else:
+            require(config["skip_validation_eval"] and config["evaluation_score_purpose"] == "fixed_test_fusion",
+                    f"{method}: test run changed the direct-test protocol")
         require(audit["label_dimensions"] == 26 and audit["frozen_visual_unchanged"]
                 and audit["frozen_visual_sha256_before"] == audit["frozen_visual_sha256_after"],
                 f"{method}: labels/backbone failed audit")
@@ -85,9 +95,11 @@ def compare(batch_root: Path, allow_skipped_updates: bool = False):
                 require(any(value > 0 for row in history for key, value in row.items()
                             if key.startswith(f"parax_grad_{component}") and key.endswith("_norm")),
                         f"{method}: no {component} gradient")
-        with np.load(root / "val_scores" / "task0.npz", allow_pickle=False) as scores:
+        with np.load(root / f"{split}_scores" / "task0.npz", allow_pickle=False) as scores:
             ids, targets, logits = scores["sample_ids"], scores["targets"], scores["logits"]
-            require(targets.shape == logits.shape == (audit["validation_instances"], 26),
+            expected_instances = (audit["validation_instances"] if split == "val"
+                                  else audit["reporting_instances"])
+            require(targets.shape == logits.shape == (expected_instances, 26),
                     f"{method}: incorrect score shape")
             require(np.isfinite(logits).all() and np.isfinite(targets).all(), f"{method}: nonfinite scores")
             if reference is None:
@@ -98,7 +110,7 @@ def compare(batch_root: Path, allow_skipped_updates: bool = False):
                     require(c0.get(field) == config.get(field), f"{method}: config differs: {field}")
                 for field in shared_audit:
                     require(a0[field] == audit[field], f"{method}: audit differs: {field}")
-                require(summary["completed_optimizer_updates"] == runs[METHODS[0]]["optimizer_updates"],
+                require(summary["completed_optimizer_updates"] == runs[methods[0]]["optimizer_updates"],
                         f"{method}: successful update counts differ")
                 require(np.array_equal(ids0, ids) and np.array_equal(targets0, targets),
                         f"{method}: evaluation samples/targets differ")
@@ -114,20 +126,29 @@ def compare(batch_root: Path, allow_skipped_updates: bool = False):
         if is_three:
             runs[method]["view_diagnostics"] = json.loads((root / "view_diagnostics.json").read_text())["0"]
     m = lambda name: runs[name]["mAP"]
-    deltas = {
-        "加入两路视图的收益（不使用 ParaX）": m("THREE_VIEW") - m("FULL_ONLY"),
-        "ParaX 在 Full 单路中的收益": m("FULL_ONLY_PARAX") - m("FULL_ONLY"),
-        "ParaX 在三路中的收益": m("THREE_VIEW_PARAX") - m("THREE_VIEW"),
-        "加入两路视图的收益（使用 ParaX）": m("THREE_VIEW_PARAX") - m("FULL_ONLY_PARAX"),
-        "ParaX 与三路联合的交互差值": (m("THREE_VIEW_PARAX") - m("THREE_VIEW")) - (m("FULL_ONLY_PARAX") - m("FULL_ONLY")),
-    }
+    deltas = {}
+    if "THREE_VIEW" in runs:
+        deltas["加入两路视图的收益（不使用 ParaX）"] = m("THREE_VIEW") - m("FULL_ONLY")
+    if "FULL_ONLY_PARAX" in runs:
+        deltas["ParaX 在 Full 单路中的收益"] = m("FULL_ONLY_PARAX") - m("FULL_ONLY")
+    if "THREE_VIEW" in runs and "THREE_VIEW_PARAX" in runs:
+        deltas["ParaX 在三路中的收益"] = m("THREE_VIEW_PARAX") - m("THREE_VIEW")
+    if "FULL_ONLY_PARAX" in runs and "THREE_VIEW_PARAX" in runs:
+        deltas["加入两路视图的收益（使用 ParaX）"] = m("THREE_VIEW_PARAX") - m("FULL_ONLY_PARAX")
+        deltas["ParaX 与三路联合的交互差值"] = (
+            m("THREE_VIEW_PARAX") - m("THREE_VIEW")
+        ) - (m("FULL_ONLY_PARAX") - m("FULL_ONLY"))
     has_skips = any(row["skipped_optimizer_updates"] for row in runs.values())
     result = {"paired_audit_passed": True, "strict_zero_skip_audit_passed": not has_skips,
-              "seed": reference[0]["seed"], "split": "validation", "runs": runs, "mAP_differences": deltas,
+              "methods": list(methods),
+              "seed": reference[0]["seed"], "split": "validation" if split == "val" else "test",
+              "runs": runs, "mAP_differences": deltas,
               "warnings": (["AMP skipped updates were explicitly accepted for exploratory analysis. Equal successful update counts do not imply identical skipped batches or training trajectories."] if has_skips else []),
               "limitations": "Single-seed diagnostic only. One joint26 pathway differs from eight incremental pathways; 30 joint epochs is not 240 incremental epochs. No forgetting/average-task mAP applies."}
     (batch_root / "comparison.json").write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n")
-    lines = ["# 全量学习：ParaX 与三路视图对照", "", "四组配对审计通过。以下为最终训练轮次的 validation 结果，未使用 test。", "",
+    statement = ("以下为最终训练轮次的 validation 结果，未使用 test。" if split == "val"
+                 else "以下为固定第 30 轮模型在 test 上的一次评估；未按 validation 或 test 选择 checkpoint。")
+    lines = ["# 全量学习：ParaX 与三路视图对照", "", f"{len(methods)} 组配对审计通过。{statement}", "",
              "| 修改方式 | mAP | cF1 | oF1 | 有效更新 / AMP 跳步 |", "| --- | ---: | ---: | ---: | ---: |"]
     lines += [f"| {row['description']} | {row['mAP']:.4f} | {row['cF1']:.4f} | {row['oF1']:.4f} | {row['optimizer_updates']} / {row['skipped_optimizer_updates']} |" for row in runs.values()]
     if has_skips:
@@ -143,8 +164,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--batch-root", required=True, type=Path)
     parser.add_argument("--allow-skipped-updates", action="store_true", help="Explicitly report existing AMP-skipped runs as exploratory; strict default remains unchanged.")
+    parser.add_argument("--methods", nargs="+", choices=METHODS, default=METHODS)
+    parser.add_argument("--split", choices=("val", "test"), default="val")
     args = parser.parse_args()
-    result = compare(args.batch_root, args.allow_skipped_updates)
+    result = compare(args.batch_root, args.allow_skipped_updates, args.methods, args.split)
     print(json.dumps(result["mAP_differences"], indent=2, ensure_ascii=False))
 
 

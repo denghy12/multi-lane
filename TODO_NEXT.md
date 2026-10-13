@@ -1473,3 +1473,6 @@ VOC 对照实验，不应在现阶段合并到 `main`。
 - Smoke peak reserved memory2756MiB; four arms fit GPU0 alongside existing work. Formal minimum free memory14500MiB, finite queue if needed, never stop existing processes or useGPU1-7.
 - Formal batch protected_parax_expert_reuse_seed0_val_20261010_01; tmux ml_protected_parax_20261010. Baseline/frozen_pool/fresh_only/reuse_old run concurrently onGPU0, seed0 tasks0-2,30epochs/task, expected5010updates/arm, validation only, no test.
 - Results: output/emotic_protected_parax_val/<batch>/<method>; logs: logs/emotic_protected_parax_val/<batch>. Smoke scores are implementation checks, not efficacy evidence. Do not continuously monitor formal training.
+## PAMI joint26 seed0 replication (2026-10-13)
+
+Finish code validation, push the isolated PAMI branch, create a clean Git-only server worktree, generate the PAMI-specific train/val/test Face manifest, run short real-ViT smoke without test access, then launch the three-arm seed0 30-epoch direct-test batch. Compare only same-PAMI test cohorts and report raw mAP alongside the earlier CVPR17 three-seed means, with the single-seed and split-protocol limits explicit. Plan: `docs/emotic_pami_joint26_three_way_seed0_plan_20261013.md`.

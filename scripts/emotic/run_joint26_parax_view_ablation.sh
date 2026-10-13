@@ -7,12 +7,14 @@ RUN_ID="${RUN_ID:?Set RUN_ID}"
 GPU="${GPU:-0}"
 PYTHON="${PYTHON:-python}"
 DATA_ROOT="${DATA_ROOT:-./datasets/EMOTIC}"
+DATASET_RELEASE="${DATASET_RELEASE:-cvpr17}"
 CLIP_CHECKPOINT="${CLIP_CHECKPOINT:-./models/clip/ViT-B-16.pt}"
 FACE_MANIFEST_ROOT="${FACE_MANIFEST_ROOT:-./output/emotic_face_manifest/face_manifest_audit_v1_20260908}"
 RESULT_ROOT="${RESULT_ROOT:-./output/emotic_joint26_parax_view_ablation}"
 LOG_ROOT="${LOG_ROOT:-./logs/emotic_joint26_parax_view_ablation}"
 SEED="${SEED:-0}"
 EPOCHS="${EPOCHS:-30}"
+REPORTING_SPLIT="${REPORTING_SPLIT:-val}"
 AMP_INITIAL_SCALE="${AMP_INITIAL_SCALE:-65536}"
 AMP_GROWTH_INTERVAL="${AMP_GROWTH_INTERVAL:-2000}"
 PARAX_MODE=disabled
@@ -32,12 +34,25 @@ esac
 if [[ "${VIEW_FUSION}" != disabled ]]; then
   AUX_WEIGHT=0.1
   LOSS_SCALE=1
-  extra_args+=(--face-manifest-root "${FACE_MANIFEST_ROOT}" --view-evaluation-diagnostics --save-view-evaluation-scores)
+  extra_args+=(--face-manifest-root "${FACE_MANIFEST_ROOT}" --view-evaluation-diagnostics)
+  if [[ "${REPORTING_SPLIT}" == val ]]; then
+    extra_args+=(--save-view-evaluation-scores)
+  fi
 fi
 if [[ -n "${SMOKE_UPDATES:-}" ]]; then
   extra_args+=(--optimizer-updates-per-task "${SMOKE_UPDATES}" --skip-validation-eval)
 fi
-for path in "${DATA_ROOT}/CVPR17_Annotations.mat" "${CLIP_CHECKPOINT}"; do
+case "${REPORTING_SPLIT}" in
+  val) EVALUATION_PURPOSE=validation_search ;;
+  test) EVALUATION_PURPOSE=fixed_test_fusion; extra_args+=(--skip-validation-eval) ;;
+  *) echo "Unknown REPORTING_SPLIT=${REPORTING_SPLIT}" >&2; exit 2 ;;
+esac
+case "${DATASET_RELEASE}" in
+  cvpr17) ANNOTATION_PATH="${DATA_ROOT}/CVPR17_Annotations.mat" ;;
+  pami) ANNOTATION_PATH="${DATA_ROOT}/Annotations/Annotations.mat" ;;
+  *) echo "Unknown DATASET_RELEASE=${DATASET_RELEASE}" >&2; exit 2 ;;
+esac
+for path in "${ANNOTATION_PATH}" "${CLIP_CHECKPOINT}"; do
   [[ -f "${path}" ]] || { echo "Missing input: ${path}" >&2; exit 2; }
 done
 if [[ "${VIEW_FUSION}" != disabled ]]; then
@@ -51,10 +66,10 @@ RUN_ROOT="${RESULT_ROOT}/${RUN_ID}/${METHOD}"
 LOG_PATH="${LOG_ROOT}/${RUN_ID}/${METHOD}.log"
 [[ ! -e "${RUN_ROOT}" ]] || { echo "Output already exists: ${RUN_ROOT}" >&2; exit 2; }
 mkdir -p "$(dirname "${LOG_PATH}")"
-echo "JOINT26 method=${METHOD} GPU=${GPU} seed=${SEED} labels=all26 lane=1 epochs=${EPOCHS} batch64 Adam main_lr0.0125 ParaX_lr0.0004 cosine clip_frozen ParaX=${PARAX_MODE} image_adapter=off validation_only test_forbidden loss_scale=${LOSS_SCALE} view_auxiliary=${AUX_WEIGHT}"
+echo "JOINT26 method=${METHOD} dataset_release=${DATASET_RELEASE} reporting_split=${REPORTING_SPLIT} GPU=${GPU} seed=${SEED} labels=all26 lane=1 epochs=${EPOCHS} batch64 Adam main_lr0.0125 ParaX_lr0.0004 cosine clip_frozen ParaX=${PARAX_MODE} image_adapter=off loss_scale=${LOSS_SCALE} view_auxiliary=${AUX_WEIGHT}"
 CUDA_VISIBLE_DEVICES="${GPU}" "${PYTHON}" -m multi_lane.track_a.runner \
   --training-protocol joint26 --max-tasks 1 --seed "${SEED}" \
-  --data-root "${DATA_ROOT}" --clip-checkpoint "${CLIP_CHECKPOINT}" \
+  --data-root "${DATA_ROOT}" --dataset-release "${DATASET_RELEASE}" --clip-checkpoint "${CLIP_CHECKPOINT}" \
   --output-root "${RUN_ROOT}" \
   --epochs "${EPOCHS}" --train-batch-size 64 --eval-batch-size 64 --workers 2 \
   --amp-initial-scale "${AMP_INITIAL_SCALE}" --amp-growth-interval "${AMP_GROWTH_INTERVAL}" \
@@ -74,6 +89,6 @@ CUDA_VISIBLE_DEVICES="${GPU}" "${PYTHON}" -m multi_lane.track_a.runner \
   --parax-num-experts 3 --parax-router-hidden 16 --parax-initialization official \
   --parax-residual-scale 0.1 --parax-output-scale-mode learnable \
   --parax-trainable-components all --parax-residual-ratio-cap 0 \
-  --reporting-split val --save-evaluation-scores --save-compact-checkpoints \
-  --no-save-checkpoints --evaluation-score-purpose validation_search \
+  --reporting-split "${REPORTING_SPLIT}" --save-evaluation-scores --save-compact-checkpoints \
+  --no-save-checkpoints --evaluation-score-purpose "${EVALUATION_PURPOSE}" \
   "${extra_args[@]}" 2>&1 | tee "${LOG_PATH}"

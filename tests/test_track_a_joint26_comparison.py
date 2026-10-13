@@ -65,3 +65,36 @@ class Joint26ComparisonTest(unittest.TestCase):
                      targets=np.zeros((2, 26)), logits=np.zeros((2, 26)))
             with self.assertRaisesRegex(ValueError, "samples/targets"):
                 compare(root)
+
+    def test_three_requested_methods_keep_paired_audit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_runs(root)
+            methods = ("FULL_ONLY", "THREE_VIEW", "THREE_VIEW_PARAX")
+            result = compare(root, methods=methods)
+            self.assertEqual(result["methods"], list(methods))
+            self.assertEqual(len(result["runs"]), 3)
+            self.assertIn("ParaX 在三路中的收益", result["mAP_differences"])
+            self.assertNotIn("ParaX 在 Full 单路中的收益", result["mAP_differences"])
+
+    def test_direct_test_comparison_requires_same_test_cohort(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_runs(root)
+            methods = ("FULL_ONLY", "THREE_VIEW", "THREE_VIEW_PARAX")
+            for method in methods:
+                d = root / method
+                config = json.loads((d / "seed_summary.json").read_text())
+                config["config"].update(reporting_split="test", skip_validation_eval=True,
+                                        evaluation_score_purpose="fixed_test_fusion")
+                (d / "seed_summary.json").write_text(json.dumps(config))
+                audit = json.loads((d / "joint_protocol_audit.json").read_text())
+                audit.update(test_loaded=True, reporting_instances=2)
+                (d / "joint_protocol_audit.json").write_text(json.dumps(audit))
+                (d / "val_scores").rename(d / "test_scores")
+            self.assertEqual(compare(root, methods=methods, split="test")["split"], "test")
+            d = root / "THREE_VIEW"
+            np.savez(d / "test_scores" / "task0.npz", sample_ids=np.array(["different", "b"]),
+                     targets=np.ones((2, 26)), logits=np.zeros((2, 26)))
+            with self.assertRaisesRegex(ValueError, "samples/targets"):
+                compare(root, methods=methods, split="test")

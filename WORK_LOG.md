@@ -4099,3 +4099,6 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - Smoke peak reserved memory2756MiB; four arms fit GPU0 alongside existing work. Formal minimum free memory14500MiB, finite queue if needed, never stop existing processes or useGPU1-7.
 - Formal batch protected_parax_expert_reuse_seed0_val_20261010_01; tmux ml_protected_parax_20261010. Baseline/frozen_pool/fresh_only/reuse_old run concurrently onGPU0, seed0 tasks0-2,30epochs/task, expected5010updates/arm, validation only, no test.
 - Results: output/emotic_protected_parax_val/<batch>/<method>; logs: logs/emotic_protected_parax_val/<batch>. Smoke scores are implementation checks, not efficacy evidence. Do not continuously monitor formal training.
+## 2026-10-13 Prepare PAMI joint26 seed0 direct-test replication
+
+Created isolated local branch/worktree `exp/emotic-pami-joint26`. Added explicit PAMI image/annotation routing and a three-arm seed0 launcher. Verified the official PAMI `.mat` has 34,320 person records, all referenced images exist, and 383 train/val image paths overlap with matching person boxes; val/test annotation-category union equals their combined-category field. The planned formal run trains 30 epochs and reports test once at the final epoch; no training result exists yet. See `docs/emotic_pami_joint26_three_way_seed0_plan_20261013.md`.

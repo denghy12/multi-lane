@@ -929,6 +929,7 @@ class EMOTIC(torch.utils.data.Dataset):
         face_min_training_score=0.0,
         face_alignment='none',
         face_dual_transform=None,
+        dataset_release='cvpr17',
     ):
         self.root = os.path.expanduser(root)
         self.transform = transform
@@ -949,7 +950,12 @@ class EMOTIC(torch.utils.data.Dataset):
             raise ValueError('Dual Face inputs cannot use paired or multi-view transforms.')
         self.train = train
         self.splits = ['train'] if self.train else list(eval_splits)
-        self.path = os.path.join(self.root, 'EMOTIC')
+        if dataset_release not in ('cvpr17', 'pami'):
+            raise ValueError(f'Unsupported EMOTIC dataset release: {dataset_release}')
+        self.dataset_release = dataset_release
+        self.path = os.path.join(
+            self.root, 'EMOTIC' if dataset_release == 'cvpr17' else 'EMOTIC_PAMI'
+        )
         self.download = download
         if input_mode not in ('full', 'person_crop', 'face_crop'):
             raise ValueError(
@@ -989,7 +995,11 @@ class EMOTIC(torch.utils.data.Dataset):
         if self.download:
             raise RuntimeError('EMOTIC must be prepared manually under the data path.')
 
-        annotation_path = os.path.join(self.path, 'CVPR17_Annotations.mat')
+        annotation_path = os.path.join(
+            self.path,
+            'CVPR17_Annotations.mat' if dataset_release == 'cvpr17'
+            else os.path.join('Annotations', 'Annotations.mat'),
+        )
         if not os.path.isfile(annotation_path):
             raise RuntimeError(f'EMOTIC annotations not found at {annotation_path}')
 
@@ -1022,7 +1032,11 @@ class EMOTIC(torch.utils.data.Dataset):
         self.sample_ids = []
 
         for split, item in split_items:
-            img_path = os.path.join(self.path, 'cvpr_emotic', item.folder, item.filename)
+            img_path = os.path.join(
+                self.path,
+                'cvpr_emotic' if dataset_release == 'cvpr17' else 'emotic',
+                item.folder, item.filename,
+            )
             if not os.path.isfile(img_path):
                 raise RuntimeError(f'EMOTIC image not found at {img_path}')
 

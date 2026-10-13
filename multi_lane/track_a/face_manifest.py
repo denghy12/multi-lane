@@ -40,14 +40,18 @@ def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
             digest.update(chunk)
 
 
-def resolve_dataset_parent(path: Path) -> Path:
+def resolve_dataset_parent(path: Path, release: str = "cvpr17") -> Path:
     path = path.expanduser().resolve()
-    if path.name == "EMOTIC" and (path / "CVPR17_Annotations.mat").is_file():
+    if release not in ("cvpr17", "pami"):
+        raise ValueError(f"Unsupported EMOTIC dataset release: {release}")
+    name = "EMOTIC" if release == "cvpr17" else "EMOTIC_PAMI"
+    annotation = Path("CVPR17_Annotations.mat") if release == "cvpr17" else Path("Annotations/Annotations.mat")
+    if path.name == name and (path / annotation).is_file():
         return path.parent
-    if (path / "EMOTIC" / "CVPR17_Annotations.mat").is_file():
+    if (path / name / annotation).is_file():
         return path
     raise FileNotFoundError(
-        "Expected CVPR17_Annotations.mat under DATA_ROOT or DATA_ROOT/EMOTIC"
+        f"Expected {annotation} under DATA_ROOT or DATA_ROOT/{name}"
     )
 
 
@@ -580,6 +584,7 @@ def write_jsonl(path: Path, rows: Sequence[Mapping[str, object]]) -> None:
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-root", type=Path, required=True)
+    parser.add_argument("--dataset-release", choices=("cvpr17", "pami"), default="cvpr17")
     parser.add_argument("--detector-checkpoint", type=Path, required=True)
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument(
@@ -626,11 +631,12 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             raise RuntimeError("Resume requested with a different detector configuration")
     _write_json(metadata_path, metadata)
 
-    parent = resolve_dataset_parent(args.data_root)
+    parent = resolve_dataset_parent(args.data_root, args.dataset_release)
     sources = {
         split: EMOTIC(
             str(parent), train=(split == "train"), transform=lambda image: image,
             eval_splits=(split,) if split != "train" else ("val",),
+            dataset_release=args.dataset_release,
         )
         for split in args.splits
     }

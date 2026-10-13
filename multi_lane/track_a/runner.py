@@ -906,14 +906,18 @@ def backward_logit_residual_training_losses(
         parameter.grad = gradient
 
 
-def resolve_dataset_parent(path: Path) -> Path:
+def resolve_dataset_parent(path: Path, release: str = "cvpr17") -> Path:
     path = path.expanduser().resolve()
-    if path.name == "EMOTIC" and (path / "CVPR17_Annotations.mat").is_file():
+    if release not in ("cvpr17", "pami"):
+        raise ValueError(f"Unsupported EMOTIC dataset release: {release}")
+    name = "EMOTIC" if release == "cvpr17" else "EMOTIC_PAMI"
+    annotation = Path("CVPR17_Annotations.mat") if release == "cvpr17" else Path("Annotations/Annotations.mat")
+    if path.name == name and (path / annotation).is_file():
         return path.parent
-    if (path / "EMOTIC" / "CVPR17_Annotations.mat").is_file():
+    if (path / name / annotation).is_file():
         return path
     raise FileNotFoundError(
-        "Expected CVPR17_Annotations.mat under DATA_ROOT/EMOTIC or DATA_ROOT"
+        f"Expected {annotation} under DATA_ROOT/{name} or DATA_ROOT"
     )
 
 
@@ -2394,6 +2398,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--supervised-loss-scale", type=float, default=1.0)
     parser.add_argument("--seed", type=int, required=True, choices=(0, 1, 2))
     parser.add_argument("--data-root", type=Path, required=True)
+    parser.add_argument("--dataset-release", choices=("cvpr17", "pami"), default="cvpr17")
     parser.add_argument("--clip-checkpoint", type=Path, required=True)
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--device", default="cuda")
@@ -3243,7 +3248,7 @@ def run(args: argparse.Namespace) -> None:
         face_color_jitter_strength=args.face_color_jitter_strength,
         face_color_jitter_probability=args.face_color_jitter_probability,
     )
-    dataset_parent = resolve_dataset_parent(args.data_root)
+    dataset_parent = resolve_dataset_parent(args.data_root, args.dataset_release)
     paired_train = paired_eval = None
     multi_view_train = multi_view_eval = None
     if three_view_fusion:
@@ -3276,6 +3281,7 @@ def run(args: argparse.Namespace) -> None:
         face_crop_margin=args.face_crop_margin,
         face_min_training_short_side=args.face_min_training_short_side,
         face_min_training_score=args.face_min_training_score,
+        dataset_release=args.dataset_release,
     )
     calibration_source = (
         EMOTIC(
@@ -3288,6 +3294,7 @@ def run(args: argparse.Namespace) -> None:
             face_crop_margin=args.face_crop_margin,
             face_min_training_short_side=args.face_min_training_short_side,
             face_min_training_score=args.face_min_training_score,
+            dataset_release=args.dataset_release,
         )
         if args.calibration_fraction > 0 or crossfit_enabled or model.parax_staged_mode or args.protected_parax_staged_training
         else None
@@ -3302,6 +3309,7 @@ def run(args: argparse.Namespace) -> None:
         face_crop_margin=args.face_crop_margin,
         face_min_training_short_side=args.face_min_training_short_side,
         face_min_training_score=args.face_min_training_score,
+        dataset_release=args.dataset_release,
     )
     test_source = None
     if args.reporting_split == "test" or args.also_report_test:
@@ -3315,6 +3323,7 @@ def run(args: argparse.Namespace) -> None:
             face_crop_margin=args.face_crop_margin,
             face_min_training_short_side=args.face_min_training_short_side,
             face_min_training_score=args.face_min_training_score,
+            dataset_release=args.dataset_release,
         )
         validate_classes(train_source, val_source, test_source)
     if args.reporting_split == "test":
@@ -3844,7 +3853,8 @@ def run(args: argparse.Namespace) -> None:
         ),
         "clip_checkpoint": str(args.clip_checkpoint.resolve()),
         "clip_checkpoint_sha256": OPENAI_VIT_B16_SHA256,
-        "data_root": str(dataset_parent / "EMOTIC"),
+        "data_root": str(dataset_parent / ("EMOTIC" if args.dataset_release == "cvpr17" else "EMOTIC_PAMI")),
+        "dataset_release": args.dataset_release,
         "git": metadata,
         "torch_version": torch.__version__,
         "cuda_version": torch.version.cuda,

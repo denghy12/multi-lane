@@ -2358,3 +2358,6 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 - Smoke peak reserved memory2756MiB; four arms fit GPU0 alongside existing work. Formal minimum free memory14500MiB, finite queue if needed, never stop existing processes or useGPU1-7.
 - Formal batch protected_parax_expert_reuse_seed0_val_20261010_01; tmux ml_protected_parax_20261010. Baseline/frozen_pool/fresh_only/reuse_old run concurrently onGPU0, seed0 tasks0-2,30epochs/task, expected5010updates/arm, validation only, no test.
 - Results: output/emotic_protected_parax_val/<batch>/<method>; logs: logs/emotic_protected_parax_val/<batch>. Smoke scores are implementation checks, not efficacy evidence. Do not continuously monitor formal training.
+## 2026-10-13 PAMI joint26 seed0 replication branch
+
+Branch `exp/emotic-pami-joint26` adds explicit `--dataset-release pami` support to the EMOTIC loader, joint26 runner, Face manifest, and evaluator while retaining CVPR17 as default. The user's requested three arms are Full only, three views without ParaX, and three views with shared image-stream ParaX. Only seed0, 30 epochs, fixed final-epoch direct PAMI test will run; no validation selection. PAMI train and val share 383 image/person-box records in the provided official annotation file, so test is the main endpoint. Detailed protocol: `docs/emotic_pami_joint26_three_way_seed0_plan_20261013.md`.

@@ -72,9 +72,11 @@ def make_source(config, data_root, face_manifest_root, split):
                               jitter_strength=config["person_color_jitter_strength"],
                               jitter_probability=config["person_color_jitter_probability"],
                               full_crop_mode=config["full_crop_mode"]) if three else None
-    return EMOTIC(str(resolve_dataset_parent(data_root)), train=False, transform=transform,
+    release = config.get("dataset_release", "cvpr17")
+    return EMOTIC(str(resolve_dataset_parent(data_root, release)), train=False, transform=transform,
                   eval_splits=(split,), input_mode="full", person_crop_margin=config["person_crop_margin"],
-                  multi_view_transform=multi, face_manifest_root=face_manifest_root if three else None)
+                  multi_view_transform=multi, face_manifest_root=face_manifest_root if three else None,
+                  dataset_release=release)
 
 
 def loader_for(source, config):
@@ -110,7 +112,9 @@ def evaluate_checkpoint(source, output, data_root, clip_checkpoint, face_manifes
     require(torch.cuda.is_available(), "CUDA required")
     metadata = git_metadata(Path(__file__).resolve().parents[2])
     require(not metadata["dirty"], "Evaluation worktree must be clean")
-    require(Path(config["data_root"]).resolve() == (resolve_dataset_parent(data_root) / "EMOTIC").resolve(),
+    release = config.get("dataset_release", "cvpr17")
+    name = "EMOTIC" if release == "cvpr17" else "EMOTIC_PAMI"
+    require(Path(config["data_root"]).resolve() == (resolve_dataset_parent(data_root, release) / name).resolve(),
             "Dataset root changed")
     manifest_hashes = audit_face_manifest(config, face_manifest_root) if config["view_fusion"] != "disabled" else {}
     source_files = [source / name for name in ("config.json", "seed_summary.json", "joint_protocol_audit.json",
