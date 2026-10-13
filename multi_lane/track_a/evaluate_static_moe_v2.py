@@ -23,6 +23,8 @@ METHODS = ("BASELINE", "SHARED", "MOE_OVERLAP")
 def source_hashes(root: Path, method: str) -> dict[str, str]:
     source = root / method
     paths = [source / "config.json"]
+    paths += [source / name for name in ("seed_summary.json", "paired_protocol_audit.json",
+                                        "static_moe_audit.json", "training_history.json")]
     paths += [source / "compact_checkpoints" / f"task{t}.pth" for t in range(8)]
     paths += [source / "val_scores" / f"task{t}.npz" for t in range(8)]
     return {str(p): _sha256(p) for p in paths}
@@ -44,7 +46,26 @@ def evaluate(batch: Path, output: Path, split: str, data_root: Path,
         require(c["adapter_residual_bound_ratio"] == 0.1,
                 "v2 sources must use the locked residual ratio 0.1")
     base = configs["BASELINE"]
+    common_keys = ("seed", "class_order", "task_sizes", "max_tasks", "epochs_per_task",
+                   "train_batch_size", "eval_batch_size", "adapter_layer_indices", "adapter_residual_scale",
+                   "view_fusion", "view_auxiliary_loss_weight", "parameter_group_loss_routing", "training_loss_mode",
+                   "learning_rate", "optimizer", "scheduler_mode", "scheduler_min_lr_ratio", "scheduler_warmup_ratio",
+                   "input_normalization", "full_crop_mode", "train_crop_scale", "person_crop_margin",
+                   "amp_initial_scale", "amp_growth_interval", "clip_checkpoint_sha256", "face_manifest",
+                   "static_moe_smoke_samples", "optimizer_updates_per_task", "git")
+    task_keys = ("train_sample_ids_sha256", "validation_sample_ids_sha256", "first_train_batch_ids_sha256",
+                 "reporting_sample_ids_sha256", "train_instances", "sampler_seed")
     for method, c in configs.items():
+        require(all(c[k] == base[k] for k in common_keys), "Paired v2 configs differ")
+        require(audits[method]["initial_selector_prompt_classifier_sha256"] ==
+                audits["BASELINE"]["initial_selector_prompt_classifier_sha256"], "Initial shared model differs")
+        for task in range(8):
+            require(all(audits[method]["tasks"][str(task)][k] ==
+                        audits["BASELINE"]["tasks"][str(task)][k] for k in task_keys),
+                    "Paired samples/samplers differ")
+        require(c["static_moe_mode"] == ("overlap" if method == "MOE_OVERLAP" else "disabled")
+                and c["adapter_mode"] == ("disabled" if method == "BASELINE" else "image_token"),
+                "Wrong v2 method mapping")
         require(c["seed"] == 0 and c["task_sizes"] == base["task_sizes"]
                 and c["class_order"] == base["class_order"]
                 and c["clip_checkpoint_sha256"] == base["clip_checkpoint_sha256"]
@@ -67,6 +88,13 @@ def evaluate(batch: Path, output: Path, split: str, data_root: Path,
             require(hashes == lock["source_sha256"][method], "v2 checkpoint/source changed after locking")
         require(_sha256(clip_checkpoint) == c["clip_checkpoint_sha256"], "CLIP checkpoint changed")
         require(Path(c["data_root"]).resolve() == data_root.resolve(), "Dataset root mismatch")
+        manifest_paths = {"detector_config": face_manifest_root / "detector_config.json",
+                          "val_manifest": face_manifest_root / "manifests/val.jsonl"}
+        if split == "test":
+            manifest_paths["test_manifest"] = face_manifest_root / "manifests/test.jsonl"
+        manifests = {str(p): _sha256(p) for p in manifest_paths.values()}
+        require(all(manifests[str(p)] == c["face_manifest"]["artifact_sha256"][k]
+                    for k, p in manifest_paths.items()), "Face source changed")
         set_seed(c["seed"], c["tf32"])
         model = build_static_model(c, load_openai_clip_visual(clip_checkpoint)).float().cuda()
         visual_sha = tensor_state_digest(model.visual_encoder.state_dict())
@@ -107,6 +135,7 @@ def evaluate(batch: Path, output: Path, split: str, data_root: Path,
         require(tensor_state_digest(model.visual_encoder.state_dict()) == visual_sha,
                 "Frozen CLIP changed during inference")
         require(source_hashes(batch, method) == hashes, "Source files changed during inference")
+        require(all(_sha256(Path(p)) == sha for p, sha in manifests.items()), "Face source changed during inference")
         results[method] = {"tasks": rows, "source_sha256": hashes, "source_unchanged": True}
         del model
         torch.cuda.empty_cache()
