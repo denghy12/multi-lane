@@ -18,6 +18,8 @@ SEEDS="${SEEDS:-0}"
 EPOCHS="${EPOCHS:-30}"
 SMOKE_UPDATES="${SMOKE_UPDATES:-}"
 METHODS=(FULL_ONLY THREE_VIEW THREE_VIEW_PARAX)
+RUN_REPORTING_SPLIT=test
+if [[ -n "${SMOKE_UPDATES}" ]]; then RUN_REPORTING_SPLIT=val; fi
 
 [[ -z "$(git status --porcelain --untracked-files=no)" ]] || {
   echo "Tracked files changed in the training worktree" >&2; exit 2;
@@ -33,9 +35,9 @@ cat > "${MANIFEST_PATH}" <<EOF
 batch_prefix=${BATCH_PREFIX}
 branch=$(git branch --show-current)
 commit=$(git rev-parse HEAD)
-dataset_release=PAMI; official Annotations.mat train/val/test; final-epoch test only, no validation selection
+dataset_release=PAMI; official Annotations.mat train/val/test; final-epoch test only in formal runs, no validation selection
 annotation_sha256=$(sha256sum "${DATA_ROOT}/Annotations/Annotations.mat" | cut -d' ' -f1)
-methods=${METHODS[*]}; seeds=${SEEDS}; GPU=${GPU}; reporting_split=test
+methods=${METHODS[*]}; seeds=${SEEDS}; GPU=${GPU}; reporting_split=${RUN_REPORTING_SPLIT}; smoke_updates=${SMOKE_UPDATES:-none}
 model=frozen OpenAI CLIP ViT-B/16; one shared encoder, Selector, Prompt, classifier; image-token Adapter disabled
 ParaX=only THREE_VIEW_PARAX; Frozen Forward after block index 10; rank32; 3 shared experts; router hidden16; official init; learnable output scale0.1
 fusion=Full/Person/Face fixed reliable [0.64,0.16,0.20] else [0.80,0.20,0]
@@ -76,12 +78,10 @@ for seed in ${SEEDS}; do
   pids=()
   for method in "${METHODS[@]}"; do
     (
-      reporting=test
-      if [[ -n "${SMOKE_UPDATES}" ]]; then reporting=val; fi
       METHOD="${method}" GPU="${GPU}" RUN_ID="${BATCH_ID}" PYTHON="${PYTHON}" \
         DATA_ROOT="${DATA_ROOT}" DATASET_RELEASE=pami CLIP_CHECKPOINT="${CLIP_CHECKPOINT}" \
         FACE_MANIFEST_ROOT="${FACE_MANIFEST_ROOT}" RESULT_ROOT="${RESULT_ROOT}" \
-        LOG_ROOT="${LOG_ROOT}" SEED="${seed}" EPOCHS="${EPOCHS}" REPORTING_SPLIT="${reporting}" \
+        LOG_ROOT="${LOG_ROOT}" SEED="${seed}" EPOCHS="${EPOCHS}" REPORTING_SPLIT="${RUN_REPORTING_SPLIT}" \
         SMOKE_UPDATES="${SMOKE_UPDATES}" \
         bash scripts/emotic/run_joint26_parax_view_ablation.sh \
         > "${LOG_ROOT}/${BATCH_ID}_${method}.launcher.log" 2>&1
@@ -92,6 +92,31 @@ for seed in ${SEEDS}; do
   for pid in "${pids[@]}"; do wait "${pid}" || failed=1; done
   (( failed == 0 )) || { echo "Training failed for ${BATCH_ID}" >&2; exit 1; }
   if [[ -n "${SMOKE_UPDATES}" ]]; then
+    "${PYTHON}" - "${RESULT_ROOT}/${BATCH_ID}" "${SMOKE_UPDATES}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+updates = int(sys.argv[2])
+reference = None
+for method in ("FULL_ONLY", "THREE_VIEW", "THREE_VIEW_PARAX"):
+    run = root / method
+    summary = json.loads((run / "seed_summary.json").read_text())
+    audit = json.loads((run / "joint_protocol_audit.json").read_text())
+    history = json.loads((run / "training_history.json").read_text())["0"]
+    assert summary["status"] == "complete" and summary["completed_optimizer_updates"] == updates, method
+    assert sum(row["skipped_optimizer_steps"] for row in history) == 0, method
+    assert summary["config"]["dataset_release"] == "pami", method
+    assert summary["config"]["reporting_split"] == "val" and not audit["test_loaded"], method
+    assert audit["frozen_visual_unchanged"], method
+    pair = (audit["train_sample_ids_sha256"], audit["first_train_batch_ids_sha256"],
+            audit["initial_selector_prompt_classifier_sha256"])
+    if reference is None:
+        reference = pair
+    assert pair == reference, method
+print("PAMI_JOINT26_SMOKE_AUDIT_PASSED", flush=True)
+PY
     echo "Smoke completed for ${BATCH_ID}; skipping comparison and test"
     continue
   fi
