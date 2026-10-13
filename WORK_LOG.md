@@ -1,4 +1,11 @@
 
+## 2026-10-13 已授权Selector key/value validation定位（实现中）
+
+用户要求执行先定位、证据支持后value-only训练。新分支exp/static-moe-key-value-diagnostic-20261013，默认both前向不变；新增runtime key_only/value_only/none开关、逐人物当前lane注意力KL/top10与去均值残差诊断、validation-only评价器和smoke→full调度。五来源为v1 SHARED/UNIFORM/OVERLAP与v2 SHARED/OVERLAP，完整8task×4模式，2397val人；不读test、不更新参数，none不是原B0。
+
+配置/门槛docs/static_moe_key_value_diagnostic_plan_20261013.md；当前仅语法检查通过，服务器回归/真实64人smoke及正式启动待执行，不宣称已完成或取得成绩。GPU核查仅0空闲，最多两进程排队，不干预其余卡。仅两个OVERLAP版本都达到预声明最终/阶段平均门槛才考虑下一训练，本轮未启动value-only训练。
+
+
 ## 2026-10-13 静态 MoE v2 与36组test消融：完整结果已复核
 
 本节替代此前“运行中/等待评价”状态。用户召回分析时发现上一轮没有实际挂接自动评价控制器；三组训练完成但正式val/test缺失。本轮明确说明并补跑同一批固定checkpoint的只读并行评价，无重训或调参。独立修复分支 `fix/static-moe-v2-evaluation-analysis-20261013`，evaluator HEAD `b3a051d`，训练仍固定 `aa06f04`；修复控制器误读paired audit.status，强化来源/样本配对与Face manifest检查，24项相关回归通过。

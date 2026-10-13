@@ -23,6 +23,7 @@ from .adapter import (
 )
 from .selector_conditioning import TaskSelectorConditioner
 from .static_moe import StaticMoEImageTokenAdapterBank
+from .selector_kv_diagnostic import SELECTOR_EVIDENCE_MODES, selector_sample_diagnostics
 from .view_fusion import TaskwiseViewFusion
 
 ModelInputs = Union[torch.Tensor, Dict[str, torch.Tensor]]
@@ -404,6 +405,9 @@ class MultiLaneModel(nn.Module):
         self._adapter_attention_max_sum = 0.0
         self._adapter_attention_count = 0
         self._adapter_ablation_diagnostics_enabled = False
+        self._selector_evidence_mode = "both"
+        self._selector_diagnostic_task = None
+        self._selector_sample_records = []
 
     @property
     def task_sizes(self) -> Tuple[int, ...]:
@@ -473,6 +477,24 @@ class MultiLaneModel(nn.Module):
         if enabled and self.adapter_bank is None:
             raise RuntimeError("Cannot enable an adapter that was not configured")
         self.adapter_runtime_enabled = bool(enabled)
+
+    def set_selector_evidence_mode(self, mode: str = "both") -> None:
+        if mode not in SELECTOR_EVIDENCE_MODES:
+            raise ValueError("Unknown Selector key/value evidence mode")
+        if mode != "both" and (self.adapter_mode != "image_token" or self.adapter_bank is None):
+            raise ValueError("Key/value intervention requires an Image-token Adapter")
+        self._selector_evidence_mode = mode
+
+    def enable_selector_sample_diagnostics(self, task_id=None) -> None:
+        if task_id is not None and not 0 <= int(task_id) < self.num_tasks:
+            raise ValueError("Invalid diagnostic task")
+        self._selector_diagnostic_task = task_id
+        self._selector_sample_records = []
+
+    def pop_selector_sample_diagnostics(self):
+        records = self._selector_sample_records
+        self._selector_sample_records = []
+        return records
 
     def reset_adapter_ablation_diagnostics(self) -> None:
         self._adapter_attention_entropy_sum = 0.0
@@ -796,10 +818,30 @@ class MultiLaneModel(nn.Module):
             selector_image_tokens = self.adapter_bank.adapted_tokens_for_layer(
                 layer_id, frozen_normalized_image, lane_ids, image_view
             )
+            key_tokens = selector_image_tokens
+            value_tokens = selector_image_tokens
+            if self._selector_evidence_mode in ("value_only", "none"):
+                key_tokens = frozen_normalized_image.unsqueeze(0).expand_as(selector_image_tokens)
+            if self._selector_evidence_mode in ("key_only", "none"):
+                value_tokens = frozen_normalized_image.unsqueeze(0).expand_as(selector_image_tokens)
             similarity = torch.einsum(
-                "tbsc,tbnc->tbsn", queries, selector_image_tokens
+                "tbsc,tbnc->tbsn", queries, key_tokens
             ) * (self.width**-0.5)
             selector_weights = torch.softmax(similarity, dim=-1)
+            if (self._selector_diagnostic_task is not None
+                    and layer_id in self.adapter_bank.layer_indices
+                    and self._selector_diagnostic_task in lane_ids):
+                position = list(lane_ids).index(self._selector_diagnostic_task)
+                frozen_expanded = frozen_normalized_image.unsqueeze(0).expand_as(selector_image_tokens)
+                reference_similarity = torch.einsum("tbsc,tbnc->tbsn", queries, frozen_expanded) * (self.width**-0.5)
+                reference_weights = torch.softmax(reference_similarity, dim=-1)
+                values = selector_sample_diagnostics(reference_weights[position], selector_weights[position],
+                                                     frozen_normalized_image, selector_image_tokens[position])
+                self._selector_sample_records.append({
+                    "view": image_view, "layer": layer_id,
+                    "task": int(self._selector_diagnostic_task),
+                    "values": {k: v.cpu() for k, v in values.items()},
+                })
             if self._adapter_ablation_diagnostics_enabled:
                 selector_weights_float = selector_weights.float().clamp_min(1e-12)
                 entropy = -(selector_weights_float * selector_weights_float.log()).sum(dim=-1).mean()
@@ -808,7 +850,7 @@ class MultiLaneModel(nn.Module):
                 self._adapter_attention_count += 1
             selected = torch.einsum(
                 "tbnc,tbsn->tbsc",
-                selector_image_tokens,
+                value_tokens,
                 selector_weights,
             )
         else:
