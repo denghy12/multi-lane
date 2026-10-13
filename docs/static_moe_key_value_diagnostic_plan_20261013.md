@@ -2,6 +2,8 @@
 
 用户授权开始执行“先定位，证据支持后才训练value-only”。本轮先实现/运行诊断，不从test选择前向或ρ；不提前训练下一版。
 
+2026-10-13 状态：固定实现提交 `b415322` 已完成五来源真实 smoke 和全部 160 次 2397 人 validation 前向，五进程 exit 0。服务器 324 项 Track-A 单测通过；完整逐样本独立核验通过。预声明门槛未达到，因此没有进入 value-only 训练。结果与分析见 `docs/static_moe_key_value_diagnostic_results_20261013.md`。
+
 ## 配置
 
 - 分支 `exp/static-moe-key-value-diagnostic-20261013`；独立远程worktree `../multi-lane-main-static-moe-kv-20261013`，Git-only同步，旧运行/primary/test-only均不改。

@@ -1,10 +1,13 @@
 
-## 2026-10-13 已授权Selector key/value validation定位（实现中）
+## 2026-10-13 Selector key/value validation diagnostic complete
 
-用户要求执行先定位、证据支持后value-only训练。新分支exp/static-moe-key-value-diagnostic-20261013，默认both前向不变；新增runtime key_only/value_only/none开关、逐人物当前lane注意力KL/top10与去均值残差诊断、validation-only评价器和smoke→full调度。五来源为v1 SHARED/UNIFORM/OVERLAP与v2 SHARED/OVERLAP，完整8task×4模式，2397val人；不读test、不更新参数，none不是原B0。
+Authorized fixed-checkpoint localization completed on isolated branch exp/static-moe-key-value-diagnostic-20261013; server evaluator commit b415322, independent worktree /mnt/haoyuan/workspace/multi-lane-main-static-moe-kv-20261013. Five checkpoint sources (v1 SHARED/UNIFORM/OVERLAP, v2 SHARED/OVERLAP), eight tasks and four K/V interventions produced 160 full 2397-person EMOTIC validation forwards. No optimizer update or test access. GPU0 at most two jobs; other workloads and primary/test-only worktrees were not changed. All 324 Track-A tests, five real 64-person eight-task smokes, and five full jobs passed.
 
-配置/门槛docs/static_moe_key_value_diagnostic_plan_20261013.md；当前仅语法检查通过，服务器回归/真实64人smoke及正式启动待执行，不宣称已完成或取得成绩。GPU核查仅0空闲，最多两进程排队，不干预其余卡。仅两个OVERLAP版本都达到预声明最终/阶段平均门槛才考虑下一训练，本轮未启动value-only训练。
+Independent full audit: all 160 score/diagnostic NPZ pairs aligned on sample IDs/targets/Face mask; historical both logits replay maximum difference 0; expected attention-pair difference 0; maximum relative residual energy decomposition error 3.55e-7; checkpoint/source SHA unchanged. Local/server 677 original artifact/log files have identical manifest hash 6ebee60978092e67f7637c58b56ba36aedb6d40178cfcea7303456fe9b577c9c. Detailed analysis and paired image-cluster bootstrap are in docs/static_moe_key_value_diagnostic_results_20261013.md; raw data in output/emotic_static_moe_kv/static_moe_kv_validation_seed0_20261013_01 and analysis in output/static_moe_kv_analysis_20261013.
 
+Predeclared training gate FAILED for both overlap versions. v1 final both/value_only/key_only/none mAP = 42.7858/42.7546/42.4871/42.5055; v2 = 42.0629/42.0580/42.0386/42.0446. Key-only is slightly below none, but both exceeds value-only, so suppressing key adaptation does not help the jointly trained checkpoint. v1 value-only minus both paired bootstrap interval [-0.0708,-0.0017]; v2 [-0.0221,+0.0097], conditional on seed0. Current-task attention KL is small and most candidate residual energy is token-mean; old-task lanes were not separately diagnosed. Value-only implementation/training was not started. Runtime none is not independently trained B0.
+
+Next: retain existing baseline as deployment reference; do not train value-only from these findings. If probing mechanism further, use a new predeclared validation-only audit of old-task lane attention and token-mean versus centered residual components before another structural training change. Keep baseline and ordinary Adapter controls in any later training comparison; no main merge or seed expansion was performed.
 
 ## 2026-10-13 静态 MoE v2 与36组test消融：完整结果已复核
 
