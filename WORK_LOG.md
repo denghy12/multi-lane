@@ -1,5 +1,17 @@
 # 工作日志
 
+## 2026-10-15：MoE-off 与 Router 原因诊断完成
+
+GPU0 同权重完整人群 validation MoE-off 重放 exit 0：task7
+fused on42.0342/off42.5185，off−on +0.4843；Full +0.8786、
+Person +2.1521、Face −0.3187。按原图像聚类的500次配对
+bootstrap，fused 提升95%区间[+0.0948,+0.9536]；Person
+[+1.4751,+2.8277]。8阶段均值只提升0.0665，task1–3
+关闭 MoE 反而略降。FP32 Router 探针在 task7 val 前64人
+显示各视图只有一组 Top-2，第一名权重0.9976–0.9995，
+CLS 图片间变化远小于共同均值。完整分析和下一版建议见
+`docs/moe_task_ffn_v1_results_analysis_20261015.md`。
+
 ## 2026-10-15：完整人群重评估完成
 
 补丁 `eaac038` 在独立 worktree 经 Git fast-forward 同步，GPU0 双进程

@@ -1,5 +1,8 @@
 # Task-Forward MoE 三视图首版：锁定配置与执行记录
 
+完整结果、统计不确定性、MoE-off 消融和下一版建议见
+`docs/moe_task_ffn_v1_results_analysis_20261015.md`。
+
 ## 方法边界
 
 本版独立于 ParaX。Frozen Forward 保持原图像 token 流不变；在 MULTI-LANE

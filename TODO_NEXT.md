@@ -1,5 +1,16 @@
 # 下一步任务
 
+## 2026-10-15：MoE 首版完成后的推荐方向
+
+- 不把首版合并到 main，也不直接扩张为跨任务旧专家复用；
+  test 阶段平均较 B0 低1.1513 mAP，Router 推理近乎单专家。
+- 若启动 v2，保持 Task Forward 位置；先做图片证据 Router
+  输入/小池/显式共享专家方案与同位置固定路由控制组，固定全人群
+  validation 比较，再决定是否做完整 8 任务训练与最终 test。
+- 用户需按需将远程 `./logs/moe_task_ffn_v1/<run_id>/` 与
+  `./output/moe_task_ffn_v1/<run_id>/` 同步回本地，保留原 checkpoint
+  和全部只读重评估/消融产物。
+
 ## 2026-10-15：MoE 首版分析后待办
 
 - 用同一批冻结 checkpoint 在全人群 validation 上关闭 MoE 残差，
