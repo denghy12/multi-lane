@@ -22,7 +22,8 @@ def evaluate_split(source_run: Path, output: Path, split: str,
                    data_root: Path, clip_checkpoint: Path,
                    face_manifest_root: Path, batch_size: int,
                    allow_smoke: bool = False,
-                   full_cohort: bool = False) -> dict:
+                   full_cohort: bool = False,
+                   disable_moe_runtime: bool = False) -> dict:
     if split not in {"val", "test"}:
         raise ValueError("Split must be val or test")
     if output.exists():
@@ -76,6 +77,7 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         payload = _torch_load(checkpoint)
         restore_compact_model_state(model, payload, task_id, config["git"])
         model.eval()
+        model.set_adapter_runtime_enabled(not disable_moe_runtime)
         model.adapter_bank.reset_route_statistics()
         view = (
             LabelView(source, range(len(source)), seen_indices(task_id),
@@ -112,6 +114,7 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         "smoke_validation_replay": bool(allow_smoke),
         "full_cohort": bool(full_cohort),
         "cohort_samples": len(source) if full_cohort else None,
+        "moe_runtime_enabled": not disable_moe_runtime,
     }
     (output / "result.json").write_text(json.dumps(result, indent=2) + "\n")
     return result
@@ -130,13 +133,16 @@ def main() -> None:
                         help="Replay one-task smoke checkpoint on validation only.")
     parser.add_argument("--full-cohort", action="store_true",
                         help="Use every person at every task for comparable continual curves.")
+    parser.add_argument("--disable-moe-runtime", action="store_true",
+                        help="Evaluate the same checkpoints with the MoE residual off.")
     args = parser.parse_args()
     if args.allow_smoke and args.split != "val":
         parser.error("Smoke replay is validation-only")
     evaluate_split(args.source_run, args.output, args.split, args.data_root,
                    args.clip_checkpoint, args.face_manifest_root, args.batch_size,
                    allow_smoke=args.allow_smoke,
-                   full_cohort=args.full_cohort)
+                   full_cohort=args.full_cohort,
+                   disable_moe_runtime=args.disable_moe_runtime)
 
 
 if __name__ == "__main__":

@@ -36,7 +36,7 @@ checkpoint、显存及 Face 数据检查；不将 smoke 指标用作效果结论
   `joint_bce` 路由，无 ParaX/蒸馏/正则、无新任务选择。
 - 训练输入：远程独立 worktree 的兄弟目录
   `../multi-lane-main/datasets/EMOTIC`；CLIP 权重
-  `../CODE_DDP-benchmark/pretrained/clip/ViT-B-16.pt`；Face manifest
+  `../CODE_DDP/pretrained/clip/ViT-B-16.pt`；Face manifest
   `../emotic_benchmark_runs/multi_lane_face_test_manifest_v0.1/face_manifest_train_val_test_v1_20260909`。
 - 输出：`./output/moe_task_ffn_v1/<run_id>/train/compact_checkpoints/task0..7.pth`
   与 `val/`、`test/` 的 per-task 分数、三视图诊断和专家路由计数；
@@ -83,3 +83,12 @@ reserved 3022 MiB，冻结 CLIP 权重未变化）。两进程评估完成。
 正例筛选人群，而旧 B0 使用固定全人群；原阶段平均 mAP、遗忘数字
 不得与 B0 直接比较。现增加 `--full-cohort` 只读重评估开关，
 分别另存 `full_val/` 与 `full_test/`，不覆盖训练或原始评估。
+
+## 全人群复核与下一项只读诊断
+
+全人群重评估 val/test 均 exit 0。val 阶段平均47.9082、最终
+42.0342、遗忘0.01636；test 阶段平均35.1268、最终31.7789、
+遗忘0.00898。对应 B0 阶段平均48.4382/36.2781、最终
+42.1912/32.0610。8个 test 阶段均低于 B0，task0 差−2.8205，
+task7 差−0.2822。`--disable-moe-runtime` 支持同一 checkpoint
+关闭 MoE 残差作 validation 诊断；该结果不是重新训练的 B0。
