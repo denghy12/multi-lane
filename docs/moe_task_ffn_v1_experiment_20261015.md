@@ -58,3 +58,7 @@ validation/test final mAP、平均 mAP、旧类遗忘、Full/Person/可靠 Face
 Router `scatter` 再次暴露 AMP dtype 不一致；已把 Router 显式固定 FP32，
 待新 commit/`smoke_03` 验证。正式 8 任务尚未启动；结果和最终
 commit/run_id 在执行后补记。
+
+`smoke_03` 在 `396c495` clean HEAD 上完整通过：2 成功更新、0 跳步，
+CLIP SHA 不变，峰值保留显存 2902 MiB，MoE 梯度有限非零；
+其 task0 val mAP26.760875 只作检查点重放基准，不作为效果结论。

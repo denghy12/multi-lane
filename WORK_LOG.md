@@ -2,6 +2,13 @@
 
 ## 2026-10-15：MoE 远程单测与首次真实 smoke
 
+第三次 smoke `moe_task_ffn_v1_smoke_20261015_03` 已完整结束：2 成功更新、
+0 skipped、val mAP26.760875（仅健全性指标）、CLIP 摘要不变，峰值
+allocated2694.4/reserved2902 MiB，MoE 梯度范数0.00011959且finite。
+checkpoint 75,984,473 bytes，Git HEAD `396c495` clean。现给独立评估器
+加入仅 validation 的单任务 smoke 重放入口，以核对 checkpoint 及路由统计；
+通过后才启动正式运行。
+
 第二次 smoke `moe_task_ffn_v1_smoke_20261015_02` task0 成功 2 次更新、
 0 skipped，训练 loss 0.75690097；随后 validation 前向在 Router `scatter`
 遇到 AMP 下 logits half/softmax float32 混用。将 Router 全程固定 FP32，

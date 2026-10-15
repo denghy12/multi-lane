@@ -19,19 +19,22 @@ from .runner import TASK_SIZES, dataset_view, evaluate, evaluate_view_diagnostic
 
 def evaluate_split(source_run: Path, output: Path, split: str,
                    data_root: Path, clip_checkpoint: Path,
-                   face_manifest_root: Path, batch_size: int) -> dict:
+                   face_manifest_root: Path, batch_size: int,
+                   allow_smoke: bool = False) -> dict:
     if split not in {"val", "test"}:
         raise ValueError("Split must be val or test")
     if output.exists():
         raise FileExistsError(output)
     config = json.loads((source_run / "config.json").read_text())
     summary = json.loads((source_run / "seed_summary.json").read_text())
+    expected_tasks = 1 if allow_smoke else len(TASK_SIZES)
     if (summary.get("status") != "complete" or summary.get("config") != config
         or config.get("git", {}).get("dirty") is not False
         or config.get("adapter_mode") != "moe_task_ffn"
         or config.get("parax_mode") != "disabled"
         or not config.get("save_compact_checkpoints")
-        or len(summary.get("task_metrics", [])) != len(TASK_SIZES)):
+        or config.get("max_tasks") != expected_tasks
+        or len(summary.get("task_metrics", [])) != expected_tasks):
         raise ValueError("Source run lacks complete clean MoE provenance")
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is required for formal evaluation")
@@ -66,7 +69,7 @@ def evaluate_split(source_run: Path, output: Path, split: str,
     views = {}
     routing = {}
     hashes = {}
-    for task_id in range(len(TASK_SIZES)):
+    for task_id in range(expected_tasks):
         checkpoint = source_run / "compact_checkpoints" / f"task{task_id}.pth"
         payload = _torch_load(checkpoint)
         restore_compact_model_state(model, payload, task_id, config["git"])
@@ -98,6 +101,7 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         "view_diagnostics": views,
         "route_statistics": routing,
         "test_used_for_selection": False,
+        "smoke_validation_replay": bool(allow_smoke),
     }
     (output / "result.json").write_text(json.dumps(result, indent=2) + "\n")
     return result
@@ -112,9 +116,14 @@ def main() -> None:
     parser.add_argument("--clip-checkpoint", type=Path, required=True)
     parser.add_argument("--face-manifest-root", type=Path, required=True)
     parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--allow-smoke", action="store_true",
+                        help="Replay one-task smoke checkpoint on validation only.")
     args = parser.parse_args()
+    if args.allow_smoke and args.split != "val":
+        parser.error("Smoke replay is validation-only")
     evaluate_split(args.source_run, args.output, args.split, args.data_root,
-                   args.clip_checkpoint, args.face_manifest_root, args.batch_size)
+                   args.clip_checkpoint, args.face_manifest_root, args.batch_size,
+                   allow_smoke=args.allow_smoke)
 
 
 if __name__ == "__main__":
