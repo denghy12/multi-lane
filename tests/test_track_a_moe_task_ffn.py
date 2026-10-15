@@ -26,8 +26,11 @@ class TaskForwardMoETest(unittest.TestCase):
         bank.eval()
         old = bank.delta_for_layer(1, x, [0], "full").detach().clone()
         bank.activate_task(1)
+        bank.train()
         self.assertFalse(any(parameter.requires_grad
                              for parameter in bank.tasks[0].parameters()))
+        self.assertFalse(bank.tasks[0][0].training)
+        self.assertTrue(bank.tasks[1][0].training)
         self.assertTrue(all(parameter.requires_grad
                             for parameter in bank.tasks[1].parameters()))
         after = bank.delta_for_layer(1, x, [0], "full").detach()

@@ -87,10 +87,23 @@ class TaskForwardMoEBank(nn.Module):
         )
         self.requires_grad_(False)
 
+    def train(self, mode: bool = True) -> "TaskForwardMoEBank":
+        super().train(mode)
+        # The parent model trains while older task lanes may still be read.
+        # Their dropout and noisy routers must remain in inference mode.
+        for task_id, task in enumerate(self.tasks):
+            if task_id != self._current_task_id:
+                task.eval()
+        return self
+
     def activate_task(self, task_id: int) -> None:
         if task_id != self._current_task_id + 1 or task_id >= len(self.tasks):
             raise ValueError("MoE tasks must activate sequentially")
+        if self._current_task_id >= 0:
+            self.tasks[self._current_task_id].requires_grad_(False)
+            self.tasks[self._current_task_id].eval()
         self.tasks[task_id].requires_grad_(True)
+        self.tasks[task_id].train(self.training)
         self._current_task_id = int(task_id)
 
     def restore_task(self, task_id: int) -> None:
@@ -148,7 +161,7 @@ class TaskForwardMoEBank(nn.Module):
         # Router logits use the post-Drop-and-Replace task CLS. Noise is
         # training-only, matching the official noisy Top-k convention.
         clean = cls.float() @ pool.gates[view_index].float()
-        if self.training and self.noisy_gating:
+        if pool.training and self.noisy_gating:
             std = F.softplus(cls.float() @ pool.noise[view_index].float()) + 1e-2
             logits = clean + torch.randn_like(clean) * std
         else:
