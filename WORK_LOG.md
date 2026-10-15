@@ -1,5 +1,24 @@
 # 工作日志
 
+## 2026-10-15：GPU0 正式批次完成及分析
+
+最终训练代码 commit `17a9b84`、本地/服务器同分支同 HEAD 且远程
+worktree clean；远程全套 Track-A 288 项单测通过。GPU0 当时空闲约
+24047 MiB。已启动 tmux `ml_moe_ffn_v1_20261015`，run_id
+`moe_task_ffn_v1_seed0_20261015_01`；观察到 `begin_task=0`、
+训练样本5353、validation2397、初始基本权重 SHA
+`35af16da90b3bd3dc52ec6756ef6545a06af5936daa577455eefb2648fd83139`，
+启动时 GPU0 使用约3431MiB、利用率70%。8任务全部完成、13950
+成功更新、0 skipped，冻结 CLIP SHA 不变，峰值 reserved 3022 MiB；
+并行 validation/test 退出码均为0。原评估的 task7 val/test fused mAP
+为42.0342/31.7789，旧 B0 为42.1912/32.0610；各视图亦未见稳定
+优势。该评估的 task0..6 按已见正例筛选人群，不能直接和旧 B0 的
+固定完整人群阶段曲线比较。正式路由计数显示每个任务/视图评估时仅
+固定使用两名专家，未实现跨图片内容分路；门控和噪声权重均已训练
+为非零，仍发生确定性路由坍缩。补充完整人群重评估程序后以独立
+`full_val/full_test` 目录保存，不覆盖原评估。
+
+
 ## 2026-10-15：MoE 远程单测与首次真实 smoke
 
 smoke compact checkpoint 经独立评估器重放：eval batch64 的 val mAP

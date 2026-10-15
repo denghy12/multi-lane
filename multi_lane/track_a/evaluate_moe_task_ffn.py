@@ -14,13 +14,15 @@ from .evaluate_joint26_checkpoint import make_source
 from .export_compact_test_scores import _sha256, _torch_load, restore_compact_model_state
 from .model import MultiLaneModel
 from .openai_clip_loader import load_openai_clip_visual
-from .runner import TASK_SIZES, dataset_view, evaluate, evaluate_view_diagnostics, seen_indices, set_seed, summarize_tasks
+from .runner import (TASK_SIZES, LabelView, dataset_view, evaluate,
+                     evaluate_view_diagnostics, seen_indices, set_seed, summarize_tasks)
 
 
 def evaluate_split(source_run: Path, output: Path, split: str,
                    data_root: Path, clip_checkpoint: Path,
                    face_manifest_root: Path, batch_size: int,
-                   allow_smoke: bool = False) -> dict:
+                   allow_smoke: bool = False,
+                   full_cohort: bool = False) -> dict:
     if split not in {"val", "test"}:
         raise ValueError("Split must be val or test")
     if output.exists():
@@ -75,8 +77,14 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         restore_compact_model_state(model, payload, task_id, config["git"])
         model.eval()
         model.adapter_bank.reset_route_statistics()
+        view = (
+            LabelView(source, range(len(source)), seen_indices(task_id),
+                      include_sample_id=True)
+            if full_cohort else
+            dataset_view(source, seen_indices(task_id), include_sample_id=True)
+        )
         loader = DataLoader(
-            dataset_view(source, seen_indices(task_id), include_sample_id=True),
+            view,
             batch_size=batch_size, shuffle=False, num_workers=config["workers"],
             pin_memory=False, drop_last=False,
         )
@@ -102,6 +110,8 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         "route_statistics": routing,
         "test_used_for_selection": False,
         "smoke_validation_replay": bool(allow_smoke),
+        "full_cohort": bool(full_cohort),
+        "cohort_samples": len(source) if full_cohort else None,
     }
     (output / "result.json").write_text(json.dumps(result, indent=2) + "\n")
     return result
@@ -118,12 +128,15 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--allow-smoke", action="store_true",
                         help="Replay one-task smoke checkpoint on validation only.")
+    parser.add_argument("--full-cohort", action="store_true",
+                        help="Use every person at every task for comparable continual curves.")
     args = parser.parse_args()
     if args.allow_smoke and args.split != "val":
         parser.error("Smoke replay is validation-only")
     evaluate_split(args.source_run, args.output, args.split, args.data_root,
                    args.clip_checkpoint, args.face_manifest_root, args.batch_size,
-                   allow_smoke=args.allow_smoke)
+                   allow_smoke=args.allow_smoke,
+                   full_cohort=args.full_cohort)
 
 
 if __name__ == "__main__":

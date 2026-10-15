@@ -1,5 +1,16 @@
 # 项目上下文
 
+## 2026-10-15：Task-Forward MoE 正式 8 任务完成，进行评估口径复核
+
+GPU0 批次 `moe_task_ffn_v1_seed0_20261015_01` 在独立远程 worktree、
+clean commit `17a9b84` 完成 8 tasks×30 epochs、13950 更新、0 跳步；
+CLIP 权重未变，峰值保留显存 3022 MiB。原 val/test 阶段评估按已见类别
+正例筛选人群，只有 task7 可与旧 B0 完整人群直接比较：val 42.0342
+vs 42.1912，test 31.7789 vs 32.0610。全部 task/view 的评估 Router
+均仅使用固定两名专家，没有跨图片专家切换。正在补完整人群重评估，之后
+才能比较阶段均值和遗忘。详见 `docs/moe_task_ffn_v1_experiment_20261015.md`。
+
+
 ## 2026-10-15：Task Forward FFN 并联 MoE 首版实施中
 
 用户明确要求在独立于 ParaX 的新分支实现第一个版本，并在 GPU0 做

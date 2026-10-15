@@ -68,3 +68,18 @@ CLIP SHA 不变，峰值保留显存 2902 MiB，MoE 梯度有限非零；
 smoke 仅 2 updates 时，三个视图分别固定使用两名专家，尚无内容相关
 路由多样性；正式运行后必须检查跨样本路由分布，不能以不同视图选择
 不同专家就宣称方法有效。
+
+正式 batch `moe_task_ffn_v1_seed0_20261015_01` 已在 GPU0/tmux
+`ml_moe_ffn_v1_20261015` 从 clean commit `17a9b84` 启动，目前 task0。
+训练代码固定在该 HEAD，训练中不更新远程 worktree。正式输出在
+`./output/moe_task_ffn_v1/moe_task_ffn_v1_seed0_20261015_01/`，日志在
+`./logs/moe_task_ffn_v1/moe_task_ffn_v1_seed0_20261015_01/`；
+8任务训练已完成（240 epochs、13950 updates、0 skipped，峰值
+reserved 3022 MiB，冻结 CLIP 权重未变化）。两进程评估完成。
+原评估 task7 完整 26 类 fused mAP：val 42.0342，test 31.7789；
+同协议旧 B0 为42.1912/32.0610，首版尚无增益。全部任务/视图的
+测试路由都只使用固定两名专家，尽管 gate/noise 参数训练后非零；
+跨图片内容相关的专家选择未出现。原评估 task0..6 使用已见类别
+正例筛选人群，而旧 B0 使用固定全人群；原阶段平均 mAP、遗忘数字
+不得与 B0 直接比较。现增加 `--full-cohort` 只读重评估开关，
+分别另存 `full_val/` 与 `full_test/`，不覆盖训练或原始评估。

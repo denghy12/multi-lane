@@ -1,5 +1,22 @@
 # 下一步任务
 
+## 2026-10-15：正式 GPU0 批次结果诊断
+
+- tmux `ml_moe_ffn_v1_20261015`；远程 worktree
+  `/mnt/haoyuan/workspace/multi-lane-main-moe-task-ffn-v1`，固定提交
+  `17a9b84`，批次 `moe_task_ffn_v1_seed0_20261015_01`。
+- 8任务训练及并行 val/test 均已完成。原阶段评估人群随任务改变，
+  先用冻结的 8 checkpoint 对 2397 val / 5368 test 全人群重评估，
+  仅用重评估曲线和旧 B0 比阶段均值与遗忘。
+- Router 在全部任务/视图的正式测试中均坍缩到固定 Top-2 专家。
+  查门控分数与训练噪声、路由负载/均衡约束；先做不训练的验证集
+  MoE-off 与路由消融，再决定是否缩池/调整门控、优化三视图互补。
+- 在任何新训练前锁定同版 B0、初始化/采样/样本 ID、验证集指标及
+  每任务负载分布，避免将随机差异当成方法收益。
+- 提醒用户按需同步 `./logs/moe_task_ffn_v1/<run_id>/` 与
+  `./output/moe_task_ffn_v1/<run_id>/` 回本地，之后核查可复现结果。
+
+
 ## 2026-10-15：执行已授权的 Task-Forward MoE 首版
 
 - `smoke_03` 已完成 2 updates、0 skips、冻结 CLIP 不变、MoE 有有限非零
