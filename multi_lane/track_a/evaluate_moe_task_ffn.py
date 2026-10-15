@@ -115,7 +115,7 @@ def main() -> None:
     parser.add_argument("--data-root", type=Path, required=True)
     parser.add_argument("--clip-checkpoint", type=Path, required=True)
     parser.add_argument("--face-manifest-root", type=Path, required=True)
-    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--allow-smoke", action="store_true",
                         help="Replay one-task smoke checkpoint on validation only.")
     args = parser.parse_args()

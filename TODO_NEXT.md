@@ -4,7 +4,7 @@
 
 - `smoke_03` 已完成 2 updates、0 skips、冻结 CLIP 不变、MoE 有有限非零
   梯度、峰值 reserved2902MiB。先独立重放 compact checkpoint 的 val，
-  与 smoke 训练末尾 val mAP26.760875 逐值核对；通过后立即正式启动。
+  batch64 与 smoke 训练末尾 val mAP26.760875 逐值一致；可正式启动。
 - 首次 GPU0 smoke 因 AMP index_add dtype 不匹配而在首批前向失败；
   第二次 smoke 完成 2 次更新后在验证 Router scatter 发现另一 AMP dtype
   问题；两处修复须先通过 autocast 单测并用 `smoke_03` 重跑，

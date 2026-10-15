@@ -63,7 +63,7 @@ for split in val test; do
     --source-run "${RUN_ROOT}/train" --output "${RUN_ROOT}/${split}" \
     --split "${split}" --data-root "${DATA_ROOT}" \
     --clip-checkpoint "${CLIP_CHECKPOINT}" \
-    --face-manifest-root "${FACE_MANIFEST_ROOT}" --batch-size 32 \
+    --face-manifest-root "${FACE_MANIFEST_ROOT}" --batch-size 64 \
     > "${LOG_ROOT}/${split}.log" 2>&1 &
   if [[ "${split}" == val ]]; then val_pid=$!; else test_pid=$!; fi
 done

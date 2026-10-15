@@ -2,6 +2,12 @@
 
 ## 2026-10-15：MoE 远程单测与首次真实 smoke
 
+smoke compact checkpoint 经独立评估器重放：eval batch64 的 val mAP
+26.76087467369557，与训练末尾逐值相同；batch32 差 -0.01418586，
+正式并行评估固定 batch64。route counts 每视图2285人×2专家，
+两更新时 Full/Person/Face 各固定用(0,13)/(13,19)/(0,18)，
+仅证明路由计算可用，不代表内容相关性已经学出。
+
 第三次 smoke `moe_task_ffn_v1_smoke_20261015_03` 已完整结束：2 成功更新、
 0 skipped、val mAP26.760875（仅健全性指标）、CLIP 摘要不变，峰值
 allocated2694.4/reserved2902 MiB，MoE 梯度范数0.00011959且finite。
