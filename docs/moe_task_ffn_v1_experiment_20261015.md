@@ -50,5 +50,8 @@ validation/test final mAP、平均 mAP、旧类遗忘、Full/Person/可靠 Face
 
 ## 状态
 
-代码已实现，待本地静态检查、服务器测试、GPU0 smoke 与正式运行；
-结果和实际 commit/run_id 在执行后补记。
+首版代码 `25772a3` 与旧任务完整冻结修复 `af4b07a` 已推送，服务器
+287 项 Track-A 单测通过。GPU0 `moe_task_ffn_v1_smoke_20261015_01`
+在首批前向暴露 AMP `index_add` 半精度/单精度不一致，零训练更新；
+已补 dtype 修复和 autocast 测试，待新 commit/`smoke_02` 检查。
+正式 8 任务尚未启动；结果和最终 commit/run_id 在执行后补记。

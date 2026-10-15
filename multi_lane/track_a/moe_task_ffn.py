@@ -203,7 +203,7 @@ class TaskForwardMoEBank(nn.Module):
                 weight = gates.index_select(0, selected)[:, expert_id]
                 combined = combined.index_add(
                     0, selected,
-                    result * weight.to(result.dtype).view(-1, 1, 1),
+                    (result * weight.to(result.dtype).view(-1, 1, 1)).to(combined.dtype),
                 )
             lane_outputs.append(combined)
         return self.residual_scale * torch.stack(lane_outputs, dim=0)

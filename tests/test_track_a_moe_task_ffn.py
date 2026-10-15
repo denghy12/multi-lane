@@ -73,6 +73,15 @@ class TaskForwardMoETest(unittest.TestCase):
         restored.restore_task(0)
         self.assertEqual(restored.route_statistics()["0"]["1"]["face"]["samples"], 0)
 
+    def test_autocast_sparse_sum_matches_lane_dtype(self) -> None:
+        bank = self.make_bank()
+        bank.activate_task(0)
+        x = torch.ones(1, 2, 3, 8)
+        with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+            result = bank.delta_for_layer(1, x, [0], "full")
+        self.assertEqual(result.dtype, x.dtype)
+        self.assertEqual(result.shape, x.shape)
+
 
 if __name__ == "__main__":
     unittest.main()

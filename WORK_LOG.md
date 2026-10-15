@@ -1,5 +1,16 @@
 # 工作日志
 
+## 2026-10-15：MoE 远程单测与首次真实 smoke
+
+提交 `25772a3`、旧任务冻结修复 `af4b07a` 已推送；服务器独立 worktree
+`/mnt/haoyuan/workspace/multi-lane-main-moe-task-ffn-v1` 与分支同步，
+287 项 Track-A 单测通过。首次 GPU0 两更新 smoke
+`moe_task_ffn_v1_smoke_20261015_01` 在首批前向失败，尚无优化器更新：
+AMP 使专家输出为 fp16，而 task lane 累加张量为 fp32，`index_add`
+要求 dtype 一致。现修复加权输出转为累加张量 dtype，并增补 CPU autocast
+回归测试；该失败产物保留在 `./output/` 与 `./logs/`，后续用新 run ID 重跑。
+
+
 ## 2026-10-15：按论文定位 Summarize 并审计 MoE-Adapters 整体迁移
 
 - 用户追问位置与原法完整迁移。核对MULTI-LANE第3.3节/Figure2、原版blocks.py与Track-A model.py；明确图像证据路径是Frozen Forward→Summarize输入，索引1是第1冻结block输出供第2块汇总，非block2输出后。
