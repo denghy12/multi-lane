@@ -1,5 +1,29 @@
 # 项目上下文
 
+## 2026-10-15：Task Forward FFN 并联 MoE 首版实施中
+
+用户明确要求在独立于 ParaX 的新分支实现第一个版本，并在 GPU0 做
+8 任务顺序训练和随后 validation/test 并行评估。实施设计和完整锁定配置见
+`docs/moe_task_ffn_v1_experiment_20261015.md`。新模块
+`multi_lane/track_a/moe_task_ffn.py`：索引1的 Drop & Replace 后 raw task lane
+进入共享任务内专家池，每任务/视图独立 noisy Top-2 CLS Router，整任务冻结。
+新增训练参数、compact checkpoint 评估脚本和复现 shell 脚本。当前尚未运行
+smoke/full，也尚无新指标；与下文上一轮“仅分析”状态按日期顺序区分。
+
+## 2026-10-15：追问后改按独立 MoE-Adapters 核心整体迁移分析
+
+用户要求以MULTI-LANE论文术语解释位置，并参照MoE-Adapters官方代码分析尽量全部迁移。补充报告 `docs/moe_adapters_full_transfer_and_multilane_location_20261015.md`。上轮“Selector图像证据路径”准确对应Figure2 Frozen Forward→Summarize的输入连线（索引1为第2块读取前），不是原法FFN并联位置。旧方案每任务独立池也不包含原法跨任务复用，已标为历史保守变体。
+
+本方向当前主要候选：Task Forward在MSA/Drop & Replace残差后、FFN旁并联完整输出MoE；每层一个跨任务/视图共享池，task/view gate与noise，分析原频率activate-freeze及独立保护版。文本塔和DDAS不能原封搬到当前多标签/all-lane协议。固定官方commit源码审计发现down硬编码64、任务/层/AE数量硬编码、全局task路由、noise训练开关、未并入训练的CV项及compact漏存风险；22×b64×12层视觉专家与8×3路由/noise约35.904M新增参数。此为独立MoE-Adapters方法，不以ParaX结论替代其效果。无源码/配置修改、无运行实验、无commit/push/服务器操作。
+
+## 2026-10-15：MoE-Adapters 三视图迁移分析，新独立分支
+
+用户要求新建分支并先分析，不启动实验。新分支 `codex/moe-adapters-three-view-20261015`，基点/HEAD `25fc8617b20f60e96ee57a7b4a4827e048014501`，无 upstream、未提交推送；独立工作树 `/Users/denghaoyuan/.codex/worktrees/moe-adapters-three-view-20261015/multi-lane-main`。主工作区未提交文档和现有九个 worktree 保留；未操作服务器。
+
+分析见 `docs/moe_adapters_three_view_transfer_feasibility_20261015.md`。工程上可行：首选沿用索引1的Selector图像证据路径，每任务一个完整输出专家池、Full/Person/Face三个内容相关Router，固定最终融合；先检验任务内跨视图共享，再讨论读取冻结旧专家。论文高频Top-2冻结不是严格旧函数保护，后续必须保存所有旧依赖和访问mask。EMOTIC多标签/all-lane推理不直接引入DDAS单任务选择。
+
+已重新阅读CVPR原论文和固定commit官方MTIL源码，并参考主工作区未提交的最新结果：静态重叠v1 val/test42.7858/31.9202、v2 42.0629/32.0727，对应B0 42.1912/32.0610，尚无稳定净收益；后置旧函数三seed val均值42.6780低于B0 42.6979。动态视图路由仍是待验证新假设。旧基点下文为历史记录，不代表当前队列；本次只维护分析和上下文，无业务代码/配置/模型修改，无训练、测试或新增实验结果。
+
 ## 2026-10-10：ParaX 新版验证全部通过，准备正式四组
 
 业务代码c440321；本地/服务器287项单测通过。新worktree `multi-lane-main-parax-audit-paired-staged` clean。四组真实ViT三task smoke各12updates/zero skipped，配对初始化/采样、identity、旧参数保护和新增残差关闭比较通过，peak reserved2712/2754MiB。原30epochs/task task1 checkpoint重建task2，新审计三组均通过且源SHA不变，0训练更新。分阶段真实smoke完成B0 12updates＋train缓存校准167updates，当前新专家实际改变/梯度非零、B0和旧参数hash不变，与基线配对一致。79个静态产物同步SHA一致；正式分阶段未启动。接下来从头运行batch `protected_parax_audit_v2_seed0_val_20261010_01`，GPU0四组、seed0 task0–2、30epochs/task、OMP1，validation-only，fixed fusion/.02界，不持续监督。配置及产物详见 `docs/protected_parax_audit_paired_staged_plan_20261010.md`。

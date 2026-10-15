@@ -1,5 +1,34 @@
 # 下一步任务
 
+## 2026-10-15：执行已授权的 Task-Forward MoE 首版
+
+- 完成 `docs/moe_task_ffn_v1_experiment_20261015.md` 所列代码/配置检查，
+  在本独立分支提交并通过 Git 同步远程新 worktree，不碰远程主与 test-only。
+- GPU0 跑 task0 两成功更新 smoke，审计初始 identity、实际专家/Router
+  梯度、旧池冻结、显存、Face 三视图与 compact checkpoint 重放。
+- smoke 通过后同 GPU0 跑 seed0 8 tasks × 30epochs；训练后自动启动
+  validation/test 两个进程并行遍历固定 8 checkpoint，记录完整 run_id、
+  日志/输出、各任务/视图/路由指标；完成后提醒同步远程产物并分析。
+- 先以 validation 评估内容及视图相关路由是否改善泛化与三路互补性，
+  核对旧 B0 的协议/hash 后才比较其 test 值；本版不加跨任务专家复用。
+
+
+## 2026-10-15：整体迁移问题取代上一轮默认插入建议
+
+- 先按 `docs/moe_adapters_full_transfer_and_multilane_location_20261015.md` 与用户讨论新方法。上轮索引1/任务独立池是另一保守变体，不作为“原MoE-Adapters完整迁移”默认实现。
+- 若用户要求实施，优先独立MoE bank接Task Forward FFN并联，保留每层跨任务/视图共享池、task/view CLS Router、noisy Top-2、原法式activate-freeze；明确Drop & Replace后的raw任务状态与现有LN2 Adapter接口差异。
+- 声明原频率冻结的遗忘风险与三视图计数策略，保护版另标；文本塔、DDAS、多标签损失及最终融合分别定义边界，不能用唯一DDAS任务选择替换all-lane推理。
+- 参数化官方64/11/12等硬编码，消除全局task状态、审计noise eval开关/统计/冻结/checkpoint保存，再做声明过的远程验证。全规模新增视觉侧约35.904M参数，需资源估算。
+- 当前仅分析；未启动或授权自动启动新实验，下文旧计划不自动执行。
+
+## 2026-10-15：当前 MoE-Adapters 方向仅完成可行性分析
+
+- 当前分支 `codex/moe-adapters-three-view-20261015`；详见 `docs/moe_adapters_three_view_transfer_feasibility_20261015.md`。本轮用户要求先分析，未实施或启动实验；下文旧计划不自动恢复执行。
+- 如用户要求推进，先审阅并迁移已有静态MoE支线的最小依赖（本分支尚无该源码），实现同位置完整输出专家池及task/view Router；保留原Frozen Forward、损失、可靠Face mask与固定融合。
+- 先声明完整配置，比较B0、普通Adapter、同池静态重叠和动态视图Router；必要时用任务常量路由/共享动态图像Router区分权重学习、内容条件化和视图专属规则。逐组报告总/活跃参数，避免b48与激活b32混淆。
+- 预检零输出identity、Router探索及非零梯度、RNG隔离、旧函数/mask保护、checkpoint重放；首轮不同时扩跨任务复用、插入位置或DDAS。先有可重复validation收益，再锁定正式评价协议；不据已有test微小正差宣布有效。
+- 当前没有可直接执行的新训练命令；未commit/push、未同步服务器。用户要求执行后依AGENTS.md持续授权和Git-only流程推进。
+
 ## 2026-10-10：全套preflight通过，正式四组启动后停止监督
 
 业务c440321：287项本地/远程全测、四组真实三task smoke每组12updates/zero skips、原已训练task1→task2新版审计及可学习新专家分阶段smoke全部通过；79个静态产物已同步SHA一致。四组smoke配对、旧保护、残差关闭导出和比较器均通过。下一步GPU0正式 `protected_parax_audit_v2_seed0_val_20261010_01`（task0–2 seed0，30epochs，固定融合，OMP1），显存不足有限排队，不干预其他任务。启动后停止监督。分阶段正式实验未启动；本轮先收齐四组及残差开关新/旧类AP，再决定是否比较分阶段，不升级8-task/test/更多专家/level embedding。计划与检查证据见 `docs/protected_parax_audit_paired_staged_plan_20261010.md`。

@@ -21,6 +21,7 @@ from .protected_parax import PROTECTED_MODES, ProtectedParaXBank
 from .adapter import (
     ParaXImageAdapterBank, TaskImageTokenAdapterBank, TaskLaneTransformerAdapterBank,
 )
+from .moe_task_ffn import TaskForwardMoEBank
 from .selector_conditioning import TaskSelectorConditioner
 from .view_fusion import TaskwiseViewFusion
 
@@ -53,6 +54,10 @@ class MultiLaneModel(nn.Module):
         adapter_auxiliary_metric_mode: str = "none",
         adapter_view_bottleneck_dim: int = 0,
         adapter_view_mode: str = "shared",
+        moe_num_experts: int = 22,
+        moe_top_k: int = 2,
+        moe_dropout: float = 0.1,
+        moe_noisy_gating: bool = True,
         selector_conditioning: str = "disabled",
         selector_condition_layers: Sequence[int] = (1,),
         selector_condition_hidden_dim: int = 32,
@@ -102,10 +107,12 @@ class MultiLaneModel(nn.Module):
             raise ValueError("Prompt private layer count is invalid")
         if normalize not in {"none", "pre-head"}:
             raise ValueError("MULTI-LANE normalize must be none or pre-head")
-        if adapter_mode not in {"disabled", "task_lane", "image_token"}:
+        if adapter_mode not in {"disabled", "task_lane", "image_token", "moe_task_ffn"}:
             raise ValueError(
-                "Adapter mode must be disabled, task_lane, or image_token"
+                "Adapter mode must be disabled, task_lane, image_token, or moe_task_ffn"
             )
+        if adapter_mode == "moe_task_ffn" and parax_mode != "disabled":
+            raise ValueError("Task-Forward MoE must be independent of ParaX")
         post_modes = {"post", "post_static", "post_task_router", "post_task_staged", "post_task_staged_static"}
         staged_modes = {"post_task_staged", "post_task_staged_static"}
         post_modes |= set(PROTECTED_MODES)
@@ -328,31 +335,41 @@ class MultiLaneModel(nn.Module):
             # while code after model construction observes the same RNG state
             # as the adapter-disabled baseline.
             with torch.random.fork_rng(devices=[]):
-                bank_class = (
-                    TaskImageTokenAdapterBank
-                    if self.adapter_mode == "image_token"
-                    else TaskLaneTransformerAdapterBank
-                )
-                adapter_bank = bank_class(
-                    num_tasks=len(self._task_sizes),
-                    hidden_dim=self.width,
-                    bottleneck_dim=adapter_bottleneck_dim,
-                    layer_indices=adapter_layers,
-                    residual_scale=adapter_residual_scale,
-                    activation=adapter_activation,
-                    task_initialization=adapter_task_initialization,
-                    bottleneck_dims_per_task=adapter_bottleneck_dims_per_task,
-                    residual_gate_mode=adapter_residual_gate_mode,
-                    auxiliary_metric_mode=adapter_auxiliary_metric_mode,
-                    **(
-                        {"view_bottleneck_dim": adapter_view_bottleneck_dim}
-                        if self.adapter_mode == "image_token" else {}
-                    ),
-                    **(
-                        {"view_mode": adapter_view_mode}
-                        if self.adapter_mode == "image_token" else {}
-                    ),
-                )
+                if self.adapter_mode == "moe_task_ffn":
+                    adapter_bank = TaskForwardMoEBank(
+                        num_tasks=len(self._task_sizes), hidden_dim=self.width,
+                        bottleneck_dim=adapter_bottleneck_dim,
+                        layer_indices=adapter_layers,
+                        residual_scale=adapter_residual_scale,
+                        num_experts=moe_num_experts, top_k=moe_top_k,
+                        dropout=moe_dropout, noisy_gating=moe_noisy_gating,
+                    )
+                else:
+                    bank_class = (
+                        TaskImageTokenAdapterBank
+                        if self.adapter_mode == "image_token"
+                        else TaskLaneTransformerAdapterBank
+                    )
+                    adapter_bank = bank_class(
+                        num_tasks=len(self._task_sizes),
+                        hidden_dim=self.width,
+                        bottleneck_dim=adapter_bottleneck_dim,
+                        layer_indices=adapter_layers,
+                        residual_scale=adapter_residual_scale,
+                        activation=adapter_activation,
+                        task_initialization=adapter_task_initialization,
+                        bottleneck_dims_per_task=adapter_bottleneck_dims_per_task,
+                        residual_gate_mode=adapter_residual_gate_mode,
+                        auxiliary_metric_mode=adapter_auxiliary_metric_mode,
+                        **(
+                            {"view_bottleneck_dim": adapter_view_bottleneck_dim}
+                            if self.adapter_mode == "image_token" else {}
+                        ),
+                        **(
+                            {"view_mode": adapter_view_mode}
+                            if self.adapter_mode == "image_token" else {}
+                        ),
+                    )
             self.adapter_bank = adapter_bank
 
         self.selector_conditioning = selector_conditioning
@@ -779,7 +796,16 @@ class MultiLaneModel(nn.Module):
         update = torch.cat([attention_output[:, :, :1], selectors], dim=2)
         lane_tokens = lane_tokens + update
         normalized_residual = block.ln_2(lane_tokens)
+        moe_delta = (
+            self.adapter_bank.delta_for_layer(
+                layer_id, lane_tokens, lane_ids, image_view
+            )
+            if self.adapter_mode == "moe_task_ffn" and self.adapter_runtime_enabled
+            else None
+        )
         lane_tokens = lane_tokens + block.mlp(normalized_residual)
+        if moe_delta is not None:
+            lane_tokens = lane_tokens + moe_delta
         if self.adapter_mode == "task_lane" and self.adapter_runtime_enabled:
             lane_tokens = lane_tokens + self.adapter_bank.delta_for_layer(
                 layer_id, normalized_residual, lane_ids

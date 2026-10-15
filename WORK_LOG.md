@@ -1,5 +1,19 @@
 # 工作日志
 
+## 2026-10-15：按论文定位 Summarize 并审计 MoE-Adapters 整体迁移
+
+- 用户追问位置与原法完整迁移。核对MULTI-LANE第3.3节/Figure2、原版blocks.py与Track-A model.py；明确图像证据路径是Frozen Forward→Summarize输入，索引1是第1冻结block输出供第2块汇总，非block2输出后。
+- 重新审计固定CVPR官方commit八份源码。原法是注意力残差后FFN并联完整瓶颈专家、每层跨任务池、task相关noisy Top-2及频率冻结；上轮每任务池/汇总前位置不是完整迁移。新主要候选为Task Forward FFN并联，视图维Router为必要扩展。
+- 补充双编码器/文本分类、DDAS唯一任务选择与多标签all-lane冲突、原冻结和严格隔离区别、三视图Top-2并集最多6位带来的容量风险，以及硬编码/噪声/全局task/损失/checkpoint的代码移植问题。计算全层视觉侧22×b64和8任务3视图gate/noise共35,904,000新增参数。
+- 新增完整迁移报告，旧报告增加修正链接，三个上下文同步更新。只运行文档/算式/diff静态核验，无业务代码/配置改动，无单测/smoke/训练/test或服务器操作，无commit/push。
+
+## 2026-10-15：新建 MoE-Adapters 三视图分析分支
+
+- 按用户要求先分析可行性。检查主仓库Git状态、remote及九个既有本地worktree；因主工作区有未提交文档，使用managed worktree从25fc861建立独立 `codex/moe-adapters-three-view-20261015`，未切换或覆盖原工作区。
+- 只读核对CVPR2024论文第3.3/3.4节、官方commit1fe7fb99e56b9d7a1d41f0b475a0ac626e6f3885的MTIL路由和冻结实现、本地model/adapter/view_fusion/runner及另一支线static_moe源码；未将MoE-Adapters++或参数混合ParaX当作同一方法。
+- 新增分析报告，给出任务内跨视图共享池+独立动态图像Router、同位置Selector证据路径、严格冻结边界、参数例子和分阶段最小对照；引用主工作区最新静态MoE/旧函数负结果并记录报告SHA。现有结果不支持直接预期精度提升，动态内容路由尚未验证。
+- 三上下文均更新；没有业务代码/配置修改，没有运行单元测试、smoke、训练或test推理，没有连接服务器、commit/push/merge。文档检查包括diff空白、表列数、参数算式、Git分支/文件范围与原工作区状态核对。
+
 ## 2026-10-10：Git-only同步、远程全测与真实smoke完成
 
 业务提交c440321已推送，服务器新独立worktree同HEAD且clean，主/test-only及运行中其他worktree保持原样。287项本地/远程单测通过。四组smoke各12updates/0skips、peak2712/2754MiB，三task全部identity/旧值和mask保护/paired审计/残差消融/比较器通过。另从原训练30轮task1 checkpoint重建task2，三组新审计通过，源权重SHA前后相同、零训练更新。分阶段真实smoke三task共12次B0更新＋167缓存校准更新，新专家改变且梯度非零有限，B0/旧路径hash不变、初始化及采样与基线一致。79个静态产物同步SHA核验一致。准备新batch正式四组task0–2 validation（从头训练、仅GPU0、OMP1），正式分阶段仅备好实现未启动，不自动扩大8-task/test。
@@ -4099,3 +4113,14 @@ CLIP patch concat: 32.8635/39.8831/47.0667/20.2515
 - Smoke peak reserved memory2756MiB; four arms fit GPU0 alongside existing work. Formal minimum free memory14500MiB, finite queue if needed, never stop existing processes or useGPU1-7.
 - Formal batch protected_parax_expert_reuse_seed0_val_20261010_01; tmux ml_protected_parax_20261010. Baseline/frozen_pool/fresh_only/reuse_old run concurrently onGPU0, seed0 tasks0-2,30epochs/task, expected5010updates/arm, validation only, no test.
 - Results: output/emotic_protected_parax_val/<batch>/<method>; logs: logs/emotic_protected_parax_val/<batch>. Smoke scores are implementation checks, not efficacy evidence. Do not continuously monitor formal training.
+# 2026-10-15 Task-Forward MoE 首版启动
+
+用户批准开始实施/实验并指定 GPU0、8任务 validation/test 并行。已核查
+本地独立 `codex/moe-adapters-three-view-20261015` worktree 与远程 97 个
+worktrees；远程主工作树和 test-only 分别存在未提交内容，保持原样。
+确认 GPU0 RTX 4090 24 GiB、当前约 24 GiB 空闲；EMOTIC、CLIP、
+train/val/test Face manifest 和 ddp Python 存在。锁定首版独立任务池设计
+与执行参数：`docs/moe_task_ffn_v1_experiment_20261015.md`。已添加 MoE bank、
+model/runner 接口、8 checkpoint val/test 并行评估器、运行脚本和单测。
+下一步在本分支检查、提交、推送，服务器新 worktree 测试与 GPU0 smoke，
+通过后启动完整运行。当前尚无实验结果。

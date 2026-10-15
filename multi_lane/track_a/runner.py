@@ -2385,6 +2385,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
                         default="incremental")
     parser.add_argument("--fixed-view-paired-audit", action="store_true",
                         help="Audit frozen fixed-view incremental ablations with isolated per-task samplers.")
+    parser.add_argument("--moe-paired-audit", action="store_true",
+                        help="Audit fixed three-view MoE with isolated per-task samplers.")
     parser.add_argument("--protected-parax-paired-audit", action="store_true",
                         help="Validation-only paired protected-expert pilot with fixed-anchor audits.")
     parser.add_argument("--protected-parax-staged-training", action="store_true",
@@ -2643,9 +2645,13 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--adapter-mode",
-        choices=("disabled", "task_lane", "image_token"),
+        choices=("disabled", "task_lane", "image_token", "moe_task_ffn"),
         default="disabled",
     )
+    parser.add_argument("--moe-num-experts", type=int, default=22)
+    parser.add_argument("--moe-top-k", type=int, default=2)
+    parser.add_argument("--moe-dropout", type=float, default=0.1)
+    parser.add_argument("--moe-disable-noise", action="store_true")
     parser.add_argument("--adapter-bottleneck-dim", type=int, default=64)
     parser.add_argument(
         "--adapter-view-mode", choices=("shared", "independent"), default="shared",
@@ -2764,7 +2770,16 @@ def main() -> None:
 
 
 def run(args: argparse.Namespace) -> None:
-    paired_protocol_audit = TRAINING_PROTOCOL == "joint26" or args.fixed_view_paired_audit or args.protected_parax_paired_audit
+    paired_protocol_audit = (TRAINING_PROTOCOL == "joint26" or args.fixed_view_paired_audit
+                             or args.protected_parax_paired_audit or args.moe_paired_audit)
+    if args.moe_paired_audit and (
+        TRAINING_PROTOCOL != "incremental" or args.adapter_mode != "moe_task_ffn"
+        or args.parax_mode != "disabled" or args.view_fusion != "fixed_three_view"
+        or args.selector_mode != "shared" or args.prompt_mode != "shared"
+        or args.loss_routing != "joint_bce" or args.seed != 0
+        or args.reporting_split != "val" or args.also_report_test
+    ):
+        raise ValueError("MoE paired audit requires seed0 fixed three-view validation training")
     if args.parax_mode in PROTECTED_MODES and not args.protected_parax_paired_audit:
         raise ValueError("Protected ParaX requires its paired pilot audit")
     if (args.protected_parax_staged_training or args.protected_parax_residual_ablation) and (
@@ -3039,6 +3054,15 @@ def run(args: argparse.Namespace) -> None:
         raise ValueError("Independent Adapter views require a positive view bottleneck")
     if args.adapter_view_mode == "independent" and args.adapter_mode != "image_token":
         raise ValueError("Independent Adapter views require Image-token Adapter mode")
+    if args.adapter_mode == "moe_task_ffn" and (
+        args.parax_mode != "disabled" or args.view_fusion != "fixed_three_view"
+        or args.view_classifier_mode != "shared_post_fusion"
+        or args.adapter_regularization != "none"
+        or args.adapter_residual_gate_mode != "fixed"
+        or args.adapter_view_bottleneck_dim != 0
+        or args.adapter_bottleneck_dims_per_task is not None
+    ):
+        raise ValueError("Task-Forward MoE requires independent fixed three-view configuration")
     if args.adapter_view_bottleneck_dim and (
         args.adapter_mode != "image_token"
         or args.view_fusion != "fixed_three_view"
@@ -3150,6 +3174,10 @@ def run(args: argparse.Namespace) -> None:
         adapter_auxiliary_metric_mode=args.adapter_regularization,
         adapter_view_bottleneck_dim=args.adapter_view_bottleneck_dim,
         adapter_view_mode=args.adapter_view_mode,
+        moe_num_experts=args.moe_num_experts,
+        moe_top_k=args.moe_top_k,
+        moe_dropout=args.moe_dropout,
+        moe_noisy_gating=not args.moe_disable_noise,
         selector_conditioning=args.selector_conditioning,
         selector_condition_layers=args.selector_condition_layers,
         selector_condition_hidden_dim=args.selector_condition_hidden_dim,
@@ -3396,7 +3424,8 @@ def run(args: argparse.Namespace) -> None:
         "amp_growth_interval": args.amp_growth_interval,
         "initial_selector_prompt_classifier_sha256": base_initialization_digest,
         "fixed_view_paired_audit": bool(args.fixed_view_paired_audit),
-        "fixed_view_sampler_protocol": "seed_plus_1009_times_task" if (args.fixed_view_paired_audit or args.protected_parax_paired_audit) else None,
+        "moe_paired_audit": bool(args.moe_paired_audit),
+        "fixed_view_sampler_protocol": "seed_plus_1009_times_task" if (args.fixed_view_paired_audit or args.protected_parax_paired_audit or args.moe_paired_audit) else None,
         "frozen_visual_sha256_before": frozen_visual_before,
         "training_loss_mode": args.training_loss_mode,
         "parameter_group_loss_routing": args.loss_routing,
@@ -3806,8 +3835,18 @@ def run(args: argparse.Namespace) -> None:
         "adapter_target": (
             "frozen_image_tokens_for_selector"
             if args.adapter_mode == "image_token"
+            else "task_forward_after_drop_replace_parallel_ffn"
+            if args.adapter_mode == "moe_task_ffn"
             else "task_lane_tokens" if args.adapter_mode == "task_lane" else None
         ),
+        "moe_num_experts": args.moe_num_experts if args.adapter_mode == "moe_task_ffn" else None,
+        "moe_top_k": args.moe_top_k if args.adapter_mode == "moe_task_ffn" else None,
+        "moe_dropout": args.moe_dropout if args.adapter_mode == "moe_task_ffn" else None,
+        "moe_noisy_gating": not args.moe_disable_noise if args.adapter_mode == "moe_task_ffn" else None,
+        "moe_pool_scope": "task_local_shared_across_full_person_face"
+        if args.adapter_mode == "moe_task_ffn" else None,
+        "moe_router_scope": "task_and_view_specific_cls_content"
+        if args.adapter_mode == "moe_task_ffn" else None,
         "adapter_image_token_scope": (
             "block_ln1_cls_plus_patch_tokens"
             if args.adapter_mode == "image_token" else None
@@ -3937,7 +3976,7 @@ def run(args: argparse.Namespace) -> None:
             seen_indices(task_id),
             include_sample_id=args.save_evaluation_scores,
         )
-        sampler_seed = fixed_view_sampler_seed(args.seed, task_id, TRAINING_PROTOCOL, args.fixed_view_paired_audit or args.protected_parax_paired_audit)
+        sampler_seed = fixed_view_sampler_seed(args.seed, task_id, TRAINING_PROTOCOL, args.fixed_view_paired_audit or args.protected_parax_paired_audit or args.moe_paired_audit)
         train_loader = DataLoader(
             train_view, batch_size=args.train_batch_size, shuffle=True,
             num_workers=args.workers, pin_memory=True, drop_last=False,
