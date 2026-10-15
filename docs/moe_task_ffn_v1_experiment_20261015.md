@@ -54,4 +54,7 @@ validation/test final mAP、平均 mAP、旧类遗忘、Full/Person/可靠 Face
 287 项 Track-A 单测通过。GPU0 `moe_task_ffn_v1_smoke_20261015_01`
 在首批前向暴露 AMP `index_add` 半精度/单精度不一致，零训练更新；
 已补 dtype 修复和 autocast 测试，待新 commit/`smoke_02` 检查。
-正式 8 任务尚未启动；结果和最终 commit/run_id 在执行后补记。
+`smoke_02` 在 GPU0 完成 task0 两次更新、零跳步后，validation 的
+Router `scatter` 再次暴露 AMP dtype 不一致；已把 Router 显式固定 FP32，
+待新 commit/`smoke_03` 验证。正式 8 任务尚未启动；结果和最终
+commit/run_id 在执行后补记。

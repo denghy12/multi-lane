@@ -3,8 +3,9 @@
 ## 2026-10-15：执行已授权的 Task-Forward MoE 首版
 
 - 首次 GPU0 smoke 因 AMP index_add dtype 不匹配而在首批前向失败；
-  修复已写入代码，须先验证新 autocast 测试并用 `smoke_02` 重跑，
-  不继续使用失败的 `smoke_01` 输出。
+  第二次 smoke 完成 2 次更新后在验证 Router scatter 发现另一 AMP dtype
+  问题；两处修复须先通过 autocast 单测并用 `smoke_03` 重跑，
+  不继续使用失败的 `smoke_01/02` 输出。
 - 完成 `docs/moe_task_ffn_v1_experiment_20261015.md` 所列代码/配置检查，
   在本独立分支提交并通过 Git 同步远程新 worktree，不碰远程主与 test-only。
 - GPU0 跑 task0 两成功更新 smoke，审计初始 identity、实际专家/Router

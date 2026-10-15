@@ -160,15 +160,18 @@ class TaskForwardMoEBank(nn.Module):
                view_index: int) -> torch.Tensor:
         # Router logits use the post-Drop-and-Replace task CLS. Noise is
         # training-only, matching the official noisy Top-k convention.
-        clean = cls.float() @ pool.gates[view_index].float()
-        if pool.training and self.noisy_gating:
-            std = F.softplus(cls.float() @ pool.noise[view_index].float()) + 1e-2
-            logits = clean + torch.randn_like(clean) * std
-        else:
-            logits = clean
-        values, indices = logits.topk(self.top_k, dim=-1)
-        weights = F.softmax(values, dim=-1)
-        return torch.zeros_like(logits).scatter(-1, indices, weights)
+        # Autocast can make the matmul half precision and softmax float32,
+        # which is invalid for scatter and amplifies near-tie route changes.
+        with torch.autocast(device_type=cls.device.type, enabled=False):
+            clean = cls.float() @ pool.gates[view_index].float()
+            if pool.training and self.noisy_gating:
+                std = F.softplus(cls.float() @ pool.noise[view_index].float()) + 1e-2
+                logits = clean + torch.randn_like(clean) * std
+            else:
+                logits = clean
+            values, indices = logits.topk(self.top_k, dim=-1)
+            weights = F.softmax(values, dim=-1)
+            return torch.zeros_like(logits).scatter(-1, indices, weights)
 
     def delta_for_layer(self, layer_id: int, task_lane_tokens: torch.Tensor,
                         lane_ids: Sequence[int], image_view: str) -> torch.Tensor:

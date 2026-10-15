@@ -79,8 +79,12 @@ class TaskForwardMoETest(unittest.TestCase):
         x = torch.ones(1, 2, 3, 8)
         with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
             result = bank.delta_for_layer(1, x, [0], "full")
+            bank.eval()
+            eval_result = bank.delta_for_layer(1, x, [0], "person")
         self.assertEqual(result.dtype, x.dtype)
         self.assertEqual(result.shape, x.shape)
+        self.assertEqual(eval_result.dtype, x.dtype)
+        self.assertEqual(eval_result.shape, x.shape)
 
 
 if __name__ == "__main__":
