@@ -110,7 +110,7 @@ class TaskForwardSharedMoETest(unittest.TestCase):
         }
         inputs["face_reliable"] = torch.tensor([True, False, True])
         logits, views, _ = model.current_all_logits_with_view_features(inputs)
-        self.assertEqual(logits.shape, (3, 2))
+        self.assertEqual(logits.shape, (3, 3))
         self.assertEqual(set(views), {"full", "person", "face"})
         self.assertTrue(torch.isfinite(model.moe_balance_loss()))
         self.assertEqual(len(model.adapter_bank._balance_terms), 3)

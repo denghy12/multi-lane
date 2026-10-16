@@ -5,7 +5,8 @@
 - 本地提交并推送 v2 分支，经 Git 在服务器新增独立 worktree；保留远程
   主工作树、test-only 和 v1 worktree 的现状。
 - GPU0 远程运行 Track-A 单测及新 MoE v2 单测，再用固定 val 前256人
-  探测索引1的归一化图片证据；三视图均达变化门槛才进入训练。
+  探测索引1的归一化图片证据；先复测修正的类别数断言，三视图均达
+  变化门槛才进入训练。
 - 先各做 2 更新 task0 smoke，检查 MoE 非零梯度、旧任务冻结、
   compact checkpoint 重放和实际路由统计。
 - smoke 后以同配置顺序完成 dynamic/shared_fixed/view_fixed 三组

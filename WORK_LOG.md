@@ -5,7 +5,9 @@
 新本地 worktree/分支 `codex/moe-task-ffn-v2-20261016` 基于首版
 `b8fe8ea`。新增独立 v2 bank、图片证据预训练探针、三组统一运行脚本和
 单测；扩展 model、runner、checkpoint evaluator。已完成 Python 语法、
-shell 语法和 diff 检查。下一步远程全测、真实 validation 证据探针与
+shell 语法和 diff 检查。远程首轮 8 项 MoE 单测有 7 项通过；唯一失败是
+测试将总类别数 3 误写成当前任务类别数 2，已修正断言。下一步重跑远程
+相关测试、真实 validation 证据探针与
 task0 smoke；仅探针通过后运行训练。实验配置和判定见
 `docs/moe_task_ffn_v2_experiment_20261016.md`。
 
