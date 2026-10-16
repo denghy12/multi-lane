@@ -1,5 +1,16 @@
 # 项目上下文
 
+## 2026-10-16：Task-Forward MoE v2 独立实验分支
+
+从首版分析提交 `b8fe8ea` 创建
+`codex/moe-task-ffn-v2-20261016`，保持索引 1 的 Task Forward
+MSA/Drop & Replace 后 FFN 并联位置与冻结图像流。v2 Router 使用本块
+Selector 汇总的归一化图片证据；每任务 7 专家中一名三视图必经共享专家，
+另按内容选一名专门专家。提供固定共享及固定视图路由控制，训练期门控
+噪声退火、温度与轻量负载约束。先做真实 val 图片证据探针与 smoke，
+再以同预算三组固定人群 validation 判定，暂不读取新方案 test 或合并
+main。协议见 `docs/moe_task_ffn_v2_experiment_20261016.md`。
+
 ## 2026-10-15：MoE 首版最终诊断结论
 
 全人群重评估、task7 val Router FP32 探针和同权重 MoE-off

@@ -1637,6 +1637,7 @@ def train_task(
     supervised_loss_scale: float = 1.0,
     amp_initial_scale: float = 65536.0,
     amp_growth_interval: int = 2000,
+    moe_balance_weight: float = 0.0,
 ) -> List[Dict[str, float]]:
     if not math.isfinite(supervised_loss_scale) or supervised_loss_scale <= 0:
         raise ValueError("Supervised loss scale must be finite and positive")
@@ -1779,11 +1780,16 @@ def train_task(
         else epoch < epochs
     ):
         model.train()
+        if model.adapter_mode == "moe_task_ffn_v2":
+            model.adapter_bank.set_training_progress(
+                min(1.0, epoch / max(1, epochs - 1))
+            )
         loss_total = 0.0
         adapter_loss_total = 0.0
         adapter_base_loss_total = 0.0
         adapter_regularization_total = 0.0
         adapter_regularization_metric_total = 0.0
+        moe_balance_total = 0.0
         supervised_bce_total = 0.0
         base_supervised_bce_total = 0.0
         oof_distillation_total = 0.0
@@ -1851,6 +1857,7 @@ def train_task(
                 logits, view_logits, view_features = (
                 model.current_all_logits_with_view_features(images)
                 )
+                moe_balance_metric = model.moe_balance_loss()
                 parax_residual_penalty = model.parax_residual_penalty()
                 parax_projector_alignment = model.parax_alignment_penalty()
                 fused_bce_loss = compute_training_loss(
@@ -2034,6 +2041,9 @@ def train_task(
                     adapter_base_loss + regularization_loss
                     + parax_projector_alignment_weight * parax_projector_alignment
                 )
+                moe_balance_penalty = float(moe_balance_weight) * moe_balance_metric
+                model_loss = model_loss + moe_balance_penalty
+                adapter_loss = adapter_loss + moe_balance_penalty
                 if view_gradient_audit_enabled and task_gradient_audit is None:
                     task_gradient_audit = view_gradient_audit(
                         fused_bce_loss,
@@ -2161,6 +2171,7 @@ def train_task(
             adapter_regularization_metric_total += float(
                 regularization_metric.detach().cpu()
             )
+            moe_balance_total += float(moe_balance_metric.detach().cpu())
             supervised_bce_total += float(supervised_bce_loss.detach().cpu())
             base_supervised_bce_total += float(
                 base_supervised_bce_loss.detach().cpu()
@@ -2248,6 +2259,12 @@ def train_task(
             "dgl_fusion_loss": dgl_fusion_total / batches,
             "adapter_regularization_weight": (
                 regularization_weight if regularization_weight is not None else 0.0
+            ),
+            "moe_balance_metric": moe_balance_total / batches,
+            "moe_balance_weight": float(moe_balance_weight),
+            "moe_noise_std_effective": (
+                model.adapter_bank.noise_std * (1.0 - model.adapter_bank.noise_progress)
+                if model.adapter_mode == "moe_task_ffn_v2" else 0.0
             ),
             "optimizer_steps": float(optimizer_steps),
             "completed_task_optimizer_updates": float(completed_task_updates),
@@ -2645,13 +2662,20 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--adapter-mode",
-        choices=("disabled", "task_lane", "image_token", "moe_task_ffn"),
+        choices=("disabled", "task_lane", "image_token", "moe_task_ffn", "moe_task_ffn_v2"),
         default="disabled",
     )
     parser.add_argument("--moe-num-experts", type=int, default=22)
     parser.add_argument("--moe-top-k", type=int, default=2)
     parser.add_argument("--moe-dropout", type=float, default=0.1)
     parser.add_argument("--moe-disable-noise", action="store_true")
+    parser.add_argument("--moe-route-mode", choices=("dynamic", "shared_fixed", "view_fixed"),
+                        default="dynamic")
+    parser.add_argument("--moe-shared-fraction", type=float, default=0.5)
+    parser.add_argument("--moe-router-logit-scale", type=float, default=2.0)
+    parser.add_argument("--moe-router-temperature", type=float, default=1.0)
+    parser.add_argument("--moe-noise-std", type=float, default=0.5)
+    parser.add_argument("--moe-balance-weight", type=float, default=0.001)
     parser.add_argument("--adapter-bottleneck-dim", type=int, default=64)
     parser.add_argument(
         "--adapter-view-mode", choices=("shared", "independent"), default="shared",
@@ -2773,7 +2797,8 @@ def run(args: argparse.Namespace) -> None:
     paired_protocol_audit = (TRAINING_PROTOCOL == "joint26" or args.fixed_view_paired_audit
                              or args.protected_parax_paired_audit or args.moe_paired_audit)
     if args.moe_paired_audit and (
-        TRAINING_PROTOCOL != "incremental" or args.adapter_mode != "moe_task_ffn"
+        TRAINING_PROTOCOL != "incremental"
+        or args.adapter_mode not in {"moe_task_ffn", "moe_task_ffn_v2"}
         or args.parax_mode != "disabled" or args.view_fusion != "fixed_three_view"
         or args.selector_mode != "shared" or args.prompt_mode != "shared"
         or args.loss_routing != "joint_bce" or args.seed != 0
@@ -3054,7 +3079,7 @@ def run(args: argparse.Namespace) -> None:
         raise ValueError("Independent Adapter views require a positive view bottleneck")
     if args.adapter_view_mode == "independent" and args.adapter_mode != "image_token":
         raise ValueError("Independent Adapter views require Image-token Adapter mode")
-    if args.adapter_mode == "moe_task_ffn" and (
+    if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_v2"} and (
         args.parax_mode != "disabled" or args.view_fusion != "fixed_three_view"
         or args.view_classifier_mode != "shared_post_fusion"
         or args.adapter_regularization != "none"
@@ -3063,6 +3088,15 @@ def run(args: argparse.Namespace) -> None:
         or args.adapter_bottleneck_dims_per_task is not None
     ):
         raise ValueError("Task-Forward MoE requires independent fixed three-view configuration")
+    if args.adapter_mode == "moe_task_ffn_v2" and (
+        args.moe_num_experts < 4 or args.moe_top_k != 2
+        or not 0 < args.moe_shared_fraction < 1
+        or args.moe_router_logit_scale <= 0
+        or args.moe_router_temperature <= 0
+        or args.moe_noise_std < 0 or args.moe_balance_weight < 0
+        or args.moe_disable_noise
+    ):
+        raise ValueError("Invalid Task-Forward MoE v2 routing configuration")
     if args.adapter_view_bottleneck_dim and (
         args.adapter_mode != "image_token"
         or args.view_fusion != "fixed_three_view"
@@ -3178,6 +3212,11 @@ def run(args: argparse.Namespace) -> None:
         moe_top_k=args.moe_top_k,
         moe_dropout=args.moe_dropout,
         moe_noisy_gating=not args.moe_disable_noise,
+        moe_route_mode=args.moe_route_mode,
+        moe_shared_fraction=args.moe_shared_fraction,
+        moe_router_logit_scale=args.moe_router_logit_scale,
+        moe_router_temperature=args.moe_router_temperature,
+        moe_noise_std=args.moe_noise_std,
         selector_conditioning=args.selector_conditioning,
         selector_condition_layers=args.selector_condition_layers,
         selector_condition_hidden_dim=args.selector_condition_hidden_dim,
@@ -3836,17 +3875,25 @@ def run(args: argparse.Namespace) -> None:
             "frozen_image_tokens_for_selector"
             if args.adapter_mode == "image_token"
             else "task_forward_after_drop_replace_parallel_ffn"
-            if args.adapter_mode == "moe_task_ffn"
+            if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_v2"}
             else "task_lane_tokens" if args.adapter_mode == "task_lane" else None
         ),
-        "moe_num_experts": args.moe_num_experts if args.adapter_mode == "moe_task_ffn" else None,
-        "moe_top_k": args.moe_top_k if args.adapter_mode == "moe_task_ffn" else None,
-        "moe_dropout": args.moe_dropout if args.adapter_mode == "moe_task_ffn" else None,
+        "moe_num_experts": args.moe_num_experts if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_v2"} else None,
+        "moe_top_k": args.moe_top_k if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_v2"} else None,
+        "moe_dropout": args.moe_dropout if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_v2"} else None,
         "moe_noisy_gating": not args.moe_disable_noise if args.adapter_mode == "moe_task_ffn" else None,
+        "moe_route_mode": args.moe_route_mode if args.adapter_mode == "moe_task_ffn_v2" else None,
+        "moe_shared_fraction": args.moe_shared_fraction if args.adapter_mode == "moe_task_ffn_v2" else None,
+        "moe_router_logit_scale": args.moe_router_logit_scale if args.adapter_mode == "moe_task_ffn_v2" else None,
+        "moe_router_temperature": args.moe_router_temperature if args.adapter_mode == "moe_task_ffn_v2" else None,
+        "moe_noise_std": args.moe_noise_std if args.adapter_mode == "moe_task_ffn_v2" else None,
+        "moe_balance_weight": args.moe_balance_weight if args.adapter_mode == "moe_task_ffn_v2" else None,
         "moe_pool_scope": "task_local_shared_across_full_person_face"
-        if args.adapter_mode == "moe_task_ffn" else None,
+        if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_v2"} else None,
         "moe_router_scope": "task_and_view_specific_cls_content"
-        if args.adapter_mode == "moe_task_ffn" else None,
+        if args.adapter_mode == "moe_task_ffn" else
+        "task_and_view_specific_normalized_image_evidence"
+        if args.adapter_mode == "moe_task_ffn_v2" else None,
         "adapter_image_token_scope": (
             "block_ln1_cls_plus_patch_tokens"
             if args.adapter_mode == "image_token" else None
@@ -4124,6 +4171,9 @@ def run(args: argparse.Namespace) -> None:
             supervised_loss_scale=args.supervised_loss_scale,
             amp_initial_scale=args.amp_initial_scale,
             amp_growth_interval=args.amp_growth_interval,
+            moe_balance_weight=(
+                args.moe_balance_weight if args.adapter_mode == "moe_task_ffn_v2" else 0.0
+            ),
         )
         if model.parax_staged_mode or args.protected_parax_staged_training:
             # Keep baseline training, initialization, and DataLoader RNG

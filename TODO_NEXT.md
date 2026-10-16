@@ -1,5 +1,19 @@
 # 下一步任务
 
+## 2026-10-16：MoE v2 执行顺序
+
+- 本地提交并推送 v2 分支，经 Git 在服务器新增独立 worktree；保留远程
+  主工作树、test-only 和 v1 worktree 的现状。
+- GPU0 远程运行 Track-A 单测及新 MoE v2 单测，再用固定 val 前256人
+  探测索引1的归一化图片证据；三视图均达变化门槛才进入训练。
+- 先各做 2 更新 task0 smoke，检查 MoE 非零梯度、旧任务冻结、
+  compact checkpoint 重放和实际路由统计。
+- smoke 后以同配置顺序完成 dynamic/shared_fixed/view_fixed 三组
+  8任务×30epochs，固定全人群 validation 优先；按 mAP、分支收益、
+  专家使用判断后再决定是否读取 test。路线详见
+  `docs/moe_task_ffn_v2_experiment_20261016.md`。
+- 实验产物同步回本地后核查日志、配置 SHA、checkpoint、指标与路由。
+
 ## 2026-10-15：MoE 首版完成后的推荐方向
 
 - 不把首版合并到 main，也不直接扩张为跨任务旧专家复用；

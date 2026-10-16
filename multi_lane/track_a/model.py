@@ -22,6 +22,7 @@ from .adapter import (
     ParaXImageAdapterBank, TaskImageTokenAdapterBank, TaskLaneTransformerAdapterBank,
 )
 from .moe_task_ffn import TaskForwardMoEBank
+from .moe_task_ffn_v2 import TaskForwardSharedMoEBank
 from .selector_conditioning import TaskSelectorConditioner
 from .view_fusion import TaskwiseViewFusion
 
@@ -58,6 +59,11 @@ class MultiLaneModel(nn.Module):
         moe_top_k: int = 2,
         moe_dropout: float = 0.1,
         moe_noisy_gating: bool = True,
+        moe_route_mode: str = "dynamic",
+        moe_shared_fraction: float = 0.5,
+        moe_router_logit_scale: float = 2.0,
+        moe_router_temperature: float = 1.0,
+        moe_noise_std: float = 0.5,
         selector_conditioning: str = "disabled",
         selector_condition_layers: Sequence[int] = (1,),
         selector_condition_hidden_dim: int = 32,
@@ -107,11 +113,11 @@ class MultiLaneModel(nn.Module):
             raise ValueError("Prompt private layer count is invalid")
         if normalize not in {"none", "pre-head"}:
             raise ValueError("MULTI-LANE normalize must be none or pre-head")
-        if adapter_mode not in {"disabled", "task_lane", "image_token", "moe_task_ffn"}:
+        if adapter_mode not in {"disabled", "task_lane", "image_token", "moe_task_ffn", "moe_task_ffn_v2"}:
             raise ValueError(
-                "Adapter mode must be disabled, task_lane, image_token, or moe_task_ffn"
+                "Adapter mode must be disabled, task_lane, image_token, moe_task_ffn, or moe_task_ffn_v2"
             )
-        if adapter_mode == "moe_task_ffn" and parax_mode != "disabled":
+        if adapter_mode in {"moe_task_ffn", "moe_task_ffn_v2"} and parax_mode != "disabled":
             raise ValueError("Task-Forward MoE must be independent of ParaX")
         post_modes = {"post", "post_static", "post_task_router", "post_task_staged", "post_task_staged_static"}
         staged_modes = {"post_task_staged", "post_task_staged_static"}
@@ -343,6 +349,21 @@ class MultiLaneModel(nn.Module):
                         residual_scale=adapter_residual_scale,
                         num_experts=moe_num_experts, top_k=moe_top_k,
                         dropout=moe_dropout, noisy_gating=moe_noisy_gating,
+                    )
+                elif self.adapter_mode == "moe_task_ffn_v2":
+                    if moe_top_k != 2:
+                        raise ValueError("V2 uses one shared and one specialist expert")
+                    adapter_bank = TaskForwardSharedMoEBank(
+                        num_tasks=len(self._task_sizes), hidden_dim=self.width,
+                        bottleneck_dim=adapter_bottleneck_dim,
+                        layer_indices=adapter_layers,
+                        residual_scale=adapter_residual_scale,
+                        num_experts=moe_num_experts, dropout=moe_dropout,
+                        route_mode=moe_route_mode,
+                        shared_fraction=moe_shared_fraction,
+                        router_logit_scale=moe_router_logit_scale,
+                        router_temperature=moe_router_temperature,
+                        noise_std=moe_noise_std,
                     )
                 else:
                     bank_class = (
@@ -796,13 +817,16 @@ class MultiLaneModel(nn.Module):
         update = torch.cat([attention_output[:, :, :1], selectors], dim=2)
         lane_tokens = lane_tokens + update
         normalized_residual = block.ln_2(lane_tokens)
-        moe_delta = (
-            self.adapter_bank.delta_for_layer(
+        moe_delta = None
+        if self.adapter_runtime_enabled and self.adapter_mode == "moe_task_ffn":
+            moe_delta = self.adapter_bank.delta_for_layer(
                 layer_id, lane_tokens, lane_ids, image_view
             )
-            if self.adapter_mode == "moe_task_ffn" and self.adapter_runtime_enabled
-            else None
-        )
+        elif self.adapter_runtime_enabled and self.adapter_mode == "moe_task_ffn_v2":
+            moe_delta = self.adapter_bank.delta_for_layer(
+                layer_id, lane_tokens, lane_ids, image_view,
+                router_evidence=selected.mean(dim=2),
+            )
         lane_tokens = lane_tokens + block.mlp(normalized_residual)
         if moe_delta is not None:
             lane_tokens = lane_tokens + moe_delta
@@ -846,7 +870,7 @@ class MultiLaneModel(nn.Module):
                     for block in self.visual_encoder.transformer.resblocks:
                         person_tokens = block(person_tokens.permute(1, 0, 2)).permute(1, 0, 2)
                     person_descriptor = self.visual_encoder.ln_post(person_tokens[:, 0]).float()
-        if self.adapter_bank is not None:
+        if self.adapter_bank is not None and self.adapter_mode != "moe_task_ffn_v2":
             self.adapter_bank.reset_auxiliary_metrics()
         image_tokens = self._visual_tokens(images)
         lane_tokens = self._initial_lane_tokens(
@@ -968,6 +992,8 @@ class MultiLaneModel(nn.Module):
             self.parax_bank.reset_forward_diagnostics()
         if isinstance(self.adapter_bank, TaskImageTokenAdapterBank):
             self.adapter_bank.reset_view_diagnostics()
+        if self.adapter_mode == "moe_task_ffn_v2":
+            self.adapter_bank.reset_auxiliary_metrics()
         if self.view_fusion == "disabled":
             self._last_fusion_weights = None
             return self._encode_single_lanes(images, all_seen_lanes), {}
@@ -1163,6 +1189,11 @@ class MultiLaneModel(nn.Module):
                 "Adapter output regularization requires an Image-token Adapter"
             )
         return self.adapter_bank.auxiliary_metric(mode)
+
+    def moe_balance_loss(self) -> torch.Tensor:
+        if self.adapter_mode != "moe_task_ffn_v2" or self.adapter_bank is None:
+            return self.selectors.new_zeros(())
+        return self.adapter_bank.balance_loss()
 
     def selector_view_residual_metric(self) -> torch.Tensor:
         """Mean squared magnitude of optional view-specific Selector residuals."""

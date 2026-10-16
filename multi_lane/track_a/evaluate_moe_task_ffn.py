@@ -33,7 +33,7 @@ def evaluate_split(source_run: Path, output: Path, split: str,
     expected_tasks = 1 if allow_smoke else len(TASK_SIZES)
     if (summary.get("status") != "complete" or summary.get("config") != config
         or config.get("git", {}).get("dirty") is not False
-        or config.get("adapter_mode") != "moe_task_ffn"
+        or config.get("adapter_mode") not in {"moe_task_ffn", "moe_task_ffn_v2"}
         or config.get("parax_mode") != "disabled"
         or not config.get("save_compact_checkpoints")
         or config.get("max_tasks") != expected_tasks
@@ -52,7 +52,7 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         selector_mode=config["selector_mode"],
         prompt_mode=config["prompt_mode"],
         normalize=config["normalize"],
-        adapter_mode="moe_task_ffn",
+        adapter_mode=config["adapter_mode"],
         adapter_bottleneck_dim=config["adapter_bottleneck_dim"],
         adapter_layer_indices=config["adapter_layer_indices"],
         adapter_residual_scale=config["adapter_residual_scale"],
@@ -60,6 +60,11 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         moe_top_k=config["moe_top_k"],
         moe_dropout=config["moe_dropout"],
         moe_noisy_gating=config["moe_noisy_gating"],
+        moe_route_mode=config.get("moe_route_mode") or "dynamic",
+        moe_shared_fraction=config.get("moe_shared_fraction") or 0.5,
+        moe_router_logit_scale=config.get("moe_router_logit_scale") or 2.0,
+        moe_router_temperature=config.get("moe_router_temperature") or 1.0,
+        moe_noise_std=config.get("moe_noise_std") if config.get("moe_noise_std") is not None else 0.5,
         view_fusion=config["view_fusion"],
         view_classifier_mode=config["view_classifier_mode"],
     ).float().to(device)

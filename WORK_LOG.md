@@ -1,5 +1,14 @@
 # 工作日志
 
+## 2026-10-16：开始 MoE v2 实施
+
+新本地 worktree/分支 `codex/moe-task-ffn-v2-20261016` 基于首版
+`b8fe8ea`。新增独立 v2 bank、图片证据预训练探针、三组统一运行脚本和
+单测；扩展 model、runner、checkpoint evaluator。已完成 Python 语法、
+shell 语法和 diff 检查。下一步远程全测、真实 validation 证据探针与
+task0 smoke；仅探针通过后运行训练。实验配置和判定见
+`docs/moe_task_ffn_v2_experiment_20261016.md`。
+
 ## 2026-10-15：MoE-off 与 Router 原因诊断完成
 
 GPU0 同权重完整人群 validation MoE-off 重放 exit 0：task7
