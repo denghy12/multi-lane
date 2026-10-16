@@ -9,7 +9,15 @@ Full/Person/Face 归一化证据相邻距离为0.37471/0.58034/0.56503，
 raw CLS 为0.01250/0.01728/0.02331。三视图证据变化坐标均768，
 通过预注册阈值。路由计数和 provenance 在
 `./output/moe_task_ffn_v2/evidence_probe_seed0_20261016/result.json`，日志在
-对应 `./logs/`；下一步三组 smoke。
+对应 `./logs/`；随后完成三组 smoke。
+
+三组 `smoke_{dynamic,shared_fixed,view_fixed}_seed0_20261016` 均在 GPU0
+完成 task0 两更新、0 skipped、冻结视觉权重 SHA 不变，共同初始主参数
+SHA `35af16da...`。固定全人群 val mAP 为
+25.16338/25.16258/25.16808；动态组 adapter_grad_total_norm
+0.00027468、finite=1，balance metric 0.00135255。动态组筛选人群
+checkpoint 重放26.687860与训练末尾完全一致。现进入正式三组
+8任务 validation；不读 test。
 
 新本地 worktree/分支 `codex/moe-task-ffn-v2-20261016` 基于首版
 `b8fe8ea`。新增独立 v2 bank、图片证据预训练探针、三组统一运行脚本和

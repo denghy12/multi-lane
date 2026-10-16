@@ -3,8 +3,11 @@
 ## 2026-10-16：MoE v2 执行顺序
 
 训练前条件已满足：服务器独立 v2 worktree clean、292项单测通过、
-固定 val 前256人三视图归一化图片证据变化均过阈值。下一步从三组
-2-update task0 smoke 开始，保持既定实验配置。
+固定 val 前256人三视图归一化图片证据变化均过阈值；三组 task0
+2-update smoke 已完成。
+三组 smoke 已完成，正式阶段应顺序运行三组 8任务×30epochs，保持
+GPU0、固定全人群 validation、同预算与不同 run_id；结束后优先比较
+路由负载、融合/分支收益及 MoE-on/off，再决定 test。
 
 - 本地提交并推送 v2 分支，经 Git 在服务器新增独立 worktree；保留远程
   主工作树、test-only 和 v1 worktree 的现状。

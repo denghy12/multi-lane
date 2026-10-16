@@ -16,6 +16,11 @@ main。协议见 `docs/moe_task_ffn_v2_experiment_20261016.md`。
 Full0.3747/Person0.5803/Face0.5650，而 raw CLS 仅
 0.0125/0.0173/0.0233；三视图证据均超过预定门槛。初始路由已有多名
 专门专家被访问，但尚不能据此判定泛化收益。
+dynamic/shared_fixed/view_fixed 三组 task0 两更新 smoke 均成功、0跳步，
+固定全人群 val mAP 分别25.1634/25.1626/25.1681；CLIP SHA 未变，
+主参数初始 SHA 完全相同。动态组 adapter 梯度有限且非零，筛选人群
+checkpoint 重放与训练末尾26.687860逐值相同。可进入三组同预算正式
+validation 训练，test 暂缓。
 
 ## 2026-10-15：MoE 首版最终诊断结论
 
