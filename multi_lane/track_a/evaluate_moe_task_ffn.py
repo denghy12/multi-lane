@@ -23,7 +23,8 @@ def evaluate_split(source_run: Path, output: Path, split: str,
                    face_manifest_root: Path, batch_size: int,
                    allow_smoke: bool = False,
                    full_cohort: bool = False,
-                   disable_moe_runtime: bool = False) -> dict:
+                   disable_moe_runtime: bool = False,
+                   disable_specialist_runtime: bool = False) -> dict:
     if split not in {"val", "test"}:
         raise ValueError("Split must be val or test")
     if output.exists():
@@ -33,12 +34,16 @@ def evaluate_split(source_run: Path, output: Path, split: str,
     expected_tasks = 1 if allow_smoke else len(TASK_SIZES)
     if (summary.get("status") != "complete" or summary.get("config") != config
         or config.get("git", {}).get("dirty") is not False
-        or config.get("adapter_mode") not in {"moe_task_ffn", "moe_task_ffn_v2"}
+        or config.get("adapter_mode") not in {"moe_task_ffn", "moe_task_ffn_v2", "moe_task_ffn_v3"}
         or config.get("parax_mode") != "disabled"
         or not config.get("save_compact_checkpoints")
         or config.get("max_tasks") != expected_tasks
         or len(summary.get("task_metrics", [])) != expected_tasks):
         raise ValueError("Source run lacks complete clean MoE provenance")
+    if disable_specialist_runtime and (
+        config.get("adapter_mode") != "moe_task_ffn_v3" or disable_moe_runtime
+    ):
+        raise ValueError("Specialist-only ablation requires enabled v3 MoE")
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is required for formal evaluation")
     set_seed(config["seed"], tf32=True)
@@ -83,6 +88,8 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         restore_compact_model_state(model, payload, task_id, config["git"])
         model.eval()
         model.set_adapter_runtime_enabled(not disable_moe_runtime)
+        if config.get("adapter_mode") == "moe_task_ffn_v3":
+            model.adapter_bank.specialist_runtime_enabled = not disable_specialist_runtime
         model.adapter_bank.reset_route_statistics()
         view = (
             LabelView(source, range(len(source)), seen_indices(task_id),
@@ -120,6 +127,7 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         "full_cohort": bool(full_cohort),
         "cohort_samples": len(source) if full_cohort else None,
         "moe_runtime_enabled": not disable_moe_runtime,
+        "specialist_runtime_enabled": not disable_specialist_runtime,
     }
     (output / "result.json").write_text(json.dumps(result, indent=2) + "\n")
     return result
@@ -140,14 +148,19 @@ def main() -> None:
                         help="Use every person at every task for comparable continual curves.")
     parser.add_argument("--disable-moe-runtime", action="store_true",
                         help="Evaluate the same checkpoints with the MoE residual off.")
+    parser.add_argument("--disable-specialist-runtime", action="store_true",
+                        help="V3 validation ablation: retain half-weight shared expert only.")
     args = parser.parse_args()
     if args.allow_smoke and args.split != "val":
         parser.error("Smoke replay is validation-only")
+    if args.disable_specialist_runtime and args.split != "val":
+        parser.error("Specialist ablation is validation-only")
     evaluate_split(args.source_run, args.output, args.split, args.data_root,
                    args.clip_checkpoint, args.face_manifest_root, args.batch_size,
                    allow_smoke=args.allow_smoke,
                    full_cohort=args.full_cohort,
-                   disable_moe_runtime=args.disable_moe_runtime)
+                   disable_moe_runtime=args.disable_moe_runtime,
+                   disable_specialist_runtime=args.disable_specialist_runtime)
 
 
 if __name__ == "__main__":

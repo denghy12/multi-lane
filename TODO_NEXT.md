@@ -1,5 +1,15 @@
 # 下一步任务
 
+## 2026-10-16：执行已授权v3
+
+- v3分支`codex/moe-task-ffn-v3-20261016`；先远程相关/全套Track-A单测，
+  再dynamic/shared_fixed/view_fixed各task0两更新smoke与同人群checkpoint重放。
+- 通过后GPU0三组顺序跑8tasks×30epochs；每组训练后两个进程并行评估
+  全8阶段固定人群validation/test，随后两专门组validation specialist-off。
+- 用户最新明确授权覆盖旧的3task门槛及暂缓test建议；test只作预锁定报告。
+- 完成后同步日志/输出、核对SHA、更新/跳步、冻结CLIP与范数/负载，按mAP
+  和specialist消融判断；不自动扩seed/调LR或输出归一化，不合并main。
+
 ## 2026-10-16：MoE v2 结果后的 v3 候选
 
 - 当前不运行v2 test、不扩seed、不做跨任务旧专家复用，也不合并main。

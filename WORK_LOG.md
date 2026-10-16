@@ -1,5 +1,13 @@
 # 工作日志
 
+## 2026-10-16：MoE v3 实施
+
+新独立v3分支基于`2d6346f`。新增SoftMoE bank和运行/批次脚本，修改
+model、runner、evaluator，新增相关单测；本地Python与shell语法及diff
+检查通过。v3每任务403456参数，匹配共享系数及固定/动态专门活跃容量，
+新增专家输出与路由日志。用户明确要求8任务validation/test并行，已写
+完整锁定配置；下一步Git-only远程同步、单测与三组2-update smoke。
+
 ## 2026-10-16：MoE v2 三组完成、MoE-off 与输出规模诊断完成
 
 tmux顺序批次自然结束。dynamic/shared_fixed/view_fixed 均为clean

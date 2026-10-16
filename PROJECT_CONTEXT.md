@@ -1,5 +1,15 @@
 # 项目上下文
 
+## 2026-10-16：开始 MoE v3，用户授权8任务与val/test并行
+
+从v2分析提交`2d6346f`创建`codex/moe-task-ffn-v3-20261016`。实现1共享+
+3专门专家、无路由噪声和ST的soft Top-2，shared-only系数修正为0.5；
+固定视图组同样激活两名专门专家。增加输出范数/CLS比值/夹角/软硬负载
+日志和specialist-only validation消融。用户本次明确要求8-task val/test
+并行，覆盖此前先3task/不访问test的建议；通过单测和三组smoke后GPU0
+三组顺序训练，每组val/test两个进程同时评估。配置见
+`docs/moe_task_ffn_v3_experiment_20261016.md`。
+
 ## 2026-10-16：MoE v2 三组 validation 完成并分析
 
 三组各完成8任务×30epochs、13950更新、0跳步、冻结CLIP不变，test

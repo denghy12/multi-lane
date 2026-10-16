@@ -1780,7 +1780,7 @@ def train_task(
         else epoch < epochs
     ):
         model.train()
-        if model.adapter_mode == "moe_task_ffn_v2":
+        if model.adapter_mode in {"moe_task_ffn_v2", "moe_task_ffn_v3"}:
             model.adapter_bank.set_training_progress(
                 min(1.0, epoch / max(1, epochs - 1))
             )
@@ -2264,7 +2264,7 @@ def train_task(
             "moe_balance_weight": float(moe_balance_weight),
             "moe_noise_std_effective": (
                 model.adapter_bank.noise_std * (1.0 - model.adapter_bank.noise_progress)
-                if model.adapter_mode == "moe_task_ffn_v2" else 0.0
+                if model.adapter_mode in {"moe_task_ffn_v2", "moe_task_ffn_v3"} else 0.0
             ),
             "optimizer_steps": float(optimizer_steps),
             "completed_task_optimizer_updates": float(completed_task_updates),
@@ -2662,7 +2662,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--adapter-mode",
-        choices=("disabled", "task_lane", "image_token", "moe_task_ffn", "moe_task_ffn_v2"),
+        choices=("disabled", "task_lane", "image_token", "moe_task_ffn", "moe_task_ffn_v2", "moe_task_ffn_v3"),
         default="disabled",
     )
     parser.add_argument("--moe-num-experts", type=int, default=22)
@@ -2798,7 +2798,7 @@ def run(args: argparse.Namespace) -> None:
                              or args.protected_parax_paired_audit or args.moe_paired_audit)
     if args.moe_paired_audit and (
         TRAINING_PROTOCOL != "incremental"
-        or args.adapter_mode not in {"moe_task_ffn", "moe_task_ffn_v2"}
+        or args.adapter_mode not in {"moe_task_ffn", "moe_task_ffn_v2", "moe_task_ffn_v3"}
         or args.parax_mode != "disabled" or args.view_fusion != "fixed_three_view"
         or args.selector_mode != "shared" or args.prompt_mode != "shared"
         or args.loss_routing != "joint_bce" or args.seed != 0
@@ -3079,7 +3079,7 @@ def run(args: argparse.Namespace) -> None:
         raise ValueError("Independent Adapter views require a positive view bottleneck")
     if args.adapter_view_mode == "independent" and args.adapter_mode != "image_token":
         raise ValueError("Independent Adapter views require Image-token Adapter mode")
-    if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_v2"} and (
+    if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_v2", "moe_task_ffn_v3"} and (
         args.parax_mode != "disabled" or args.view_fusion != "fixed_three_view"
         or args.view_classifier_mode != "shared_post_fusion"
         or args.adapter_regularization != "none"
@@ -3097,6 +3097,13 @@ def run(args: argparse.Namespace) -> None:
         or args.moe_disable_noise
     ):
         raise ValueError("Invalid Task-Forward MoE v2 routing configuration")
+    if args.adapter_mode == "moe_task_ffn_v3" and (
+        args.moe_num_experts != 4 or args.moe_top_k != 2
+        or args.moe_shared_fraction != 0.5 or args.moe_noise_std != 0
+        or args.moe_router_logit_scale <= 0 or args.moe_router_temperature <= 0
+        or args.moe_balance_weight < 0
+    ):
+        raise ValueError("V3 requires 1 shared + 3 specialists, soft Top-2, fraction 0.5 and noise 0")
     if args.adapter_view_bottleneck_dim and (
         args.adapter_mode != "image_token"
         or args.view_fusion != "fixed_three_view"
@@ -3875,25 +3882,27 @@ def run(args: argparse.Namespace) -> None:
             "frozen_image_tokens_for_selector"
             if args.adapter_mode == "image_token"
             else "task_forward_after_drop_replace_parallel_ffn"
-            if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_v2"}
+            if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_v2", "moe_task_ffn_v3"}
             else "task_lane_tokens" if args.adapter_mode == "task_lane" else None
         ),
-        "moe_num_experts": args.moe_num_experts if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_v2"} else None,
-        "moe_top_k": args.moe_top_k if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_v2"} else None,
-        "moe_dropout": args.moe_dropout if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_v2"} else None,
+        "moe_num_experts": args.moe_num_experts if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_v2", "moe_task_ffn_v3"} else None,
+        "moe_top_k": args.moe_top_k if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_v2", "moe_task_ffn_v3"} else None,
+        "moe_dropout": args.moe_dropout if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_v2", "moe_task_ffn_v3"} else None,
         "moe_noisy_gating": not args.moe_disable_noise if args.adapter_mode == "moe_task_ffn" else None,
-        "moe_route_mode": args.moe_route_mode if args.adapter_mode == "moe_task_ffn_v2" else None,
-        "moe_shared_fraction": args.moe_shared_fraction if args.adapter_mode == "moe_task_ffn_v2" else None,
-        "moe_router_logit_scale": args.moe_router_logit_scale if args.adapter_mode == "moe_task_ffn_v2" else None,
-        "moe_router_temperature": args.moe_router_temperature if args.adapter_mode == "moe_task_ffn_v2" else None,
-        "moe_noise_std": args.moe_noise_std if args.adapter_mode == "moe_task_ffn_v2" else None,
-        "moe_balance_weight": args.moe_balance_weight if args.adapter_mode == "moe_task_ffn_v2" else None,
+        "moe_route_mode": args.moe_route_mode if args.adapter_mode in {"moe_task_ffn_v2", "moe_task_ffn_v3"} else None,
+        "moe_shared_fraction": args.moe_shared_fraction if args.adapter_mode in {"moe_task_ffn_v2", "moe_task_ffn_v3"} else None,
+        "moe_router_logit_scale": args.moe_router_logit_scale if args.adapter_mode in {"moe_task_ffn_v2", "moe_task_ffn_v3"} else None,
+        "moe_router_temperature": args.moe_router_temperature if args.adapter_mode in {"moe_task_ffn_v2", "moe_task_ffn_v3"} else None,
+        "moe_noise_std": args.moe_noise_std if args.adapter_mode in {"moe_task_ffn_v2", "moe_task_ffn_v3"} else None,
+        "moe_balance_weight": args.moe_balance_weight if args.adapter_mode in {"moe_task_ffn_v2", "moe_task_ffn_v3"} else None,
+        "moe_specialist_top_k": 2 if args.adapter_mode == "moe_task_ffn_v3" else None,
+        "moe_specialist_gradient": "soft_top2_no_straight_through" if args.adapter_mode == "moe_task_ffn_v3" else None,
         "moe_pool_scope": "task_local_shared_across_full_person_face"
-        if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_v2"} else None,
+        if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_v2", "moe_task_ffn_v3"} else None,
         "moe_router_scope": "task_and_view_specific_cls_content"
         if args.adapter_mode == "moe_task_ffn" else
         "task_and_view_specific_normalized_image_evidence"
-        if args.adapter_mode == "moe_task_ffn_v2" else None,
+        if args.adapter_mode in {"moe_task_ffn_v2", "moe_task_ffn_v3"} else None,
         "adapter_image_token_scope": (
             "block_ln1_cls_plus_patch_tokens"
             if args.adapter_mode == "image_token" else None
@@ -4172,7 +4181,7 @@ def run(args: argparse.Namespace) -> None:
             amp_initial_scale=args.amp_initial_scale,
             amp_growth_interval=args.amp_growth_interval,
             moe_balance_weight=(
-                args.moe_balance_weight if args.adapter_mode == "moe_task_ffn_v2" else 0.0
+                args.moe_balance_weight if args.adapter_mode in {"moe_task_ffn_v2", "moe_task_ffn_v3"} else 0.0
             ),
         )
         if model.parax_staged_mode or args.protected_parax_staged_training:
