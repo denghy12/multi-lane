@@ -4,6 +4,10 @@
 
 296项远程全测与三组smoke已过，checkpoint重放差0；两项并行启动
 模拟测试本地已过。同步新测试并远程复测后启动正式8任务批次。
+正式批次已在clean `7eb1f64`启动，tmux `ml_moe_ffn_v3_20261016`；
+远程298项全测通过。等待自然完成，保持checkout固定；结束后同步
+`./logs/moe_task_ffn_v3/`与`./output/moe_task_ffn_v3/`对应批次产物，
+核查三组各13950更新/0跳步与val/test退出码，按预声明指标分析。
 
 - v3分支`codex/moe-task-ffn-v3-20261016`；先远程相关/全套Track-A单测，
   再dynamic/shared_fixed/view_fixed各task0两更新smoke与同人群checkpoint重放。

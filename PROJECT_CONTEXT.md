@@ -13,6 +13,10 @@ v3业务提交`6a4d585`远程296项Track-A单测通过，三组各2-update smoke
 均0跳步、CLIP不变、checkpoint同人群重放差0；dynamic专门/共享比约
 0.67–0.70，路径与日志均生效。新增并行启动/失败处理测试两项本地通过；
 下一步同步新测试后启动正式批次。
+最终298项远程全测通过。正式批次已在GPU0、tmux
+`ml_moe_ffn_v3_20261016`启动，远程固定clean `7eb1f64`，三组run_id为
+`formal_<mode>_seed0_20261016_01`。每组三组8任务训练后val/test并行评估；
+两专门组随后val specialist-off。文档后续提交不在运行中更新服务器checkout。
 
 ## 2026-10-16：MoE v2 三组 validation 完成并分析
 

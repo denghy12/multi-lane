@@ -13,6 +13,11 @@ smoke均2次成功更新/0 skipped、CLIP SHA未变，主参数初始SHA一致�
 dynamic梯度有限非零，三视图专门/共享输出比0.692/0.672/0.701；
 每人共享+两专门硬计数和soft权重正确。新增两项launcher模拟测试本地
 通过，覆盖val/test并发及失败状态。准备正式三组8task与并行split评估。
+新测试经Git同步后，服务器完整298项测试通过。确认GPU0空闲约24047MiB，
+正式tmux `ml_moe_ffn_v3_20261016`已启动，使用clean `7eb1f64`；
+run_id为`formal_<mode>_seed0_20261016_01`，mode依次dynamic、shared_fixed、
+view_fixed，训练每组8×30epochs，随后固定val/test双进程同GPU0并行。
+运行期间固定服务器checkout，新增文档提交不拉入运行工作树。
 
 ## 2026-10-16：MoE v2 三组完成、MoE-off 与输出规模诊断完成
 
