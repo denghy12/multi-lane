@@ -19,6 +19,11 @@ SHA `35af16da...`。固定全人群 val mAP 为
 checkpoint 重放26.687860与训练末尾完全一致。现进入正式三组
 8任务 validation；不读 test。
 
+正式批次已在 GPU0 启动 tmux `ml_moe_ffn_v2_20261016`，使用 clean
+`eb90978`，顺序执行 dynamic → shared_fixed → view_fixed，run_id 为
+`formal_<mode>_seed0_20261016`；各组 train 与固定全人群 val 独立记录。
+启动后已观察 dynamic 进程加载 CLIP，尚无正式指标。test 未启动。
+
 新本地 worktree/分支 `codex/moe-task-ffn-v2-20261016` 基于首版
 `b8fe8ea`。新增独立 v2 bank、图片证据预训练探针、三组统一运行脚本和
 单测；扩展 model、runner、checkpoint evaluator。已完成 Python 语法、

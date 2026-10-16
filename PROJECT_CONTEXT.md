@@ -21,6 +21,11 @@ dynamic/shared_fixed/view_fixed 三组 task0 两更新 smoke 均成功、0跳步
 主参数初始 SHA 完全相同。动态组 adapter 梯度有限且非零，筛选人群
 checkpoint 重放与训练末尾26.687860逐值相同。可进入三组同预算正式
 validation 训练，test 暂缓。
+正式三组 seed0 validation 批次已在服务器 v2 独立 worktree 的 tmux
+`ml_moe_ffn_v2_20261016` 顺序启动，训练代码固定 `eb90978`；
+当前先运行 dynamic，随后 shared_fixed 和 view_fixed。正式输出在
+`./output/moe_task_ffn_v2/formal_<mode>_seed0_20261016/`，日志在
+对应 `./logs/`。不读取 test。
 
 ## 2026-10-15：MoE 首版最终诊断结论
 

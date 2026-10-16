@@ -8,6 +8,9 @@
 三组 smoke 已完成，正式阶段应顺序运行三组 8任务×30epochs，保持
 GPU0、固定全人群 validation、同预算与不同 run_id；结束后优先比较
 路由负载、融合/分支收益及 MoE-on/off，再决定 test。
+正式三组已在 tmux `ml_moe_ffn_v2_20261016` 顺序启动；等待自然完成后
+核查 8任务完整性、总更新/跳步、固定人群 val 与逐视图/路由统计，
+然后同步远程 `./logs/`、`./output/` 的相关产物回本地。
 
 - 本地提交并推送 v2 分支，经 Git 在服务器新增独立 worktree；保留远程
   主工作树、test-only 和 v1 worktree 的现状。
