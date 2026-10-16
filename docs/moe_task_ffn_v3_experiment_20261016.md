@@ -73,3 +73,14 @@ BATCH_ID=seed0_20261016_01 bash scripts/emotic/run_moe_task_ffn_v3_batch.sh
 各8阶段分数、逐类/逐视图/路由与输出诊断，split退出状态；两专门组另有
 full_val_specialist_off。任何训练/评估失败会使批次停止，不覆盖失败目录。
 不合并main，不删除数据或checkpoint，不修改远程test-only工作树。
+
+## 预检记录
+
+业务提交`6a4d585`已在服务器独立v3 worktree通过296项Track-A单测。
+三组`smoke_<mode>_seed0_20261016_01`均完成2次更新、0跳步，CLIP
+SHA未变；初始主参数SHA同为`35af16da90b3...`，三组checkpoint同人群
+重放mAP差均0。峰值reserved为2818/2798/2804MiB。
+dynamic smoke的MoE梯度0.00036335、finite=1，三视图专门/共享输出比
+约0.692/0.672/0.701。两次更新只用于验证路径，不视为正式效果。
+新增两项无需真实数据的脚本测试已本地通过，检查val/test时间重叠、
+两者结束后才做validation消融，以及test失败仍等待val并返回失败。

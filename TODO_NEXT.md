@@ -2,6 +2,9 @@
 
 ## 2026-10-16：执行已授权v3
 
+296项远程全测与三组smoke已过，checkpoint重放差0；两项并行启动
+模拟测试本地已过。同步新测试并远程复测后启动正式8任务批次。
+
 - v3分支`codex/moe-task-ffn-v3-20261016`；先远程相关/全套Track-A单测，
   再dynamic/shared_fixed/view_fixed各task0两更新smoke与同人群checkpoint重放。
 - 通过后GPU0三组顺序跑8tasks×30epochs；每组训练后两个进程并行评估

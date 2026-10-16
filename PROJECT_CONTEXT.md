@@ -9,6 +9,10 @@
 并行，覆盖此前先3task/不访问test的建议；通过单测和三组smoke后GPU0
 三组顺序训练，每组val/test两个进程同时评估。配置见
 `docs/moe_task_ffn_v3_experiment_20261016.md`。
+v3业务提交`6a4d585`远程296项Track-A单测通过，三组各2-update smoke
+均0跳步、CLIP不变、checkpoint同人群重放差0；dynamic专门/共享比约
+0.67–0.70，路径与日志均生效。新增并行启动/失败处理测试两项本地通过；
+下一步同步新测试后启动正式批次。
 
 ## 2026-10-16：MoE v2 三组 validation 完成并分析
 

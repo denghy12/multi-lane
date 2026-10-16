@@ -7,6 +7,12 @@ model、runner、evaluator，新增相关单测；本地Python与shell语法及d
 检查通过。v3每任务403456参数，匹配共享系数及固定/动态专门活跃容量，
 新增专家输出与路由日志。用户明确要求8任务validation/test并行，已写
 完整锁定配置；下一步Git-only远程同步、单测与三组2-update smoke。
+服务器v3独立worktree创建于clean `6a4d585`，296项全测通过。三组
+smoke均2次成功更新/0 skipped、CLIP SHA未变，主参数初始SHA一致；
+同人群checkpoint重放mAP差均0，峰值reserved2818/2798/2804MiB。
+dynamic梯度有限非零，三视图专门/共享输出比0.692/0.672/0.701；
+每人共享+两专门硬计数和soft权重正确。新增两项launcher模拟测试本地
+通过，覆盖val/test并发及失败状态。准备正式三组8task与并行split评估。
 
 ## 2026-10-16：MoE v2 三组完成、MoE-off 与输出规模诊断完成
 
