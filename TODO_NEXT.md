@@ -1,5 +1,19 @@
 # 下一步任务
 
+## 2026-10-16：MoE v2 结果后的 v3 候选
+
+- 当前不运行v2 test、不扩seed、不做跨任务旧专家复用，也不合并main。
+- v3保留当前Task Forward位置和归一化图片证据；缩为每任务1共享+3专门
+  专家，专门路由使用训练/推理一致的soft Top-2，取消hard-ST与噪声。
+- 修正控制：shared-only使用`0.5*shared`，view-fixed和dynamic都使用
+  `0.5*shared+0.5*specialist`；固定/动态都激活两名专门专家并采用相同
+  residual scale，避免当前共享系数和活跃容量混杂。
+- 记录shared/specialist/combined输出范数、夹角、软硬负载；先以task0–2
+  validation验证专门/共享输出比≥0.25及specialist消融有实际收益。
+- 只有dynamic超过两控制且不伤Person，再做完整8任务seed0；再同时超过
+  B0最终和阶段平均后才补seed1/2与锁定test。详见
+  `docs/moe_task_ffn_v2_results_analysis_20261016.md`。
+
 ## 2026-10-16：等待 MoE v2 第三组完成
 
 - dynamic 与 shared_fixed 训练/固定人群 val 已完成；view_fixed 巡检时

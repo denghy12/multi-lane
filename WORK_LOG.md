@@ -1,5 +1,18 @@
 # 工作日志
 
+## 2026-10-16：MoE v2 三组完成、MoE-off 与输出规模诊断完成
+
+tmux顺序批次自然结束。dynamic/shared_fixed/view_fixed 均为clean
+`eb90978`、8任务、各30epochs、13950更新、0 skipped、固定2397人
+validation，CLIP SHA不变；最终mAP 42.2877/41.7671/41.9757，阶段
+平均48.2518/48.9959/47.7554。补跑三组冻结checkpoint MoE-off，
+无训练、无test；dynamic task7 on−off仅+0.0058。读取旧B0归档的完整
+人群validation分数并逐项核对ID/targets，dynamic−B0最终+0.0965的
+500次原图分组bootstrap区间[-0.748,+1.007]。task7输出探针显示共享
+分量比专门分量大11.6–13.4倍，是“路由多样但作用弱”的主要机制。
+本地已同步分析所需结果，checkpoint留服务器。完整报告见
+`docs/moe_task_ffn_v2_results_analysis_20261016.md`。
+
 ## 2026-10-16：正式批次进度巡检
 
 tmux `ml_moe_ffn_v2_20261016` 仍在运行，GPU0 约3469MiB。

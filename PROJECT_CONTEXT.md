@@ -1,5 +1,19 @@
 # 项目上下文
 
+## 2026-10-16：MoE v2 三组 validation 完成并分析
+
+三组各完成8任务×30epochs、13950更新、0跳步、冻结CLIP不变，test
+未加载。固定2397人 validation：dynamic 最终/阶段平均
+42.2877/48.2518，shared_fixed 41.7671/48.9959，view_fixed
+41.9757/47.7554；B0为42.1912/48.4382。dynamic 最终仅+B0
+0.0965，原图分组bootstrap区间[-0.748,+1.007]，阶段平均反低0.1864。
+Router 已按图片使用多个专家，但task7共享输出范数是专门输出的
+11.6–13.4倍；同权重关闭dynamic残差最终只降0.0058，说明专门路由
+没有形成实质预测贡献。下一版优先缩为1共享+3专门、训练推理一致的
+soft Top-2、匹配控制组共享系数和活跃容量；先task0–2 validation，
+不做test/跨任务复用/main合并。详见
+`docs/moe_task_ffn_v2_results_analysis_20261016.md`。
+
 ## 2026-10-16：MoE v2 正式 validation 中途状态
 
 GPU0 顺序批次的 dynamic 与 shared_fixed 两组均已完成8任务训练和固定
