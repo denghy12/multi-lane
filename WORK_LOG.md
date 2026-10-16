@@ -2,6 +2,15 @@
 
 ## 2026-10-16：开始 MoE v2 实施
 
+服务器 v2 独立 worktree 与本地/远端 `3b5612d` 对齐。修正测试期望后
+8 项相关测试及 Track-A 全部292项单测通过。GPU0 `evidence_probe_seed0_20261016`
+使用真实固定 val 前256人、未训练模型、batch64，无优化更新；
+Full/Person/Face 归一化证据相邻距离为0.37471/0.58034/0.56503，
+raw CLS 为0.01250/0.01728/0.02331。三视图证据变化坐标均768，
+通过预注册阈值。路由计数和 provenance 在
+`./output/moe_task_ffn_v2/evidence_probe_seed0_20261016/result.json`，日志在
+对应 `./logs/`；下一步三组 smoke。
+
 新本地 worktree/分支 `codex/moe-task-ffn-v2-20261016` 基于首版
 `b8fe8ea`。新增独立 v2 bank、图片证据预训练探针、三组统一运行脚本和
 单测；扩展 model、runner、checkpoint evaluator。已完成 Python 语法、
