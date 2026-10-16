@@ -1,5 +1,13 @@
 # 项目上下文
 
+## 2026-10-16：MoE v2 正式 validation 中途状态
+
+GPU0 顺序批次的 dynamic 与 shared_fixed 两组均已完成8任务训练和固定
+2397人全人群 validation，各13950成功更新、0跳步。dynamic 的最终/
+阶段平均 mAP 为42.2877/48.2518，shared_fixed 为41.7671/48.9959。
+view_fixed 巡检时在 task6 第7/30 epoch，已完成 task0–5，尚无正式
+全人群验证结果；三组结论需等待其完成后统一分析。test 未启动。
+
 ## 2026-10-16：Task-Forward MoE v2 独立实验分支
 
 从首版分析提交 `b8fe8ea` 创建

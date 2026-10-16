@@ -1,5 +1,14 @@
 # 工作日志
 
+## 2026-10-16：正式批次进度巡检
+
+tmux `ml_moe_ffn_v2_20261016` 仍在运行，GPU0 约3469MiB。
+dynamic、shared_fixed 两组的 `train/seed_summary.json` 与
+`full_val/result.json` 均完整：各8任务、13950更新、0跳步；
+最终/阶段平均全人群 val mAP 分别42.2877/48.2518与
+41.7671/48.9959。view_fixed 已完成 task0–5，巡检时 task6
+第7/30 epoch，已记录阶段中0跳步。完整三组比较待完成；test 未读。
+
 ## 2026-10-16：开始 MoE v2 实施
 
 服务器 v2 独立 worktree 与本地/远端 `3b5612d` 对齐。修正测试期望后

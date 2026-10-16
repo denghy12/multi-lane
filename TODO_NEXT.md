@@ -1,5 +1,12 @@
 # 下一步任务
 
+## 2026-10-16：等待 MoE v2 第三组完成
+
+- dynamic 与 shared_fixed 训练/固定人群 val 已完成；view_fixed 巡检时
+  在 task6 第7/30 epoch。保持 tmux 自然运行，不改动远程工作树。
+- 第三组完成后核查三组相同代码提交、更新/跳步、CLIP 哈希、固定样本
+  人群与逐视图/路由指标，再决定是否做 MoE-off validation 和 test。
+
 ## 2026-10-16：MoE v2 执行顺序
 
 训练前条件已满足：服务器独立 v2 worktree clean、292项单测通过、
