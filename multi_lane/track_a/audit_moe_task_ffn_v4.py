@@ -45,6 +45,7 @@ def audit(root: Path, batch_id: str, phase: str, output: Path) -> dict:
         assert protocol["frozen_visual_unchanged"] is True
         assert protocol["frozen_visual_sha256_after"] == protocol["frozen_visual_sha256_before"]
         assert len(protocol["tasks"]) == count
+        tasks = [protocol["tasks"][str(i)] for i in range(count)]
         assert len(summary["task_metrics"]) == count and len(history) == count
         current = {
             "initial": protocol["initial_selector_prompt_classifier_sha256"],
@@ -52,15 +53,15 @@ def audit(root: Path, batch_id: str, phase: str, output: Path) -> dict:
             "tasks": [{key: row[key] for key in (
                 "train_sample_ids_sha256", "validation_sample_ids_sha256",
                 "first_train_batch_ids_sha256", "sampler_seed", "train_instances",
-            )} for row in protocol["tasks"]],
+            )} for row in tasks],
         }
         if identity is None:
             identity = current
         assert current == identity, f"Unpaired source initialization/samples: {mode}"
-        assert all(row["test_loaded"] is False for row in protocol["tasks"])
+        assert all(row["test_loaded"] is False for row in tasks)
         expected_updates = 2 if smoke else sum(
             math.ceil(row["train_instances"] / config["train_batch_size"]) * config["epochs"]
-            for row in protocol["tasks"])
+            for row in tasks)
         assert summary["completed_optimizer_updates"] == expected_updates
         epochs = [row for task in history.values() for row in task]
         assert sum(row["skipped_optimizer_steps"] for row in epochs) == 0

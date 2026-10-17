@@ -110,3 +110,18 @@ test搜索系数、关闭分支或选择checkpoint。
 如果共享控制已解释收益，优先普通Adapter；如果新接口仍无收益，停止
 当前Task-Forward MoE方向，保留B0。本轮按用户指令运行8任务/test，不自动扩seed、不合并main。
 运行结束后同步日志/分数回本地并核对SHA；checkpoint保留服务器。
+
+### 预检进展（2026-10-17）
+
+锁定实现`2ec1b58`已在远程独立worktree通过305项Track-A单测。
+真实val256人实际专家输入探针通过：Full/Person/Face归一化相邻距离
+0.37475/0.58036/0.56503，768维均变化；初始残差严格零，关闭TF32
+开关MoE的最大logit差2.7474e-7（门槛1e-6）。CPU严格identity通过。
+GPU0四组seed0两更新smoke已并行启动，tmux
+`ml_moe_ffn_v4_smoke_20261017`；四组初始主参数SHA同为35af16da90b3...。
+GPU1–7未启动本次作业。正式8任务尚待smoke、同人群重放与配对审计通过。
+
+四组GPU0 smoke已全部退出0，各2成功更新/0跳步，训练人群checkpoint重放
+mAP差均0。三个Adapter组梯度非零/有限，dynamic Person CLS残差/输入比
+约0.00103；这只验证路径。配对审计脚本初次把tasks字典误当列表，已按
+现有schema修正，待真实产物审计通过后启动正式批次；模型/训练代码未变。

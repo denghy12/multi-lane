@@ -15,6 +15,8 @@ val/test两个进程并行评估**。这是用户后续最新明确指令，覆�
 重复前向约1e-4波动，禁用TF32约3e-7；恒等审计改用关闭TF32、1e-6
 容差并保留严格零残差检查。待新并行入口复测、探针与4组2-update smoke
 及配对审计后启动正式批次。
+远程最终305项全测与256人探针已过，FP32 identity最大差2.7474e-7；
+四组GPU0 smoke已并行开始，等待完整checkpoint重放与配对审计。
 
 
 ## 2026-10-16：执行已授权v3
@@ -1627,3 +1629,8 @@ VOC 对照实验，不应在现阶段合并到 `main`。
 - Smoke peak reserved memory2756MiB; four arms fit GPU0 alongside existing work. Formal minimum free memory14500MiB, finite queue if needed, never stop existing processes or useGPU1-7.
 - Formal batch protected_parax_expert_reuse_seed0_val_20261010_01; tmux ml_protected_parax_20261010. Baseline/frozen_pool/fresh_only/reuse_old run concurrently onGPU0, seed0 tasks0-2,30epochs/task, expected5010updates/arm, validation only, no test.
 - Results: output/emotic_protected_parax_val/<batch>/<method>; logs: logs/emotic_protected_parax_val/<batch>. Smoke scores are implementation checks, not efficacy evidence. Do not continuously monitor formal training.
+
+四组GPU0 smoke已全部退出0，各2成功更新/0跳步，训练人群checkpoint重放
+mAP差均0。三个Adapter组梯度非零/有限，dynamic Person CLS残差/输入比
+约0.00103；这只验证路径。配对审计脚本初次把tasks字典误当列表，已按
+现有schema修正，待真实产物审计通过后启动正式批次；模型/训练代码未变。
