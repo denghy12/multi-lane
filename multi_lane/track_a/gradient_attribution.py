@@ -287,10 +287,7 @@ def make_train_source(config, data_root, face_root):
     source = EMOTIC(str(resolve_dataset_parent(data_root)), train=True, transform=train,
                     multi_view_transform=transform, input_mode="full",
                     person_crop_margin=config["person_crop_margin"],
-                    face_manifest_root=face_root,
-                    face_crop_margin=config["face_crop_margin"],
-                    face_min_training_short_side=config["face_min_training_short_side"],
-                    face_min_training_score=config["face_min_training_score"])
+                    face_manifest_root=face_root)
     if source.splits != ["train"]:
         raise AssertionError("Gradient audit may only open the training split")
     return source

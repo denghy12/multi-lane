@@ -1709,3 +1709,7 @@ mAP差均0。三个Adapter组梯度非零/有限，dynamic Person CLS残差/输�
 独立诊断分支已通过Git-only同步；服务器311项Track-A测试通过。首轮smoke
 在配置校验阶段因归档字段名parameter_group_loss_routing误写而退出，未计算梯度、
 未更新任何参数。已按真实config修正，并增加缓存标签SHA复核；使用新run ID重试。
+
+第二轮smoke发现三视图归档将Face单路crop参数记为null；诊断数据入口现使用
+与原多视图路径一致的EMOTIC默认值，实际Face裁剪/可靠性仍由manifest及ThreeViewTransform决定。
+此前两轮均在加载数据/模型前停止，无梯度或权重更新。
