@@ -8,7 +8,8 @@ v3解决了专门输出偏弱，但seed0最终val/test为42.2628/31.6540，
 本次假设：让Adapter实际变换图片证据、直接更新任务CLS，更有机会产生
 图像相关的有效适配。它是待验证假设，不承诺改善。
 
-用户2026-10-17明确要求执行修改，允许全部空闲GPU。新分支
+用户2026-10-17明确要求执行修改；后续最新指令锁定**仅GPU0、seed0、
+完整8任务，validation/test并行**，覆盖初提task0–2/两seed/全部空闲GPU计划。新分支
 `codex/moe-task-ffn-v4-20261017`从`44c40fe`创建；既有本地/远程用户改动
 及test-only工作树保持原样，受控代码只经Git同步。v3完整诊断作为文档
 归档到本分支。
@@ -43,11 +44,11 @@ lane = lane + FFN(LN2(lane)) + concat(delta_cls, zeros_like(selectors))
 是否有价值，固定控制判断动态Router是否有独立收益。所有专家dropout0.1，
 零输出初始化，residual scale0.1。动态负载loss0.001沿用v3，不搜索新LR/scale。
 
-## 锁定首轮配置（仅validation）
+## 锁定正式配置（8任务validation/test）
 
-- 数据EMOTIC；总任务定义5/3/3/3/3/3/3/3，本轮只训练task0–2。
-- 四组×seed0/1，共8个独立作业，每组30epochs/task，batch64；每作业
-  预期5010成功更新（以样本数/实际batch核算为准），训练期间不加载test。
+- 数据EMOTIC；8任务定义5/3/3/3/3/3/3/3，完整训练task0–7。
+- 四组×seed0，共4个GPU0并行作业，每组30epochs/task，batch64；每作业
+  预期13950成功更新，训练期间不加载test。
 - 冻结OpenAI CLIP ViT-B/16，Full/Person/Face固定融合，shared Selector/
   Prompt/head；Selector10、Prompt10、Prompt layers5、pre-head normalization。
 - Adam；source LR0.05按batch64/256缩放为0.0125，Adapter LR0.0004，
@@ -58,7 +59,8 @@ lane = lane + FFN(LN2(lane)) + concat(delta_cls, zeros_like(selectors))
   jitter；沿用train/val Face manifest与可靠性mask。
 - 训练采样generator固定seed+1009*task；同seed四组初始主参数、训练样本
   SHA、首批ID、CLIP SHA核对。新增专家初始化使用fork_rng，不改变主参数/RNG。
-- 训练完成后逐checkpoint评估同一固定2397人validation，仅已见类，
+- 每组训练完成后两个进程并行遍历同一套8个checkpoint，评估固定2397人
+  validation与5368人test，仅已见类，
   batch64/AMP/TF32/threshold0.5；训练期筛选人群分数不作正式晋级指标。
 - dynamic/view_fixed追加specialist-off validation，三Adapter组追加whole-MoE-off。
   关闭分支消融保留联合训练权重，不等同于重新训练B0/shared-only。
@@ -70,36 +72,41 @@ lane = lane + FFN(LN2(lane)) + concat(delta_cls, zeros_like(selectors))
 - `../emotic_benchmark_runs/multi_lane_face_test_manifest_v0.1/face_manifest_train_val_test_v1_20260909`
 
 输出`./output/moe_task_ffn_v4/<run_id>/`，日志`./logs/moe_task_ffn_v4/<run_id>/`。
-首轮检查8张RTX4090均无compute进程；自动只选无compute进程、free≥16000MiB、
-util≤5%的GPU。少于8张空闲时按轮次分配，绝不中断其他作业。
+仅GPU0：启动前检查无compute进程、free≥20000MiB、util≤5%，然后四组
+并行训练。每组结束后val/test两个进程也在GPU0并行；峰值并发最多8个
+评估进程，预计显存低于24GiB。GPU1–7不使用；任何已有作业不被中断。
 
 ## 执行与产物
 
-1. 远程Track-A单测，覆盖新接口、零输出恒等性、专家/Router/图片证据梯度、
+1. 远程Track-A单测，覆盖新接口、零输出数值恒等性、专家/Router/图片证据梯度、
    Selector零写入、AMP、旧池冻结和RNG配对。
 2. 真实val前256人探针：捕获实际共享专家down输入，验证随图片变化，
-   初始残差为零且开关MoE logits逐值相同。
-3. 四组×seed0/1各task0两成功更新smoke，完整validation与训练人群checkpoint
+   初始残差严格为零，开关MoE的FP32 logits最大差≤1e-6（关闭TF32审计）。
+   真实GPU重复前向本身有数值波动：TF32约1e-4，禁用TF32约3e-7；
+   因此不把GPU逐值相同作为恒等门槛。CPU单测仍要求严格逐值相同。
+3. 四组seed0各task0两成功更新smoke，完整validation与训练人群checkpoint
    重放差<1e-7；同seed配对审计、CLIP不变、梯度有限/非零、0跳步。
-4. 检查通过后8GPU并行启动首轮task0–2正式validation；每作业3个compact
-   checkpoint、full_val逐类/逐视图/逐样本分数、路由/CLS诊断和消融产物。
+4. 检查通过后GPU0并行启动四组8任务正式训练；每作业8个compact
+   checkpoint、full_val/full_test逐类/逐视图/逐样本分数、路由/CLS诊断
+   和validation消融产物。test仅作锁定报告，不用于调参。
 
 入口：
 
 ```
-PHASE=smoke BATCH_ID=seed01_20261017_01 bash scripts/emotic/run_moe_task_ffn_v4_batch.sh
-PHASE=formal BATCH_ID=seed01_20261017_01 bash scripts/emotic/run_moe_task_ffn_v4_batch.sh
+PHASE=smoke BATCH_ID=seed0_20261017_01 bash scripts/emotic/run_moe_task_ffn_v4_batch.sh
+PHASE=formal BATCH_ID=seed0_20261017_01 bash scripts/emotic/run_moe_task_ffn_v4_batch.sh
 ```
 
 单组入口`GPU=0 ROUTE_MODE=dynamic SEED=0 bash scripts/emotic/run_moe_task_ffn_v4.sh`。
-正式run ID `formal_<baseline|shared_fixed|view_fixed|dynamic>_seed<0|1>_seed01_20261017_01`。
+正式run ID `formal_<baseline|shared_fixed|view_fixed|dynamic>_seed0_20261017_01`。
 
 ## 预声明判断与范围
 
-先核对完整性/配对/同人群，比较两seed各阶段及阶段平均fused mAP、Person
-和来源/可靠Face子群，并评估specialist-off差值。动态候选应在两个seed
-呈一致方向，超过B0、普通共享、固定路由，Person不出现持续退化，
-专门分量关闭造成可重复validation下降。两seed仍不代表充分统计证明。
+先核对完整性/配对/同人群，比较seed0各阶段及阶段平均fused mAP、Person
+和来源/可靠Face子群，并评估specialist-off差值。动态候选应在最终及阶段平均
+超过B0、普通共享、固定路由，Person不出现持续退化，专门分量关闭应造成
+validation下降；单seed不能证明训练稳定性。所有参数在test前锁定，不以
+test搜索系数、关闭分支或选择checkpoint。
 如果共享控制已解释收益，优先普通Adapter；如果新接口仍无收益，停止
-当前Task-Forward MoE方向，保留B0。本轮不自动扩8任务、不访问test、不合并main。
+当前Task-Forward MoE方向，保留B0。本轮按用户指令运行8任务/test，不自动扩seed、不合并main。
 运行结束后同步日志/分数回本地并核对SHA；checkpoint保留服务器。

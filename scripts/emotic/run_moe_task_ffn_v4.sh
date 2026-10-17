@@ -7,7 +7,7 @@ PYTHON="${PYTHON:-/opt/conda/envs/ddp/bin/python}"
 GPU="${GPU:-0}"
 ROUTE_MODE="${ROUTE_MODE:-dynamic}"
 SEED="${SEED:-0}"
-MAX_TASKS="${MAX_TASKS:-3}"
+MAX_TASKS="${MAX_TASKS:-8}"
 RUN_ID="${RUN_ID:-moe_task_ffn_v4_${ROUTE_MODE}_seed${SEED}_$(date +%Y%m%d_%H%M%S)}"
 DATA_ROOT="${DATA_ROOT:-../multi-lane-main/datasets/EMOTIC}"
 CLIP_CHECKPOINT="${CLIP_CHECKPOINT:-../CODE_DDP/pretrained/clip/ViT-B-16.pt}"
@@ -24,8 +24,8 @@ for input in "${DATA_ROOT}/CVPR17_Annotations.mat" "${CLIP_CHECKPOINT}" \
 done
 mkdir -p "${LOG_ROOT}"
 export OMP_NUM_THREADS=1
-[[ "${MAX_TASKS}" == 3 ]] || { echo "V4 pilot is locked to task0-2 validation" >&2; exit 2; }
-[[ "${SEED}" == 0 || "${SEED}" == 1 ]] || exit 2
+[[ "${MAX_TASKS}" == 8 ]] || { echo "V4 run is locked to eight tasks" >&2; exit 2; }
+[[ "${SEED}" == 0 && "${GPU}" == 0 ]] || { echo "User locked seed0/GPU0" >&2; exit 2; }
 adapter_mode=moe_task_ffn_v4
 route="${ROUTE_MODE}"
 if [[ "${ROUTE_MODE}" == baseline ]]; then
@@ -90,7 +90,16 @@ assert abs(a - b) < 1e-7, (a, b)
 print(f'CHECKPOINT_REPLAY_PASSED mAP={b:.8f}')
 PY
 else
-  evaluate_split val full_val --full-cohort
+  # Locked reports: replay identical checkpoints in concurrent val/test processes.
+  evaluate_split val full_val --full-cohort &
+  val_pid=$!
+  evaluate_split test full_test --full-cohort &
+  test_pid=$!
+  val_status=0; test_status=0
+  wait "${val_pid}" || val_status=$?
+  wait "${test_pid}" || test_status=$?
+  echo "val_exit=${val_status} test_exit=${test_status}" | tee "${LOG_ROOT}/evaluation_status.txt"
+  [[ "${val_status}" == 0 && "${test_status}" == 0 ]] || exit 1
   if [[ "${ROUTE_MODE}" == dynamic || "${ROUTE_MODE}" == view_fixed ]]; then
     evaluate_split val full_val_specialist_off --full-cohort --disable-specialist-runtime
   fi

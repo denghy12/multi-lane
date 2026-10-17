@@ -40,7 +40,7 @@ def probe(data_root: Path, clip_checkpoint: Path, face_manifest_root: Path,
         raise RuntimeError("CUDA is required for the image-evidence probe")
     if samples < 2 or batch_size < 1:
         raise ValueError("Probe needs at least two images and positive batch size")
-    set_seed(0, tf32=True)
+    set_seed(0, tf32=False)
     config = {
         "input_normalization": "clip", "train_crop_scale": [0.05, 1.0],
         "view_fusion": "fixed_three_view", "person_crop_margin": 0.15,
@@ -91,6 +91,7 @@ def probe(data_root: Path, clip_checkpoint: Path, face_manifest_root: Path,
         return delta
 
     bank.delta_for_layer = record
+    max_identity_diff = 0.0
     with torch.inference_mode():
         for images, *_ in loader:
             inputs = move_model_inputs(images, torch.device("cuda"))
@@ -98,12 +99,16 @@ def probe(data_root: Path, clip_checkpoint: Path, face_manifest_root: Path,
             model.set_adapter_runtime_enabled(False)
             baseline_logits = model.current_all_logits(inputs)
             model.set_adapter_runtime_enabled(True)
-            if not torch.equal(logits, baseline_logits):
-                raise RuntimeError("V4 zero-output identity failed")
+            difference = float((logits - baseline_logits).abs().max())
+            max_identity_diff = max(max_identity_diff, difference)
+            if not torch.isfinite(logits).all() or difference > 1e-6:
+                raise RuntimeError(f"V4 FP32 identity failed: max_abs_diff={difference}")
     hook.remove()
     result = {
         "git": git_metadata(Path(__file__).resolve().parents[2]),
         "split": "val", "training_updates": 0, "zero_output_identity": True,
+        "identity_tf32": False, "identity_atol": 1e-6,
+        "identity_max_abs_logit_diff": max_identity_diff,
         "expert_input_interface": "layer_norm_mean_selected_image_evidence",
         "requested_samples": samples, "sample_count": sample_count,
         "batch_size": batch_size,

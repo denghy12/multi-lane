@@ -4283,7 +4283,9 @@ model/runner 接口、8 checkpoint val/test 并行评估器、运行脚本和单
 v4保留索引1 Task Forward FFN并联位置和Frozen Forward，Router及专家
 都读取归一化selected图片证据，残差仅写CLS。1共享+3专门、soft Top-2、
 0.5/0.5、scale0.1沿用；旧任务整池冻结。四组B0/shared_fixed/view_fixed/
-dynamic×seed0/1，各task0–2×30epochs，固定全人群validation；不访问test。
-8张空闲4090按组/seed并行。完整配置与晋级条件见
-`docs/moe_task_ffn_v4_experiment_20261017.md`。当前实现中，待远程单测、
-真实图片输入探针、8组2-update smoke及配对审计后启动正式批次。
+dynamic×seed0，各8tasks×30epochs；**仅GPU0四组并行训练，每组训练后
+val/test两个进程并行评估**。这是用户后续最新明确指令，覆盖初拟pilot。完整配置与晋级条件见
+`docs/moe_task_ffn_v4_experiment_20261017.md`。首版实现`7ebfb9e`远程303项Track-A单测通过。真实图片探针发现TF32
+重复前向约1e-4波动，禁用TF32约3e-7；恒等审计改用关闭TF32、1e-6
+容差并保留严格零残差检查。待新并行入口复测、探针与4组2-update smoke
+及配对审计后启动正式批次。

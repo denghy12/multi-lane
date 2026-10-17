@@ -3,60 +3,47 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${ROOT}"
 PYTHON="${PYTHON:-/opt/conda/envs/ddp/bin/python}"
-BATCH_ID="${BATCH_ID:-seed01_20261017_01}"
+BATCH_ID="${BATCH_ID:-seed0_20261017_01}"
 PHASE="${PHASE:-formal}"
 [[ "${PHASE}" == formal || "${PHASE}" == smoke ]] || exit 2
 [[ -z "$(git status --porcelain)" ]] || { echo "Clean worktree required" >&2; exit 2; }
 batch_root="${ROOT}/logs/moe_task_ffn_v4/batch_${PHASE}_${BATCH_ID}"
 [[ ! -e "${batch_root}" ]] || { echo "Batch ID already exists" >&2; exit 2; }
-# Use every currently idle GPU; never terminate or compete with another job.
-gpu_text="$("${PYTHON}" - <<'PY'
+# User's final scope: GPU0 only. Four ~3GiB jobs fit a free 24GiB 4090.
+"${PYTHON}" - <<'PY'
 import subprocess
-query = subprocess.check_output([
-    'nvidia-smi', '--query-gpu=index,uuid,memory.free,utilization.gpu',
-    '--format=csv,noheader,nounits'], text=True)
+row = subprocess.check_output([
+    'nvidia-smi', '-i', '0', '--query-gpu=uuid,memory.free,utilization.gpu',
+    '--format=csv,noheader,nounits'], text=True).strip()
+uuid, free, util = (x.strip() for x in row.split(','))
 busy = set(subprocess.check_output([
     'nvidia-smi', '--query-compute-apps=gpu_uuid',
     '--format=csv,noheader'], text=True).splitlines())
-for row in query.splitlines():
-    index, uuid, free, util = (x.strip() for x in row.split(','))
-    if uuid not in busy and int(free) >= 16000 and int(util) <= 5:
-        print(index)
+if uuid in busy or int(free) < 20000 or int(util) > 5:
+    raise SystemExit('GPU0 must be idle with >=20000MiB free; no existing job will be stopped')
 PY
-)"
-gpus=()
-while IFS= read -r gpu; do
-  [[ -n "${gpu}" ]] && gpus+=("${gpu}")
-done <<< "${gpu_text}"
-[[ ${#gpus[@]} -gt 0 ]] || { echo "No idle GPU available" >&2; exit 2; }
 mkdir -p "${batch_root}"
 git rev-parse HEAD > "${batch_root}/source_commit.txt"
-jobs=(baseline:0 shared_fixed:0 view_fixed:0 dynamic:0 baseline:1 shared_fixed:1 view_fixed:1 dynamic:1)
 worker() {
-  local slot="$1" gpu="$2" index job mode seed code
-  for ((index=slot; index<${#jobs[@]}; index+=${#gpus[@]})); do
-    job="${jobs[index]}"; mode="${job%:*}"; seed="${job#*:}"
-    echo "START gpu=${gpu} mode=${mode} seed=${seed} phase=${PHASE}"
-    code=0
-    if [[ "${PHASE}" == smoke ]]; then
-      GPU="${gpu}" ROUTE_MODE="${mode}" SEED="${seed}" SMOKE_UPDATES=2 \
-        RUN_ID="smoke_${mode}_seed${seed}_${BATCH_ID}" \
-        bash scripts/emotic/run_moe_task_ffn_v4.sh \
-        > "${batch_root}/${mode}_seed${seed}.log" 2>&1 || code=$?
-    else
-      GPU="${gpu}" ROUTE_MODE="${mode}" SEED="${seed}" \
-        RUN_ID="formal_${mode}_seed${seed}_${BATCH_ID}" \
-        bash scripts/emotic/run_moe_task_ffn_v4.sh \
-        > "${batch_root}/${mode}_seed${seed}.log" 2>&1 || code=$?
-    fi
-    printf '%s\t%s\t%s\t%s\n' "${mode}" "${seed}" "${gpu}" "${code}" \
-      >> "${batch_root}/exit_status.tsv"
-    [[ ${code} == 0 ]] || return "${code}"
-  done
+  local mode="$1" code=0
+  echo "START gpu=0 mode=${mode} seed=0 phase=${PHASE}"
+  if [[ "${PHASE}" == smoke ]]; then
+    GPU=0 ROUTE_MODE="${mode}" SEED=0 SMOKE_UPDATES=2 \
+      RUN_ID="smoke_${mode}_${BATCH_ID}" \
+      bash scripts/emotic/run_moe_task_ffn_v4.sh \
+      > "${batch_root}/${mode}.log" 2>&1 || code=$?
+  else
+    GPU=0 ROUTE_MODE="${mode}" SEED=0 \
+      RUN_ID="formal_${mode}_${BATCH_ID}" \
+      bash scripts/emotic/run_moe_task_ffn_v4.sh \
+      > "${batch_root}/${mode}.log" 2>&1 || code=$?
+  fi
+  printf '%s\t0\t0\t%s\n' "${mode}" "${code}" >> "${batch_root}/exit_status.tsv"
+  return "${code}"
 }
 pids=()
-for ((slot=0; slot<${#gpus[@]} && slot<${#jobs[@]}; slot++)); do
-  worker "${slot}" "${gpus[slot]}" &
+for mode in baseline shared_fixed view_fixed dynamic; do
+  worker "${mode}" &
   pids+=("$!")
 done
 status=0
