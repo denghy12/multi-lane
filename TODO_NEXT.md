@@ -1,5 +1,28 @@
 # 下一步任务
 
+## 2026-10-17：v4只读梯度归因完成，不启动v5
+
+GPU0、seed0，四组B0/shared_fixed/view_fixed/dynamic，task0/2/7各4批64人，
+FP32/dropout-off与AMP/dropout-on，共96快照完成；正式运行clean `272b768`。
+312项测试通过，真实smoke8快照通过。12个checkpoint及模型state SHA均不变，
+所有.grad为None，缓存像素/标签未变，0更新；分解最大相对误差0.0285%，
+峰值reserved6138MiB。120份远程日志/结果已同步本地并逐项SHA复核，本地重汇总一致。
+
+所有被测参数组/视图对均未达到预声明的跨任务冲突门槛（cos<−0.1，至少2任务、
+每任务3/4批且两配置一致）。dynamic task7可靠人群Full/Face对Prompt的单路BCE
+梯度确有4/4局部冲突，但task0/2均0/4；不能称为全局稳定干扰。dynamic实际加权
+aux在各主要组均与fused同向；shared_fixed仅task0/batch2 Prompt抵消1.4%/1.7%，
+未达10%。dynamic total/fused在Selector/Prompt/classifier/共享和专门Expert的
+最小cos均>0.98。task7/batch1的同参数点MoE-on/off表示梯度反向在fixed与dynamic
+重复，但其他批次/任务未重复。不可把终点raw梯度当Adam更新或全程泛化因果证据。
+
+决定：当前证据不足以支持梯度隔离v5；保留B0，结束当前Task-Forward FFN并联
+MoE路线，不扩seed/改温度/scale/专家数，不合并main，不自动转Face后置校准。
+仅新增诊断/汇总/测试和报告，训练模型未变。未来重开需新的独立证据和明确实验。
+完整报告 `docs/moe_v4_gradient_attribution_results_20261017.md`；机器结果与日志在
+`./output/moe_v4_gradient_audit/`、`./logs/moe_v4_gradient_audit/`。
+代码Git-only同步，服务器v4/main/test-only与原有用户改动均保留；运行完GPU0已空闲。
+
 ## 2026-10-17：执行v4既有checkpoint只读梯度归因
 
 用户授权开始task0/2/7、四组固定训练batch梯度诊断，不训练v5，继续只用GPU0。

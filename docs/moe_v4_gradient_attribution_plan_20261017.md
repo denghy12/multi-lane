@@ -96,3 +96,12 @@ Face_unreliable_shadow只是假设性loss，不参与实际训练；其实际aux
 - 产物：config/输入审计、每模型/task/精度/batch的梯度范数/夹角JSON、源权重
   不变审计、汇总报告；不保存新模型或原始图像，不覆盖已有run目录。
 - 完成后同步日志/JSON并做SHA校验，更新PROJECT_CONTEXT/WORK_LOG/TODO_NEXT。
+
+## 执行结果（2026-10-17）
+
+正式clean `272b768`、GPU0已完成96快照；312项测试、成功smoke8快照通过。
+最初两次smoke在配置/数据入口停止，修复归档字段与Face null参数后成功；不覆盖旧日志。
+实际成功smoke run ID为`smoke_20261017_03`；正式`formal_20261017_01`。
+12个模型/源checkpoint与缓存像素/标签均未变；120份日志/结果同步SHA一致。
+未达到跨任务稳定冲突门槛，不启动v5；完整事实、局部例外及限制见
+[结果报告](moe_v4_gradient_attribution_results_20261017.md)。
