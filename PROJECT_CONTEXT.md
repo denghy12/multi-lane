@@ -1,5 +1,20 @@
 # 项目上下文
 
+## 2026-10-17：v3诊断后的v4图片证据→CLS接口
+
+用户要求执行修改并允许所有空闲GPU。独立分支
+`codex/moe-task-ffn-v4-20261017`，起点`44c40fe`；主工作树与v3未提交
+分析文档保留。v3动态最终val/test42.2628/31.6540；专门输出足够，
+但至少99.9821%残差能量在Selector，详见归档v3分析。
+v4保留索引1 Task Forward FFN并联位置和Frozen Forward，Router及专家
+都读取归一化selected图片证据，残差仅写CLS。1共享+3专门、soft Top-2、
+0.5/0.5、scale0.1沿用；旧任务整池冻结。四组B0/shared_fixed/view_fixed/
+dynamic×seed0/1，各task0–2×30epochs，固定全人群validation；不访问test。
+8张空闲4090按组/seed并行。完整配置与晋级条件见
+`docs/moe_task_ffn_v4_experiment_20261017.md`。当前实现中，待远程单测、
+真实图片输入探针、8组2-update smoke及配对审计后启动正式批次。
+
+
 ## 2026-10-16：开始 MoE v3，用户授权8任务与val/test并行
 
 从v2分析提交`2d6346f`创建`codex/moe-task-ffn-v3-20261016`。实现1共享+
