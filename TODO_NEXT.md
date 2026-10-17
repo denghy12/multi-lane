@@ -1713,3 +1713,7 @@ mAP差均0。三个Adapter组梯度非零/有限，dynamic Person CLS残差/输�
 第二轮smoke发现三视图归档将Face单路crop参数记为null；诊断数据入口现使用
 与原多视图路径一致的EMOTIC默认值，实际Face裁剪/可靠性仍由manifest及ThreeViewTransform决定。
 此前两轮均在加载数据/模型前停止，无梯度或权重更新。
+
+第三轮真实smoke（clean b8107df）已完成四组task0×两数值配置共8快照，
+无训练更新。新增离线汇总器及缺失梯度/重复冲突门槛测试；正式诊断待汇总器
+远程测试后启动，固定配置仍为task0/2/7×每任务4批×四组×两精度。
