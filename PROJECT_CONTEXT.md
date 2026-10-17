@@ -2575,3 +2575,10 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
 mAP差均0。三个Adapter组梯度非零/有限，dynamic Person CLS残差/输入比
 约0.00103；这只验证路径。配对审计脚本初次把tasks字典误当列表，已按
 现有schema修正，待真实产物审计通过后启动正式批次；模型/训练代码未变。
+
+
+### 2026-10-17 梯度诊断预检
+
+独立诊断分支已通过Git-only同步；服务器311项Track-A测试通过。首轮smoke
+在配置校验阶段因归档字段名parameter_group_loss_routing误写而退出，未计算梯度、
+未更新任何参数。已按真实config修正，并增加缓存标签SHA复核；使用新run ID重试。

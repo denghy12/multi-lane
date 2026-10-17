@@ -330,12 +330,12 @@ def run(args):
     baseline = configs["baseline"]
     for mode, c in configs.items():
         for key in ("training_loss_mode", "temperature", "view_auxiliary_loss_weight",
-                    "view_fusion", "selector_mode", "prompt_mode", "loss_routing"):
+                    "view_fusion", "selector_mode", "prompt_mode", "parameter_group_loss_routing"):
             if c[key] != baseline[key]:
                 raise ValueError(f"Unpaired objective: {mode}/{key}")
         if c["git"] != baseline["git"]:
             raise ValueError("Source methods use different training commits")
-        if c["loss_routing"] != "joint_bce" or c["supervised_loss_scale"] != 1:
+        if c["parameter_group_loss_routing"] != "joint_bce" or c["supervised_loss_scale"] != 1:
             raise ValueError("Audit is scoped to the v4 supervised objective")
     expected_face = baseline["face_manifest"]["artifact_sha256"]["train_manifest"]
     if _sha256(args.face_manifest_root / "manifests/train.jsonl") != expected_face:
@@ -431,6 +431,8 @@ def run(args):
         for i, (images, targets, _) in enumerate(cache[task]):
             if tensor_state_digest(images) != batch_metadata[task][i]["input_tensor_sha256"]:
                 raise AssertionError("Cached training pixels changed")
+            if tensor_state_digest({"targets": targets}) != batch_metadata[task][i]["target_sha256"]:
+                raise AssertionError("Cached training targets changed")
     result = {"status": "complete", "elapsed_seconds": time.time() - start,
               "snapshots": len(MODES) * len(args.tasks) * len(PRECISIONS) * args.batches,
               "training_updates": 0, "checkpoint_audits": checkpoint_audits,

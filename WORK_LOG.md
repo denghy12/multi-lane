@@ -4369,3 +4369,10 @@ auxiliary监督归因，证明可修复的负迁移后才考虑梯度隔离/平�
 位于原v4服务器worktree，均只读；不创建optimizer，无参数更新，验证state/checkpoint
 与像素SHA不变。详见`docs/moe_v4_gradient_attribution_plan_20261017.md`。
 下一步提交/Git-only远程新worktree、全测、8-snapshot smoke，通过后运行正式诊断。
+
+
+### 2026-10-17 梯度诊断预检
+
+独立诊断分支已通过Git-only同步；服务器311项Track-A测试通过。首轮smoke
+在配置校验阶段因归档字段名parameter_group_loss_routing误写而退出，未计算梯度、
+未更新任何参数。已按真实config修正，并增加缓存标签SHA复核；使用新run ID重试。
