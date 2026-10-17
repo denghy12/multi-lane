@@ -125,3 +125,24 @@ GPU1–7未启动本次作业。正式8任务尚待smoke、同人群重放与配
 mAP差均0。三个Adapter组梯度非零/有限，dynamic Person CLS残差/输入比
 约0.00103；这只验证路径。配对审计脚本初次把tasks字典误当列表，已按
 现有schema修正，待真实产物审计通过后启动正式批次；模型/训练代码未变。
+
+## 2026-10-17：v4正式8任务已在GPU0并行启动
+
+最终用户范围：仅GPU0、seed0、8任务，各训练30epochs；四组baseline、
+shared_fixed、view_fixed、dynamic并行。运行代码固定clean
+`bfd8ef99f5a13d2c223b069522cf7fe2a099b6e7`，远程worktree
+`/mnt/haoyuan/workspace/multi-lane-main-moe-task-ffn-v4-20261017`，tmux
+`ml_moe_ffn_v4_20261017`。四组已进入task0，初始主参数SHA一致，
+训练未加载test。巡检四个主进程均在GPU0，总显存约13GiB。
+
+305项单测、256人真实图片输入/零残差探针、四组2-update smoke及实际
+产物配对审计全部通过。smoke各0跳步、CLIP不变、checkpoint重放mAP
+差0，峰值reserved为baseline2710/shared2802/fixed2806/dynamic2808MiB。
+预检日志/分数已通过SSH归档传输同步本地，未传受控代码或.git。
+
+正式run_id：`formal_<baseline|shared_fixed|view_fixed|dynamic>_seed0_20261017_01`。
+输出`./output/moe_task_ffn_v4/<run_id>/`，日志`./logs/moe_task_ffn_v4/<run_id>/`。
+每组训练结束后自动在GPU0以两个进程并行评估同一套8个checkpoint的
+固定全人群val/test，结束后再做预声明validation消融。当前尚无正式
+完整结果，test不用于调参；不扩seed、不合并main。后续文档提交不在
+运行中更新远程checkout。
