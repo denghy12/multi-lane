@@ -1,5 +1,51 @@
 # 项目上下文
 
+## 2026-10-17：执行v4既有checkpoint只读梯度归因
+
+用户授权开始task0/2/7、四组固定训练batch梯度诊断，不训练v5，继续只用GPU0。
+新分支`codex/moe-v4-gradient-audit-20261017`从`bc5f572`创建，保留v4未提交分析。
+新增独立gradient_attribution模块、launcher、机制单测及完整协议，模型/训练入口不改。
+每task4个原图组不跨batch的至多64人batch，缓存像素跨四组/两数值配置复用；
+共96 snapshot，FP32/Expert dropout off与训练AMP/dropout敏感性对照。源checkpoint
+位于原v4服务器worktree，均只读；不创建optimizer，无参数更新，验证state/checkpoint
+与像素SHA不变。详见`docs/moe_v4_gradient_attribution_plan_20261017.md`。
+下一步提交/Git-only远程新worktree、全测、8-snapshot smoke，通过后运行正式诊断。
+
+
+## 2026-10-17：v4结束并完成结果分析，当前保留B0
+
+GPU0、seed0四组各8tasks×30epochs、13950成功更新/0跳步，正式batch与
+所有val/test/validation消融退出0；运行提交`bfd8ef9`。270份正式日志/JSON/
+NPZ已同步并逐项SHA核对，32 checkpoint实测SHA与评估记录一致；另12份
+只读诊断日志/分数/科研图也逐项SHA核对通过。fresh B0
+与历史B0的val/test八阶段概率数组逐元素相同。
+
+最终val/test（阶段平均val/test）：B0 42.1912/32.0610（48.4382/36.2781）；
+shared-only42.6217/31.9368（49.2331/35.8074）；view-fixed42.8794/32.2326
+（49.3266/36.0570）；dynamic42.5036/31.8392（49.0768/35.6642）。
+dynamic test最终/阶段平均差−0.2219/−0.6139，500次原图聚类配对95%区间
+分别[−0.849,+0.339]/[−1.514,+0.117]；全部关键总体比较区间跨0，无晋级证据。
+
+v4专家确实处理图片证据，CLS残差/输入比4.5%–26.5%，专门/共享范数比
+0.987–4.357；不能继续按弱专家调LR/scale。Person单路点估计改善，但
+Full test−0.3613。dynamic specialist-off val42.5625，高于全开42.5036；
+专门净贡献最终区间跨0。两次只读Router置换val42.3099/42.2838，原始
+42.5036，支持局部匹配作用，不代表整体动态收益。
+
+追加只读同checkpoint val视图屏蔽：Full-only42.6344、Face-only42.3050；
+Full-only相对普通共享仅+0.0127且区间跨0，Face-only也无融合净收益。
+可靠Face单路专门贡献+0.6632不能推导后置Face校准有效。上述诊断无训练/
+无test干预，源checkpoint与模型state均不变，原始logits逐值重放差0。
+
+决定：保留B0；不自动训练v5/扩seed/复用旧专家/合并main，也不把固定
+最终小正差当成功。若继续，先在固定训练batch做共享梯度范数/冲突及fused/
+auxiliary监督归因，证明可修复的负迁移后才考虑梯度隔离/平衡；否则结束
+当前插入位置MoE。该下一步尚未运行。不原样重启已有失败的Face/post校准。
+完整分析`docs/moe_task_ffn_v4_results_analysis_20261017.md`；表图/区间/只读
+探针见`./output/moe_task_ffn_v4/analysis_20261017/`。本轮仅修复审计工具
+`epochs_per_task`字段并更新报告与三上下文；模型/训练代码未改，未提交分析改动。
+
+
 ## 2026-10-17：v4正式8任务已在GPU0并行启动
 
 最终用户范围：仅GPU0、seed0、8任务，各训练30epochs；四组baseline、

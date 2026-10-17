@@ -60,7 +60,7 @@ def audit(root: Path, batch_id: str, phase: str, output: Path) -> dict:
         assert current == identity, f"Unpaired source initialization/samples: {mode}"
         assert all(row["test_loaded"] is False for row in tasks)
         expected_updates = 2 if smoke else sum(
-            math.ceil(row["train_instances"] / config["train_batch_size"]) * config["epochs"]
+            math.ceil(row["train_instances"] / config["train_batch_size"]) * config["epochs_per_task"]
             for row in tasks)
         assert summary["completed_optimizer_updates"] == expected_updates
         epochs = [row for task in history.values() for row in task]
