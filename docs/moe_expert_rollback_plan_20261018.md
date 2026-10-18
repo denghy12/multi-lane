@@ -66,3 +66,7 @@ ca82541全Track-A 337项通过。首轮smoke在Git元数据root参数缺失处�
 
 第二轮smoke在TRAIN稀疏类别ID筛选处退出；改用既有_intersects并补类别0测试。
 未进行模型前向或更新；下一轮run_id=smoke_seed0_20261018_03。
+
+第三轮smoke在FP32阴性逐值门槛停止：独立same-state after replay也有feature约1e-6/
+logit约1e-5差，AMP复放0。补确定性算法和CUBLAS workspace（:4096:8），继续要求
+阴性预测逐值相同，不放宽检查。重跑smoke_seed0_20261018_04；正式尚未启动。

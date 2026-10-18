@@ -10,6 +10,7 @@ import argparse
 from contextlib import contextmanager
 from dataclasses import asdict
 import json
+import os
 from pathlib import Path
 import time
 
@@ -161,12 +162,15 @@ def select_batches(source, boundary, count):
 
 def run(args):
     if args.output.exists(): raise FileExistsError(args.output)
+    os.environ.setdefault('CUBLAS_WORKSPACE_CONFIG', ':4096:8')
+    torch.use_deterministic_algorithms(True)
     if not torch.cuda.is_available(): raise RuntimeError('CUDA required')
     set_seed(0, tf32=False)
     args.output.mkdir(parents=True)
     provenance = dict(status='running', git=git_metadata(Path(__file__).resolve().parents[2]), optimizer_steps=0,
                       source_checkpoints={}, conditions=list(CONDITIONS), boundaries=[1, 7],
                       validation_old_classes_only=True, test_loaded=False,
+                      deterministic_algorithms=True, cublas_workspace=os.environ['CUBLAS_WORKSPACE_CONFIG'],
                       support_split='train', support_batch_cap=64, support_batches=args.train_batches,
                       source_mutations=0, settings=vars(args).copy())
     provenance['settings'] = {k: str(v) if isinstance(v, Path) else v for k, v in provenance['settings'].items()}

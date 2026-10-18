@@ -4,6 +4,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${ROOT}"
 PYTHON="${PYTHON:-/opt/conda/envs/ddp/bin/python}"
 RUN_ID="${RUN_ID:-formal_seed0_20261018_01}"
+export CUBLAS_WORKSPACE_CONFIG=:4096:8
 [[ "${GPU:-1}" == 1 ]] || { echo "Locked to GPU1" >&2; exit 2; }
 [[ -z "$(git status --porcelain)" ]] || { echo "Clean checkout required" >&2; exit 2; }
 "${PYTHON}" - <<'CHECK'

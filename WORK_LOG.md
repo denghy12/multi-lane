@@ -1,5 +1,12 @@
 # 工作日志
 
+## 2026-10-18：回滚阴性控制发现FP32重复前向数值非确定性
+
+第三轮smoke在严格逐值阴性门槛停止。独立同输入复放确认相同state SHA、不做回滚的
+after replay也有FP32 feature约1e-6/logit约1e-5差，AMP复放为0；不把该差解释成
+模型改变。开启确定性算法与CUBLAS_WORKSPACE_CONFIG=:4096:8，保留逐值阴性门槛，
+准备smoke尾号04。没有修改源checkpoint或放宽参数/预测不变性检查，正式尚未启动。
+
 ## 2026-10-18：修正回滚TRAIN稀疏标签筛选
 
 第二次smoke读取了源模型并通过旧非Expert坐标核验，但在TRAIN抽样时发现dataset.targets
