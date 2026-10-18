@@ -1,5 +1,60 @@
 # 项目上下文
 
+## 2026-10-18：用户授权执行旧Expert只读回滚归因
+
+新分支codex/moe-expert-rollback-20261018从ceded63创建；原WAF脏文档复制保留，
+不修改旧工作树。新增独立expert_rollback模块、六项机制测试、GPU1启动器及协议
+文档docs/moe_expert_rollback_plan_20261018.md。锁定AF/WAF seed0、边界1/7，
+4批按原图分组TRAIN（每批≤64），前后相同旧lane数，五条件，FP32主归因、TRAIN
+AMP/TF32复核；全val2397旧类mAP，不读取test。零优化器更新，内存patch必恢复、
+源checkpoint/state SHA审计。WAF两个边界val收益均正且至少一个CI>0、两配置两
+边界≥3/4批特征漂移降低≥90%才进入完整保护设计；否则不新训练。先测试/smoke。
+已只读检查服务器104工作树，仅原主树153项/test-only5项脏，均保留；GPU1空闲。
+
+## 2026-10-18：WAF/AF正式结束与完整分析
+
+GPU1 WAF（ceded63）和GPU0 AF（07fd35c）均8task×30epochs、13950更新、0跳步，
+整体/val/test全部退出0，checkpoint来源、累计冻结、CLIP/旧冻结权重不变审计通过。
+固定全人群val2397/test5368，与fresh B0/v1的ID/targets/class及配对初始化/样本SHA
+逐项一致。四组157份JSON/NPZ同步并与新服务器SHA核对，16个AF/WAF checkpoint
+当前SHA与verification/val/test记录交叉一致（checkpoint留服务器）。
+B0最终val/test=42.1912/32.0610，AF=42.4007/31.7904，WAF=42.2952/31.6815；
+阶段均值分别48.4382/36.2781、48.0956/35.1105、47.9071/35.0797。WAF−AF四项均
+负，但500次原图配对bootstrap的两组差区间跨0；两版test全部8阶段低B0，阶段均值
+相对B0的test区间均为负。只对应seed0，不能替代训练seed复验。
+机制：两版完整val均23/24任务视图使用固定Top2；新只读64人probe确认raw CLS去均值
+能量约0.07%–0.11%、gate多饱和。task0两版logits完全一致，test已低B0 2.8205。
+AF/WAF最终冻结15/16名，WAF首次冻结[6,13]保护Person/Face，但Full依赖[4,9]均
+未冻结。冻结旧Router不保护它仍访问的可变专家；test forgetting AF/WAF .2485/.3918，
+高于B0 .0071/v1 .0090；固定旧类logit漂移及同边界train probe也明显增加。
+GPU1只读probe4个checkpoint已完成，无更新且模型state/源checkpoint SHA不变，
+3份probe产物同步SHA通过；首次manifest字段类型失败保留，无前向/更新。
+决策保留B0，不扩seed/温度/容量、不新训练/合并main；若继续，先预锁边界做旧访问
+可变Expert的内存回滚因果对照，再讨论完整依赖封存/快照及容量成本，不能只改分数。
+完整报告：docs/moe_weighted_freeze_results_analysis_20261018.md；机器结果output/moe_weighted_freeze/analysis_20261018/。
+本次仅分析/文档，业务代码及两个服务器tracked checkout保持不变。
+
+## 2026-10-18：WAF-v1正式GPU1八任务已启动
+
+代码分支codex/moe-weighted-freeze-20261018，本地/服务器/upstream运行提交均为
+ceded63a0f58a27729845c32a78ff95f15b53fd8；启动时工作树clean。服务器独立checkout：
+/mnt/haoyuan/workspace/multi-lane-main-moe-weighted-freeze-20261018。
+331项Track-A测试通过。修复入口model.float()降低统计buffer精度的问题后，真实
+smoke_seed0_20261018_02两任务各2更新全部通过：B0来源配对、加权Top2重算、
+gate mass守恒、冻结专家与历史Router不变、CLIP不变、无跳步、checkpoint重放一致。
+两任务各145个浮点参数与硬AF对应smoke完全相同，唯一新增key为training_gate_mass；
+task0冻结[9,19]相同，task1加权[4,18]而硬计数[4,20]，机制差异成立，非性能结论。
+
+正式run_id=formal_seed0_20261018_01，tmux=ml_moe_waf_seed0_20261018，GPU1，
+seed0，8任务各30epochs；训练顺序执行，checkpoint核验后full_val/full_test双进程
+同GPU1并行。已观察task0 epoch1：84更新、skipped=0、loss=0.67717795；当前仍在
+训练，不能报告八任务最终结果。GPU1训练PID启动观测为514567，GPU0 AF原作业
+PID199069/session和07fd35c clean checkout保留，未操作原主树/test-only用户改动。
+日志/输出根分别logs/moe_weighted_freeze与output/moe_weighted_freeze。
+两轮smoke/preflight的37个非checkpoint产物已同步本地并核验SHA256。首次失败
+smoke保留用于追溯。仅在本地补写运行状态文档；服务器运行代码固定ceded63，
+不在长任务中更新checkout。详见docs/moe_weighted_freeze_experiment_20261018.md。
+
 ## 2026-10-18：WAF smoke发现并修复入口dtype转换
 
 首轮全测330项通过；GPU1两任务smoke训练完成，但核验发现model.float()将新增

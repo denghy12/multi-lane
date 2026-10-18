@@ -73,3 +73,47 @@ checkpoint核验阶段退出1：入口model.float()将诊断buffer降为float32�
 正式八任务未启动。新增_apply保护mass原精度和设备迁移，并补dtype转换回归测试，
 将用smoke_seed0_20261018_02从头复验。首轮task0与硬AF smoke的145个浮点参数
 完全相同；task1加权Top2[4,18]而硬计数[4,20]，仅用于机制核验。
+
+## 实际检查与启动记录
+
+- 修复后运行提交`ceded63a0f58a27729845c32a78ff95f15b53fd8`，本地/服务器/
+  upstream一致且启动工作树clean；仅本地文档在启动后追加状态，服务器checkout不动。
+- 全Track-A **331项通过**（13.573s）。`smoke_seed0_20261018_02`退出0，
+  verification=verified、TWO_TASK_CHECKPOINT_REPLAY_PASSED。每task仅2更新，
+  smoke不用于评估方法性能。
+- task0有效样本Full/Person/Face=128/128/73，gate mass约128/128/73，
+  硬激活256/256/146；task1有效样本128/128/66，gate mass约128/128/66，
+  硬激活256/256/132。Face无效占位不进入统计，双精度保存、重算排序一致。
+- 两任务各145个浮点参数张量均与原硬AF smoke完全一致；唯一新增state key为
+  `adapter_bank.training_gate_mass`。首次冻结名单相同[9,19]，task1加权Top2[4,18]
+  与硬Top2[4,20]不同；下一任务起由不同冻结集合影响训练。
+- Full-cohort smoke val两阶段25.228568/27.608866；seen-positive replay val
+  26.760875/27.958062，与训练记录相同。核验B0初始化/样本来源、旧专家和Router
+  不变、CLIP不变、skipped=0。task1旧lane probe relative L2=0.00295064，
+  说明冻结部分专家不保证整条旧lane特征不变。
+- 正式已启动：`tmux ml_moe_waf_seed0_20261018`，
+  `RUN_ID=formal_seed0_20261018_01 GPU=1 SEED=0`，8task×30epochs。
+  初始PID514567位于GPU1 UUID `GPU-7d793ed1-ce16-d011-ad9e-aaa15a9eb7f5`；
+  task0 epoch1已完成84更新、0跳步、loss0.67717795，尚无正式最终指标。
+- 训练后自动核验，再full_val/full_test同GPU1双进程并行；非八任务训练并行。
+  日志`logs/moe_weighted_freeze/formal_seed0_20261018_01/`，
+  外层日志`logs/moe_weighted_freeze/formal_seed0_20261018_01.launch.log`；
+  输出`output/moe_weighted_freeze/formal_seed0_20261018_01/`。
+- GPU0原AF session仍在运行，服务器工作树保持07fd35c clean；主树和test-only不变。
+  smoke/preflight共37个非checkpoint文件已同步此本地工作树，SHA256全部相符。
+  首轮失败产物保留。等待正式完成后再同步分析；未合并main。
+
+正式命令（已执行，不要重复启动同run ID）：
+
+```bash
+env -u SMOKE_UPDATES GPU=1 SEED=0 RUN_ID=formal_seed0_20261018_01 \
+  bash scripts/emotic/run_moe_weighted_freeze.sh
+```
+
+## 2026-10-18正式完成（替代前文运行中状态）
+
+8task×30epochs、13950更新、0跳步，整体/validation/test退出0。最终WAF
+val42.2952/test31.6815，阶段均值47.9071/35.0797；AF最终42.4007/31.7904。
+已同步结果并与B0/v1核对来源/固定cohort，新增只读Router probe与离线bootstrap。
+完整分析及下一步建议见[结果报告](moe_weighted_freeze_results_analysis_20261018.md)。
+当前保留B0，不自动新训练或扩seed，不合并main。
