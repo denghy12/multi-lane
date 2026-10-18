@@ -1,5 +1,14 @@
 # 下一步任务
 
+## 2026-10-18：WAF smoke发现并修复入口dtype转换
+
+首轮全测330项通过；GPU1两任务smoke训练完成，但核验发现model.float()将新增
+float64统计buffer转成float32，正式运行未启动。新增bank._apply保护累计值原精度，
+跟随模型迁移设备；补充float/half/to转换回归测试，下一步重测并用新run_id重跑smoke。
+首轮task0的145个浮点参数张量与硬AF smoke完全一致，新增key仅training_gate_mass。
+task1加权Top2为[4,18]，硬AF为[4,20]；这仅证明排序不同，不代表性能改善。
+保留首轮失败产物与GPU0原运行；通过后再启动GPU1八任务。
+
 ## 2026-10-18：用户授权GPU1带权重激活冻结版本
 
 新分支codex/moe-weighted-freeze-20261018从AF-v1运行提交07fd35c创建；保留GPU0

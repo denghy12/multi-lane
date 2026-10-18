@@ -39,6 +39,18 @@ class WeightedFreezeTest(unittest.TestCase):
         self.assertEqual(record['counts'],[1,1,1,1])
         self.assertFalse(any('gate_mass' in k for k in hard.state_dict()))
 
+    def test_model_dtype_conversion_preserves_accumulator_precision_and_values(self):
+        bank=self.bank()
+        bank.training_gate_mass[0,0,0,0]=1.0000000001
+        original=bank.training_gate_mass.clone()
+        for dtype in (torch.float32,torch.float16,torch.float64,torch.float32):
+            bank.to(dtype=dtype)
+            self.assertEqual(bank.training_gate_mass.dtype,torch.float64)
+            self.assertTrue(torch.equal(original,bank.training_gate_mass))
+            self.assertEqual(next(bank.parameters()).dtype,dtype)
+        bank.float()
+        self.assertTrue(torch.equal(original,bank.training_gate_mass))
+
     def test_actual_gate_mass_counts_mask_and_eval_isolation(self):
         bank=self.bank()
         with torch.no_grad():

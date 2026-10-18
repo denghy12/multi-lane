@@ -59,6 +59,16 @@ class TaskForwardActivateFreezeBank(TaskForwardMoEBank):
         self._face_reliable = None
         self.requires_grad_(False)
 
+    def _apply(self, fn):
+        # Model entry points call .float(); diagnostic sums must retain their
+        # original precision while following the model to its target device.
+        mass = getattr(self, "training_gate_mass", None)
+        result = super()._apply(fn)
+        if mass is not None:
+            self.training_gate_mass = mass.to(
+                device=self.training_gate_mass.device, dtype=torch.float64)
+        return result
+
     def train(self, mode=True):
         nn.Module.train(self, mode)
         for t, routers in enumerate(self.tasks):

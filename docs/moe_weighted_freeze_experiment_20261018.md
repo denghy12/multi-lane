@@ -65,3 +65,11 @@ g为训练期实际noisy Top-2后softmax权重，非选中项为0。例：0.999/
 
 当前已实现统计/配置/恢复/核验接线，两个launcher测试及语法/diff检查通过；准备
 提交/Git同步、全测、真实smoke。未启动GPU1正式训练。
+
+## 首轮smoke与修复
+
+7d79318全Track-A 330项通过。smoke_seed0_20261018_01完成两任务训练，但在
+checkpoint核验阶段退出1：入口model.float()将诊断buffer降为float32。保留失败产物；
+正式八任务未启动。新增_apply保护mass原精度和设备迁移，并补dtype转换回归测试，
+将用smoke_seed0_20261018_02从头复验。首轮task0与硬AF smoke的145个浮点参数
+完全相同；task1加权Top2[4,18]而硬计数[4,20]，仅用于机制核验。
