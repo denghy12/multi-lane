@@ -22,6 +22,7 @@ from .adapter import (
     ParaXImageAdapterBank, TaskImageTokenAdapterBank, TaskLaneTransformerAdapterBank,
 )
 from .moe_task_ffn import TaskForwardMoEBank
+from .moe_activate_freeze import TaskForwardActivateFreezeBank
 from .moe_task_ffn_v2 import TaskForwardSharedMoEBank
 from .moe_task_ffn_v3 import TaskForwardSoftMoEBank
 from .moe_task_ffn_v4 import TaskForwardEvidenceMoEBank
@@ -115,11 +116,11 @@ class MultiLaneModel(nn.Module):
             raise ValueError("Prompt private layer count is invalid")
         if normalize not in {"none", "pre-head"}:
             raise ValueError("MULTI-LANE normalize must be none or pre-head")
-        if adapter_mode not in {"disabled", "task_lane", "image_token", "moe_task_ffn", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"}:
+        if adapter_mode not in {"disabled", "task_lane", "image_token", "moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"}:
             raise ValueError(
                 "Invalid MULTI-LANE adapter mode"
             )
-        if adapter_mode in {"moe_task_ffn", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} and parax_mode != "disabled":
+        if adapter_mode in {"moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} and parax_mode != "disabled":
             raise ValueError("Task-Forward MoE must be independent of ParaX")
         post_modes = {"post", "post_static", "post_task_router", "post_task_staged", "post_task_staged_static"}
         staged_modes = {"post_task_staged", "post_task_staged_static"}
@@ -343,8 +344,9 @@ class MultiLaneModel(nn.Module):
             # while code after model construction observes the same RNG state
             # as the adapter-disabled baseline.
             with torch.random.fork_rng(devices=[]):
-                if self.adapter_mode == "moe_task_ffn":
-                    adapter_bank = TaskForwardMoEBank(
+                if self.adapter_mode in {"moe_task_ffn", "moe_task_ffn_activate_freeze"}:
+                    bank_class = TaskForwardActivateFreezeBank if self.adapter_mode == "moe_task_ffn_activate_freeze" else TaskForwardMoEBank
+                    adapter_bank = bank_class(
                         num_tasks=len(self._task_sizes), hidden_dim=self.width,
                         bottleneck_dim=adapter_bottleneck_dim,
                         layer_indices=adapter_layers,
@@ -827,7 +829,7 @@ class MultiLaneModel(nn.Module):
         lane_tokens = lane_tokens + update
         normalized_residual = block.ln_2(lane_tokens)
         moe_delta = None
-        if self.adapter_runtime_enabled and self.adapter_mode == "moe_task_ffn":
+        if self.adapter_runtime_enabled and self.adapter_mode in {"moe_task_ffn", "moe_task_ffn_activate_freeze"}:
             moe_delta = self.adapter_bank.delta_for_layer(
                 layer_id, lane_tokens, lane_ids, image_view
             )
@@ -1019,6 +1021,8 @@ class MultiLaneModel(nn.Module):
             face_reliable = images.get("face_reliable")
             if face_reliable is None or face_reliable.shape != (batch,):
                 raise ValueError("Three-view fusion requires a valid Face mask")
+        if self.adapter_mode == "moe_task_ffn_activate_freeze":
+            self.adapter_bank.set_face_reliability(face_reliable)
         if self.view_fusion_module.residual:
             # The auxiliary views are complementary frozen feature sources.
             # Their task-specific residual modules learn the mapping, while

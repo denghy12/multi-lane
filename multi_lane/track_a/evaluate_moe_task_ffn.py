@@ -39,7 +39,7 @@ def evaluate_split(source_run: Path, output: Path, split: str,
     expected_tasks = 1 if allow_smoke else expected_tasks
     if (summary.get("status") != "complete" or summary.get("config") != config
         or config.get("git", {}).get("dirty") is not False
-        or config.get("adapter_mode") not in {"moe_task_ffn", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4", "disabled"}
+        or config.get("adapter_mode") not in {"moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4", "disabled"}
         or (config.get("adapter_mode") == "disabled" and not config.get("moe_paired_audit"))
         or config.get("parax_mode") != "disabled"
         or not config.get("save_compact_checkpoints")

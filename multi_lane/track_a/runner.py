@@ -2662,7 +2662,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--adapter-mode",
-        choices=("disabled", "task_lane", "image_token", "moe_task_ffn", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"),
+        choices=("disabled", "task_lane", "image_token", "moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"),
         default="disabled",
     )
     parser.add_argument("--moe-num-experts", type=int, default=22)
@@ -2798,7 +2798,7 @@ def run(args: argparse.Namespace) -> None:
                              or args.protected_parax_paired_audit or args.moe_paired_audit)
     if args.moe_paired_audit and (
         TRAINING_PROTOCOL != "incremental"
-        or args.adapter_mode not in {"disabled", "moe_task_ffn", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"}
+        or args.adapter_mode not in {"disabled", "moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"}
         or args.parax_mode != "disabled" or args.view_fusion != "fixed_three_view"
         or args.selector_mode != "shared" or args.prompt_mode != "shared"
         or args.loss_routing != "joint_bce"
@@ -3080,7 +3080,7 @@ def run(args: argparse.Namespace) -> None:
         raise ValueError("Independent Adapter views require a positive view bottleneck")
     if args.adapter_view_mode == "independent" and args.adapter_mode != "image_token":
         raise ValueError("Independent Adapter views require Image-token Adapter mode")
-    if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} and (
+    if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} and (
         args.parax_mode != "disabled" or args.view_fusion != "fixed_three_view"
         or args.view_classifier_mode != "shared_post_fusion"
         or args.adapter_regularization != "none"
@@ -3883,13 +3883,13 @@ def run(args: argparse.Namespace) -> None:
             "frozen_image_tokens_for_selector"
             if args.adapter_mode == "image_token"
             else "task_forward_after_drop_replace_parallel_ffn"
-            if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"}
+            if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"}
             else "task_lane_tokens" if args.adapter_mode == "task_lane" else None
         ),
-        "moe_num_experts": args.moe_num_experts if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} else None,
-        "moe_top_k": args.moe_top_k if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} else None,
-        "moe_dropout": args.moe_dropout if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} else None,
-        "moe_noisy_gating": not args.moe_disable_noise if args.adapter_mode == "moe_task_ffn" else None,
+        "moe_num_experts": args.moe_num_experts if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} else None,
+        "moe_top_k": args.moe_top_k if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} else None,
+        "moe_dropout": args.moe_dropout if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} else None,
+        "moe_noisy_gating": not args.moe_disable_noise if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_activate_freeze"} else None,
         "moe_route_mode": args.moe_route_mode if args.adapter_mode in {"moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} else None,
         "moe_shared_fraction": args.moe_shared_fraction if args.adapter_mode in {"moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} else None,
         "moe_router_logit_scale": args.moe_router_logit_scale if args.adapter_mode in {"moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} else None,
@@ -3900,10 +3900,10 @@ def run(args: argparse.Namespace) -> None:
         "moe_residual_target": "cls_only" if args.adapter_mode == "moe_task_ffn_v4" else None,
         "moe_specialist_top_k": 2 if args.adapter_mode in {"moe_task_ffn_v3", "moe_task_ffn_v4"} else None,
         "moe_specialist_gradient": "soft_top2_no_straight_through" if args.adapter_mode in {"moe_task_ffn_v3", "moe_task_ffn_v4"} else None,
-        "moe_pool_scope": "task_local_shared_across_full_person_face"
-        if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} else None,
+        "moe_pool_scope": "cross_task_and_view_shared" if args.adapter_mode == "moe_task_ffn_activate_freeze" else "task_local_shared_across_full_person_face"
+        if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} else None,
         "moe_router_scope": "task_and_view_specific_cls_content"
-        if args.adapter_mode == "moe_task_ffn" else
+        if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_activate_freeze"} else
         "task_and_view_specific_normalized_image_evidence"
         if args.adapter_mode in {"moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} else None,
         "adapter_image_token_scope": (
@@ -3962,6 +3962,10 @@ def run(args: argparse.Namespace) -> None:
         "adapter_parameters": adapter_parameters,
         "adapter_parameters_per_task": adapter_parameters_per_task,
         "adapter_parameter_counts_per_task": adapter_parameter_counts_per_task,
+        "moe_freeze_policy": "cumulative_training_frequency_top2" if args.adapter_mode == "moe_task_ffn_activate_freeze" else None,
+        "moe_freeze_counting": "training_noisy_hard_top2_full_person_reliable_face_sum" if args.adapter_mode == "moe_task_ffn_activate_freeze" else None,
+        "moe_freeze_tie_break": "expert_id_ascending" if args.adapter_mode == "moe_task_ffn_activate_freeze" else None,
+        "moe_allocation_accounting": "shared_pool_charged_once_to_task0_then_router_only" if args.adapter_mode == "moe_task_ffn_activate_freeze" else None,
         "parax_parameters": parax_parameters,
     }
     (output / "config.json").write_text(
@@ -3982,8 +3986,14 @@ def run(args: argparse.Namespace) -> None:
     start = time.time()
     paired_task_audits = {}
     protected_audit = ProtectedRouteAudit(output, device) if args.protected_parax_paired_audit else None
+    freeze_audit = None
+    if args.adapter_mode == "moe_task_ffn_activate_freeze":
+        from .audit_moe_activate_freeze import ActivateFreezeAudit
+        freeze_audit = ActivateFreezeAudit(model, train_source, output, device)
     for task_id in range(args.max_tasks):
         print(f"begin_task={task_id}", flush=True)
+        if freeze_audit is not None:
+            freeze_audit.begin(task_id)
         model.activate_task(task_id)
         if crossfit_enabled:
             fit_indices, calibration_indices = crossfit_fold_indices(
@@ -4187,6 +4197,8 @@ def run(args: argparse.Namespace) -> None:
                 args.moe_balance_weight if args.adapter_mode in {"moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} else 0.0
             ),
         )
+        if freeze_audit is not None:
+            freeze_audit.finish(task_id)
         if model.parax_staged_mode or args.protected_parax_staged_training:
             # Keep baseline training, initialization, and DataLoader RNG
             # identical across tasks. All extra route work is isolated.

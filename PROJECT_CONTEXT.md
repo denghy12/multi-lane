@@ -1,5 +1,61 @@
 # 项目上下文
 
+## 2026-10-18：用户授权AF-v1跨任务共享池与频率冻结实验
+
+独立分支codex/moe-activate-freeze-20261018从d81b7e2创建；前一分析工作树的本会话
+未提交报告/上下文已复制保留，原树和主工作区未动。用户明确要求新版本seed0完整8task，
+仅GPU0，训练后val/test并行。方案以v1接口为对照，22名专家跨任务/视图共享，任务后按
+训练Full/Person/可靠Face硬激活总次数选Top-2加入累计冻结集合，含已冻结者、不补足。
+新Router可调用所有专家，只更新未冻结专家；冻结参数保留输入梯度，checkpoint保存完整
+计数/mask/历史；记录冻结专家与旧Router SHA及旧lane输出漂移。新增参数2992000。
+完整配置/边界见docs/moe_activate_freeze_experiment_20261018.md；新增bank、boundary
+审计、model/runner/evaluator接线、launcher及机制/并发测试。launcher两测与语法/diff
+检查通过；下一步Git-only服务器新worktree、Track-A全测、task0/1各2更新smoke再正式。
+本次用户授权重开的是频率冻结迁移，非默认延续v4梯度隔离或结构搜索；不合并main。
+
+## 2026-10-18：测试三视图生成与输入前提澄清
+
+核对test入口也使用ThreeViewTransform(train=False)：同一原图在线生成三视图，
+各自进入对应view Router再融合，不是仅训练有三视图或测试只选一个Router。
+当前人物级EMOTIC test依赖注释body_bbox与预计算Face manifest；任意RGB端到端
+找人/匹配Face并非已实现的测试入口。版本说明已记录该边界，业务/实验均未变，
+不需要新测试；不以测试情绪标签决定视图或唯一任务。
+
+## 2026-10-18：冻结与三视图身份接口澄清
+
+确认v1–v4采用旧任务整池冻结，并非频率Top-2冻结；v1使用率统计只作诊断。
+无DDAS；已知image_view选择对应Router，专家gate仍由内容动态生成。三视图分别
+编码但保留同一人物样本的target/配对/融合关系，未引入显式跨视图身份对齐loss。
+详细说明补入版本小结。仅文档更新，无业务变更/新结果，不需新实验或测试。
+
+## 2026-10-18：澄清v1路由结构与论文差别
+
+核对论文3.3及v1代码：论文同时具有task-specific Router和CLS条件的image-dependent
+gating；不能概括成同任务图片使用固定专家。v1保留任务索引并增加view-specific
+Router，同task三视图共享22专家，按图像CLS产生Top-2；实测固定路由属于坍缩。
+明确Task Forward的任务路径隔离不等于专家复用，专家路由不等于三视图融合门控。
+详细结构补入版本小结；未修改业务代码/配置/实验，不需新测试，原有未提交分析保留。
+
+## 2026-10-17：按MoE-Adapters术语整理版本演进
+
+新增`docs/moe_adapters_version_summary_20261017.md`，核对v1–v4配置与论文3.3：
+v1迁移Adapters as Experts/CLS noisy Top-2；v2图片证据Router及必经共享；
+v3小池、soft Top-2与匹配控制；v4专家也读取图片证据且仅写task CLS。
+明确跨视图共享与论文跨任务activate–freeze协作的差别，最后梯度诊断不构成v5。
+本次仅文档小结，无新增结果/业务代码/训练；未改当前保留B0的决定，无需新测试。
+
+## 2026-10-17：再次复核归因结果与后续边界
+
+120份同步文件SHA再次核对一致，无新训练/推理。补充报告解释：total/fused高余弦
+只排除本次终点上aux大幅扭转当前fused，不能证明B0梯度被保护。task7 Prompt
+Full/Face局部冲突不跨task；同参数点off锚点只有一个task7 batch重复反向。
+固定训练batch fused BCE显示dynamic task7较B0更差，不能无完整曲线就认定单纯过拟合。
+
+首选方案仍是保留B0、结束当前插入位置，不启动v5。若未来重开梯度假设，需独立
+声明早/中/末轨迹及Adam状态的诊断；若换新方法，训练前按原图划定并排除holdout，
+不能事后把已训练过的train子集当未见数据。Face校准/锚点残差不可换名重启。
+本轮仅补充归因报告与三份上下文文档，无业务代码修改，不需新模型测试或远程执行。
+
 ## 2026-10-17：v4只读梯度归因完成，不启动v5
 
 GPU0、seed0，四组B0/shared_fixed/view_fixed/dynamic，task0/2/7各4批64人，
