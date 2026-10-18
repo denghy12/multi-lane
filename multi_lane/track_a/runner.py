@@ -1638,6 +1638,7 @@ def train_task(
     amp_initial_scale: float = 65536.0,
     amp_growth_interval: int = 2000,
     moe_balance_weight: float = 0.0,
+    recovery_state: Optional[Dict[str, object]] = None,
 ) -> List[Dict[str, float]]:
     if not math.isfinite(supervised_loss_scale) or supervised_loss_scale <= 0:
         raise ValueError("Supervised loss scale must be finite and positive")
@@ -2333,6 +2334,9 @@ def train_task(
             flush=True,
         )
         epoch += 1
+    if recovery_state is not None:
+        from .task_recovery import optimizer_snapshot
+        recovery_state.update(optimizer_snapshot(model, optimizer, scheduler, scaler))
     history[-1]["validation_current_mAP"] = (
         current_validation_map(model, validation_loader, device, amp)
         if validation_loader is not None else None
@@ -2665,6 +2669,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         choices=("disabled", "task_lane", "image_token", "moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"),
         default="disabled",
     )
+    parser.add_argument("--eval-workers", type=int, default=None, help="Reporting DataLoader workers; defaults to training workers")
+    parser.add_argument("--save-pre-evaluation-recovery", action="store_true", help="Atomically save task-boundary model/optimizer/RNG state before reporting")
     parser.add_argument("--moe-num-experts", type=int, default=22)
     parser.add_argument("--moe-top-k", type=int, default=2)
     parser.add_argument("--moe-freeze-count", type=int, default=2, help="Experts selected for cumulative freezing per layer/task; independent of Router Top-k")
@@ -3194,6 +3200,10 @@ def run(args: argparse.Namespace) -> None:
     if args.save_view_evaluation_scores:
         (output / f"view_{args.reporting_split}_scores").mkdir()
 
+    if args.eval_workers is not None and args.eval_workers < 0:
+        raise ValueError("eval-workers must be nonnegative")
+    if args.save_pre_evaluation_recovery and (args.adapter_mode != "moe_task_ffn_activate_freeze" or not args.skip_validation_eval or not args.moe_paired_audit):
+        raise ValueError("Boundary recovery currently requires activate-freeze with skip-validation-eval")
     metadata = git_metadata(root)
     visual = load_openai_clip_visual(args.clip_checkpoint)
     model = MultiLaneModel(
@@ -3966,6 +3976,8 @@ def run(args: argparse.Namespace) -> None:
         "adapter_parameters": adapter_parameters,
         "adapter_parameters_per_task": adapter_parameters_per_task,
         "adapter_parameter_counts_per_task": adapter_parameter_counts_per_task,
+        "eval_workers": args.workers if args.eval_workers is None else args.eval_workers,
+        "save_pre_evaluation_recovery": args.save_pre_evaluation_recovery,
         "moe_freeze_metric": args.moe_freeze_metric if args.adapter_mode == "moe_task_ffn_activate_freeze" else None,
         "moe_freeze_count": args.moe_freeze_count if args.adapter_mode == "moe_task_ffn_activate_freeze" else None,
         "moe_freeze_policy": (f"cumulative_training_gate_mass_top{args.moe_freeze_count}" if args.moe_freeze_metric == "gate_mass" else f"cumulative_training_frequency_top{args.moe_freeze_count}") if args.adapter_mode == "moe_task_ffn_activate_freeze" else None,
@@ -4100,11 +4112,11 @@ def run(args: argparse.Namespace) -> None:
                   flush=True)
         val_loader = None if args.skip_validation_eval else DataLoader(
             val_view, batch_size=args.eval_batch_size, shuffle=False,
-            num_workers=args.workers, pin_memory=False, drop_last=False,
+            num_workers=args.workers if args.eval_workers is None else args.eval_workers, pin_memory=False, drop_last=False,
         )
         reporting_loader = DataLoader(
             reporting_view, batch_size=args.eval_batch_size, shuffle=False,
-            num_workers=args.workers, pin_memory=False, drop_last=False,
+            num_workers=args.workers if args.eval_workers is None else args.eval_workers, pin_memory=False, drop_last=False,
         )
         test_loader = None
         if args.also_report_test:
@@ -4114,7 +4126,7 @@ def run(args: argparse.Namespace) -> None:
             )
             test_loader = DataLoader(
                 test_view, batch_size=args.eval_batch_size, shuffle=False,
-                num_workers=args.workers, pin_memory=False, drop_last=False,
+                num_workers=args.workers if args.eval_workers is None else args.eval_workers, pin_memory=False, drop_last=False,
             )
         calibration_loader = None
         if args.save_calibration_scores:
@@ -4130,7 +4142,7 @@ def run(args: argparse.Namespace) -> None:
                 calibration_view,
                 batch_size=args.eval_batch_size,
                 shuffle=False,
-                num_workers=args.workers,
+                num_workers=args.workers if args.eval_workers is None else args.eval_workers,
                 pin_memory=False,
                 drop_last=False,
             )
@@ -4152,6 +4164,7 @@ def run(args: argparse.Namespace) -> None:
             # Exclude the current expert pool from B0's optimizer entirely.
             if args.protected_parax_staged_training:
                 model.parax_bank.requires_grad_(False)
+        recovery_state = {} if args.save_pre_evaluation_recovery else None
         history = train_task(
             model, train_loader, val_loader, device, task_id,
             args.epochs, learning_rate, args.weight_decay,
@@ -4202,9 +4215,23 @@ def run(args: argparse.Namespace) -> None:
             moe_balance_weight=(
                 args.moe_balance_weight if args.adapter_mode in {"moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} else 0.0
             ),
+            recovery_state=recovery_state,
         )
         if freeze_audit is not None:
             freeze_audit.finish(task_id)
+        if recovery_state is not None:
+            from .task_recovery import save_boundary
+            save_boundary(model, compact_model_state_dict(model), task_id, config,
+                          recovery_state, train_loader.generator,
+                          dict(training_history={**training_history, str(task_id): history},
+                               completed_reporting=[asdict(x) for x in task_rows],
+                               paired_task_audits=paired_task_audits,
+                               initial_selector_prompt_classifier_sha256=base_initialization_digest,
+                               frozen_visual_sha256_before=frozen_visual_before,
+                               activate_freeze_audit=freeze_audit.rows),
+                          output / "recovery_checkpoints" / f"task{task_id}_before_reporting.pth")
+            del recovery_state
+            print(f"TASK_RECOVERY_SAVED task={task_id} before_reporting=1", flush=True)
         if model.parax_staged_mode or args.protected_parax_staged_training:
             # Keep baseline training, initialization, and DataLoader RNG
             # identical across tasks. All extra route work is isolated.

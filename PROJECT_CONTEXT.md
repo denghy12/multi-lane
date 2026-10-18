@@ -1,5 +1,52 @@
 # 项目上下文
 
+## 2026-10-18：用户授权Late只读路由对照与Middle完整重跑
+
+新分支exp/moe-late-route-middle-recovery-20261018从f17a256创建，继承5完整/1缺失
+分析及文档，保留旧脏工作树。GPU0计划Middle[5]/22expert/Top2/冻2，seed0、8task×30ep，
+原WAF预算不变，训练workers2、内部/外部评估0；验证前原子保存任务边界完整恢复信息。
+GPU1原Late task0/2/7，先以固定TRAIN原图分组4批校准每lane/view固定Top2和归一权重，
+再锁定完整val2397上dynamic/fixed/off三条件，workers0、B64、500原图配对bootstrap，
+无训练或test；动态重放逐值验证、源/模型SHA保护。全部TRAIN表在val读取前锁定。
+先全测及双方真实smoke；正式尚未启动。服务器107工作树只主树153项/test-only5项脏，
+GPU0/1均空闲，/dev/shm=4GiB空；只使用GPU0/1，不动其他卡或已有作业。
+详细配置与预锁门槛docs/moe_late_route_middle_recovery_20261018.md。
+
+## 2026-10-18：六臂消融完整性核验、val补齐与结果分析完成（5完整/1缺失）
+
+原3410546批次failed，不能称六臂全部完成。Middle[5]/k2/冻2虽完成task7 cycle30，
+在内嵌val Bus error后未保存最后checkpoint/summary，只有task0–6的7份checkpoint；
+其他5臂均240epochs、13950成功更新、0跳步，完整test已存在。
+原双split并行漏算共享内存：12loader预取图像约5.17GiB>容器/dev/shm 4GiB；
+两臂外置val同样失败。f17a256独立repair worktree新增评估--workers=0，351项全测
+通过（15.625s），GPU0/1各1进程只读补L1_K2_F2/L1_K3_F3完整8阶段val，均exit0。
+7份重叠NPZ全部数组逐值相同；225原产物+45补评估/预检/绘图产物及清单同步并核验，
+B0另39份新SHA匹配。47个源checkpoint SHA前后不变，原运行启动核验clean，补评估结束Git记录clean，
+没有新训练/扩seed/test调参/合并main，Middle未重训，原failed状态与目录保留。
+
+最终val/test（val均值/test均值）：B0 42.1912/32.0610（48.4382/36.2781）；
+Early2/2 42.2952/31.6815（47.9071/35.0797）；Late2/2 42.2600/31.6347
+（48.3586/34.7766）；Early2/3 41.8437/31.7328（47.7562/34.9600）；
+Early3/2 42.0640/31.5780（48.2216/35.1649）；Early3/3 42.0622/31.8150
+（48.1568/35.1551）。后者虽然MoE最终test数值最高，val低原2/2，不据test选它。
+五臂test全部8阶段点估计低B0；500次原图配对bootstrap最终差CI跨0、阶段平均差CI
+全部为负，仅seed0样本不确定性。保留B0，不晋级3/3、不扩容量/温度或seed。
+
+冻结3改善test forgetting：k2 .3918→.0829，k3 .3417→.0446；最终冻结22/21名，
+训练task7时仍各有3名可更新（不能称task7已无容量）。低遗忘不等于更高最终旧类AP；
+3/3相对2/2的+.1335最终test主要来自最后3类+1.3475，旧23类−.0249。
+Late只有1/24任务视图集合固定（Early23/24），Full/Person也有15/16动态（Early0/16），
+但test全程无收益；不能再用Early的弱图片路由解释全部层。Top3第三权重中位约.27%/.31%，
+仅6/24≥1%，集合固定不代表gate权重恒定，Face路由汇总含占位，精度单列可靠Face。
+首任务test各MoE已低B0，不能归因后续遗忘；增加冻结名额没修复前置泛化差距。
+
+完整报告docs/moe_layer_routing_ablation_results_20261018.md；离线JSON/CSV/复算脚本
+output/moe_ablation_repair/analysis_20261018/；补评估目录val_workers0_20261018_01。
+建议研究上先用Late现checkpoint在task0/2/7做只读动态vsTRAIN确定固定Top2vs关闭
+MoE残差对照，validation看路由净收益再决定是否训练；这些新干预尚未执行。
+工程上评估workers0/共享内存预算、验证前保存完整可恢复状态；要完成三层消融，
+Middle需唯一配置独立完整重跑，当前未启动，不能用缺失结果宣称所有层均无效。
+
 ## 2026-10-18：六臂结束核验发现共享内存故障，先补只读validation
 
 原batch实际failed。5臂训练完整（13950更新/0跳步、8 checkpoint）且test完整；

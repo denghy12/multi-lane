@@ -134,3 +134,12 @@ checkpoint未下载；目录`output/moe_layer_routing_ablation/smoke_seed0_20261
 映射及运行快照共8文件与SHA清单已同步本地并校验，位于正式输出目录；该目录当前仅
 启动元数据，不能当作已完成正式结果。快照分别记录容器PID与GPU宿主机PID。
 再次只读检查原主树153项/test-only5项未提交状态数量未变，未操作其他卡作业。
+
+## 结束核验更正（5完整，Middle缺最终checkpoint）
+
+原batch实际failed：两个外置val及Middle训练内最后val因共享内存Bus error退出。
+两份缺失val已在独立repair分支f17a256以workers0只读补齐，源权重SHA不变，重叠预测
+逐值一致；完整四格路由/冻结对照现已可分析。Middle虽最后epoch更新结束，最后权重
+未保存，完整三层消融仍缺此配置。不能将上文“已启动”理解为全部完成。
+结果与下一步以docs/moe_layer_routing_ablation_results_20261018.md为准：保留B0，
+不晋级3/3；Late图片相关Expert集合增加，但尚无精度优势。新训练未启动。

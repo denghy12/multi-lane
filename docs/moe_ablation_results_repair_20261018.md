@@ -36,3 +36,14 @@ Middle缺task7无法伪造恢复，不用7任务结果充当完整消融。先�
 
 当前：本地修复，待测试与Git同步后执行只读补评估。分析包含最终/阶段平均mAP、
 分支、Face可靠性子集、旧类漂移/遗忘、冻结覆盖和推理权重；仅seed0不当作跨seed结论。
+
+## 完成状态
+
+运行提交f17a25652134e8d4ef691a3a9aca002784fd59ba，两端/upstream一致，启动及运行后
+服务器clean；351项Track-A测试通过。val_workers0_20261018_01两臂全部exit0，16阶段
+完成，7个重叠NPZ全部数组逐值相同，47个源checkpoint SHA前后相同。
+225份原产物、45份补评估/预检/绘图文件及清单同步并核验；B0另39份新SHA匹配。
+原batch仍failed，未修改失败目录。正式可用完整模型5个，Middle仍缺task7 checkpoint。
+500次原图配对bootstrap与逐样本ID/targets/class/Face mask核验完成，没有模型重训。
+完整报告docs/moe_layer_routing_ablation_results_20261018.md，指标/脚本位于
+output/moe_ablation_repair/analysis_20261018/；新干预或Middle重训均未启动。
