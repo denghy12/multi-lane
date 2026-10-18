@@ -46,6 +46,16 @@ def verify(root, expected_tasks, baseline=None):
             assert expected_tasks < 8 and config["optimizer_updates_per_task"] > 0
         if expected_tasks == 8:
             assert config["training_budget_mode"] == "epochs"
+    freeze_count = config.get("moe_freeze_count") if config.get("moe_freeze_count") is not None else 2
+    route_k = config.get("moe_top_k") if config.get("moe_top_k") is not None else 2
+    assert route_k in (2, 3) and route_k <= config["moe_num_experts"]
+    assert 1 <= freeze_count <= config["moe_num_experts"]
+    metric = "gate_mass" if config.get("moe_freeze_metric", "hard_count") == "gate_mass" else "frequency"
+    assert config["moe_freeze_policy"] == f"cumulative_training_{metric}_top{freeze_count}"
+    if "freeze_per_layer" in audit:
+        assert audit["freeze_per_layer"] == freeze_count
+    if "router_top_k" in audit:
+        assert audit["router_top_k"] == route_k
     history = read(train / "training_history.json")
     checks, previous = [], None
     for task in range(expected_tasks):
@@ -74,19 +84,25 @@ def verify(root, expected_tasks, baseline=None):
                 assert info["freeze_metric"] == "gate_mass"
                 assert info["per_view_gate_mass"] == mass.tolist()
                 assert info["freeze_scores"] == scores.tolist() == info["gate_mass"]
-            selected = sorted(range(config["moe_num_experts"]), key=lambda i: (-float(scores[i]), i))[:2]
-            assert info["top2"] == selected
+            selected = sorted(range(config["moe_num_experts"]), key=lambda i: (-float(scores[i]), i))[:freeze_count]
+            assert info.get("selected_experts", info.get("top2")) == selected
+            assert info.get("freeze_count", 2) == freeze_count
             assert info["counts"] == total.tolist()
             assert info["per_view_counts"] == counts.tolist()
             assert info["per_view_samples"] == samples.tolist()
-            assert bool(((counts.sum(1) >= samples) & (counts.sum(1) <= 2*samples)).all())
+            assert bool(((counts.sum(1) >= samples) & (counts.sum(1) <= route_k*samples)).all())
             assert int(samples[0]) == int(samples[1]) > 0 and int(samples[2]) <= int(samples[0])
-            assert state["adapter_bank.freeze_top2"][task, layer].tolist() == selected
+            selection_key = "adapter_bank.freeze_top2" if freeze_count == 2 else "adapter_bank.freeze_topk"
+            assert state[selection_key].shape[-1] == freeze_count
+            assert state[selection_key][task, layer].tolist() == selected
             expected = previous["adapter_bank.frozen_experts"][layer].clone() if previous else torch.zeros_like(frozen[layer])
             expected[selected] = True
             assert torch.equal(frozen[layer], expected)
             assert torch.equal(state["adapter_bank.frozen_history"][task, layer], expected)
             assert info["cumulative_frozen"] == torch.nonzero(expected).flatten().tolist()
+            assert info["remaining_trainable"] == int((~expected).sum())
+            old_frozen = previous["adapter_bank.frozen_experts"][layer] if previous else torch.zeros_like(expected)
+            assert info["newly_frozen"] == [i for i in selected if not bool(old_frozen[i])]
         if previous:
             for layer, mask in enumerate(previous["adapter_bank.frozen_experts"]):
                 for expert in torch.nonzero(mask).flatten().tolist():
@@ -111,7 +127,8 @@ def verify(root, expected_tasks, baseline=None):
             assert abs(original["mAP"]-restored["mAP"]) < 1e-7
     result = dict(status="verified", expected_tasks=expected_tasks, checks=checks,
                   baseline_provenance_matched=str(baseline) if baseline else None,
-                  source_git=config["git"], freeze_policy=config["moe_freeze_policy"])
+                  source_git=config["git"], freeze_policy=config["moe_freeze_policy"],
+                  router_top_k=route_k, freeze_count=freeze_count)
     (root / "verification.json").write_text(json.dumps(result, indent=2)+"\n")
     print(json.dumps(result, indent=2))
 

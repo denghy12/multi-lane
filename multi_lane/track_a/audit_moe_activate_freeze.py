@@ -77,10 +77,10 @@ class ActivateFreezeAudit:
             old_lane_feature_drift=drift,
             trainable_adapter_parameters_after_boundary=sum(p.numel() for p in self.bank.active_parameters()),
         )
-        payload = dict(policy="cumulative_per_task_training_gate_mass" if self.bank.freeze_metric == "gate_mass" else "cumulative_per_task_training_hard_top2_frequency",
+        payload = dict(policy="cumulative_per_task_training_gate_mass" if self.bank.freeze_metric == "gate_mass" else f"cumulative_per_task_training_hard_top{self.bank.top_k}_frequency",
                        freeze_metric=self.bank.freeze_metric,
-                       face_counting="reliable_only", count_views="sum_not_per_view_top2",
-                       freeze_per_layer=2, can_reselect_already_frozen=True,
+                       face_counting="reliable_only", count_views="sum_not_per_view_topk", router_top_k=self.bank.top_k,
+                       freeze_per_layer=self.bank.freeze_count, can_reselect_already_frozen=True,
                        frozen_expert_dropout="follows_model_training_mode_weights_only_frozen",
                        probe=self.probe, tasks=self.rows)
         (self.output / "activate_freeze_audit.json").write_text(json.dumps(payload, indent=2)+"\n")

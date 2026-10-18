@@ -1,5 +1,64 @@
 # 下一步任务
 
+## 2026-10-18：用户授权插入层与Top-k／冻结数量两组完整消融
+
+在独立分支codex/moe-layer-routing-ablation-20261018从41567eb实现；保留此前回滚
+与WAF分析文档，原停止建议作为历史结果，不覆盖用户此次明确实验授权。
+预设六臂：GPU0为L1/L5/L11、K2/F2；GPU1为L1的K2/F3、K3/F2、K3/F3。
+共同L1/K2/F2在新代码重新训练一次供两组共享；沿用gate_mass加权冻结、22专家、
+宽度64、noisy Top-k、30epochs/task、8task、seed0、B0配对和原WAF全部其他配置。
+新加独立--moe-freeze-count、f3 checkpoint恢复／审计、推理门控权重日志、六臂启动器；
+累计冻结仍可重选、不补足，并不保证旧函数完整保护。3项启动器本地测试通过；
+计划服务器全测与六臂两任务smoke通过后，再在GPU0/1并行正式训练和val/test。
+完整协议docs/moe_layer_routing_ablation_20261018.md。当前未启动远程实验。
+已检查服务器105工作树，仅原主树153项/test-only5项脏，保留；GPU0/1均空闲。
+
+## 2026-10-18：冻结统计含义澄清（无新实验）
+
+再次核对现有task0审计：AF/WAF首次冻结前模型相同，Expert6/9/13硬激活分别
+164710/144382/96664；gate mass分别150217.5084/76701.9608/88206.2159，故AF选
+[6,9]、WAF选[6,13]均符合各自统计规则。Full专家9全训练Full mass75842.4733/
+160590≈47.23%，不同于训练结束只读推理平均gate90.47%；历史累计/训练噪声及
+视图合并造成使用量与最终依赖的差别。该解释基于已有产物，无新前向/训练或代码修改。
+
+## 2026-10-18：旧Expert回滚归因完成，未通过保护设计门槛
+
+GPU1只读正式run formal_seed0_20261018_01（41567eb）exit0/complete；AF/WAF各
+边界1/7，4批TRAIN各64人、全val2397，五条件，前后相同旧lane数，FP32主归因及
+TRAIN AMP/TF32复核。338项全测、7项最终针对测试、真实smoke04通过。正式88份
+日志/JSON/NPZ已同步本地并与服务器新SHA逐项相同；8个源checkpoint前后SHA相同，
+原AF/WAF与诊断服务器tracked工作树clean，GPU1已空闲。没有test前向/选择或训练。
+
+机制因果已确认：访问可变Expert回滚在4个方法边界、两精度全部4/4 TRAIN批恢复
+旧特征/logits至训练前；完整val fused/Full/Person/Face旧类logits也逐元素恢复。
+冻结Expert阴性在两精度TRAIN及完整val各分支逐值不变；旧非Expert坐标SHA一致。
+AF边界1/7旧类val恢复+.2678/-.0153，CI[-.2621,+.7502]/[-.0983,+.0627]；
+WAF为+.2580/+.0346，CI[-.4480,+.9577]/[-.1449,+.2000]。500次原图配对bootstrap，
+只含seed0样本不确定性。WAF两边界正、特征全恢复，但至少一个CI>0的门槛未通过。
+
+按预锁协议，不进入完整保护方案设计或新训练；保留B0，停止当前Task Forward MoE
+扩展，不扩seed/专家/温度/LR，不合并main。区间跨0并非证明真实收益严格为0；
+已证实漂移机制也不能替代泛化收益。完整报告：docs/moe_expert_rollback_results_20261018.md。
+原始输出output/moe_expert_rollback/formal_seed0_20261018_01/，离线结果与复算脚本
+位于output/moe_expert_rollback/analysis_20261018/。仅本地追加结果文档，服务器
+运行提交及源模型不动；未覆盖原WAF/主树/test-only未提交改动。
+
+当前本轮无待运行训练/诊断任务；下面“正式在运行/等待”的记录由本条替代。
+不重复回滚、不为跨0区间自动扩seed，不按结果更换边界或专家集。未来若重新立项，
+先提出独立任务学习假设，并要求task0与匹配固定路由控制的TRAIN留出/validation收益。
+
+## 2026-10-18：只读Expert回滚正式运行已启动
+
+独立运行提交41567eb3bf320b39395c30bdfcdaefdfdf987a8d，本地/服务器/upstream一致、
+启动时clean。338项全测通过（13.962s），之后七项针对测试通过；真实smoke尾号04
+四个方法边界五条件全部完成，阴性TRAIN两精度/validation逐值相同，内存patch恢复、
+源checkpoint/视觉权重SHA保护通过。前3次失败smoke保留（元数据root、稀疏标签、
+FP32非确定性），用确定性CUDA算法和workspace修正，未放宽逐值门槛。
+正式run_id=formal_seed0_20261018_01，tmux=ml_moe_rollback_seed0_20261018，GPU1，
+4批TRAIN（上限64/批）及全val2397、AF/WAF边界1/7、五条件、无optimizer/test。
+源路径固定原AF/WAF训练输出，日志logs/moe_expert_rollback，输出output同名子目录。
+当前正式在运行，等待完整validation和原图配对bootstrap后按预锁门槛判断；不新训练。
+
 ## 2026-10-18：回滚阴性控制发现FP32重复前向数值非确定性
 
 第三轮smoke在严格逐值阴性门槛停止。独立同输入复放确认相同state SHA、不做回滚的

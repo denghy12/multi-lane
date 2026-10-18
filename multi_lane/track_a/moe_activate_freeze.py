@@ -1,4 +1,4 @@
-"""Shared experts with task/view Routers and cumulative frequency Top-2 freeze.
+"""Shared experts with task/view Routers and independent cumulative Top-f freeze.
 
 This is the v1 Task-Forward interface, with expert ownership changed from
 task-local pools to one pool per layer. Old Routers can still call every expert.
@@ -22,10 +22,13 @@ class _Routers(nn.Module):
 class TaskForwardActivateFreezeBank(TaskForwardMoEBank):
     def __init__(self, num_tasks, hidden_dim, bottleneck_dim, layer_indices,
                  residual_scale, num_experts=22, top_k=2, dropout=.1, noisy_gating=True,
-                 freeze_metric="hard_count"):
+                 freeze_metric="hard_count", freeze_count=2):
         nn.Module.__init__(self)
-        if num_tasks < 1 or num_experts < 2 or top_k != 2:
-            raise ValueError("Activate-freeze requires positive tasks and Top-2")
+        if num_tasks < 1 or num_experts < 2 or top_k not in (2, 3) or top_k > num_experts:
+            raise ValueError("Activate-freeze requires positive tasks and valid Top-2/3")
+        if not isinstance(freeze_count, int) or isinstance(freeze_count, bool) or not 1 <= freeze_count <= num_experts:
+            raise ValueError("Freeze count must be an integer within the expert pool")
+        self.freeze_count = freeze_count
         if not layer_indices or len(set(layer_indices)) != len(layer_indices):
             raise ValueError("Unique nonempty layer indices required")
         if hidden_dim < 1 or bottleneck_dim < 1 or not 0 <= dropout < 1 or residual_scale <= 0:
@@ -51,10 +54,14 @@ class TaskForwardActivateFreezeBank(TaskForwardMoEBank):
             # original hard-count checkpoint schema unchanged in the default mode.
             self.register_buffer("training_gate_mass", torch.zeros(*shape, num_experts, dtype=torch.float64))
         self.register_buffer("training_samples", torch.zeros(*shape, dtype=torch.long))
-        self.register_buffer("freeze_top2", torch.full((num_tasks, len(self.layer_indices), 2), -1, dtype=torch.long))
+        # Preserve the exact legacy checkpoint key/shape for freeze_count=2.
+        selection_key = "freeze_top2" if freeze_count == 2 else "freeze_topk"
+        self.register_buffer(selection_key, torch.full((num_tasks, len(self.layer_indices), freeze_count), -1, dtype=torch.long))
         self.register_buffer("frozen_history", torch.zeros(num_tasks, len(self.layer_indices), num_experts, dtype=torch.bool))
         self.register_buffer("route_counts", torch.zeros(*shape, num_experts), persistent=False)
         self.register_buffer("route_samples", torch.zeros(*shape), persistent=False)
+        self.register_buffer("route_gate_mass", torch.zeros(*shape, num_experts, dtype=torch.float64), persistent=False)
+        self.register_buffer("route_sorted_gate_mass", torch.zeros(*shape, top_k, dtype=torch.float64), persistent=False)
         self._current_task_id = -1
         self._face_reliable = None
         self.requires_grad_(False)
@@ -62,11 +69,34 @@ class TaskForwardActivateFreezeBank(TaskForwardMoEBank):
     def _apply(self, fn):
         # Model entry points call .float(); diagnostic sums must retain their
         # original precision while following the model to its target device.
-        mass = getattr(self, "training_gate_mass", None)
+        sums = {name: getattr(self, name) for name in
+                ("training_gate_mass", "route_gate_mass", "route_sorted_gate_mass")
+                if hasattr(self, name)}
         result = super()._apply(fn)
-        if mass is not None:
-            self.training_gate_mass = mass.to(
-                device=self.training_gate_mass.device, dtype=torch.float64)
+        for name, value in sums.items():
+            setattr(self, name, value.to(device=getattr(self, name).device, dtype=torch.float64))
+        return result
+
+    @property
+    def freeze_selection(self):
+        return getattr(self, "freeze_top2" if self.freeze_count == 2 else "freeze_topk")
+
+    def reset_route_statistics(self):
+        super().reset_route_statistics()
+        self.route_gate_mass.zero_()
+        self.route_sorted_gate_mass.zero_()
+
+    def route_statistics(self):
+        result = super().route_statistics()
+        mass = self.route_gate_mass.detach().cpu()
+        ranked = self.route_sorted_gate_mass.detach().cpu()
+        for task in range(self._current_task_id + 1):
+            for layer, block in enumerate(self.layer_indices):
+                for view, name in enumerate(self.view_names):
+                    row = result[str(task)][str(block)][name]
+                    n = max(float(row["samples"]), 1.)
+                    row["expert_gate_mass"] = mass[task, layer, view].tolist()
+                    row["mean_sorted_gate_weights"] = (ranked[task, layer, view] / n).tolist()
         return result
 
     def train(self, mode=True):
@@ -126,10 +156,10 @@ class TaskForwardActivateFreezeBank(TaskForwardMoEBank):
                     raise RuntimeError("Cannot freeze from empty gate mass")
             # Rank ALL experts, including those frozen earlier; do not top up.
             # Equal counts deterministically prefer the smaller expert ID.
-            selected = sorted(range(self.num_experts), key=lambda i: (-float(scores[i]), i))[:2]
+            selected = sorted(range(self.num_experts), key=lambda i: (-float(scores[i]), i))[:self.freeze_count]
             before = self.frozen_experts[layer].clone()
             self.frozen_experts[layer, selected] = True
-            self.freeze_top2[task_id, layer] = torch.tensor(selected, device=counts.device)
+            self.freeze_selection[task_id, layer] = torch.tensor(selected, device=counts.device)
             self.frozen_history[task_id, layer].copy_(self.frozen_experts[layer])
             for i, expert in enumerate(pool):
                 if bool(self.frozen_experts[layer, i]):
@@ -139,10 +169,12 @@ class TaskForwardActivateFreezeBank(TaskForwardMoEBank):
             records[str(self.layer_indices[layer])] = dict(
                 counts=counts.tolist(), per_view_counts=per_view.tolist(),
                 per_view_samples=self.training_samples[task_id, layer].tolist(),
-                top2=selected, newly_frozen=[i for i in selected if not bool(before[i])],
+                selected_experts=selected, freeze_count=self.freeze_count, newly_frozen=[i for i in selected if not bool(before[i])],
                 cumulative_frozen=torch.nonzero(self.frozen_experts[layer]).flatten().tolist(),
                 remaining_trainable=int((~self.frozen_experts[layer]).sum()),
             )
+            if self.freeze_count == 2:
+                records[str(self.layer_indices[layer])]["top2"] = selected
             if per_view_mass is not None:
                 records[str(self.layer_indices[layer])].update(
                     freeze_metric=self.freeze_metric, freeze_scores=scores.tolist(),
@@ -189,6 +221,8 @@ class TaskForwardActivateFreezeBank(TaskForwardMoEBank):
                 if not self.training:
                     self.route_counts[task, layer, view] += hard.sum(0)
                     self.route_samples[task, layer, view] += len(tokens)
+                    self.route_gate_mass[task, layer, view] += gates.detach().double().sum(0)
+                    self.route_sorted_gate_mass[task, layer, view] += gates.detach().topk(self.top_k, dim=-1).values.double().sum(0)
             combined = torch.zeros_like(tokens)
             for expert_id, expert in enumerate(self.experts[layer]):
                 ids = torch.nonzero(hard[:, expert_id], as_tuple=True)[0]

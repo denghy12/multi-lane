@@ -70,3 +70,18 @@ ca82541全Track-A 337项通过。首轮smoke在Git元数据root参数缺失处�
 第三轮smoke在FP32阴性逐值门槛停止：独立same-state after replay也有feature约1e-6/
 logit约1e-5差，AMP复放0。补确定性算法和CUBLAS workspace（:4096:8），继续要求
 阴性预测逐值相同，不放宽检查。重跑smoke_seed0_20261018_04；正式尚未启动。
+
+## 正式启动
+
+最终运行41567eb（本地/服务器/upstream一致、clean）；338项全测及最后七项针对测试
+通过。smoke_seed0_20261018_04四边界五条件完成，阴性TRAIN两精度/val逐值相同。
+正式formal_seed0_20261018_01已在GPU1、tmux ml_moe_rollback_seed0_20261018启动；
+仍在运行，未作正式性能结论。仅本地追加状态，服务器checkout保持运行提交。
+
+## 正式完成及预锁决定（替代运行中状态）
+
+41567eb正式exit0，四方法边界、五条件及全部val完成。88个产物已同步并逐项SHA
+核对；源checkpoint、CLIP不变，阴性逐值不变，旧函数漂移全部恢复。WAF两边界
+旧类val恢复+.2580/+.0346，但配对CI均跨0，未通过进入完整保护设计的门槛。
+本轮不设计/训练保护版，保留B0并停止当前位置MoE扩展。完整结果见
+[回滚报告](moe_expert_rollback_results_20261018.md)。

@@ -2667,6 +2667,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument("--moe-num-experts", type=int, default=22)
     parser.add_argument("--moe-top-k", type=int, default=2)
+    parser.add_argument("--moe-freeze-count", type=int, default=2, help="Experts selected for cumulative freezing per layer/task; independent of Router Top-k")
     parser.add_argument("--moe-freeze-metric", choices=("hard_count", "gate_mass"), default="hard_count")
     parser.add_argument("--moe-dropout", type=float, default=0.1)
     parser.add_argument("--moe-disable-noise", action="store_true")
@@ -3222,6 +3223,7 @@ def run(args: argparse.Namespace) -> None:
         moe_dropout=args.moe_dropout,
         moe_noisy_gating=not args.moe_disable_noise,
         moe_freeze_metric=args.moe_freeze_metric,
+        moe_freeze_count=args.moe_freeze_count,
         moe_route_mode=args.moe_route_mode,
         moe_shared_fraction=args.moe_shared_fraction,
         moe_router_logit_scale=args.moe_router_logit_scale,
@@ -3965,8 +3967,9 @@ def run(args: argparse.Namespace) -> None:
         "adapter_parameters_per_task": adapter_parameters_per_task,
         "adapter_parameter_counts_per_task": adapter_parameter_counts_per_task,
         "moe_freeze_metric": args.moe_freeze_metric if args.adapter_mode == "moe_task_ffn_activate_freeze" else None,
-        "moe_freeze_policy": ("cumulative_training_gate_mass_top2" if args.moe_freeze_metric == "gate_mass" else "cumulative_training_frequency_top2") if args.adapter_mode == "moe_task_ffn_activate_freeze" else None,
-        "moe_freeze_counting": ("training_noisy_gate_mass_full_person_reliable_face_sum" if args.moe_freeze_metric == "gate_mass" else "training_noisy_hard_top2_full_person_reliable_face_sum") if args.adapter_mode == "moe_task_ffn_activate_freeze" else None,
+        "moe_freeze_count": args.moe_freeze_count if args.adapter_mode == "moe_task_ffn_activate_freeze" else None,
+        "moe_freeze_policy": (f"cumulative_training_gate_mass_top{args.moe_freeze_count}" if args.moe_freeze_metric == "gate_mass" else f"cumulative_training_frequency_top{args.moe_freeze_count}") if args.adapter_mode == "moe_task_ffn_activate_freeze" else None,
+        "moe_freeze_counting": ("training_noisy_gate_mass_full_person_reliable_face_sum" if args.moe_freeze_metric == "gate_mass" else f"training_noisy_hard_top{args.moe_top_k}_full_person_reliable_face_sum") if args.adapter_mode == "moe_task_ffn_activate_freeze" else None,
         "moe_freeze_tie_break": "expert_id_ascending" if args.adapter_mode == "moe_task_ffn_activate_freeze" else None,
         "moe_allocation_accounting": "shared_pool_charged_once_to_task0_then_router_only" if args.adapter_mode == "moe_task_ffn_activate_freeze" else None,
         "parax_parameters": parax_parameters,
