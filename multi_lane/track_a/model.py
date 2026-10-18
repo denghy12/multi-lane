@@ -67,6 +67,7 @@ class MultiLaneModel(nn.Module):
         moe_router_logit_scale: float = 2.0,
         moe_router_temperature: float = 1.0,
         moe_noise_std: float = 0.5,
+        moe_freeze_metric: str = "hard_count",
         selector_conditioning: str = "disabled",
         selector_condition_layers: Sequence[int] = (1,),
         selector_condition_hidden_dim: int = 32,
@@ -116,6 +117,10 @@ class MultiLaneModel(nn.Module):
             raise ValueError("Prompt private layer count is invalid")
         if normalize not in {"none", "pre-head"}:
             raise ValueError("MULTI-LANE normalize must be none or pre-head")
+        if moe_freeze_metric not in {"hard_count", "gate_mass"}:
+            raise ValueError("Unknown MoE freeze metric")
+        if moe_freeze_metric != "hard_count" and adapter_mode != "moe_task_ffn_activate_freeze":
+            raise ValueError("Gate-mass freezing requires the activate-freeze bank")
         if adapter_mode not in {"disabled", "task_lane", "image_token", "moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"}:
             raise ValueError(
                 "Invalid MULTI-LANE adapter mode"
@@ -353,6 +358,7 @@ class MultiLaneModel(nn.Module):
                         residual_scale=adapter_residual_scale,
                         num_experts=moe_num_experts, top_k=moe_top_k,
                         dropout=moe_dropout, noisy_gating=moe_noisy_gating,
+                        **({"freeze_metric": moe_freeze_metric} if self.adapter_mode == "moe_task_ffn_activate_freeze" else {}),
                     )
                 elif self.adapter_mode in {"moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"}:
                     if moe_top_k != 2:

@@ -40,6 +40,7 @@ class ActivateFreezeAudit:
     def features(self):
         training = self.model.training
         counts_before = self.bank.training_counts.clone()
+        mass_before = self.bank.training_gate_mass.clone() if self.bank.freeze_metric == "gate_mass" else None
         self.model.eval()
         try:
             with isolated_rng(self.device):
@@ -48,6 +49,8 @@ class ActivateFreezeAudit:
             self.model.train(training)
         if not torch.equal(counts_before, self.bank.training_counts):
             raise AssertionError("Audit inference contaminated freeze counts")
+        if mass_before is not None and not torch.equal(mass_before, self.bank.training_gate_mass):
+            raise AssertionError("Audit inference contaminated gate-mass statistics")
         return value
 
     def begin(self, task):
@@ -74,7 +77,8 @@ class ActivateFreezeAudit:
             old_lane_feature_drift=drift,
             trainable_adapter_parameters_after_boundary=sum(p.numel() for p in self.bank.active_parameters()),
         )
-        payload = dict(policy="cumulative_per_task_training_hard_top2_frequency",
+        payload = dict(policy="cumulative_per_task_training_gate_mass" if self.bank.freeze_metric == "gate_mass" else "cumulative_per_task_training_hard_top2_frequency",
+                       freeze_metric=self.bank.freeze_metric,
                        face_counting="reliable_only", count_views="sum_not_per_view_top2",
                        freeze_per_layer=2, can_reselect_already_frozen=True,
                        frozen_expert_dropout="follows_model_training_mode_weights_only_frozen",

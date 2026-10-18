@@ -80,3 +80,43 @@ clean1070854服务器全部322项测试通过。GPU0两任务smoke（smoke_seed0
 专家与Router SHA未变。train原阶段与独立重放mAP26.760875/27.958062逐值相同。
 新增verify_moe_activate_freeze离线验证器，在正式split推理前核对真实checkpoint权重、
 计数/mask/Top-2及与既有fresh B0的初始化/CLIP/训练样本/首批ID/主要超参数一致。
+
+## 正式启动
+
+两任务smoke、全部322项测试和checkpoint直接核验/B0配对校验通过。smoke peak reserved
+2826MiB；22份日志/非checkpoint结果已同步并逐项SHA复核，源checkpoint保留服务器。
+正式run_id为formal_seed0_20261018_01，tmux ml_moe_af_seed0_20261018，clean运行提交
+07fd35cf97a2efc416d56348a1e82a2f00572291；已进入GPU0 task0训练，8任务各30epochs。
+运行期间服务器checkout保持该提交；新增本地文档不拉入。正式指标待运行结束，不用smoke
+判断效果。训练后先核验全部阶段冻结状态，再GPU0并行full_val/full_test。
+
+## AF-v1与论文/官方MTIL实现对照（2026-10-18）
+
+对齐的是共享专家池、CLS条件Top-2 gated summation及任务后按频率累计冻结，新Router
+可复用冻结专家并训练未冻结专家。原v1是任务独立池，新AF-v1已恢复跨任务专家复用。
+以官方CVPR固定commit为参照，不混用单Router的CIL设置或MoE-Adapters++。
+
+| 维度 | 论文/官方MTIL | AF-v1 |
+|---|---|---|
+| Router条件 | task-specific，gate依赖当前CLS | task-and-view-specific，gate依赖各视图task CLS |
+| 插入范围 | 图像/文本两编码器各Transformer block | 仅视觉Task Forward索引1块 |
+| 专家读取 | 编码器MSA后的特征tokens | MSA、Drop & Replace及残差后的task CLS与恢复Selectors |
+| 图像流 | Adapter参与编码器表示更新 | Frozen Forward图像流不写回，残差仅沿Task Forward |
+| 冻结统计 | 同层对应模态池的激活次数，选Top-2 | 唯一插入层共享池，Full+Person+可靠Face实际硬激活次数相加，再总选2 |
+| 预测 | 图文相似度分类；DDAS选任务/原CLIP分支 | 原线性分类头/多标签BCE，遍历全部已见lane，三视图固定融合 |
+| 可训练模块 | Adapter/Router/noise为主要适配参数 | 除未冻结专家/当前Router外，沿用Selector、Prompt、classifier训练 |
+| 优化预算 | 官方MTIL的AdamW/迭代预算及交叉熵 | 配对MULTI-LANE Adam、30epochs/task、BCE及0.1辅助视图loss |
+
+专家结构参照官方adapter.py的down→ReLU→dropout→up及up零初始化，不能仅因论文
+使用LoRA一词就描述为对Q/K/V权重的直接低秩更新。AF-v1保留v1 raw-CLS和全task-token
+专家接口，没有叠加v4的图片证据输入/CLS-only输出。这是冻结迁移，不能自动解决旧版
+Router内容变化弱或Selector残差占优的问题；是否发生需新运行结果验证。
+
+冻结名单是旧集合与当前Top-2的并集，允许重复入选、不凑够两名新冻结专家。三视图
+原始计数汇总，Face样本少时票数较少，不是三路归一化频率等权；这是明确的迁移选择。
+两名选中专家均冻结时，MoE内部仍可训练Router，但Selector/Prompt/head也仍更新，
+不能称整个模型只训练Router；冻结专家保持输入梯度和训练期dropout语义。
+
+AF-v1相对旧v1同时改变了专家池归属和冻结策略；若后续要分离冻结本身的因果收益，
+需要同一跨任务共享池、不冻结的匹配控制，现有差值不能全部归于单一冻结操作。
+本次仅文档对照，不改服务器运行配置/代码，也不新增控制组训练。

@@ -1,5 +1,42 @@
 # 项目上下文
 
+## 2026-10-18：用户授权GPU1带权重激活冻结版本
+
+新分支codex/moe-weighted-freeze-20261018从AF-v1运行提交07fd35c创建；保留GPU0
+硬计数作业及其服务器checkout。复制本会话未提交文档，原树与主工作区用户改动不动。
+WAF-v1唯一方法改动为按当前任务训练noisy Top-2的gate权重总和排名冻结，三视图汇总
+Full/Person/可靠Face，不乘视图融合系数/输出范数，不归一化视图票数。原硬计数仍保存，
+新增float64 buffer与checkpoint/核验支持；默认hard_count保持原checkpoint schema。
+共享池22专家、单层v1接口、超参数均不变；GPU1/seed0，8task各30epochs，训练后
+val/test双进程GPU1并行。完整配置见docs/moe_weighted_freeze_experiment_20261018.md。
+已新增统计、model/runner/evaluator参数、boundary/验证器及机制测试和GPU1 launcher；
+本地两项launcher测试与语法/diff通过。下一步Git-only远程新worktree、全测及两任务smoke。
+本加权排名是本项目新变体，门控权重不是预测贡献的因果量，不宣称等同原论文硬频率。
+
+## 2026-10-18：AF-v1与论文异同对照
+
+核对论文与固定官方MTIL实现，补充AF实验文档：核心跨任务共享/CLS Top-2/频率累计
+冻结复用已对齐；仍保留MULTI-LANE单层Task Forward、task×view Router、多标签
+BCE与全部已见lane推理，无文本塔或DDAS。说明两冻结专家时基础任务参数仍更新、
+三视图原始硬计数汇总总选2，以及AF-v1相对旧v1同时改变共享范围与冻结策略的归因边界。
+仅本地文档，未修改正在运行的07fd35c服务器checkout，不需新测试/实验。
+
+## 2026-10-18：AF-v1正式8任务已启动
+
+真实两任务smoke和checkpoint/B0配对核验全部通过；322项Track-A测试通过，checkpoint
+与原阶段mAP逐值重放一致，CLIP未变，peak reserved2826MiB；22份smoke日志/结果已同步
+本地并逐项SHA验证（checkpoint留服务器）。
+正式run_id=formal_seed0_20261018_01，tmux=ml_moe_af_seed0_20261018，GPU0/seed0，
+8任务各30epochs，batch64。服务器独立worktree
+/mnt/haoyuan/workspace/multi-lane-main-moe-activate-freeze-20261018，clean运行HEAD
+07fd35cf97a2efc416d56348a1e82a2f00572291，branch/upstream一致；本地同分支HEAD一致。
+已确认进入task0真实训练，使用配对初始化SHA35af16da...，test_loaded=False。
+训练后先自动核验8个checkpoint与冻结历史/旧权重，再GPU0双进程并行固定全人群
+full_val/full_test。日志./logs/moe_activate_freeze/formal_seed0_20261018_01/；
+输出./output/moe_activate_freeze/formal_seed0_20261018_01/；外层launch.log在同日志父目录。
+运行期间服务器checkout固定，不拉入后续文档；此次状态仅追加本地文档。未合并main。
+正式结果尚未产生，不能用smoke mAP推断效果；完成后需同步正式日志/结果再作配对分析。
+
 ## 2026-10-18：AF-v1全测与两任务smoke通过
 
 服务器独立worktree clean1070854，322项Track-A测试通过。GPU0 smoke_seed0_20261018_01

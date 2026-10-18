@@ -64,7 +64,17 @@ def verify(root, expected_tasks, baseline=None):
             counts = state["adapter_bank.training_counts"][task, layer]
             samples = state["adapter_bank.training_samples"][task, layer]
             total = counts.sum(0)
-            selected = sorted(range(config["moe_num_experts"]), key=lambda i: (-int(total[i]), i))[:2]
+            scores = total
+            if config.get("moe_freeze_metric", "hard_count") == "gate_mass":
+                mass = state["adapter_bank.training_gate_mass"][task, layer]
+                assert mass.dtype == torch.float64 and bool(torch.isfinite(mass).all())
+                assert bool((mass >= 0).all()) and bool((mass <= counts.double()+1e-9).all())
+                assert torch.allclose(mass.sum(1), samples.double(), rtol=1e-6, atol=1e-5)
+                scores = mass.sum(0)
+                assert info["freeze_metric"] == "gate_mass"
+                assert info["per_view_gate_mass"] == mass.tolist()
+                assert info["freeze_scores"] == scores.tolist() == info["gate_mass"]
+            selected = sorted(range(config["moe_num_experts"]), key=lambda i: (-float(scores[i]), i))[:2]
             assert info["top2"] == selected
             assert info["counts"] == total.tolist()
             assert info["per_view_counts"] == counts.tolist()
