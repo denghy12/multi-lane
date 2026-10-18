@@ -1,10 +1,11 @@
 import copy
+from types import SimpleNamespace
 import unittest
 
 import torch
 
 from multi_lane.track_a.expert_rollback import (SupportCapture, differences,
-                                               old_coordinate_digest, rollback_experts)
+                                               old_coordinate_digest, rollback_experts, select_batches)
 from multi_lane.track_a.model import MultiLaneModel
 from multi_lane.track_a.runner import TASK_SIZES, compact_model_state_dict, tensor_state_digest
 from test_track_a_reproduction import FakeVisual
@@ -88,6 +89,13 @@ class ExpertRollbackTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             with rollback_experts(model,reference,[(0,100)]):pass
         self.assertEqual(tensor_state_digest(compact_model_state_dict(model)),sha)
+
+    def test_sparse_dataset_labels_include_class_zero_and_exclude_future_classes(self):
+        source=SimpleNamespace(targets=[[0]]*80+[[25]]*80,
+                               sample_ids=[f'train:image{i}#person=0' for i in range(160)])
+        selected=select_batches(source,1,1)
+        self.assertEqual(len(selected[0]),64)
+        self.assertTrue(all(i<80 for i in selected[0]))
 
 
 if __name__=='__main__':unittest.main()

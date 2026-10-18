@@ -1,5 +1,11 @@
 # 项目上下文
 
+## 2026-10-18：修正回滚TRAIN稀疏标签筛选
+
+第二次smoke读取了源模型并通过旧非Expert坐标核验，但在TRAIN抽样时发现dataset.targets
+是类别ID列表而非one-hot。改用项目既有_intersects，补类0/未来类排除回归测试；
+原失败产物保留，尚无正式运行/参数更新。下一次smoke使用run_id尾号03。
+
 ## 2026-10-18：只读回滚全测通过，修复smoke元数据入口
 
 ca82541服务器337项Track-A测试通过。首轮smoke在git_metadata缺少root参数时退出，

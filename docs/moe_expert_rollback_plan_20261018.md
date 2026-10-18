@@ -63,3 +63,6 @@ Expert（阴性控制）、训练后回滚全部此前未冻结Expert（覆盖�
 
 ca82541全Track-A 337项通过。首轮smoke在Git元数据root参数缺失处退出，
 没有模型前向/更新；修复后以smoke_seed0_20261018_02重跑，原失败产物保留。
+
+第二轮smoke在TRAIN稀疏类别ID筛选处退出；改用既有_intersects并补类别0测试。
+未进行模型前向或更新；下一轮run_id=smoke_seed0_20261018_03。

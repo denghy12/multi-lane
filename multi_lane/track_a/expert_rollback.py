@@ -24,7 +24,7 @@ from .model import MultiLaneModel
 from .openai_clip_loader import load_openai_clip_visual
 from .paired_transforms import move_model_inputs
 from .runner import (TASK_SIZES, LabelView, compact_model_state_dict, compute_metrics,
-                     git_metadata, seen_indices, set_seed, tensor_state_digest)
+                     _intersects, git_metadata, seen_indices, set_seed, tensor_state_digest)
 
 CONDITIONS = ('before', 'after', 'rollback_accessed', 'rollback_frozen', 'rollback_all_mutable')
 
@@ -154,7 +154,7 @@ def load(model, payload, config, boundary):
 
 def select_batches(source, boundary, count):
     classes = seen_indices(boundary - 1)
-    eligible = [i for i, y in enumerate(source.targets) if any(y[c] for c in classes)]
+    eligible = [i for i, y in enumerate(source.targets) if _intersects(y, classes)]
     groups = grouped_batches([source.sample_ids[i] for i in eligible], 64, count, 20261018 + boundary)
     return [[eligible[j] for j in group] for group in groups]
 
