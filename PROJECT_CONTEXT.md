@@ -1,5 +1,14 @@
 # 项目上下文
 
+## 2026-10-18：AF-v1全测与两任务smoke通过
+
+服务器独立worktree clean1070854，322项Track-A测试通过。GPU0 smoke_seed0_20261018_01
+已完成task0/1各2成功更新、0跳步；task0冻结9/19，task1加入4/20，旧冻结专家及旧Router
+SHA均不变；旧lane0的固定train特征relative L2漂移0.00296444，符合未冻结专家仍更新的语义。
+源CLIP保持冻结。独立checkpoint重放两任务mAP26.760875/27.958062与训练评估逐值相同，
+前者也匹配原v1 smoke。新增离线验证器直接核对checkpoint计数/累计mask/旧权重和B0
+配对元数据，launcher将在正式test前先过该门槛。正式8task尚未启动，下一步运行验证器。
+
 ## 2026-10-18：用户授权AF-v1跨任务共享池与频率冻结实验
 
 独立分支codex/moe-activate-freeze-20261018从d81b7e2创建；前一分析工作树的本会话

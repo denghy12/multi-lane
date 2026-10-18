@@ -72,3 +72,11 @@ CLS，专家逐token处理整个task-lane状态。不是v4的证据到CLS接口�
 5. 检查GPU0空闲且显存>=12GiB后启动正式作业；不终止其他用户进程。
 
 目前本地实现及launcher测试通过，准备Git同步、服务器全测及真实smoke。未启动正式训练。
+
+## 预检进展
+
+clean1070854服务器全部322项测试通过。GPU0两任务smoke（smoke_seed0_20261018_01）
+完成各2成功更新、0 skipped；task0 Top-2为9/19、task1为4/20，累计4名冻结；旧冻结
+专家与Router SHA未变。train原阶段与独立重放mAP26.760875/27.958062逐值相同。
+新增verify_moe_activate_freeze离线验证器，在正式split推理前核对真实checkpoint权重、
+计数/mask/Top-2及与既有fresh B0的初始化/CLIP/训练样本/首批ID/主要超参数一致。

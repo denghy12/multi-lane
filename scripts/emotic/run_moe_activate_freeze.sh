@@ -62,6 +62,11 @@ CUDA_VISIBLE_DEVICES="${GPU}" "${PYTHON}" -u -m multi_lane.track_a.runner \
   --save-compact-checkpoints --no-save-checkpoints \
   "${task_args[@]}" 2>&1 | tee "${LOG_ROOT}/train.log"
 
+BASELINE_RUN="${BASELINE_RUN:-../multi-lane-main-moe-task-ffn-v4-20261017/output/moe_task_ffn_v4/formal_baseline_seed0_20261017_01/train}"
+"${PYTHON}" -u -m multi_lane.track_a.verify_moe_activate_freeze "${RUN_ROOT}" \
+  --expected-tasks "${expected_tasks}" --baseline "${BASELINE_RUN}" \
+  > "${LOG_ROOT}/verification.log" 2>&1
+
 evaluate_split() {
   local split="$1" directory="$2"
   shift 2
