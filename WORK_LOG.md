@@ -1,5 +1,11 @@
 # 工作日志
 
+## 2026-10-18：只读回滚全测通过，修复smoke元数据入口
+
+ca82541服务器337项Track-A测试通过。首轮smoke在git_metadata缺少root参数时退出，
+尚未加载checkpoint/模型前向/更新；失败输出保留。补充显式项目root，下一轮使用
+smoke_seed0_20261018_02重跑完整4个方法边界及五条件；正式尚未启动。
+
 ## 2026-10-18：用户授权执行旧Expert只读回滚归因
 
 新分支codex/moe-expert-rollback-20261018从ceded63创建；原WAF脏文档复制保留，

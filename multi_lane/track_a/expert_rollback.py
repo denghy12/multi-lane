@@ -164,7 +164,7 @@ def run(args):
     if not torch.cuda.is_available(): raise RuntimeError('CUDA required')
     set_seed(0, tf32=False)
     args.output.mkdir(parents=True)
-    provenance = dict(status='running', git=git_metadata(), optimizer_steps=0,
+    provenance = dict(status='running', git=git_metadata(Path(__file__).resolve().parents[2]), optimizer_steps=0,
                       source_checkpoints={}, conditions=list(CONDITIONS), boundaries=[1, 7],
                       validation_old_classes_only=True, test_loaded=False,
                       support_split='train', support_batch_cap=64, support_batches=args.train_batches,
