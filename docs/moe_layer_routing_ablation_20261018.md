@@ -101,5 +101,36 @@ Python默认`/opt/conda/envs/ddp/bin/python`。
 Router不变、CLIP不变、0跳步、checkpoint验证集重放一致。共同对照另与旧WAF同预算
 smoke逐参数对比，确认默认k2/f2训练计算兼容。
 
-当前：本地实现及启动器三项测试通过，尚未启动服务器smoke或正式实验。
+服务器已Git-only创建独立worktree，运行提交34105463a64e642d74f8f154ddbe3455734ae5c9，
+启动时本地/服务器/upstream一致且clean。349项Track-A测试通过（18.785s）；本地
+启动器三项通过。真实smoke使用预设ID01、tmux ml_moe_ablation_smoke_20261018；
+当前正式实验尚未启动。
 完成后将日志与结果同步本地并核对SHA256，checkpoint留服务器；不自动合并main。
+
+## 运行状态（正式已启动，尚未完成）
+
+运行代码：`34105463a64e642d74f8f154ddbe3455734ae5c9`，本地/服务器/upstream同HEAD。
+服务器新checkout启动时及观测时均clean；本地仅追加状态文档，运行中不更新服务器源码。
+349项Track-A测试通过。真实smoke01六臂全部exit0/complete，各两任务×2更新、0跳步，
+B0配对、加权冻结排名、可靠Face计数、权重守恒、旧冻结权重/Router与CLIP保护通过，
+完整人群validation及原训练人群checkpoint重放均通过（mAP差<1e-7）。
+默认L1/K2/F2的task0、task1各152个状态张量与旧WAF对应smoke逐值相同；同k的f2/f3
+在task0各145个浮点模型张量逐值相同。该检查证明默认兼容及冻结参数独立，不代表收益。
+147份smoke/preflight文件及SHA清单已同步本地，逐文件新服务器SHA256核对相同，
+checkpoint未下载；目录`output/moe_layer_routing_ablation/smoke_seed0_20261018_01`。
+
+正式run_id=`formal_seed0_20261018_01`，tmux=`ml_moe_ablation_seed0_20261018`。
+六臂各8task、seed0及对应层/k/f已逐一核对，全部使用相同新提交；GPU0/1各3进程，
+初始合计各约10GB显存，其他卡作业未操作。已观察首臂task0 cycle1=84成功更新、0跳步。
+正式尚在训练，validation/test将在各臂训练完成并审计通过后自动并行执行。
+尚无正式结果，不据smoke比较继续筛选。并行作业的墙钟耗时受竞争影响，不作为严格
+独立的吞吐量基准；日志仍保留每epoch时间及实际专家负载。
+
+结果完成后同步远程正式logs/output并校验SHA，核对6×8 checkpoint和12个split曲线，
+先按预设两组比较最终/阶段平均validation与B0，再完整报告test和机制证据；不据test调参。
+
+最新启动健康快照：六臂均已完成task0的3–4个epochs，每epoch84成功更新、所有skipped=0，
+没有训练错误，运行checkout仍clean。GPU0/1各3进程、各约10GB。6个正式config、批次
+映射及运行快照共8文件与SHA清单已同步本地并校验，位于正式输出目录；该目录当前仅
+启动元数据，不能当作已完成正式结果。快照分别记录容器PID与GPU宿主机PID。
+再次只读检查原主树153项/test-only5项未提交状态数量未变，未操作其他卡作业。

@@ -15,7 +15,16 @@ from .export_compact_test_scores import _sha256, _torch_load, restore_compact_mo
 from .model import MultiLaneModel
 from .openai_clip_loader import load_openai_clip_visual
 from .runner import (TASK_SIZES, LabelView, dataset_view, evaluate,
-                     evaluate_view_diagnostics, seen_indices, set_seed, summarize_tasks)
+                     evaluate_view_diagnostics, seen_indices, set_seed, summarize_tasks, git_metadata)
+
+
+def evaluation_loader(source, batch_size, config, workers=None):
+    """Override evaluation workers without editing training provenance."""
+    resolved = config["workers"] if workers is None else workers
+    if not isinstance(resolved, int) or isinstance(resolved, bool) or resolved < 0:
+        raise ValueError("Evaluation workers must be a nonnegative integer")
+    return DataLoader(source, batch_size=batch_size, shuffle=False,
+                      num_workers=resolved, pin_memory=False, drop_last=False)
 
 
 def evaluate_split(source_run: Path, output: Path, split: str,
@@ -25,7 +34,7 @@ def evaluate_split(source_run: Path, output: Path, split: str,
                    full_cohort: bool = False,
                    disable_moe_runtime: bool = False,
                    disable_specialist_runtime: bool = False,
-                   expected_tasks: int = 8) -> dict:
+                   expected_tasks: int = 8, workers: int = None) -> dict:
     if split not in {"val", "test"}:
         raise ValueError("Split must be val or test")
     if output.exists():
@@ -107,11 +116,7 @@ def evaluate_split(source_run: Path, output: Path, split: str,
             if full_cohort else
             dataset_view(source, seen_indices(task_id), include_sample_id=True)
         )
-        loader = DataLoader(
-            view,
-            batch_size=batch_size, shuffle=False, num_workers=config["workers"],
-            pin_memory=False, drop_last=False,
-        )
+        loader = evaluation_loader(view, batch_size, config, workers)
         row = evaluate(model, loader, device, task_id, config["threshold"],
                        amp=True, score_output_path=output / "scores" / f"task{task_id}.npz")
         routing[str(task_id)] = model.adapter_bank.route_statistics() if model.adapter_bank is not None else {}
@@ -124,6 +129,8 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         print(f"split={split} task={task_id} mAP={row.mAP:.6f}", flush=True)
     result = {
         "split": split,
+        "evaluation_workers": config["workers"] if workers is None else workers,
+        "evaluation_git": git_metadata(Path(__file__).resolve().parents[2]),
         "source_run": str(source_run.resolve()),
         "source_git": config["git"],
         "checkpoint_sha256": hashes,
@@ -152,6 +159,8 @@ def main() -> None:
     parser.add_argument("--clip-checkpoint", type=Path, required=True)
     parser.add_argument("--face-manifest-root", type=Path, required=True)
     parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--workers", type=int, default=None,
+                        help="Evaluation-only override; 0 avoids shared-memory worker queues.")
     parser.add_argument("--expected-tasks", type=int, default=8,
                         help="Partial task counts are allowed only on validation.")
     parser.add_argument("--allow-smoke", action="store_true",
@@ -173,7 +182,7 @@ def main() -> None:
                    full_cohort=args.full_cohort,
                    disable_moe_runtime=args.disable_moe_runtime,
                    disable_specialist_runtime=args.disable_specialist_runtime,
-                   expected_tasks=args.expected_tasks)
+                   expected_tasks=args.expected_tasks, workers=args.workers)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,58 @@
 # 项目上下文
 
+## 2026-10-18：六臂结束核验发现共享内存故障，先补只读validation
+
+原batch实际failed。5臂训练完整（13950更新/0跳步、8 checkpoint）且test完整；
+L1_K2_F2/L1_K3_F3的val Bus error失败。Middle L5_K2_F2虽完成task7 30epochs及
+冻结，在内嵌val失败，未保存task7/最终summary，仅7 checkpoint，不能报完整结果。
+4GiB /dev/shm小于正式12评估进程预取图像估算约5.17GiB；原smoke每臂串行两类
+val未覆盖双split峰值。属执行流程故障，不能计为模型效果，保留全部失败产物。
+新独立分支fix/moe-ablation-eval-workers-20261018补--workers=0评估覆盖与运行来源
+记录；计划GPU0/1各1进程补两个已训练模型val，不训练/不动原checkpoint。
+原主树/test-only与旧实验工作树保留；协议docs/moe_ablation_results_repair_20261018.md。
+随后同步结果并分析5个完整模型、B0和有效层比较，Middle完整结果明确缺失。
+
+## 2026-10-18：六臂正式运行健康检查与本地快照
+
+已逐臂确认task0完成3–4个epochs、每epoch84次成功更新、所有skipped=0，未见错误。
+GPU0/1各3训练进程、各约10GB显存；运行worktree clean、HEAD/upstream=3410546。
+启动快照分开记录容器PID与nvidia-smi宿主机PID，防止命名空间混淆。
+6份正式config、批次映射与运行快照共8文件及SHA清单同步本地并核验一致。
+本地快照位于output/moe_layer_routing_ablation/formal_seed0_20261018_01/，仅启动
+元数据，不代表完整正式结果；val/test均待各自训练与审计完成后自动执行。
+原主树153项/test-only5项未提交改动数量未变；未操作其他GPU作业。
+PROJECT_CONTEXT/WORK_LOG/TODO_NEXT与实验协议均已同步本次状态，源码运行提交不动。
+
+## 2026-10-18：两组消融六臂正式GPU0/1已启动
+
+正式run_id=formal_seed0_20261018_01，tmux=ml_moe_ablation_seed0_20261018，
+代码34105463a64e642d74f8f154ddbe3455734ae5c9；启动时本地/服务器/upstream同HEAD，
+服务器工作树clean。GPU0并行L1_K2_F2、L5_K2_F2、L11_K2_F2；GPU1并行
+L1_K2_F3、L1_K3_F2、L1_K3_F3。每臂8task×30epochs、seed0、batch64，
+训练完成并核验8个checkpoint后在其GPU上并行完整val/test。两组共享新训练的
+L1_K2_F2对照，总计6次训练，不是7次或12个全组合；不据smoke指标筛选配置。
+
+349项Track-A测试通过；真实六臂smoke01全部exit0，均2任务各2成功更新、0跳步，
+B0初始化/采样配对、加权冻结重算、可靠Face计数、float64权重守恒、已冻结Expert/
+旧Router/CLIP保护、checkpoint验证集逐阶段重放全部通过。共同对照两个checkpoint
+各152个状态张量与旧WAF smoke逐值相同；同k不同f的task0各145个浮点模型张量
+逐值相同，证实冻结差异从任务边界开始生效。六臂参数分配相同2992000。
+147份smoke/preflight日志与结果及SHA清单同步本地，逐文件SHA256相同；checkpoint
+留服务器。正式六进程已加载正确配置，首个配置task0 cycle1=84步、0跳步；尚无
+正式八任务结果，不能报告精度收益。正式日志/输出根均为moe_layer_routing_ablation。
+运行协议docs/moe_layer_routing_ablation_20261018.md。本地仅追加状态文档；运行
+服务器固定3410546，不在长任务中更新源码；保留原主树及test-only用户未提交改动。
+实验结束后同步正式logs/output、核验完整性，再作两组对照分析，不自动扩seed/合并main。
+
+## 2026-10-18：六臂消融服务器全测通过，开始真实smoke
+
+运行代码34105463a64e642d74f8f154ddbe3455734ae5c9已Git-only同步新服务器工作树，
+与本地/upstream一致且clean。349项Track-A测试全部通过（18.785s）；本地启动器
+3项通过。服务器内存可用133GiB、磁盘539GiB，GPU0/1空闲，各约24GiB。
+六臂真实smoke预设run_id=smoke_seed0_20261018_01、各2任务×2更新，仅validation，
+tmux=ml_moe_ablation_smoke_20261018；需全部机制／重放检查及旧WAF默认兼容后
+才启动正式八任务。协议docs/moe_layer_routing_ablation_20261018.md。正式尚未启动。
+
 ## 2026-10-18：用户授权插入层与Top-k／冻结数量两组完整消融
 
 在独立分支codex/moe-layer-routing-ablation-20261018从41567eb实现；保留此前回滚
