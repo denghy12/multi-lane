@@ -34,11 +34,18 @@ def verify(root, expected_tasks, baseline=None):
             for key in ("train_sample_ids_sha256", "first_train_batch_ids_sha256", "validation_sample_ids_sha256", "sampler_seed"):
                 assert left[key] == right[key], (task, key)
         reference_config = read(baseline / "config.json")
-        for key in ("seed", "epochs_per_task", "train_batch_size", "eval_batch_size",
+        for key in ("seed", "train_batch_size", "eval_batch_size",
                     "optimizer", "learning_rate", "temperature", "training_loss_mode",
                     "view_fusion", "view_classifier_mode", "view_auxiliary_loss_weight",
                     "selector_mode", "prompt_mode", "input_normalization", "train_crop_scale"):
             assert config[key] == reference_config[key], key
+        if config["training_budget_mode"] == "epochs":
+            assert config["epochs_per_task"] == reference_config["epochs_per_task"]
+        else:
+            # A two-task smoke deliberately uses updates, not the formal epoch budget.
+            assert expected_tasks < 8 and config["optimizer_updates_per_task"] > 0
+        if expected_tasks == 8:
+            assert config["training_budget_mode"] == "epochs"
     history = read(train / "training_history.json")
     checks, previous = [], None
     for task in range(expected_tasks):
