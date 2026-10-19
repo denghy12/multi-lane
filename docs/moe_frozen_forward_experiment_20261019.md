@@ -27,3 +27,7 @@ EMOTIC，26类按5/3/3/3/3/3/3/3，seed0，train各30epoch，batch64，预期139
 ## 启动前检查
 
 完整Track-A测试；新测试覆盖图像而非任务tokens、CLS来源、下一层图像流写回、跨冻结层非零梯度、骨干无梯度、可靠Face统计、task各自Router、恢复重放、初始零输出identity。两任务真实smoke通过冻结及B0配对/保存重放、检查显存和13950预算后才正式。正式前进一步用同smoke权重检查全部8lane的eval形状/数值和成本，不用smoke判断精度。源main/test-only不动，受控代码Git-only同步，运行中服务器HEAD锁定。
+
+## 预检进展
+
+883868f在服务器独立worktree通过全部364项Track-A测试（30.623s）。真实GPU0两任务各2更新smoke已启动，首任务2步/0跳步，恢复状态保存及累计gate-mass冻3完成。smoke结束后执行probe_frozen_moe，只用val前64人物做zero-up FP32 identity和8lane资源检查；后六Router仍未训练，不保存其预测为实验精度。不读取test或改写checkpoint。
