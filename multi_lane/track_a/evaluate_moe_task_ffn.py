@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from .moe_activate_freeze import ACTIVATE_FREEZE_MODES
-
 import argparse
 import json
 from dataclasses import asdict

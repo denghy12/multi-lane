@@ -63,9 +63,9 @@ class FrozenMoETest(unittest.TestCase):
         def gates(cls,*args,**kwargs):
             gate_inputs.append(cls.detach().clone());return route(cls,*args,**kwargs)
         with torch.no_grad(),patch.object(model,'_lane_block',side_effect=record),patch.object(model.adapter_bank,'_route',side_effect=gates):
-            on=model.encode_lanes(images,False)
+            on=model._encode_single_lanes(images,False,'full')
             model.set_adapter_runtime_enabled(False)
-            off=model.encode_lanes(images,False)
+            off=model._encode_single_lanes(images,False,'full')
         self.assertTrue(torch.equal(streams[0],streams[3]))
         self.assertFalse(torch.allclose(streams[1],streams[4]))
         self.assertFalse(torch.allclose(on,off))

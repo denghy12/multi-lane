@@ -4765,3 +4765,6 @@ auxiliary监督归因，证明可修复的负迁移后才考虑梯度隔离/平�
 AF离线核验首次在epoch元数据比较处停止：smoke按updates预算，归档epochs_per_task为null；
 已修正仅正式epochs预算与30epoch基线核对，更新预算仅允许少于8task的smoke。
 不改变模型/冻结机制，无训练重跑；其余来源、checkpoint核对继续执行。
+
+2026-10-19预检：81b54b1已Git-only同步新服务器worktree；新增测试4通过/1入口错误，
+单视图探针误调用要求三视图字典的融合API，修正为单视图内部接口；无模型实现改动、尚未smoke。
