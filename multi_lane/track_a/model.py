@@ -22,7 +22,7 @@ from .adapter import (
     ParaXImageAdapterBank, TaskImageTokenAdapterBank, TaskLaneTransformerAdapterBank,
 )
 from .moe_task_ffn import TaskForwardMoEBank
-from .moe_activate_freeze import TaskForwardActivateFreezeBank
+from .moe_activate_freeze import ACTIVATE_FREEZE_MODES, TaskForwardActivateFreezeBank
 from .moe_task_ffn_v2 import TaskForwardSharedMoEBank
 from .moe_task_ffn_v3 import TaskForwardSoftMoEBank
 from .moe_task_ffn_v4 import TaskForwardEvidenceMoEBank
@@ -120,15 +120,15 @@ class MultiLaneModel(nn.Module):
             raise ValueError("MULTI-LANE normalize must be none or pre-head")
         if moe_freeze_metric not in {"hard_count", "gate_mass"}:
             raise ValueError("Unknown MoE freeze metric")
-        if moe_freeze_metric != "hard_count" and adapter_mode != "moe_task_ffn_activate_freeze":
+        if moe_freeze_metric != "hard_count" and adapter_mode not in ACTIVATE_FREEZE_MODES:
             raise ValueError("Gate-mass freezing requires the activate-freeze bank")
-        if moe_freeze_count != 2 and adapter_mode != "moe_task_ffn_activate_freeze":
+        if moe_freeze_count != 2 and adapter_mode not in ACTIVATE_FREEZE_MODES:
             raise ValueError("Custom freeze count requires the activate-freeze bank")
-        if adapter_mode not in {"disabled", "task_lane", "image_token", "moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"}:
+        if adapter_mode not in {"disabled", "task_lane", "image_token", "moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_frozen_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"}:
             raise ValueError(
                 "Invalid MULTI-LANE adapter mode"
             )
-        if adapter_mode in {"moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} and parax_mode != "disabled":
+        if adapter_mode in {"moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_frozen_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} and parax_mode != "disabled":
             raise ValueError("Task-Forward MoE must be independent of ParaX")
         post_modes = {"post", "post_static", "post_task_router", "post_task_staged", "post_task_staged_static"}
         staged_modes = {"post_task_staged", "post_task_staged_static"}
@@ -227,6 +227,13 @@ class MultiLaneModel(nn.Module):
             block_width = int(block.attn.embed_dim)
             if block_width != width or int(block.attn.num_heads) != num_heads:
                 raise ValueError("CLIP visual residual blocks are inconsistent")
+
+        if adapter_mode == "moe_frozen_ffn_activate_freeze" and (
+            len(adapter_layers) != 1 or adapter_layers[0] >= len(blocks) - 1
+            or selector_conditioning != "disabled" or view_fusion != "fixed_three_view"
+            or parax_mode != "disabled"
+        ):
+            raise ValueError("Frozen-Forward MoE requires one non-final block and fixed three views")
 
         self.visual_encoder = visual_encoder
         self.visual_encoder.requires_grad_(False)
@@ -352,8 +359,8 @@ class MultiLaneModel(nn.Module):
             # while code after model construction observes the same RNG state
             # as the adapter-disabled baseline.
             with torch.random.fork_rng(devices=[]):
-                if self.adapter_mode in {"moe_task_ffn", "moe_task_ffn_activate_freeze"}:
-                    bank_class = TaskForwardActivateFreezeBank if self.adapter_mode == "moe_task_ffn_activate_freeze" else TaskForwardMoEBank
+                if self.adapter_mode in {"moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_frozen_ffn_activate_freeze"}:
+                    bank_class = TaskForwardActivateFreezeBank if self.adapter_mode in ACTIVATE_FREEZE_MODES else TaskForwardMoEBank
                     adapter_bank = bank_class(
                         num_tasks=len(self._task_sizes), hidden_dim=self.width,
                         bottleneck_dim=adapter_bottleneck_dim,
@@ -361,7 +368,7 @@ class MultiLaneModel(nn.Module):
                         residual_scale=adapter_residual_scale,
                         num_experts=moe_num_experts, top_k=moe_top_k,
                         dropout=moe_dropout, noisy_gating=moe_noisy_gating,
-                        **({"freeze_metric": moe_freeze_metric, "freeze_count": moe_freeze_count} if self.adapter_mode == "moe_task_ffn_activate_freeze" else {}),
+                        **({"freeze_metric": moe_freeze_metric, "freeze_count": moe_freeze_count} if self.adapter_mode in ACTIVATE_FREEZE_MODES else {}),
                     )
                 elif self.adapter_mode in {"moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"}:
                     if moe_top_k != 2:
@@ -781,7 +788,9 @@ class MultiLaneModel(nn.Module):
         # aggregation and prompt attention.  Keep the residual stream itself
         # unnormalized, as in the original pre-norm transformer.
         frozen_normalized_image = block.ln_1(image_tokens)
-        if not self.parax_runtime_enabled:
+        if not self.parax_runtime_enabled and not (
+            self.adapter_mode == "moe_frozen_ffn_activate_freeze" and self.adapter_runtime_enabled
+        ):
             frozen_normalized_image = frozen_normalized_image.detach()
         selector_image_tokens = frozen_normalized_image
         normalized_lane = block.ln_1(lane_tokens)
@@ -856,9 +865,59 @@ class MultiLaneModel(nn.Module):
             )
         return lane_tokens
 
+    def _frozen_moe_image_block(self, block, image_tokens, task_id, layer_id, image_view):
+        """Frozen CLIP weights, differentiable image stream and parallel MoE."""
+        if not self.adapter_runtime_enabled or layer_id not in self.adapter_bank.layer_indices:
+            return block(image_tokens.permute(1, 0, 2)).permute(1, 0, 2)
+        sequence = image_tokens.permute(1, 0, 2)
+        normalized = block.ln_1(sequence)
+        attended = block.attn(normalized, normalized, normalized, need_weights=False,
+                              attn_mask=getattr(block, "attn_mask", None))[0]
+        post_attention = sequence + attended
+        # CLS drives Router; the SAME gate is applied to all 197 image tokens.
+        image_state = post_attention.permute(1, 0, 2)
+        delta = self.adapter_bank.delta_for_layer(
+            layer_id, image_state.unsqueeze(0), [task_id], image_view
+        )[0]
+        ordinary = post_attention + block.mlp(block.ln_2(post_attention))
+        return ordinary.permute(1, 0, 2) + delta
+
+    def _encode_frozen_moe_lanes(self, images, all_seen_lanes, image_view):
+        """Each task/view Router defines its own image stream; no oracle task choice.
+
+        Task Forward reads each block's INPUT image tokens, as in MULTI-LANE.
+        A backbone block's MoE therefore first affects Summarize in the next block.
+        Evaluate lanes sequentially to bound GPU memory; all class outputs remain.
+        """
+        if isinstance(images, dict):
+            images = images["full"]
+        initial_image_tokens = self._visual_tokens(images)
+        outputs = []
+        for task_id in self._lane_ids(all_seen_lanes):
+            image_tokens = initial_image_tokens
+            lane_tokens = self._initial_lane_tokens(images.shape[0], [task_id], image_view)
+            for layer_id, block in enumerate(self.visual_encoder.transformer.resblocks):
+                lane_tokens = self._lane_block(
+                    block, image_tokens, lane_tokens, [task_id], layer_id,
+                    image_view=image_view,
+                )
+                image_tokens = self._frozen_moe_image_block(
+                    block, image_tokens, task_id, layer_id, image_view
+                )
+            lane_tokens = self.visual_encoder.ln_post(lane_tokens)
+            if self.visual_encoder.proj is not None:
+                lane_tokens = lane_tokens @ self.visual_encoder.proj
+            feature = lane_tokens[:, :, 0].permute(1, 0, 2).float()
+            if self.normalize == "pre-head":
+                feature = F.normalize(feature, dim=-1)
+            outputs.append(feature)
+        return torch.cat(outputs, dim=1)
+
     def _encode_single_lanes(
         self, images: ModelInputs, all_seen_lanes: bool, image_view: str = "full"
     ) -> torch.Tensor:
+        if self.adapter_mode == "moe_frozen_ffn_activate_freeze":
+            return self._encode_frozen_moe_lanes(images, all_seen_lanes, image_view)
         lane_ids = self._lane_ids(all_seen_lanes)
         person_descriptor = None
         person_tokens = None
@@ -1030,7 +1089,7 @@ class MultiLaneModel(nn.Module):
             face_reliable = images.get("face_reliable")
             if face_reliable is None or face_reliable.shape != (batch,):
                 raise ValueError("Three-view fusion requires a valid Face mask")
-        if self.adapter_mode == "moe_task_ffn_activate_freeze":
+        if self.adapter_mode in ACTIVATE_FREEZE_MODES:
             self.adapter_bank.set_face_reliability(face_reliable)
         if self.view_fusion_module.residual:
             # The auxiliary views are complementary frozen feature sources.

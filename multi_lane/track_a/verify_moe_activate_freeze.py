@@ -1,6 +1,8 @@
 """Verify recorded AF task boundaries against actual compact checkpoint tensors."""
 from __future__ import annotations
 
+from .moe_activate_freeze import ACTIVATE_FREEZE_MODES
+
 import argparse
 import json
 from pathlib import Path
@@ -22,7 +24,7 @@ def verify(root, expected_tasks, baseline=None):
     audit = read(train / "activate_freeze_audit.json")
     if (summary["status"] != "complete" or summary["config"] != config
         or config["git"]["dirty"] or config["max_tasks"] != expected_tasks
-        or config["adapter_mode"] != "moe_task_ffn_activate_freeze"
+        or config["adapter_mode"] not in ACTIVATE_FREEZE_MODES
         or not protocol["frozen_visual_unchanged"]):
         raise AssertionError("Incomplete or unpaired AF provenance")
     if baseline:

@@ -12,6 +12,9 @@ from torch import nn
 from .moe_task_ffn import TaskForwardMoEBank, _Expert
 
 
+ACTIVATE_FREEZE_MODES = frozenset(("moe_task_ffn_activate_freeze", "moe_frozen_ffn_activate_freeze"))
+
+
 class _Routers(nn.Module):
     def __init__(self, width, experts):
         super().__init__()

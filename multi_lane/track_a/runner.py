@@ -7,6 +7,8 @@ benchmark protocol used for the registered MULTI-LANE Track-A result.
 
 from __future__ import annotations
 
+from .moe_activate_freeze import ACTIVATE_FREEZE_MODES
+
 import argparse
 import copy
 import hashlib
@@ -2666,7 +2668,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--adapter-mode",
-        choices=("disabled", "task_lane", "image_token", "moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"),
+        choices=("disabled", "task_lane", "image_token", "moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_frozen_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"),
         default="disabled",
     )
     parser.add_argument("--eval-workers", type=int, default=None, help="Reporting DataLoader workers; defaults to training workers")
@@ -2806,7 +2808,7 @@ def run(args: argparse.Namespace) -> None:
                              or args.protected_parax_paired_audit or args.moe_paired_audit)
     if args.moe_paired_audit and (
         TRAINING_PROTOCOL != "incremental"
-        or args.adapter_mode not in {"disabled", "moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"}
+        or args.adapter_mode not in {"disabled", "moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_frozen_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"}
         or args.parax_mode != "disabled" or args.view_fusion != "fixed_three_view"
         or args.selector_mode != "shared" or args.prompt_mode != "shared"
         or args.loss_routing != "joint_bce"
@@ -3088,7 +3090,7 @@ def run(args: argparse.Namespace) -> None:
         raise ValueError("Independent Adapter views require a positive view bottleneck")
     if args.adapter_view_mode == "independent" and args.adapter_mode != "image_token":
         raise ValueError("Independent Adapter views require Image-token Adapter mode")
-    if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} and (
+    if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_frozen_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} and (
         args.parax_mode != "disabled" or args.view_fusion != "fixed_three_view"
         or args.view_classifier_mode != "shared_post_fusion"
         or args.adapter_regularization != "none"
@@ -3202,7 +3204,7 @@ def run(args: argparse.Namespace) -> None:
 
     if args.eval_workers is not None and args.eval_workers < 0:
         raise ValueError("eval-workers must be nonnegative")
-    if args.save_pre_evaluation_recovery and (args.adapter_mode != "moe_task_ffn_activate_freeze" or not args.skip_validation_eval or not args.moe_paired_audit):
+    if args.save_pre_evaluation_recovery and (args.adapter_mode not in ACTIVATE_FREEZE_MODES or not args.skip_validation_eval or not args.moe_paired_audit):
         raise ValueError("Boundary recovery currently requires activate-freeze with skip-validation-eval")
     metadata = git_metadata(root)
     visual = load_openai_clip_visual(args.clip_checkpoint)
@@ -3894,37 +3896,41 @@ def run(args: argparse.Namespace) -> None:
         "adapter_activation": args.adapter_activation,
         "adapter_task_initialization": args.adapter_task_init,
         "adapter_target": (
+            "frozen_forward_after_attention_parallel_ffn"
+            if args.adapter_mode == "moe_frozen_ffn_activate_freeze" else
             "frozen_image_tokens_for_selector"
             if args.adapter_mode == "image_token"
             else "task_forward_after_drop_replace_parallel_ffn"
-            if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"}
+            if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_frozen_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"}
             else "task_lane_tokens" if args.adapter_mode == "task_lane" else None
         ),
-        "moe_num_experts": args.moe_num_experts if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} else None,
-        "moe_top_k": args.moe_top_k if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} else None,
-        "moe_dropout": args.moe_dropout if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} else None,
-        "moe_noisy_gating": not args.moe_disable_noise if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_activate_freeze"} else None,
+        "moe_num_experts": args.moe_num_experts if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_frozen_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} else None,
+        "moe_top_k": args.moe_top_k if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_frozen_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} else None,
+        "moe_dropout": args.moe_dropout if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_frozen_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} else None,
+        "moe_noisy_gating": not args.moe_disable_noise if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_frozen_ffn_activate_freeze"} else None,
         "moe_route_mode": args.moe_route_mode if args.adapter_mode in {"moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} else None,
         "moe_shared_fraction": args.moe_shared_fraction if args.adapter_mode in {"moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} else None,
         "moe_router_logit_scale": args.moe_router_logit_scale if args.adapter_mode in {"moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} else None,
         "moe_router_temperature": args.moe_router_temperature if args.adapter_mode in {"moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} else None,
         "moe_noise_std": args.moe_noise_std if args.adapter_mode in {"moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} else None,
         "moe_balance_weight": args.moe_balance_weight if args.adapter_mode in {"moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} else None,
-        "moe_expert_input": "layer_norm_mean_selected_image_evidence" if args.adapter_mode == "moe_task_ffn_v4" else None,
-        "moe_residual_target": "cls_only" if args.adapter_mode == "moe_task_ffn_v4" else None,
+        "moe_expert_input": "frozen_post_attention_cls_plus_patch_tokens" if args.adapter_mode == "moe_frozen_ffn_activate_freeze" else "layer_norm_mean_selected_image_evidence" if args.adapter_mode == "moe_task_ffn_v4" else None,
+        "moe_residual_target": "frozen_image_cls_plus_patches" if args.adapter_mode == "moe_frozen_ffn_activate_freeze" else "cls_only" if args.adapter_mode == "moe_task_ffn_v4" else None,
         "moe_specialist_top_k": 2 if args.adapter_mode in {"moe_task_ffn_v3", "moe_task_ffn_v4"} else None,
         "moe_specialist_gradient": "soft_top2_no_straight_through" if args.adapter_mode in {"moe_task_ffn_v3", "moe_task_ffn_v4"} else None,
-        "moe_pool_scope": "cross_task_and_view_shared" if args.adapter_mode == "moe_task_ffn_activate_freeze" else "task_local_shared_across_full_person_face"
-        if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} else None,
-        "moe_router_scope": "task_and_view_specific_cls_content"
-        if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_activate_freeze"} else
+        "moe_pool_scope": "cross_task_and_view_shared" if args.adapter_mode in ACTIVATE_FREEZE_MODES else "task_local_shared_across_full_person_face"
+        if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_frozen_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} else None,
+        "moe_router_scope": "task_and_view_specific_frozen_image_cls_content" if args.adapter_mode == "moe_frozen_ffn_activate_freeze" else "task_and_view_specific_cls_content"
+        if args.adapter_mode in {"moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_frozen_ffn_activate_freeze"} else
         "task_and_view_specific_normalized_image_evidence"
         if args.adapter_mode in {"moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} else None,
         "adapter_image_token_scope": (
             "block_ln1_cls_plus_patch_tokens"
             if args.adapter_mode == "image_token" else None
         ),
-        "adapter_writes_back_to_frozen_visual_stream": False,
+        "adapter_writes_back_to_frozen_visual_stream": args.adapter_mode == "moe_frozen_ffn_activate_freeze",
+        "moe_image_stream_scope": "task_and_view_conditioned_sequential_lanes" if args.adapter_mode == "moe_frozen_ffn_activate_freeze" else None,
+        "moe_first_affected_summarize_layer": args.adapter_layer_indices[0] + 1 if args.adapter_mode == "moe_frozen_ffn_activate_freeze" else None,
         "adapter_initialization_rng": (
             "forked_global_state"
             if args.adapter_mode != "disabled" or args.parax_mode != "disabled"
@@ -3978,12 +3984,12 @@ def run(args: argparse.Namespace) -> None:
         "adapter_parameter_counts_per_task": adapter_parameter_counts_per_task,
         "eval_workers": args.workers if args.eval_workers is None else args.eval_workers,
         "save_pre_evaluation_recovery": args.save_pre_evaluation_recovery,
-        "moe_freeze_metric": args.moe_freeze_metric if args.adapter_mode == "moe_task_ffn_activate_freeze" else None,
-        "moe_freeze_count": args.moe_freeze_count if args.adapter_mode == "moe_task_ffn_activate_freeze" else None,
-        "moe_freeze_policy": (f"cumulative_training_gate_mass_top{args.moe_freeze_count}" if args.moe_freeze_metric == "gate_mass" else f"cumulative_training_frequency_top{args.moe_freeze_count}") if args.adapter_mode == "moe_task_ffn_activate_freeze" else None,
-        "moe_freeze_counting": ("training_noisy_gate_mass_full_person_reliable_face_sum" if args.moe_freeze_metric == "gate_mass" else f"training_noisy_hard_top{args.moe_top_k}_full_person_reliable_face_sum") if args.adapter_mode == "moe_task_ffn_activate_freeze" else None,
-        "moe_freeze_tie_break": "expert_id_ascending" if args.adapter_mode == "moe_task_ffn_activate_freeze" else None,
-        "moe_allocation_accounting": "shared_pool_charged_once_to_task0_then_router_only" if args.adapter_mode == "moe_task_ffn_activate_freeze" else None,
+        "moe_freeze_metric": args.moe_freeze_metric if args.adapter_mode in ACTIVATE_FREEZE_MODES else None,
+        "moe_freeze_count": args.moe_freeze_count if args.adapter_mode in ACTIVATE_FREEZE_MODES else None,
+        "moe_freeze_policy": (f"cumulative_training_gate_mass_top{args.moe_freeze_count}" if args.moe_freeze_metric == "gate_mass" else f"cumulative_training_frequency_top{args.moe_freeze_count}") if args.adapter_mode in ACTIVATE_FREEZE_MODES else None,
+        "moe_freeze_counting": ("training_noisy_gate_mass_full_person_reliable_face_sum" if args.moe_freeze_metric == "gate_mass" else f"training_noisy_hard_top{args.moe_top_k}_full_person_reliable_face_sum") if args.adapter_mode in ACTIVATE_FREEZE_MODES else None,
+        "moe_freeze_tie_break": "expert_id_ascending" if args.adapter_mode in ACTIVATE_FREEZE_MODES else None,
+        "moe_allocation_accounting": "shared_pool_charged_once_to_task0_then_router_only" if args.adapter_mode in ACTIVATE_FREEZE_MODES else None,
         "parax_parameters": parax_parameters,
     }
     (output / "config.json").write_text(
@@ -4005,7 +4011,7 @@ def run(args: argparse.Namespace) -> None:
     paired_task_audits = {}
     protected_audit = ProtectedRouteAudit(output, device) if args.protected_parax_paired_audit else None
     freeze_audit = None
-    if args.adapter_mode == "moe_task_ffn_activate_freeze":
+    if args.adapter_mode in ACTIVATE_FREEZE_MODES:
         from .audit_moe_activate_freeze import ActivateFreezeAudit
         freeze_audit = ActivateFreezeAudit(model, train_source, output, device)
     for task_id in range(args.max_tasks):
