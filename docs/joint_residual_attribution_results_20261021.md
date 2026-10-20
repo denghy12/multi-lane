@@ -52,9 +52,9 @@ Selector、Prompt与head会适应这种新证据，专家产生的内容遂成�
 共同按TRAIN原图固定90/10 fit/holdout：task0 4854/499，task1 3972/422，task2 782/79；每epoch76/63/13步，正式每臂4560成功更新。
 只使用validation；GPU5顺序两个控制，GPU6候选。379项测试通过；三臂2task×2更新真实smoke、旧参数/CLIP保护、TRAIN原图无泄漏与跨臂配对、checkpoint重放全部通过，批次exit0。
 2026-10-21已启动正式先导pilot_seed0_20261021_01，tmux ml_retained_summary_seed0_20261021。
-GPU5当前baseline_noaux，完成后自动fixed；GPU6当前retained。完整先导指标尚未产生，不报告精度收益。
+GPU5当前baseline_noaux，完成后自动fixed；GPU6当前retained。已确认当前两组task0前6epoch正常，每epoch76次成功更新、0跳步。完整先导指标尚未产生，不报告精度收益。
 运行源22d1ae0，服务器pilot worktree clean detached该commit；后续本地文档提交不修改运行服务器。
-43份归因产物、86份smoke/预检产物已同步本地且逐文件SHA核验。
+44份归因产物、87份smoke/预检产物（含正式健康快照）已同步本地且逐文件SHA核验。
 本轮不自动扩8task、test或seed，不合并main。
 
 ## 产物与代码

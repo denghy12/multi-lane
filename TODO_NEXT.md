@@ -1,5 +1,8 @@
 # 下一步任务
 
+2026-10-21启动健康核验：两组task0已完成前6epoch，每epoch76成功更新、0跳步；配置逐项符合预锁。
+服务器pilot源码仍clean 22d1ae0，fixed在GPU5后续队列；健康快照已同步并SHA匹配，正式尚无最终结果。
+
 ## 2026-10-21：三组摘要无专家正式task0–2先导已启动
 
 379项全测通过；smoke_seed0_20261020_01三臂各2task×2更新、全部0跳步，三个训练/重放及批次exit0，
@@ -9,7 +12,7 @@
 GPU5 baseline_noaux→fixed，GPU6 retained；当前两组task0开始，formal尚无最终结果；每臂3task×30epoch/B64/Adam LR.0125/WD0/cosine/aux0，
 TRAIN原图90/10 holdout，fit4854/3972/782、每epoch76/63/13步、总4560更新；只holdout+完整validation，不自动test或8task。
 运行记录logs/retained_view_summaries/preflight/launch_pilot_seed0_20261021_01.json，日志/结果retained_view_summaries/<run>。
-归因43文件、smoke/预检86文件已同步本地并SHA匹配；模型运行与历史checkpoint均保留。
+归因44文件、smoke/预检87文件（含正式启动健康快照）已同步本地并SHA匹配；模型运行与历史checkpoint均保留。
 完成后同步新formal日志/分数，比较监督和holdout匹配的两控制，分别报告三阶段完整val与逐任务holdout，不能用train/seed_summary筛选人群混算。
 
 
