@@ -103,6 +103,17 @@ class JointSummaryTest(unittest.TestCase):
         with torch.no_grad(): actual = restored.seen_logits(images)
         self.assertTrue(torch.equal(full, actual))
 
+    def test_sparse_dispatch_supports_mixed_precision_backward(self):
+        model = self.model('moe'); model.activate_task(0)
+        with torch.autocast('cpu', dtype=torch.bfloat16):
+            loss = model.current_all_logits(self.images()).float().square().mean()
+        loss.backward()
+        self.assertTrue(torch.isfinite(loss))
+        self.assertTrue(all(torch.isfinite(p.grad).all() for p in model.joint_summary_bank.parameters()
+                            if p.grad is not None))
+        self.assertTrue(any(p.grad is not None and p.grad.abs().sum() > 0
+                            for p in model.joint_summary_bank.parameters()))
+
     def test_hard_load_counts_dispatched_experts_even_at_zero_weight(self):
         model = self.model('moe'); model.activate_task(0); model.eval()
         with torch.no_grad():

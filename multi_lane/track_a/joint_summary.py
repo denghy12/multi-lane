@@ -68,7 +68,7 @@ class JointSummaryLayer(nn.Module):
                 rows, slots = torch.where(indices == expert_id)
                 if rows.numel():
                     contribution = expert(evidence[rows]) * selected_weights[rows, slots, None, None]
-                    delta = delta.index_add(0, rows, contribution)
+                    delta = delta.index_add(0, rows, contribution.to(delta.dtype))
         return base + self.scale * delta, gates, base, self.scale * delta, indices
 
 
