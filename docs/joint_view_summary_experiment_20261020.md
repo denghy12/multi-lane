@@ -99,3 +99,12 @@ validation gate统计，不能只凭训练累计统计作结论。
 
 smoke02固定融合完成双validation重放；GPU退出后利用率窗口延迟导致单次idle检查误拒绝后续MoE启动。
 启动器增加最多60秒等待，不杀外部作业；核心模型未改。补齐缺少MoE短跑使用独立run ID，已通过的控制组不重训。
+
+## 最新预检结论（正式前锁定）
+375项Track-A全测通过（8项新机制测试）。同一clean 9055ebc下，baseline_noaux/fixed/dense的smoke02及
+MoE的smoke03均完成2task×2成功更新、0跳步、来源配对/CLIP与旧融合保护/恢复核验，双validation并发及
+checkpoint重放差严格0；8个源checkpoint SHA前后一致。早期失败批次保留原exit1状态。
+训练峰值仅两任务短跑：baseline_noaux2575.65MiB、fixed1805.83MiB、dense1948.04MiB、MoE2145.92MiB。
+固定MoE checkpoint的24个任务层gate均有样本差异，此处只证明机制可运行，不代表泛化或融合收益。
+GPU idle guard短暂利用率延迟/持续外部占用两项模拟检查通过；bf0ad7d没有改变模型或训练数学。
+正式计划formal_seed0_20261020_01，tmux ml_joint_summary_seed0_20261020；需实际启动后核对首epoch84步/0跳步。
