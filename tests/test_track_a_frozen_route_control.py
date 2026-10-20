@@ -48,7 +48,9 @@ class FrozenRouteControlTest(unittest.TestCase):
         first = build(config, copy.deepcopy(visual)); first.activate_task(0)
         images = self.images()
         first.train()
-        with torch.no_grad(): first.current_all_logits_with_views(images)
+        # Build a finalized synthetic training state; the bank deliberately does
+        # not count no-grad diagnostic forwards as training activations.
+        first.current_all_logits_with_views(images)
         first.adapter_bank.finish_task(0); first.eval()
         state = first.state_dict()
         self.assertEqual(state['adapter_bank.freeze_topk'].shape, (8, 1, 3))

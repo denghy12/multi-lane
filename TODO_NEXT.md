@@ -2116,3 +2116,5 @@ AF离线核验首次在epoch元数据比较处停止：smoke按updates预算，�
 2. GPU0正式task0/2/7三条件完整validation，TRAIN锁表在任何val读取前完成；no_grad、0训练更新、无test，bootstrap500。
 3. 同步完整日志/分数及SHA，比较dynamic−fixed/off及Full/Person/可靠Face/融合。未通过内容路由收益门槛不追加训练。
 4. 独立image_token Adapter当前关闭、与MoE模式互斥；是否叠加在MoE单独有效后另立对照，不能本轮混入。
+
+2026-10-20预检：首次完整367项测试中366通过，新增schema恢复测试的合成训练前向误用no_grad，按设计不累计训练激活，finish_task因此拒绝空计数。已修正测试准备步骤，不改变模型/真实诊断逻辑；未启动真实smoke或正式验证，失败日志保留。
