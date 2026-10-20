@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${ROOT}"
 PYTHON="${PYTHON:-/opt/conda/envs/ddp/bin/python}"
-GPU="${GPU:-0}"
+GPU="${GPU:-5}"
 [[ "${GPU}" =~ ^[56]$ && "${SEED:-0}" == 0 ]] || { echo "Joint summary experiment uses GPU5/6, seed0" >&2; exit 2; }
 ARM="${ARM:-fixed}"
 case "${ARM}" in
