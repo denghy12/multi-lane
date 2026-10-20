@@ -19,3 +19,25 @@ GPU5运行dense，GPU6运行moe，分别on→原预测逐数组精确重放→of
 无Expert/Router/可学习视图embedding，无跨任务可变共享模块，Frozen Forward及分类头位置保留。
 注意力序列11→31，不能预先宣称提速；取消提前平均，也改变注意力中三视图的隐式先验。
 先task0–2的TRAIN原图分组holdout与监督匹配对照；不自动开启8task或test。正式训练配置启动前补齐。
+
+## 三组摘要保留的先导配置（启动前锁定）
+
+三臂均重新训练：baseline_noaux保留三路Task Forward及末端固定融合；fixed单路径提前固定平均摘要；retained单路径保留三组摘要供注意力读取。
+三臂均禁用Expert、Router、ParaX和image-token Adapter，aux0，仅联合BCE；不与含aux.1的历史B0作单因素归因。
+数据EMOTIC，seed0，task0–2（类别数5/3/3），每任务30epoch，B64；三臂共同使用固定TRAIN原图分组约90/10 fit/holdout。
+盐emotic-reliability-calibration-v1，按原图SHA256固定划分，所有任务/视图相同规则；holdout图片任何person都不参与任何任务更新。
+--calibration-fraction 0.1 --save-calibration-scores，逐任务保存fit/holdout完整ID与跨任务无泄漏核验。
+与历史全TRAIN实验人群不同，三臂都重跑；不将历史全TRAIN曲线当新候选的严格匹配控制。
+Adam，主LR.0125（source .05×64/256），weight decay0，每任务cosine无warmup/min0，30epoch；AMP初始scale1024/growth1e9，TF32。
+每层10个Selectors，前5层10个prefix prompts，共12层；CLIP ViT-B/16冻结；head为共享post-fusion，pre-head归一化。
+retained无额外融合参数，不使用expert数/融合LR/scale等保留CLI占位参数，config中effective专家数0/residual false。
+Full使用原随机crop(.05,1)，Person letterbox margin.15，无Person jitter；Face来自既有manifest可靠性，Face无效则softmax前mask。
+workers训练2、评估0；内部逐epoch validation关闭，任务结束保存完整可恢复状态后再报告seen-positive val及TRAIN holdout。
+每臂完成后外置完整validation2397人、三个边界均保存预测；不加载test。固定30epoch，不用val选最佳epoch。
+GPU5 baseline_noaux→fixed；GPU6 retained，两条队列并行；先三臂各2task×2更新smoke并做checkpoint精确重放，再正式。
+入口RUN_ID=... bash scripts/emotic/run_retained_view_summaries_batch.sh；smoke加SMOKE_UPDATES=2。
+输入../multi-lane-main/datasets/EMOTIC，CLIP ../CODE_DDP/pretrained/clip/ViT-B-16.pt，Face manifest同旧实验。
+日志logs/retained_view_summaries/<run>，结果output/retained_view_summaries/<run>/<arm>/{train,full_val}。
+产物含3份compact、3份验证前完整恢复、holdout/val预测、训练history、初始化/样本配对、冻结CLIP及旧任务保护核验。
+停止规则：不自动扩8task/test；仅当候选在holdout与完整validation对匹配三路/单路控制显示一致改善，再讨论完整训练。
+可用性与端点信息保留是这次变量；无新自由残差，注意力token数变化及取消固定视图先验都要一并报告。

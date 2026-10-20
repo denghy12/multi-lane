@@ -749,6 +749,7 @@ class MultiLaneModel(nn.Module):
         lane_ids: Sequence[int],
         layer_id: int,
         image_view: str = "full",
+        key_valid: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         task_count, batch, token_count, width = task_tokens.shape
         attention = block.attn
@@ -787,6 +788,15 @@ class MultiLaneModel(nn.Module):
             key = torch.cat([prompt[0], key], dim=-2)
             value = torch.cat([prompt[1], value], dim=-2)
         weights = torch.matmul(query, key.transpose(-2, -1))
+        if key_valid is not None:
+            if key_valid.shape != (batch, token_count) or key_valid.dtype != torch.bool:
+                raise ValueError("Invalid task attention key validity mask")
+            if not bool(key_valid[:, 0].all()):
+                raise ValueError("Task CLS must remain a valid attention key")
+            # Prompt K/V are always valid; invalid view tokens never enter softmax.
+            prefix = key.shape[-2] - token_count
+            valid = F.pad(key_valid, (prefix, 0), value=True)
+            weights = weights.masked_fill(~valid[None, :, None, None, :], float("-inf"))
         weights = torch.softmax(weights * (self.head_dim**-0.5), dim=-1)
         output = torch.matmul(weights, value)
         output = output.permute(0, 1, 3, 2, 4).reshape(
@@ -864,15 +874,18 @@ class MultiLaneModel(nn.Module):
                                         task_cls, selectors, selected, image_view)
 
     def _task_attention_ffn(self, block, lane_tokens, lane_ids, layer_id,
-                            task_cls, selectors, selected, image_view="full"):
+                            task_cls, selectors, selected, image_view="full",
+                            summary_valid=None):
         """Released task attention, Drop & Replace and FFN after Summarize."""
         summarized = torch.cat([task_cls, selected], dim=2)
+        attention_kwargs = {} if summary_valid is None else {"key_valid": summary_valid}
         attention_output = self._prompt_attention(
             block,
             summarized,
             lane_ids,
             layer_id,
             image_view=image_view,
+            **attention_kwargs,
         )
         # Released drop-and-replace: retain the attended CLS update and put the
         # selector tokens back before the residual addition.
@@ -924,8 +937,15 @@ class MultiLaneModel(nn.Module):
                 similarity = torch.einsum("tbsc,bnc->tbsn", selectors, image) * (self.width ** -0.5)
                 selected.append(torch.einsum("bnc,tbsn->tbsc", image, similarity.softmax(-1)))
             joint = self.joint_summary_bank(layer, torch.stack(selected, dim=3), lane_ids, valid)
-            lanes = self._task_attention_ffn(block, lanes, lane_ids, layer,
-                                             normalized[:, :, :1], selectors, joint)
+            if self.joint_summary_mode == "retained":
+                summary_valid = valid[:, :, None].expand(-1, -1, self.num_selectors).flatten(1)
+                summary_valid = F.pad(summary_valid, (1, 0), value=True)
+                lanes = self._task_attention_ffn(
+                    block, lanes, lane_ids, layer, normalized[:, :, :1], selectors, joint,
+                    summary_valid=summary_valid)
+            else:
+                lanes = self._task_attention_ffn(block, lanes, lane_ids, layer,
+                                               normalized[:, :, :1], selectors, joint)
             # Frozen image computation is independent of task count and never
             # participates in autograd. Last block output is not read again.
             if layer + 1 < len(self.visual_encoder.transformer.resblocks):

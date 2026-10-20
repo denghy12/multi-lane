@@ -24,7 +24,7 @@ class JointSummaryTest(unittest.TestCase):
                 'face_reliable': torch.tensor([True, False, True])}
 
     def test_full_only_reduces_to_unmodified_single_lane(self):
-        for mode in ('fixed', 'dense', 'moe'):
+        for mode in ('fixed', 'dense', 'moe', 'retained'):
             model = self.model(mode); model.activate_task(0); model.eval()
             images = self.images()
             images['joint_view_valid'] = torch.tensor([[True, False, False]] * 3)
@@ -129,7 +129,7 @@ class JointSummaryTest(unittest.TestCase):
         original = self.model('disabled'); state = torch.get_rng_state()
         base = tensor_state_digest({n: v for n, v in original.state_dict().items()
                                    if n == 'selectors' or n.startswith(('prompts.', 'head.'))})
-        for mode in ('fixed', 'dense', 'moe'):
+        for mode in ('fixed', 'dense', 'moe', 'retained'):
             model = self.model(mode)
             self.assertTrue(torch.equal(state, torch.get_rng_state()))
             self.assertEqual(base, tensor_state_digest({n: v for n, v in model.state_dict().items()

@@ -45,6 +45,10 @@ class JointSummaryLayer(nn.Module):
     def forward(self, summaries, valid):
         # [B,M,3,D]. Mask BEFORE normalization, the router, and expert MLPs.
         clean = summaries.masked_fill(~valid[:, None, :, None], 0)
+        if self.mode == 'retained':
+            # Preserve separate Full/Person/Face groups, without learned fusion.
+            out = clean.permute(0, 2, 1, 3).flatten(1, 2)
+            return out, None, out, torch.zeros_like(out), None
         evidence = F.layer_norm(clean.float(), (self.width,)).to(clean.dtype)
         mask_features = valid[:, None].expand(-1, clean.shape[1], -1).to(clean.dtype)
         evidence = torch.cat((evidence.flatten(-2), mask_features), dim=-1)
@@ -73,7 +77,7 @@ class JointSummaryLayer(nn.Module):
 
 
 class TaskJointSummaryBank(nn.Module):
-    MODES = ('disabled', 'fixed', 'dense', 'moe')
+    MODES = ('disabled', 'fixed', 'dense', 'moe', 'retained')
 
     def __init__(self, num_tasks, num_layers, width, mode, bottleneck=16,
                  num_experts=4, top_k=2, scale=0.1):

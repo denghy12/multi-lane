@@ -2549,7 +2549,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         ),
         default="disabled",
     )
-    parser.add_argument("--joint-summary-mode", choices=("disabled", "fixed", "dense", "moe"), default="disabled")
+    parser.add_argument("--joint-summary-mode", choices=("disabled", "fixed", "dense", "moe", "retained"), default="disabled")
     parser.add_argument("--joint-summary-bottleneck", type=int, default=16)
     parser.add_argument("--joint-summary-experts", type=int, default=4)
     parser.add_argument("--joint-summary-top-k", type=int, default=2)
@@ -3647,6 +3647,11 @@ def run(args: argparse.Namespace) -> None:
         "joint_summary_mode": args.joint_summary_mode,
         "joint_summary_bottleneck": args.joint_summary_bottleneck,
         "joint_summary_experts": args.joint_summary_experts,
+        "joint_summary_total_experts": args.joint_summary_experts if args.joint_summary_mode == "moe" else 0,
+        "joint_summary_residual_active": args.joint_summary_mode in {"dense", "moe"},
+        "joint_summary_active_experts": args.joint_summary_top_k if args.joint_summary_mode == "moe" else 0,
+        "task_attention_summary_tokens": (3 if args.joint_summary_mode == "retained" else 1) * args.num_selectors,
+        "invalid_face_mask_before_task_attention_softmax": args.joint_summary_mode == "retained",
         "joint_summary_top_k": args.joint_summary_top_k,
         "joint_summary_scale": args.joint_summary_scale,
         "joint_summary_layer_indices": list(range(len(model.visual_encoder.transformer.resblocks))) if model.joint_summary_bank is not None else [],
@@ -4070,7 +4075,7 @@ def run(args: argparse.Namespace) -> None:
             fit_indices, calibration_indices = fit_calibration_indices(
                 train_source, task_indices(task_id), args.calibration_fraction
             )
-        if args.export_calibration_view_scores:
+        if args.export_calibration_view_scores or (args.moe_paired_audit and args.calibration_fraction > 0):
             split_record = {
                 "task_id": task_id, "source_split": "train",
                 "training_exclusion": True,

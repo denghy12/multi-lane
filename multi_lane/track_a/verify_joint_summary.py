@@ -28,9 +28,19 @@ def verify(root, expected_tasks, baseline):
                 'temperature', 'training_loss_mode', 'view_fusion', 'view_classifier_mode',
                 'selector_mode', 'prompt_mode', 'input_normalization', 'train_crop_scale'):
         assert config[key] == reference_config[key], key
-    if expected_tasks == 8:
-        assert config['training_budget_mode'] == 'epochs'
+    if config['training_budget_mode'] == 'epochs':
         assert config['epochs_per_task'] == reference_config['epochs_per_task'] == 30
+    assert config.get('calibration_fraction', 0) == reference_config.get('calibration_fraction', 0)
+    if config.get('calibration_fraction', 0) > 0:
+        all_fit, all_held = set(), set()
+        for task in range(expected_tasks):
+            name = f'calibration_split_provenance/task{task}.json'
+            split = read(train / name)
+            assert split == read(baseline / name), (task, 'holdout pairing')
+            assert split['training_exclusion'] and split['source_split'] == 'train'
+            all_fit.update(x.rsplit('#person=', 1)[0] for x in split['fit_sample_ids'])
+            all_held.update(x.rsplit('#person=', 1)[0] for x in split['calibration_sample_ids'])
+        assert all_fit and all_held and not (all_fit & all_held), 'Cross-task holdout leakage'
     audits = read(train / 'joint_summary_audit.json') if config['joint_summary_mode'] != 'disabled' else {}
     previous = None
     checks = []

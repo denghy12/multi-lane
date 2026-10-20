@@ -1,5 +1,13 @@
 # 工作日志
 
+2026-10-20执行更新：375项旧测试通过。3ac8fbf只读task0 smoke两臂均exit0，on与历史预测逐数组相同；off明显下降。
+正式task0/2/7已在GPU5/6启动，服务器运行3ac8fbf保持不更新。
+本地新增retained三组摘要、softmax前Key/Value有效性mask、无新增融合参数；无效Face、全Full退化、梯度、旧任务和重载测试待远程执行。
+先导锁定三臂baseline_noaux/fixed/retained重新训练、seed0 tasks0–2各30epoch/B64/Adam LR.0125/WD0/cosine/aux0，
+共同90/10 TRAIN原图holdout，val-only；GPU5前两臂顺序，GPU6候选。需完整测试和三臂2task×2更新真实smoke通过才启动。
+所有新代码通过Git-only独立worktree，源和用户脏树保留；协议已补齐。
+
+
 ## 2026-10-20：联合残差归因与三组摘要保留候选
 
 用户已授权开始执行。新分支codex/retained-view-summaries-20261020，从f057e71创建，旧脏树保留。
