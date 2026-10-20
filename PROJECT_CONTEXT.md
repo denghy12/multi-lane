@@ -1,5 +1,16 @@
 # 项目上下文
 
+## 2026-10-20：用户授权三视图联合摘要＋单Task Forward完整对照
+
+新分支codex/joint-view-summary-20261020从635f729创建，旧脏树均保留。用户已确认GPU5/6。
+原B0复用历史；新增baseline_noaux/fixed/dense/moe四组，各seed0、8task×30epochs、B64、主LR.0125、
+融合LR.0004、aux0。每层同一组Selectors分别读取三路冻结图像证据，联合摘要进入单任务注意力/FFN；
+分类头位置保留；无跨任务可变共享模块。dense宽32，MoE每任务每层4名宽16专家softTop2，完整任务融合冻结。
+新TaskJointSummaryBank/model/runner/evaluator/verification/双GPU launcher及机制测试已编写。
+需远程全测、四组各2任务×2步真实smoke及checkpoint重放、SHA保护通过，才能正式启动；尚未启动。
+完整配置docs/joint_view_summary_experiment_20261020.md；日志/产物均joint_view_summary。
+
+
 ## 2026-10-19：用户授权Frozen Forward MoE对比实验
 
 新分支codex/moe-frozen-forward-20261019从ce70645创建，保留旧脏树。仅GPU0，seed0、8task

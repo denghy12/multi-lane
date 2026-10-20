@@ -1670,6 +1670,8 @@ def train_task(
         raise ValueError("Selector residual regularization requires shared_residual mode")
     if not math.isfinite(view_auxiliary_loss_weight) or not 0 <= view_auxiliary_loss_weight <= 1:
         raise ValueError("View auxiliary loss weight must be in [0, 1]")
+    if model.joint_summary_bank is not None and view_auxiliary_loss_weight != 0:
+        raise ValueError("Joint summaries have no independent view endpoints for auxiliary losses")
     if model.view_fusion == "disabled" and view_auxiliary_loss_weight != 0:
         raise ValueError("View auxiliary supervision requires enabled view fusion")
     if view_gradient_routing not in {"joint", "fusion_detach", "dgl"}:
@@ -2547,6 +2549,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         ),
         default="disabled",
     )
+    parser.add_argument("--joint-summary-mode", choices=("disabled", "fixed", "dense", "moe"), default="disabled")
+    parser.add_argument("--joint-summary-bottleneck", type=int, default=16)
+    parser.add_argument("--joint-summary-experts", type=int, default=4)
+    parser.add_argument("--joint-summary-top-k", type=int, default=2)
+    parser.add_argument("--joint-summary-scale", type=float, default=0.1)
     parser.add_argument("--view-fusion-hidden-dim", type=int, default=16)
     parser.add_argument("--view-fusion-learning-rate", type=float, default=4e-4)
     parser.add_argument("--view-residual-scale", type=float, default=0.1)
@@ -2804,6 +2811,13 @@ def main() -> None:
 
 
 def run(args: argparse.Namespace) -> None:
+    if args.joint_summary_mode != "disabled" and (
+        not args.moe_paired_audit or args.view_auxiliary_loss_weight != 0
+        or args.view_gradient_routing != "joint" or args.view_evaluation_diagnostics
+        or args.view_path_gradient_audit_batches or args.view_gradient_audit
+        or args.loss_routing != "joint_bce"
+    ):
+        raise ValueError("Joint summaries require paired joint BCE, zero per-view auxiliary loss and no endpoint diagnostics")
     paired_protocol_audit = (TRAINING_PROTOCOL == "joint26" or args.fixed_view_paired_audit
                              or args.protected_parax_paired_audit or args.moe_paired_audit)
     if args.moe_paired_audit and (
@@ -3204,8 +3218,8 @@ def run(args: argparse.Namespace) -> None:
 
     if args.eval_workers is not None and args.eval_workers < 0:
         raise ValueError("eval-workers must be nonnegative")
-    if args.save_pre_evaluation_recovery and (args.adapter_mode not in ACTIVATE_FREEZE_MODES or not args.skip_validation_eval or not args.moe_paired_audit):
-        raise ValueError("Boundary recovery currently requires activate-freeze with skip-validation-eval")
+    if args.save_pre_evaluation_recovery and (args.adapter_mode not in {*ACTIVATE_FREEZE_MODES, "disabled"} or not args.skip_validation_eval or not args.moe_paired_audit):
+        raise ValueError("Boundary recovery requires paired MoE/baseline training with skip-validation-eval")
     metadata = git_metadata(root)
     visual = load_openai_clip_visual(args.clip_checkpoint)
     model = MultiLaneModel(
@@ -3245,6 +3259,11 @@ def run(args: argparse.Namespace) -> None:
         selector_condition_layers=args.selector_condition_layers,
         selector_condition_hidden_dim=args.selector_condition_hidden_dim,
         selector_condition_scale=args.selector_condition_scale,
+        joint_summary_mode=args.joint_summary_mode,
+        joint_summary_bottleneck=args.joint_summary_bottleneck,
+        joint_summary_experts=args.joint_summary_experts,
+        joint_summary_top_k=args.joint_summary_top_k,
+        joint_summary_scale=args.joint_summary_scale,
         view_fusion=args.view_fusion,
         view_fusion_hidden_dim=args.view_fusion_hidden_dim,
         view_residual_scale=args.view_residual_scale,
@@ -3311,6 +3330,8 @@ def run(args: argparse.Namespace) -> None:
         if model.selector_conditioner is not None else 0
     )
     fusion_parameters_per_task = model.view_fusion_module.parameter_count_per_task()
+    if model.joint_summary_bank is not None:
+        fusion_parameters_per_task += model.joint_summary_bank.parameter_count_per_task()
     print(
         f"trainable_parameters={lane_parameters + classifier_parameters + adapter_parameters_per_task + parax_parameters + condition_parameters_per_task + fusion_parameters_per_task} "
         f"selector_mode={model.selector_mode} selectors_total={model.selectors.numel()} "
@@ -3622,7 +3643,17 @@ def run(args: argparse.Namespace) -> None:
         "full_private_classifier": (
             args.view_classifier_mode == "full_private_per_view"
         ),
+        "joint_summary_mode": args.joint_summary_mode,
+        "joint_summary_bottleneck": args.joint_summary_bottleneck,
+        "joint_summary_experts": args.joint_summary_experts,
+        "joint_summary_top_k": args.joint_summary_top_k,
+        "joint_summary_scale": args.joint_summary_scale,
+        "joint_summary_parameters_per_task": fusion_parameters_per_task if model.joint_summary_bank is not None else 0,
+        "joint_summary_task_semantics": "complete_task_local_fusion_frozen_after_task_no_cross_task_reuse" if model.joint_summary_bank is not None else None,
+        "joint_summary_router_input": "concatenated_normalized_three_view_selector_summary_means_and_validity" if args.joint_summary_mode == "moe" else None,
+        "task_attention_paths_per_task": 1 if model.joint_summary_bank is not None else 3 if args.view_fusion != "disabled" else 1,
         "view_fusion_level": (
+            "per_layer_selector_summaries_before_task_attention" if model.joint_summary_bank is not None else
             "normalized_task_lane_cls_features"
             if args.view_fusion != "disabled" else None
         ),
@@ -3632,7 +3663,7 @@ def run(args: argparse.Namespace) -> None:
         ),
         "view_fusion_learning_rate": (
             args.view_fusion_learning_rate
-            if model.view_fusion_module.learned else None
+            if (model.view_fusion_module.learned or args.joint_summary_mode in {"dense", "moe"}) else None
         ),
         "view_residual_scale": (
             args.view_residual_scale
@@ -4014,11 +4045,17 @@ def run(args: argparse.Namespace) -> None:
     if args.adapter_mode in ACTIVATE_FREEZE_MODES:
         from .audit_moe_activate_freeze import ActivateFreezeAudit
         freeze_audit = ActivateFreezeAudit(model, train_source, output, device)
+    joint_audits = {}
     for task_id in range(args.max_tasks):
         print(f"begin_task={task_id}", flush=True)
         if freeze_audit is not None:
             freeze_audit.begin(task_id)
         model.activate_task(task_id)
+        joint_before = None
+        if model.joint_summary_bank is not None:
+            joint_before = tensor_state_digest({n: v for n, v in model.joint_summary_bank.state_dict().items()
+                                               if int(n.split(".")[1]) < task_id})
+            model.joint_summary_bank.reset_statistics()
         if crossfit_enabled:
             fit_indices, calibration_indices = crossfit_fold_indices(
                 train_source,
@@ -4223,6 +4260,14 @@ def run(args: argparse.Namespace) -> None:
             ),
             recovery_state=recovery_state,
         )
+        if model.joint_summary_bank is not None:
+            joint_after = tensor_state_digest({n: v for n, v in model.joint_summary_bank.state_dict().items()
+                                              if int(n.split(".")[1]) < task_id})
+            if joint_after != joint_before:
+                raise RuntimeError("Old task fusion parameters changed")
+            joint_audits[str(task_id)] = dict(old_fusion_unchanged=True, before=joint_before,
+                                             after=joint_after, training_statistics=model.joint_summary_bank.statistics())
+            (output / "joint_summary_audit.json").write_text(json.dumps(joint_audits, indent=2) + "\n")
         if freeze_audit is not None:
             freeze_audit.finish(task_id)
         if recovery_state is not None:
@@ -4234,7 +4279,8 @@ def run(args: argparse.Namespace) -> None:
                                paired_task_audits=paired_task_audits,
                                initial_selector_prompt_classifier_sha256=base_initialization_digest,
                                frozen_visual_sha256_before=frozen_visual_before,
-                               activate_freeze_audit=freeze_audit.rows),
+                               activate_freeze_audit=freeze_audit.rows if freeze_audit is not None else None,
+                               joint_summary_audit=joint_audits),
                           output / "recovery_checkpoints" / f"task{task_id}_before_reporting.pth")
             del recovery_state
             print(f"TASK_RECOVERY_SAVED task={task_id} before_reporting=1", flush=True)

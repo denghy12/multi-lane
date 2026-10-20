@@ -87,6 +87,11 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         moe_router_logit_scale=config.get("moe_router_logit_scale") or 2.0,
         moe_router_temperature=config.get("moe_router_temperature") or 1.0,
         moe_noise_std=config.get("moe_noise_std") if config.get("moe_noise_std") is not None else 0.5,
+        joint_summary_mode=config.get("joint_summary_mode", "disabled"),
+        joint_summary_bottleneck=config.get("joint_summary_bottleneck", 16),
+        joint_summary_experts=config.get("joint_summary_experts", 4),
+        joint_summary_top_k=config.get("joint_summary_top_k", 2),
+        joint_summary_scale=config.get("joint_summary_scale", 0.1),
         view_fusion=config["view_fusion"],
         view_classifier_mode=config["view_classifier_mode"],
     ).float().to(device)
@@ -110,6 +115,8 @@ def evaluate_split(source_run: Path, output: Path, split: str,
             model.adapter_bank.specialist_runtime_enabled = not disable_specialist_runtime
         if model.adapter_bank is not None:
             model.adapter_bank.reset_route_statistics()
+        if model.joint_summary_bank is not None:
+            model.joint_summary_bank.reset_statistics()
         view = (
             LabelView(source, range(len(source)), seen_indices(task_id),
                       include_sample_id=True)
@@ -121,10 +128,14 @@ def evaluate_split(source_run: Path, output: Path, split: str,
                        amp=True, score_output_path=output / "scores" / f"task{task_id}.npz")
         routing[str(task_id)] = model.adapter_bank.route_statistics() if model.adapter_bank is not None else {}
         rows.append(row)
-        views[str(task_id)] = evaluate_view_diagnostics(
-            model, loader, device, task_id, config["threshold"], amp=True,
-            score_output_path=output / "view_scores" / f"task{task_id}.npz",
-        )
+        if model.joint_summary_bank is not None:
+            routing[str(task_id)] = model.joint_summary_bank.statistics()
+            views[str(task_id)] = {"status": "not_applicable", "reason": "single_joint_task_path_has_no_independent_view_endpoints"}
+        else:
+            views[str(task_id)] = evaluate_view_diagnostics(
+                model, loader, device, task_id, config["threshold"], amp=True,
+                score_output_path=output / "view_scores" / f"task{task_id}.npz",
+            )
         hashes[str(task_id)] = _sha256(checkpoint)
         print(f"split={split} task={task_id} mAP={row.mAP:.6f}", flush=True)
     result = {
@@ -139,6 +150,7 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         "summary": summarize_tasks(rows),
         "view_diagnostics": views,
         "route_statistics": routing,
+        "joint_summary_mode": model.joint_summary_mode,
         "test_used_for_selection": False,
         "smoke_validation_replay": bool(allow_smoke),
         "full_cohort": bool(full_cohort),

@@ -28,6 +28,7 @@ from .moe_task_ffn_v3 import TaskForwardSoftMoEBank
 from .moe_task_ffn_v4 import TaskForwardEvidenceMoEBank
 from .selector_conditioning import TaskSelectorConditioner
 from .view_fusion import TaskwiseViewFusion
+from .joint_summary import TaskJointSummaryBank
 
 ModelInputs = Union[torch.Tensor, Dict[str, torch.Tensor]]
 
@@ -93,6 +94,11 @@ class MultiLaneModel(nn.Module):
         parax_freeze_center_after_task0: bool = False,
         parax_projector_bottleneck_dim: int = 0,
         parax_smooth_ratio_bound: float = 0.0,
+        joint_summary_mode: str = "disabled",
+        joint_summary_bottleneck: int = 16,
+        joint_summary_experts: int = 4,
+        joint_summary_top_k: int = 2,
+        joint_summary_scale: float = 0.1,
     ) -> None:
         super().__init__()
         if not task_sizes or any(int(size) <= 0 for size in task_sizes):
@@ -235,6 +241,15 @@ class MultiLaneModel(nn.Module):
         ):
             raise ValueError("Frozen-Forward MoE requires one non-final block and fixed three views")
 
+        if joint_summary_mode not in TaskJointSummaryBank.MODES:
+            raise ValueError("Invalid joint summary mode")
+        if joint_summary_mode != "disabled" and (
+            adapter_mode != "disabled" or parax_mode != "disabled"
+            or selector_conditioning != "disabled" or view_fusion != "fixed_three_view"
+            or selector_mode != "shared" or prompt_mode != "shared"
+            or view_classifier_mode != "shared_post_fusion" or detach_view_fusion_features
+        ):
+            raise ValueError("Joint summaries require shared Selectors/Prompts, three views and no other adapter")
         self.visual_encoder = visual_encoder
         self.visual_encoder.requires_grad_(False)
         self.width = width
@@ -442,6 +457,14 @@ class MultiLaneModel(nn.Module):
                 residual_scale=view_residual_scale,
                 num_classes=self.num_classes,
             )
+        self.joint_summary_mode = joint_summary_mode
+        self.joint_summary_bank = None
+        if joint_summary_mode != "disabled":
+            self.joint_summary_bank = TaskJointSummaryBank(
+                self.num_tasks, len(blocks), self.width, joint_summary_mode,
+                joint_summary_bottleneck, joint_summary_experts, joint_summary_top_k,
+                joint_summary_scale,
+            )
         self._last_fusion_weights: Optional[torch.Tensor] = None
         self._last_base_fused_logits: Optional[torch.Tensor] = None
 
@@ -495,6 +518,8 @@ class MultiLaneModel(nn.Module):
         if self.selector_conditioner is not None:
             self.selector_conditioner.restore_task(task_id)
         self.view_fusion_module.restore_task(task_id)
+        if self.joint_summary_bank is not None:
+            self.joint_summary_bank.restore_task(task_id)
         self._current_task_id = int(task_id)
 
     def restore_task(self, task_id: int) -> None:
@@ -507,6 +532,8 @@ class MultiLaneModel(nn.Module):
         if self.selector_conditioner is not None:
             self.selector_conditioner.restore_task(task_id)
         self.view_fusion_module.restore_task(task_id)
+        if self.joint_summary_bank is not None:
+            self.joint_summary_bank.restore_task(task_id)
         self._current_task_id = int(task_id)
 
     def set_adapter_runtime_enabled(self, enabled: bool) -> None:
@@ -833,6 +860,12 @@ class MultiLaneModel(nn.Module):
                 selector_image_tokens,
                 torch.softmax(similarity, dim=-1),
             )
+        return self._task_attention_ffn(block, lane_tokens, lane_ids, layer_id,
+                                        task_cls, selectors, selected, image_view)
+
+    def _task_attention_ffn(self, block, lane_tokens, lane_ids, layer_id,
+                            task_cls, selectors, selected, image_view="full"):
+        """Released task attention, Drop & Replace and FFN after Summarize."""
         summarized = torch.cat([task_cls, selected], dim=2)
         attention_output = self._prompt_attention(
             block,
@@ -864,6 +897,49 @@ class MultiLaneModel(nn.Module):
                 layer_id, normalized_residual, lane_ids
             )
         return lane_tokens
+
+    def _encode_joint_lanes(self, images, all_seen_lanes):
+        """Three task-invariant image streams; ONE evolving task lane per task."""
+        lane_ids = self._lane_ids(all_seen_lanes)
+        batch = images["full"].shape[0]
+        valid = torch.ones(batch, 3, dtype=torch.bool, device=images["full"].device)
+        valid[:, 2] = images["face_reliable"].to(dtype=torch.bool)
+        # Optional explicit intervention mask is distinct from crop condition_valid.
+        if "joint_view_valid" in images:
+            mask = images["joint_view_valid"]
+            if mask.shape != valid.shape or mask.dtype != torch.bool:
+                raise ValueError("Invalid joint view intervention mask")
+            valid &= mask
+        if not bool(valid[:, 0].all()):
+            raise ValueError("Full must remain available")
+        tokens = {name: self._visual_tokens(images[name]) for name in ("full", "person", "face")}
+        lanes = self._initial_lane_tokens(batch, lane_ids, image_view="full")
+        for layer, block in enumerate(self.visual_encoder.transformer.resblocks):
+            normalized = block.ln_1(lanes)
+            selectors = normalized[:, :, 1:]
+            selected = []
+            for name in ("full", "person", "face"):
+                with torch.no_grad():
+                    image = block.ln_1(tokens[name])
+                similarity = torch.einsum("tbsc,bnc->tbsn", selectors, image) * (self.width ** -0.5)
+                selected.append(torch.einsum("bnc,tbsn->tbsc", image, similarity.softmax(-1)))
+            joint = self.joint_summary_bank(layer, torch.stack(selected, dim=3), lane_ids, valid)
+            lanes = self._task_attention_ffn(block, lanes, lane_ids, layer,
+                                             normalized[:, :, :1], selectors, joint)
+            # Frozen image computation is independent of task count and never
+            # participates in autograd. Last block output is not read again.
+            if layer + 1 < len(self.visual_encoder.transformer.resblocks):
+                with torch.no_grad():
+                    tokens = {name: block(value.permute(1, 0, 2)).permute(1, 0, 2)
+                              for name, value in tokens.items()}
+        lanes = self.visual_encoder.ln_post(lanes)
+        if self.visual_encoder.proj is not None:
+            lanes = lanes @ self.visual_encoder.proj
+        features = lanes[:, :, 0].permute(1, 0, 2).float()
+        if self.normalize == "pre-head":
+            features = F.normalize(features, dim=-1)
+        self._last_fusion_weights = None  # There are no post-task fusion weights.
+        return features, {}
 
     def _frozen_moe_image_block(self, block, image_tokens, task_id, layer_id, image_view):
         """Frozen CLIP weights, differentiable image stream and parallel MoE."""
@@ -1089,6 +1165,8 @@ class MultiLaneModel(nn.Module):
             face_reliable = images.get("face_reliable")
             if face_reliable is None or face_reliable.shape != (batch,):
                 raise ValueError("Three-view fusion requires a valid Face mask")
+        if self.joint_summary_bank is not None:
+            return self._encode_joint_lanes(images, all_seen_lanes)
         if self.adapter_mode in ACTIVATE_FREEZE_MODES:
             self.adapter_bank.set_face_reliability(face_reliable)
         if self.view_fusion_module.residual:
@@ -1354,6 +1432,8 @@ class MultiLaneModel(nn.Module):
 
     def fusion_optimizer_parameters(self) -> Iterable[nn.Parameter]:
         yield from self.view_fusion_module.active_parameters()
+        if self.joint_summary_bank is not None:
+            yield from self.joint_summary_bank.active_parameters()
 
     def adapter_optimizer_parameters(self) -> Iterable[nn.Parameter]:
         if self.adapter_bank is not None:
@@ -1386,6 +1466,9 @@ class MultiLaneModel(nn.Module):
             for name, parameter in self.view_fusion_module.named_parameters()
             if parameter.requires_grad
         )
+        if self.joint_summary_bank is not None:
+            names.extend(f"joint_summary_bank.{name}"
+                         for name, p in self.joint_summary_bank.named_parameters() if p.requires_grad)
         if self.adapter_bank is not None:
             names.extend(
                 f"adapter_bank.{name}"
