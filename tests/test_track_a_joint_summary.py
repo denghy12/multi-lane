@@ -103,6 +103,17 @@ class JointSummaryTest(unittest.TestCase):
         with torch.no_grad(): actual = restored.seen_logits(images)
         self.assertTrue(torch.equal(full, actual))
 
+    def test_hard_load_counts_dispatched_experts_even_at_zero_weight(self):
+        model = self.model('moe'); model.activate_task(0); model.eval()
+        with torch.no_grad():
+            for layer in model.joint_summary_bank.tasks[0]:
+                layer.router[-1].weight.zero_()
+                layer.router[-1].bias.copy_(torch.tensor([1000., 0., -1000., -2000.]))
+            model.seen_logits(self.images())
+        for row in model.joint_summary_bank.statistics().values():
+            self.assertEqual(row['hard_load'], [3., 3., 0., 0.])
+            self.assertEqual(row['soft_mass'], [3., 0., 0., 0.])
+
     def test_base_rng_initialization_and_optimizer_membership(self):
         original = self.model('disabled'); state = torch.get_rng_state()
         base = tensor_state_digest({n: v for n, v in original.state_dict().items()

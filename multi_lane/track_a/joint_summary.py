@@ -52,8 +52,9 @@ class JointSummaryLayer(nn.Module):
         weights = prior / prior.sum(-1, keepdim=True)
         base = (clean * weights[:, None, :, None]).sum(-2)
         gates = None
+        indices = None
         if self.mode == 'fixed':
-            return base, gates, base, torch.zeros_like(base)
+            return base, gates, base, torch.zeros_like(base), None
         if self.mode == 'dense':
             delta = self.experts[0](evidence)
         else:
@@ -68,7 +69,7 @@ class JointSummaryLayer(nn.Module):
                 if rows.numel():
                     contribution = expert(evidence[rows]) * selected_weights[rows, slots, None, None]
                     delta = delta.index_add(0, rows, contribution)
-        return base + self.scale * delta, gates, base, self.scale * delta
+        return base + self.scale * delta, gates, base, self.scale * delta, indices
 
 
 class TaskJointSummaryBank(nn.Module):
@@ -123,6 +124,12 @@ class TaskJointSummaryBank(nn.Module):
                            for name, value in row.items()}
             result[key]['base_norm_mean'] = result[key]['base_norm_sum'] / n
             result[key]['residual_norm_mean'] = result[key]['residual_norm_sum'] / n
+            if 'soft_mass' in row:
+                mean = row['soft_mass'] / n
+                std = (row['soft_square_mass'] / n - mean.square()).clamp_min(0).sqrt()
+                result[key]['gate_mean'] = mean.cpu().tolist()
+                result[key]['gate_std_across_images'] = std.cpu().tolist()
+                result[key]['gate_entropy_mean'] = result[key]['gate_entropy_sum'] / n
         return result
 
     def forward(self, layer_id: int, summaries: torch.Tensor,
@@ -134,16 +141,21 @@ class TaskJointSummaryBank(nn.Module):
             raise ValueError('Invalid joint summary evidence or Full validity')
         outputs = []
         for position, task in enumerate(lane_ids):
-            out, gates, base, residual = self.tasks[task][layer_id](summaries[position], valid)
+            out, gates, base, residual, indices = self.tasks[task][layer_id](summaries[position], valid)
             outputs.append(out)
             with torch.no_grad():
                 key = f'task{task}/layer{layer_id}'
                 row = dict(samples=base.new_tensor(len(base), dtype=torch.float64),
                            base_norm_sum=base.float().norm(dim=-1).mean(-1).sum().double(),
-                           residual_norm_sum=residual.float().norm(dim=-1).mean(-1).sum().double())
+                           residual_norm_sum=residual.float().norm(dim=-1).mean(-1).sum().double(),
+                           reliable_face_samples=valid[:, 2].sum().double())
                 if gates is not None:
                     row['soft_mass'] = gates.double().sum(0)
-                    row['hard_load'] = (gates > 0).double().sum(0)
+                    row['soft_square_mass'] = gates.double().square().sum(0)
+                    row['gate_entropy_sum'] = -(gates.double() * gates.double().clamp_min(1e-30).log()).sum()
+                    row['reliable_face_soft_mass'] = gates[valid[:, 2]].double().sum(0)
+                    # Count actual dispatch, including a selected zero-weight expert.
+                    row['hard_load'] = torch.bincount(indices.flatten(), minlength=self.num_experts).double()
                 if key not in self._statistics:
                     self._statistics[key] = row
                 else:

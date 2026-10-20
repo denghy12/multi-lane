@@ -84,8 +84,16 @@ evaluate_split() {
     > "${LOG_ROOT}/${directory}.log" 2>&1
 }
 if [[ -n "${SMOKE_UPDATES:-}" ]]; then
-  evaluate_split val smoke_val --full-cohort
-  evaluate_split val replay_val
+  # Two concurrent validation readers exercise the formal dual-process budget
+  # without accessing test during implementation smoke.
+  evaluate_split val smoke_val --full-cohort &
+  smoke_pid=$!
+  evaluate_split val replay_val &
+  replay_pid=$!
+  smoke_status=0; replay_status=0
+  wait "${smoke_pid}" || smoke_status=$?
+  wait "${replay_pid}" || replay_status=$?
+  [[ "${smoke_status}" == 0 && "${replay_status}" == 0 ]] || exit 1
   "${PYTHON}" - "${RUN_ROOT}" <<'REPLAY'
 import json,sys
 from pathlib import Path

@@ -3636,6 +3636,7 @@ def run(args: argparse.Namespace) -> None:
         "view_fusion": args.view_fusion,
         "view_classifier_mode": args.view_classifier_mode,
         "view_classifier_fusion_level": (
+            "single_joint_task_cls" if model.joint_summary_bank is not None else
             "post_fusion_feature"
             if args.view_classifier_mode == "shared_post_fusion"
             else "fixed_weighted_per_view_logits"
@@ -3648,6 +3649,7 @@ def run(args: argparse.Namespace) -> None:
         "joint_summary_experts": args.joint_summary_experts,
         "joint_summary_top_k": args.joint_summary_top_k,
         "joint_summary_scale": args.joint_summary_scale,
+        "joint_summary_layer_indices": list(range(len(model.visual_encoder.transformer.resblocks))) if model.joint_summary_bank is not None else [],
         "joint_summary_parameters_per_task": fusion_parameters_per_task if model.joint_summary_bank is not None else 0,
         "joint_summary_task_semantics": "complete_task_local_fusion_frozen_after_task_no_cross_task_reuse" if model.joint_summary_bank is not None else None,
         "joint_summary_router_input": "concatenated_normalized_three_view_selector_summary_means_and_validity" if args.joint_summary_mode == "moe" else None,
@@ -3672,6 +3674,7 @@ def run(args: argparse.Namespace) -> None:
         ),
         "view_fusion_parameters_per_task": fusion_parameters_per_task,
         "view_fusion_task_semantics": (
+            "task_local_per_layer_joint_fusion_frozen_after_task" if model.joint_summary_bank is not None else
             "router_k_only_fuses_task_k_lane_and_freezes_after_task"
             if args.view_fusion.startswith("soft_")
             else "task_local_classwise_logit_residual_frozen_after_task"
@@ -3692,7 +3695,7 @@ def run(args: argparse.Namespace) -> None:
         "view_auxiliary_loss_weight": args.view_auxiliary_loss_weight,
         "view_auxiliary_loss_reduction": (
             "mean_over_available_views_face_strictly_reliable"
-            if args.view_fusion != "disabled" else None
+            if args.view_fusion != "disabled" and model.joint_summary_bank is None else None
         ),
         "view_gradient_routing": args.view_gradient_routing,
         "view_fusion_features_detached": args.view_gradient_routing != "joint",
