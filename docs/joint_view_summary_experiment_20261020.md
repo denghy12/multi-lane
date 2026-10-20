@@ -96,3 +96,6 @@ validation gate统计，不能只凭训练累计统计作结论。
 
 2faeb52修复版本375项全测通过（15.746s），其中8项新机制测试。smoke01最终3组通过、MoE因上述dtype失败，batch exit1；保留。
 新版smoke_seed0_20261020_02将四组全部重跑，双validation并发测试，不接触test。
+
+smoke02固定融合完成双validation重放；GPU退出后利用率窗口延迟导致单次idle检查误拒绝后续MoE启动。
+启动器增加最多60秒等待，不杀外部作业；核心模型未改。补齐缺少MoE短跑使用独立run ID，已通过的控制组不重训。

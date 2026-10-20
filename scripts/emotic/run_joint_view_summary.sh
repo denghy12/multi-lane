@@ -13,10 +13,17 @@ case "${ARM}" in
   *) echo "Unknown arm: ${ARM}" >&2; exit 2 ;;
 esac
 "${PYTHON}" - "${GPU}" <<'GPU_CHECK'
-import subprocess,sys
-uuid,free,util=(v.strip() for v in subprocess.check_output(['nvidia-smi','-i',sys.argv[1],'--query-gpu=uuid,memory.free,utilization.gpu','--format=csv,noheader,nounits'],text=True).strip().split(','))
-busy=subprocess.check_output(['nvidia-smi','--query-compute-apps=gpu_uuid','--format=csv,noheader'],text=True).splitlines()
-assert uuid not in busy and int(free)>=12000 and int(util)<=5,'Selected GPU must be idle; no processes will be stopped'
+import subprocess,sys,time
+for attempt in range(30):
+    uuid,free,util=(v.strip() for v in subprocess.check_output(['nvidia-smi','-i',sys.argv[1],'--query-gpu=uuid,memory.free,utilization.gpu','--format=csv,noheader,nounits'],text=True).strip().split(','))
+    busy=subprocess.check_output(['nvidia-smi','--query-compute-apps=gpu_uuid','--format=csv,noheader'],text=True).splitlines()
+    if uuid not in busy and int(free)>=12000 and int(util)<=5:
+        break
+    if attempt == 0:
+        print('Waiting for previous GPU context/utilization sample to clear; no processes will be stopped',flush=True)
+    time.sleep(2)
+else:
+    raise RuntimeError(f'Selected GPU is not idle after 60s: free={free}MiB util={util}%')
 GPU_CHECK
 RUN_ID="${RUN_ID:-formal_seed0_20261020_01}"
 DATA_ROOT="${DATA_ROOT:-../multi-lane-main/datasets/EMOTIC}"
