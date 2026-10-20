@@ -1,5 +1,8 @@
 # 项目上下文
 
+379项测试在e57b3bb全部通过；复查补正旧allow_smoke单边界入口的checkpoint范围，新增同项测试覆盖。
+运行中的3ac8fbf归因未更新；先导仍须新版本全测及真实smoke后启动。
+
 2026-10-20执行更新：375项旧测试通过。3ac8fbf只读task0 smoke两臂均exit0，on与历史预测逐数组相同；off明显下降。
 正式task0/2/7已在GPU5/6启动，服务器运行3ac8fbf保持不更新。
 本地新增retained三组摘要、softmax前Key/Value有效性mask、无新增融合参数；无效Face、全Full退化、梯度、旧任务和重载测试待远程执行。

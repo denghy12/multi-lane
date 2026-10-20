@@ -38,6 +38,7 @@ def evaluate_split(source_run: Path, output: Path, split: str,
                    checkpoint_tasks=None, disable_joint_residual: bool = False) -> dict:
     if split not in {"val", "test"}:
         raise ValueError("Split must be val or test")
+    expected_tasks = 1 if allow_smoke else expected_tasks
     task_ids = list(range(expected_tasks)) if checkpoint_tasks is None else list(checkpoint_tasks)
     if (not task_ids or len(set(task_ids)) != len(task_ids)
             or any(t < 0 or t >= expected_tasks for t in task_ids)):

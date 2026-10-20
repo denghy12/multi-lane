@@ -93,6 +93,9 @@ class RetainedSummaryTest(unittest.TestCase):
         for flags in ({'checkpoint_tasks':[0,2,7]}, {'disable_joint_residual':True}):
             with self.assertRaisesRegex(ValueError, 'validation-only'):
                 evaluate_split(**kwargs, **flags)
+        kwargs['split'] = 'val'
+        with self.assertRaisesRegex(ValueError, 'Invalid checkpoint selection'):
+            evaluate_split(**kwargs, allow_smoke=True, checkpoint_tasks=[1])
 
 
 if __name__ == '__main__':
