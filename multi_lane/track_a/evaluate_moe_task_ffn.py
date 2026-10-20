@@ -34,9 +34,16 @@ def evaluate_split(source_run: Path, output: Path, split: str,
                    full_cohort: bool = False,
                    disable_moe_runtime: bool = False,
                    disable_specialist_runtime: bool = False,
-                   expected_tasks: int = 8, workers: int = None) -> dict:
+                   expected_tasks: int = 8, workers: int = None,
+                   checkpoint_tasks=None, disable_joint_residual: bool = False) -> dict:
     if split not in {"val", "test"}:
         raise ValueError("Split must be val or test")
+    task_ids = list(range(expected_tasks)) if checkpoint_tasks is None else list(checkpoint_tasks)
+    if (not task_ids or len(set(task_ids)) != len(task_ids)
+            or any(t < 0 or t >= expected_tasks for t in task_ids)):
+        raise ValueError("Invalid checkpoint selection")
+    if (checkpoint_tasks is not None or disable_joint_residual) and split != "val":
+        raise ValueError("Joint residual attribution is validation-only")
     if output.exists():
         raise FileExistsError(output)
     config = json.loads((source_run / "config.json").read_text())
@@ -96,6 +103,12 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         view_classifier_mode=config["view_classifier_mode"],
     ).float().to(device)
     model.assert_visual_frozen()
+    if disable_joint_residual:
+        if config.get("joint_summary_mode") not in {"dense", "moe"}:
+            raise ValueError("Residual intervention requires learned joint summaries")
+        for task in model.joint_summary_bank.tasks:
+            for layer in task:
+                layer.scale = 0.0
     source = make_source(config, data_root, face_manifest_root, split)
     output.mkdir(parents=True)
     (output / "scores").mkdir()
@@ -104,8 +117,9 @@ def evaluate_split(source_run: Path, output: Path, split: str,
     views = {}
     routing = {}
     hashes = {}
-    for task_id in range(expected_tasks):
+    for task_id in task_ids:
         checkpoint = source_run / "compact_checkpoints" / f"task{task_id}.pth"
+        before_hash = _sha256(checkpoint)
         payload = _torch_load(checkpoint)
         restore_compact_model_state(model, payload, task_id, config["git"])
         model.eval()
@@ -137,6 +151,8 @@ def evaluate_split(source_run: Path, output: Path, split: str,
                 score_output_path=output / "view_scores" / f"task{task_id}.npz",
             )
         hashes[str(task_id)] = _sha256(checkpoint)
+        if hashes[str(task_id)] != before_hash:
+            raise RuntimeError("Source checkpoint changed during attribution")
         print(f"split={split} task={task_id} mAP={row.mAP:.6f}", flush=True)
     result = {
         "split": split,
@@ -151,6 +167,9 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         "view_diagnostics": views,
         "route_statistics": routing,
         "joint_summary_mode": model.joint_summary_mode,
+        "checkpoint_tasks": task_ids,
+        "joint_residual_runtime_enabled": not disable_joint_residual,
+        "summary_is_selected_boundaries_only": checkpoint_tasks is not None,
         "test_used_for_selection": False,
         "smoke_validation_replay": bool(allow_smoke),
         "full_cohort": bool(full_cohort),
@@ -183,6 +202,10 @@ def main() -> None:
                         help="Evaluate the same checkpoints with the MoE residual off.")
     parser.add_argument("--disable-specialist-runtime", action="store_true",
                         help="V3 validation ablation: retain half-weight shared expert only.")
+    parser.add_argument("--checkpoint-tasks", type=int, nargs="+", default=None,
+                        help="Validation-only selected checkpoint boundaries.")
+    parser.add_argument("--disable-joint-residual", action="store_true",
+                        help="Zero every task-local joint residual scale in memory only.")
     args = parser.parse_args()
     if args.allow_smoke and args.split != "val":
         parser.error("Smoke replay is validation-only")
@@ -194,7 +217,9 @@ def main() -> None:
                    full_cohort=args.full_cohort,
                    disable_moe_runtime=args.disable_moe_runtime,
                    disable_specialist_runtime=args.disable_specialist_runtime,
-                   expected_tasks=args.expected_tasks, workers=args.workers)
+                   expected_tasks=args.expected_tasks, workers=args.workers,
+                   checkpoint_tasks=args.checkpoint_tasks,
+                   disable_joint_residual=args.disable_joint_residual)
 
 
 if __name__ == "__main__":
