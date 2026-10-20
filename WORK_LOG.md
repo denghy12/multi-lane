@@ -1,5 +1,31 @@
 # 工作日志
 
+## 2026-10-21：三组摘要无专家正式task0–2先导已启动
+
+379项全测通过；smoke_seed0_20261020_01三臂各2task×2更新、全部0跳步，三个训练/重放及批次exit0，
+完整可恢复状态、旧参数与CLIP保护、原图holdout跨任务无泄漏、初始化/采样配对、checkpoint重放均通过。
+正式run_id=pilot_seed0_20261021_01，tmux=ml_retained_summary_seed0_20261021，源22d1ae0c70f16d45ce0f41c830dc9869711d3270。
+远程/mnt/haoyuan/workspace/multi-lane-main-retained-view-summary-pilot-20261020，clean detached运行源；本地分支codex/retained-view-summaries-20261020。
+GPU5 baseline_noaux→fixed，GPU6 retained；当前两组task0开始，formal尚无最终结果；每臂3task×30epoch/B64/Adam LR.0125/WD0/cosine/aux0，
+TRAIN原图90/10 holdout，fit4854/3972/782、每epoch76/63/13步、总4560更新；只holdout+完整validation，不自动test或8task。
+运行记录logs/retained_view_summaries/preflight/launch_pilot_seed0_20261021_01.json，日志/结果retained_view_summaries/<run>。
+归因43文件、smoke/预检86文件已同步本地并SHA匹配；模型运行与历史checkpoint均保留。
+完成后同步新formal日志/分数，比较监督和holdout匹配的两控制，分别报告三阶段完整val与逐任务holdout，不能用train/seed_summary筛选人群混算。
+
+
+## 2026-10-21：联合残差三边界只读归因完成；无专家先导真实smoke中
+
+来源3ac8fbf，GPU5/6两臂正式均exit0，原动态预测三边界全部逐数组重放相同，六源checkpoint SHA不变。
+Dense on/off：task0 49.9872/38.7399，task2 40.3464/32.6391，task7 38.5627/36.0553。
+MoE on/off：48.3830/38.7092，39.8763/35.4139，38.6142/38.3423；最后差−.2719，500原图bootstrap95%[-1.3254,.6584]。
+MoE最后类别所属task0关闭−9.6350、task5+4.6942、task6+8.0022，存在抵消，不可声称每条路径无依赖。
+条件依赖不等于相对重训控制有净收益；结果支持先移除自由改写、保留三组证据的结构验证。
+正式分数/日志已同步本地；分析analysis.json及报告docs/joint_residual_attribution_results_20261021.md。
+先导代码22d1ae0的379项全测通过，远程独立pilot worktree clean detached该commit，不改运行归因源树。
+smoke_seed0_20261020_01已在GPU5/6启动三臂2task×2更新、val-only，当前初始更新有限且0跳步，尚待完整重放/跨臂核验。
+正式先导尚未启动；预算tasks0–2 30epoch，fit数4854/3972/782，每epoch76/63/13更新，共4560更新/臂。
+
+
 379项测试在e57b3bb全部通过；复查补正旧allow_smoke单边界入口的checkpoint范围，新增同项测试覆盖。
 运行中的3ac8fbf归因未更新；先导仍须新版本全测及真实smoke后启动。
 

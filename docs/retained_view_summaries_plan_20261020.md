@@ -41,3 +41,12 @@ GPU5 baseline_noaux→fixed；GPU6 retained，两条队列并行；先三臂各2
 产物含3份compact、3份验证前完整恢复、holdout/val预测、训练history、初始化/样本配对、冻结CLIP及旧任务保护核验。
 停止规则：不自动扩8task/test；仅当候选在holdout与完整validation对匹配三路/单路控制显示一致改善，再讨论完整训练。
 可用性与端点信息保留是这次变量；无新自由残差，注意力token数变化及取消固定视图先验都要一并报告。
+
+## 执行记录：2026-10-21
+
+只读两臂三边界完成，on逐值重放、off残差范数全为0、六源SHA及用户主树/test-only状态SHA不变。
+结果见docs/joint_residual_attribution_results_20261021.md。
+379项全测与smoke三臂各2task×2更新/0跳步、所有配对/holdout/重放核验通过，批次exit0。
+正式pilot_seed0_20261021_01已在GPU5/6启动，源22d1ae0，tmux ml_retained_summary_seed0_20261021。
+服务器独立pilot树detached该commit且clean，后续文档更新不修改运行树。
+三臂各3task×30epoch、4560更新；只holdout/validation，正式结果尚未产生。
