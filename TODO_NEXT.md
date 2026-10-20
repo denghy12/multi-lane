@@ -2109,3 +2109,10 @@ AF离线核验首次在epoch元数据比较处停止：smoke按updates预算，�
 2026-10-19：883868f完整364项Track-A测试通过（30.623s），GPU0两任务各2步smoke已启动。
 首任务2更新/0跳步、gate-mass冻结3名成功，验证前恢复状态已保存。新增只读真实图像零输出
 恒等与8lane形状/资源探针；后6任务Router未训练，明确仅资源检查、不报告准确率。
+
+
+## 最新执行计划（2026-10-20，Frozen路由归因）
+1. 远程独立worktree通过全部Track-A测试及9条件GPU0 smoke，动态重放原val逐值一致，模型/源SHA不变。
+2. GPU0正式task0/2/7三条件完整validation，TRAIN锁表在任何val读取前完成；no_grad、0训练更新、无test，bootstrap500。
+3. 同步完整日志/分数及SHA，比较dynamic−fixed/off及Full/Person/可靠Face/融合。未通过内容路由收益门槛不追加训练。
+4. 独立image_token Adapter当前关闭、与MoE模式互斥；是否叠加在MoE单独有效后另立对照，不能本轮混入。

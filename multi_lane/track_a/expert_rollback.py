@@ -141,6 +141,7 @@ def build(config, visual):
              'moe_top_k', 'moe_dropout', 'moe_noisy_gating', 'view_fusion', 'view_classifier_mode')
     return MultiLaneModel(visual, TASK_SIZES,
                          moe_freeze_metric=config.get('moe_freeze_metric') or 'hard_count',
+                         moe_freeze_count=int(config.get('moe_freeze_count') or 2),
                          **{k: config[k] for k in names}).float()
 
 

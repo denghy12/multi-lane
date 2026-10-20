@@ -4772,3 +4772,7 @@ AF离线核验首次在epoch元数据比较处停止：smoke按updates预算，�
 2026-10-19：883868f完整364项Track-A测试通过（30.623s），GPU0两任务各2步smoke已启动。
 首任务2更新/0跳步、gate-mass冻结3名成功，验证前恢复状态已保存。新增只读真实图像零输出
 恒等与8lane形状/资源探针；后6任务Router未训练，明确仅资源检查、不报告准确率。
+
+
+## 2026-10-20：新建Frozen Forward路由归因分支
+已检查两端worktree及状态；远程GPU0空闲，primary153/test-only5个dirty条目保留。创建codex/moe-frozen-route-control-20261020，受控代码只经Git同步。修改late_route_control支持Frozen[1]/Top3/冻3，保留原Late[11]/Top2；加载器恢复moe_freeze_count以匹配checkpoint。新增GPU0入口及针对白名单、Top3 schema恢复、实际Frozen路径固定/关闭干预的测试。声明完整回归及9条件小样本smoke，全部通过才启动正式。无模型训练变更，不叠加独立Image Token Adapter。

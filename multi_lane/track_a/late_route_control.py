@@ -1,4 +1,8 @@
-"""TRAIN-calibrated fixed Top-2 versus dynamic/off Late MoE, validation only."""
+"""TRAIN-calibrated fixed versus dynamic/off MoE, validation only.
+
+Supports the original Late Task-Forward Top-2 and Frozen-Forward Top-3 controls.
+Neither source weights nor their original validation artifacts are modified.
+"""
 from __future__ import annotations
 import argparse
 from contextlib import contextmanager
@@ -121,6 +125,24 @@ def paired_bootstrap(paths, replicates, seed):
             for name in ('fixed','off')}
 
 
+def validate_route_config(config):
+    signature=(config['adapter_mode'],tuple(config['adapter_layer_indices']),
+               config['moe_top_k'],config['moe_freeze_count'])
+    if signature not in {
+        ('moe_task_ffn_activate_freeze',(11,),2,2),
+        ('moe_frozen_ffn_activate_freeze',(1,),3,3),
+    }:
+        raise ValueError(f'Unsupported source configuration: {signature}')
+    if config['moe_num_experts']!=22:
+        raise ValueError('Expected the locked 22-expert source')
+    if signature[0]=='moe_frozen_ffn_activate_freeze' and (
+        config.get('moe_freeze_metric')!='gate_mass'
+        or config.get('parax_mode')!='disabled'
+        or config.get('view_fusion')!='fixed_three_view'
+    ):
+        raise ValueError('Frozen source must retain weighted freezing and fixed three-view fusion without ParaX')
+
+
 def run(args):
     if args.output.exists():raise FileExistsError(args.output)
     config=json.loads((args.source/'train/config.json').read_text())
@@ -128,8 +150,7 @@ def run(args):
     verification=json.loads((args.source/'verification.json').read_text())
     assert summary['status']=='complete' and summary['config']==config
     assert verification['status']=='verified' and len(verification['checks'])==8
-    assert config['adapter_mode']=='moe_task_ffn_activate_freeze' and config['adapter_layer_indices']==[11]
-    assert config['moe_top_k']==2 and config['moe_num_experts']==22 and config['moe_freeze_count']==2
+    validate_route_config(config)
     assert config['seed']==0 and not config['git']['dirty']
     metadata=git_metadata(Path(__file__).resolve().parents[2]);assert not metadata['dirty']
     assert sorted(set(args.tasks))==args.tasks and all(t in (0,2,7) for t in args.tasks)
@@ -147,7 +168,11 @@ def run(args):
     args.output.mkdir(parents=True)
     save(args.output/'protocol.json',dict(source=str(args.source.resolve()),source_git=config['git'],evaluation_git=metadata,
         tasks=args.tasks,calibration_split='train',calibration_batches=args.calibration_batches,
-        calibration_seed=20261018,selection='per_task_view_cpu_float64_gate_mass_top2_normalized',
+        calibration_seed=args.calibration_seed,selection=f'per_task_view_cpu_float64_gate_mass_top{config["moe_top_k"]}_normalized',
+        adapter_mode=config['adapter_mode'],adapter_layer_indices=config['adapter_layer_indices'],
+        router_top_k=config['moe_top_k'],freeze_count=config['moe_freeze_count'],
+        standalone_image_token_adapter_enabled=False,
+        bootstrap_seed=args.bootstrap_seed,
         reliable_face_only=True,validation_limit=args.validation_limit,workers=0,batch_size=64,
         residual_scale=config['adapter_residual_scale'],bootstrap_replicates=args.bootstrap,test_accessed=False,optimizer_updates=0))
     # Lock every TRAIN-only route table before loading validation images.
@@ -158,7 +183,7 @@ def run(args):
         assert source_hashes[str(task)]==verification['checks'][task]['checkpoint_sha256']
         restore_compact_model_state(model,_torch_load(path),task,config['git']);model.requires_grad_(False).eval()
         before=tensor_state_digest(compact_model_state_dict(model))
-        batches=choose_training_batches(train,task,args.calibration_batches,20261018+task)
+        batches=choose_training_batches(train,task,args.calibration_batches,args.calibration_seed+task)
         capture=GateCalibration(model.adapter_bank);pixels=[]
         with torch.no_grad(),capture.capture():
             for indices in batches:
@@ -195,7 +220,7 @@ def run(args):
             task_results[mode]=dict(metric=asdict(row),view_diagnostics=views,route_statistics=routes,model_state_unchanged=True)
             save(folder/'result.json',task_results[mode]);print(f'task={task} mode={mode} val_mAP={row.mAP:.6f}',flush=True)
         model.set_adapter_runtime_enabled(True)
-        intervals=paired_bootstrap({n:args.output/f'task{task}'/n/'scores.npz' for n in task_results},args.bootstrap,20261018+task)
+        intervals=paired_bootstrap({n:args.output/f'task{task}'/n/'scores.npz' for n in task_results},args.bootstrap,args.bootstrap_seed+task)
         results[str(task)]=dict(conditions=task_results,dynamic_minus=intervals)
         save(args.output/'progress.json',results)
         assert _sha256(args.source/'train/compact_checkpoints'/f'task{task}.pth')==source_hashes[str(task)]
@@ -210,6 +235,8 @@ def main():
     for name in ('source','output','data-root','clip-checkpoint','face-manifest-root'):p.add_argument('--'+name,type=Path,required=True)
     p.add_argument('--tasks',type=int,nargs='+',default=[0,2,7]);p.add_argument('--calibration-batches',type=int,default=4)
     p.add_argument('--validation-limit',type=int,default=None);p.add_argument('--bootstrap',type=int,default=500)
+    p.add_argument('--calibration-seed',type=int,default=20261018)
+    p.add_argument('--bootstrap-seed',type=int,default=20261018)
     run(p.parse_args())
 
 if __name__=='__main__':main()

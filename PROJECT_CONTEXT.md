@@ -2975,3 +2975,7 @@ AF离线核验首次在epoch元数据比较处停止：smoke按updates预算，�
 2026-10-19：883868f完整364项Track-A测试通过（30.623s），GPU0两任务各2步smoke已启动。
 首任务2更新/0跳步、gate-mass冻结3名成功，验证前恢复状态已保存。新增只读真实图像零输出
 恒等与8lane形状/资源探针；后6任务Router未训练，明确仅资源检查、不报告准确率。
+
+
+## 2026-10-20 Frozen Forward路由只读对照
+用户授权执行task0/2/7动态Top3、TRAIN锁定固定Top3及关闭残差的validation。新独立分支codex/moe-frozen-route-control-20261020基于b63616b，保留原分支未提交分析文档。源Frozen完整训练已结束，val42.0412/avg48.3758、test31.6928/avg35.4285。仅GPU0，4 TRAIN批/阶段（人物上限64、原图分组）后完整val2397人、workers0、bootstrap500、0训练更新、无test。独立image_token Adapter未启用；MoE本身已适配图像tokens，两模式当前互斥。源main/test-only保持原dirty状态，不修改。协议docs/moe_frozen_route_control_20261020.md。
