@@ -23,9 +23,12 @@ class SummaryAttention(nn.Module):
             nn.init.xavier_uniform_(layer.weight)
         nn.init.zeros_(self.out.weight)
 
-    def forward(self, query, source):
+    def forward(self, query, source, query_override=None, query_mask=None):
         batch, count, _ = query.shape
         norm_q = F.layer_norm(query.float(), (self.width,)).to(query.dtype)
+        if query_override is not None:
+            alternative = F.layer_norm(query_override.float(), (self.width,)).to(query.dtype)
+            norm_q = torch.where(query_mask[:, None, None], alternative, norm_q)
         norm_s = F.layer_norm(source.float(), (self.width,)).to(source.dtype)
         def split(x):
             return x.reshape(batch, -1, self.heads, self.head_dim).transpose(1, 2)
@@ -95,16 +98,24 @@ class TaskCrossViewAttentionBank(nn.Module):
             out[key] = result
         return out
 
-    def forward(self, person, full, selectors, lane_ids):
+    def forward(self, person, full, selectors, lane_ids, query_override=None, query_mask=None):
         if (person.ndim != 4 or person.shape != full.shape or selectors.shape != person.shape
                 or len(lane_ids) != person.shape[0]):
             raise ValueError('Cross-view summary shapes/tasks do not match')
+        if query_override is not None and (
+            self.mode != 'person_full' or query_override.shape != person.shape
+            or query_mask is None or query_mask.dtype != torch.bool
+            or query_mask.shape != (person.shape[1],)
+        ):
+            raise ValueError('Query override is restricted to matching person_full summaries')
         result = []
         for index, task in enumerate(lane_ids):
             p, f, s = person[index], full[index], selectors[index]
             query = s if self.mode == 'task_full' else p
             source = p if self.mode == 'person_self' else f
-            delta, weights, normalized_query = self.tasks[task](query, source)
+            options = {} if query_override is None else dict(
+                query_override=query_override[index], query_mask=query_mask)
+            delta, weights, normalized_query = self.tasks[task](query, source, **options)
             delta = delta.to(p.dtype)
             result.append(p + delta)
             with torch.no_grad():

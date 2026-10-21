@@ -905,10 +905,19 @@ class MultiLaneModel(nn.Module):
             if image_view == "full":
                 summary_cache["full"] = (tuple(lane_ids), selected)
             elif image_view == "person":
-                source_ids, source = summary_cache["full"]
-                if source_ids != tuple(lane_ids):
-                    raise RuntimeError("Cross-view source task order mismatch")
-                selected = self.cross_view_bank(selected, source, selectors, lane_ids)
+                if summary_cache.get("capture_person_query_only", False):
+                    # Read the donor's pre-interaction summary. The remaining
+                    # private pass is discarded; it never changes the recipient.
+                    summary_cache["person_query"] = selected
+                else:
+                    source_ids, source = summary_cache["full"]
+                    if source_ids != tuple(lane_ids):
+                        raise RuntimeError("Cross-view source task order mismatch")
+                    override = summary_cache.get("person_query_override")
+                    mask = summary_cache.get("person_query_mask")
+                    options = {} if override is None else {
+                        "query_override": override, "query_mask": mask}
+                    selected = self.cross_view_bank(selected, source, selectors, lane_ids, **options)
         return self._task_attention_ffn(block, lane_tokens, lane_ids, layer_id,
                                         task_cls, selectors, selected, image_view)
 
@@ -1257,13 +1266,30 @@ class MultiLaneModel(nn.Module):
             )
         elif self.cross_view_bank is not None and self.cross_view_runtime_enabled:
             summary_cache = {}
+            donor_cache = {}
             try:
+                if "cross_view_query_donor" in images:
+                    if self.training or torch.is_grad_enabled() or self.cross_view_mode != "person_full":
+                        raise ValueError("Person Query intervention is no-grad evaluation-only")
+                    donor = images["cross_view_query_donor"]
+                    mask = images.get("cross_view_query_mask")
+                    if (donor.shape != images["person"].shape or mask is None
+                            or mask.dtype != torch.bool or mask.shape != (len(donor),)):
+                        raise ValueError("Invalid Query donor/mask shape")
+                    donor_cache["capture_person_query_only"] = True
+                    self._encode_single_lanes(donor, all_seen_lanes, image_view="person",
+                                              summary_cache=donor_cache)
+                    summary_cache["person_query_override"] = donor_cache["person_query"]
+                    summary_cache["person_query_mask"] = mask
                 features = {name: self._encode_single_lanes(
                     images[name], all_seen_lanes, image_view=name,
                     summary_cache=summary_cache) for name in self.view_fusion_module.view_names}
             finally:
                 summary_cache.clear()
+                donor_cache.clear()
         else:
+            if "cross_view_query_donor" in images:
+                raise ValueError("Query intervention requires enabled cross-view attention")
             features = {
                 name: self._encode_single_lanes(
                     images[name], all_seen_lanes, image_view=name

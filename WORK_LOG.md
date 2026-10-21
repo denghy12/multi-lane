@@ -1,5 +1,21 @@
 # 工作日志
 
+## 2026-10-21：开始跨视图Attention只读归因，用户要求完整8task val/test
+
+新隔离分支codex/cross-view-attention-attribution-20261021，基于74ece12；旧源码/分析文档及工作树保留。来源为formal_seed0_20261021_01任务Query/人物Query的8份seed0 checkpoint，不重新训练。
+两来源on/off残差；人物Query另做同图可见多人仅换Q。90%人体框可见+中心可见、不同身体框，按sample ID循环，标签/分数不参与配对；保留本人Person底座/Full K/V/Face/head，不可交换者保持本人Query。
+评估B64/workers0/AMP/TF32，完整val2397/test5368，GPU0四进程并行；先单元测试、历史正常预测重放与同人Query等价、task0/2/7两batch真实短跑，通过后启动正式8任务。
+协议docs/cross_view_attention_attribution_protocol_20261021.md；logs/output使用独立cross_view_attribution目录，记录源SHA、完整/可交换子集指标与状态不变，原checkpoint不覆盖。当前实现中，未启动正式评估。
+
+## 2026-10-21：人物条件跨视图注意力8任务完整结束，主方案未获提升
+
+formal_seed0_20261021_01三臂及batch均exit0；每臂240epoch/13950成功更新/0跳步，完整val2397/test5368×8边界结束；恢复/compact/配对/旧依赖保护核验通过。训练代码8fef770，remote clean74ece12，未改训练源码。
+匹配aux0基线val最终/平均42.7618/48.4159，test32.0492/35.4368；Person自注意力41.4584/46.9362、30.4556/33.2333；任务Selector读Full42.8976/48.8781、32.4993/35.9290；Person摘要读Full42.1003/47.8098、31.7499/35.1945。
+任务Query是小幅正向候选，人物Query主假设未获支持。任务Query test阶段平均仍低于原B0的36.2781。validation最终提升.1357的原图分组bootstrap95%区间[-.6825,.9042]跨0，不能称稳定提升。
+完整结果184份非checkpoint产物同步本地且SHA逐文件一致；只读离线统计/500次val原图分组bootstrap完成，没有新前向或训练。结果详见docs/person_conditioned_cross_view_results_20261021.md，分析JSON/脚本在output/person_conditioned_cross_view/analysis_20261021。
+
+本轮仅读取远程正式结果并同步，新增只读分析脚本（在ignored output下）和结果文档，三个上下文已更新；未新增分支、未提交/推送分析文档、未改业务代码，因此无需模型测试。模型源码与运行分支均保留，checkpoint未同步/修改/删除。离线指标复算与保存mAP一致；近似logit融合重组最大mAP差.0069已标注，不把移除Person项当关闭attention残差。
+
 ## 2026-10-21：人物条件跨视图注意力完整8任务已正式运行
 
 formal_seed0_20261021_01已在GPU0启动person_self/task_full/person_full三组并行，tmux=cross_view_full8_seed0_20261021。训练源码8fef770，分支codex/person-conditioned-cross-view-20261021，两端Git-only同步；后续仅更新文档。
