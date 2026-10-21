@@ -4,6 +4,7 @@ from unittest.mock import patch
 import numpy as np
 import torch
 from PIL import Image
+from multi_lane.track_a.evaluate_cross_view_attribution import attribution_inputs
 from multi_lane.track_a.model import MultiLaneModel
 from multi_lane.track_a.runner import tensor_state_digest
 from multi_lane.track_a.cross_view_query_pairs import eval_geometry,make_pairs
@@ -98,6 +99,16 @@ class AttributionTest(unittest.TestCase):
             b=m.seen_logits(dict(images,cross_view_query_donor=torch.randn_like(images['person'])*100,
                                 cross_view_query_mask=torch.zeros(3,dtype=torch.bool)))
         self.assertTrue(torch.equal(a,b))
+
+    def test_input_mover_preserves_query_mask_and_legacy_casts(self):
+        images=self.images()
+        images.update(cross_view_query_donor=images['person'],cross_view_query_mask=torch.tensor([True,False,True]))
+        moved=attribution_inputs(images,torch.device('cpu'))
+        self.assertEqual(moved['cross_view_query_mask'].dtype,torch.bool)
+        self.assertTrue(torch.equal(moved['cross_view_query_mask'],images['cross_view_query_mask']))
+        self.assertEqual(moved['face_reliable'].dtype,torch.float32)
+        images['cross_view_query_mask']=images['cross_view_query_mask'].float()
+        with self.assertRaises(ValueError):attribution_inputs(images,torch.device('cpu'))
 
     def test_geometry_matches_actual_transform_odd_image_sizes(self):
         tr=PairedFullPersonTransform(False,jitter_strength=0,jitter_probability=0)

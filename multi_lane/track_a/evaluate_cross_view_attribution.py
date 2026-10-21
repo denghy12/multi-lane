@@ -49,6 +49,17 @@ def compare_archive(arrays, source, split, task, partial=False):
     return dict(status='bitwise_identical_to_archived',samples=n)
 
 
+def attribution_inputs(images, device):
+    # The historical mover casts every field to float. Preserve this new
+    # intervention mask separately while leaving all legacy fields unchanged.
+    mask=images.get('cross_view_query_mask')
+    if mask is None:return move_model_inputs(images,device)
+    if mask.dtype!=torch.bool:raise ValueError('Query intervention mask must be boolean')
+    moved=move_model_inputs({k:v for k,v in images.items() if k!='cross_view_query_mask'},device)
+    moved['cross_view_query_mask']=mask.to(device,non_blocking=True)
+    return moved
+
+
 def evaluate_condition(model,source,plan,classes,condition,device,batch_size,smoke_batches):
     swap=condition=='query_swap'; model.cross_view_runtime_enabled=condition!='residual_off'
     model.cross_view_bank.reset_statistics()
@@ -59,7 +70,7 @@ def evaluate_condition(model,source,plan,classes,condition,device,batch_size,smo
     with torch.no_grad():
         for batch_index,(images,y,sample_ids,index) in enumerate(loader):
             if smoke_batches and batch_index>=smoke_batches:break
-            images=move_model_inputs(images,device)
+            images=attribution_inputs(images,device)
             with torch.cuda.amp.autocast(): fused,views=model.seen_logits_with_views(images)
             if condition=='on' and model.cross_view_mode=='person_full' and batch_index==0:
                 identity=dict(images,cross_view_query_donor=images['person'],

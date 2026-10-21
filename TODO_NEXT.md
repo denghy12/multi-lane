@@ -1,5 +1,7 @@
 # 下一步任务
 
+2026-10-21归因实现验证：402项全量测试通过（1项CUDA RNG因CPU环境跳过），新增10项机制测试通过。smoke_01任务Query task0/2/7正常/关闭及历史重放成功；人物Query在交换条件因legacy mover把mask转float而被严格拒绝。已修复归因入口并补类型回归；失败产物保留，拟smoke_02重跑。完整validation固定90%几何规则得到373人/175原图。正式尚未启动。
+
 ## 2026-10-21：开始跨视图Attention只读归因，用户要求完整8task val/test
 
 新隔离分支codex/cross-view-attention-attribution-20261021，基于74ece12；旧源码/分析文档及工作树保留。来源为formal_seed0_20261021_01任务Query/人物Query的8份seed0 checkpoint，不重新训练。

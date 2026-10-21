@@ -32,7 +32,7 @@
 日志：`logs/cross_view_attribution/<run>/`。
 各进程保存on/residual_off/query_swap（后者仅person_full）的每边界预测NPZ、Query配对manifest、分支及子集mAP、最终/阶段平均、SHA与源模型不变核验。
 
-短跑：`SMOKE=1 RUN_ID=smoke_seed0_20261021_01 bash scripts/emotic/run_cross_view_attribution.sh`，仅validation，task0/2/7各原始前2batch，须实际包含可交换样本，不访问test图片。正式评估没有沿用短跑子集。
+短跑：`SMOKE=1 RUN_ID=smoke_seed0_20261021_02 bash scripts/emotic/run_cross_view_attribution.sh`，仅validation，task0/2/7各原始前2batch，须实际包含可交换样本，不访问test图片。正式评估没有沿用短跑子集。
 
 ## 验证及保护
 
@@ -44,3 +44,5 @@
 6. 原工作树及test-only保留；代码通过新分支/Git-only新远程工作树同步。
 
 结果只说明固定已训练模型的条件贡献。Query交换造成下降本身不能单独证明学会了正确人物关系，还可能包含输入扰动影响；没有下降也不能证明所有人物条件方法无效。test仅按用户要求固定报告，不选择配对阈值或参数。
+
+初次smoke `_01`发现历史输入搬运会把新布尔mask转float，交换条件被严格检查中止，批次exit1；保留失败产物。已在归因入口单独保留mask类型，加入回归测试，修正后使用新run `_02`重跑，不覆盖旧结果。原模型正常开启/残差关闭及本人Query首batch重放已通过，validation几何筛选373人/175原图，不据此改阈值。
