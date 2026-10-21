@@ -1,5 +1,13 @@
 # 项目上下文
 
+## 2026-10-21：人物条件跨视图注意力完整8任务已正式运行
+
+formal_seed0_20261021_01已在GPU0启动person_self/task_full/person_full三组并行，tmux=cross_view_full8_seed0_20261021。训练源码8fef770，分支codex/person-conditioned-cross-view-20261021，两端Git-only同步；后续仅更新文档。
+启动健康快照：三组均完成task0前4epoch，每epoch84成功更新、0跳步，GPU0约10014MiB/100%利用率。48项关键配置与历史fullTRAIN aux0基线逐项匹配；基线复用源完整8任务/13950更新/全人群val-test已核验，默认关闭路径93预测数组完全一致。
+正式每臂8×30epoch/B64、主LR.0125/模块LR.0004、scale.1、4头/宽64、索引5、每任务196608新增参数；每边界先恢复状态再报告，训练及核验后自动并行完整validation2397/test5368人。MoE/ParaX/image-token adapter关闭。
+391项全量测试、修正后10项机制/CUDA测试、三臂两任务真实短跑和六评估并行/重放已通过。远程主工作树和test-only的状态SHA均与开始时相同。
+下一步等待完整训练/验证/测试及批次exit0，同步产物后比较三个控制与基线；目前没有最终精度结论，不依据中途loss改超参。日志/结果位于logs和output/person_conditioned_cross_view；执行配置见docs/person_conditioned_cross_view_execution_20261021.md。
+
 2026-10-21正式启动前核验完成：391项全量测试+修正后10项机制/CUDA检查通过；基线task0/2/7共93预测数组完全一致；真实CLIP三模式零输出与基线逐位相同。
 smoke_seed0_20261021_01三臂/批次exit0，每臂4更新0跳步、恢复与checkpoint重放/初始化采样配对/旧参数保护通过；六评估并行完成，单进程峰值2593.64MiB、观察总峰值9904MiB。
 固定checkpoint Person query显著随样本变化，task query仅约9e-5数值差异；训练累计Q变化不可当图片条件证据。旧参数精确不变，AMP跨任务批形状旧logits差异约.0012–.0022，避免逐位不变承诺。
