@@ -24,7 +24,7 @@ Full摘要缓存只在单次三视图前向内有效，按Full→Person→Face�
 - Adam每任务重置，weight_decay=0，cosine降到0，无warmup，temperature=1，threshold=.5。
 - AMP初始scale1024，growth_interval=1000000000，TF32开启，gradient_clip_norm=0。
 - legacy_full_zero、joint_bce、supervised_loss_scale=1、aux=0；MoE/ParaX/image-token adapter/Selector conditioner关闭。
-- 10 Selectors，原Prompt数量及层数沿用runner（保存在config），共享Selector/Prompt/head，pre-head归一化。
+- 10 Selectors、10 Prompts、5层Prompt（保存在config），共享Selector/Prompt/head，pre-head归一化。
 - Full224及CLIP归一化，legacy RandomResizedCrop(.05,1)；Person letterbox、margin.15、无颜色扰动；Face沿用现有manifest。
 - 可靠Face末端权重Full/Person/Face=.64/.16/.20，不可靠时=.80/.20/0。
 - 训练workers2，评估workers0；避免4GiB共享内存预取故障。
@@ -54,3 +54,5 @@ GPU5/6本次已被外部任务占用，不停止外部作业；采用空闲GPU0�
 模块额外保存摘要/残差范数及其比例、夹角、注意力熵、跨图片Q/注意力变化量。注意力不同不等于性能提高；最终要比较人物条件组与同容量两组对照及匹配基线的validation最终/阶段平均，test仅按用户要求固定报告，不回头据此选参数。
 
 Full摘要已经压缩，可能缺少局部线索；没有框坐标条件，不保证空间上锁定目标人物；Full本身含人物，不是纯背景。共享监督仍可能让Person增强路径学习重复信息。上述均为待检验假设，不能预先认定是历史失败原因。
+
+训练统计跨多个参数更新累计，Q变化混有参数变化，不能作为固定模型图片依赖性的证据；应使用外部validation中每个固定checkpoint单独重置后的Q/注意力统计。正式核验允许最后一个batch的某矩阵梯度为0，但要求梯度有限、输出投影已更新；两步真实短跑负责验证四个矩阵的梯度连通性。
