@@ -64,3 +64,42 @@ GPU5当前baseline_noaux，完成后自动fixed；GPU6当前retained。已确认
 - 日志：`logs/joint_residual_attribution/`。
 - 新结构代码：`multi_lane/track_a/{joint_summary,model,runner}.py`；新机制测试`tests/test_track_a_retained_summary.py`。
 - 启动器：`scripts/emotic/run_retained_view_summaries_batch.sh`；完整预锁配置见`docs/retained_view_summaries_plan_20261020.md`。
+
+
+## 三任务先导最终结果与后续方向（2026-10-21）
+
+三臂均已结束，批次exit0；各90epoch、4560更新、0跳步，三份compact/完整恢复及跨臂配对核验通过。
+运行22d1ae0，seed0，TRAIN原图90/10 holdout，完整validation每阶段2397人；78份非checkpoint产物同步并SHA匹配。
+
+| 方法 | task0 val | task1 val | task2 val | 三阶段平均 |
+|---|---:|---:|---:|---:|
+| 原三路路径，辅助监督0 | 55.1099 | 56.8729 | 44.3003 | 52.0944 |
+| 单路径，固定融合摘要 | 55.6430 | 57.5363 | 44.6137 | 52.5977 |
+| 单路径，保留三组摘要 | 55.9338 | 56.6044 | 43.8444 | 52.1276 |
+
+| 方法 | task0 TRAIN holdout（499人） | task1（422人） | task2（79人） |
+|---|---:|---:|---:|
+| 原三路路径，辅助监督0 | 53.3339 | 52.1464 | 27.8657 |
+| 单路径，固定融合摘要 | 52.8652 | 50.8788 | 29.3814 |
+| 单路径，保留三组摘要 | 51.7690 | 51.4806 | 29.7992 |
+
+holdout按当前任务正例资格筛选，三个阶段人群不同，不将其均值当全人群持续学习指标。
+三组摘要相对三路控制最终−0.4559、平均+0.0332；相对固定摘要最终−0.7692、平均−0.4701。
+它没有建立一致优势，不晋级完整8task或test；这只是seed0三任务先导，不能据此排除所有注意力融合。
+
+### 新方向与已有失败方案的区别
+
+1. 优先研究目标人物姿态/交互的显式证据：先核对关键点置信度、遮挡和与bbox绑定质量，再决定是否为Person摘要补充姿态/关系tokens。
+   这不是再次使用Person平均特征或bbox修改Selector query，也不是换一套表情encoder。三视图RGB与已有路径先保留。
+   新分支单独AP不是唯一条件，必须检验其错误是否与B0互补，以及加入后完整holdout/validation的净收益；需要匹配参数/更新预算。
+2. 先诊断场景依赖，再考虑背景偏置控制：按人物大小、同图多人、目标遮挡、场景组划分错误；背景遮挡只提供敏感性证据，不能独自证明因果。
+   CVPR2023 Context De-confounded Emotion Recognition提出CCIM处理场景与情绪的伪相关，可作为方法来源，尚未证明本项目有同样机制。
+   如果迁移，context原型仅由合法TRAIN生成，按任务保存冻结并报告存储成本，不改变旧路径，不将全部背景当噪声删除。
+
+论文参考：
+- MULTI-LANE：https://arxiv.org/html/2405.15633v1
+- MoE-Adapters：https://arxiv.org/html/2403.11549v2
+- EmotiCon（包含多线索和社会交互建模）：https://arxiv.org/abs/2003.06692
+- Context De-confounded Emotion Recognition：https://arxiv.org/abs/2303.11921
+
+这里只新增完成状态和研究建议；没有新增训练、test或模型改动，无须重新运行模型测试。

@@ -29,6 +29,7 @@ from .moe_task_ffn_v4 import TaskForwardEvidenceMoEBank
 from .selector_conditioning import TaskSelectorConditioner
 from .view_fusion import TaskwiseViewFusion
 from .joint_summary import TaskJointSummaryBank
+from .cross_view_attention import TaskCrossViewAttentionBank
 
 ModelInputs = Union[torch.Tensor, Dict[str, torch.Tensor]]
 
@@ -99,6 +100,11 @@ class MultiLaneModel(nn.Module):
         joint_summary_experts: int = 4,
         joint_summary_top_k: int = 2,
         joint_summary_scale: float = 0.1,
+        cross_view_mode: str = "disabled",
+        cross_view_layer: int = 5,
+        cross_view_dim: int = 64,
+        cross_view_heads: int = 4,
+        cross_view_scale: float = 0.1,
     ) -> None:
         super().__init__()
         if not task_sizes or any(int(size) <= 0 for size in task_sizes):
@@ -250,6 +256,16 @@ class MultiLaneModel(nn.Module):
             or view_classifier_mode != "shared_post_fusion" or detach_view_fusion_features
         ):
             raise ValueError("Joint summaries require shared Selectors/Prompts, three views and no other adapter")
+        if cross_view_mode not in TaskCrossViewAttentionBank.MODES:
+            raise ValueError("Invalid cross-view mode")
+        if cross_view_mode != "disabled" and (
+            joint_summary_mode != "disabled" or adapter_mode != "disabled"
+            or parax_mode != "disabled" or selector_conditioning != "disabled"
+            or view_fusion != "fixed_three_view" or selector_mode != "shared"
+            or prompt_mode != "shared" or view_classifier_mode != "shared_post_fusion"
+            or detach_view_fusion_features or not 0 <= cross_view_layer < len(blocks)
+        ):
+            raise ValueError("Cross-view attention requires original shared three-view paths without other adapters")
         self.visual_encoder = visual_encoder
         self.visual_encoder.requires_grad_(False)
         self.width = width
@@ -465,6 +481,13 @@ class MultiLaneModel(nn.Module):
                 joint_summary_bottleneck, joint_summary_experts, joint_summary_top_k,
                 joint_summary_scale,
             )
+        self.cross_view_mode = cross_view_mode
+        self.cross_view_runtime_enabled = cross_view_mode != "disabled"
+        self.cross_view_bank = None
+        if cross_view_mode != "disabled":
+            self.cross_view_bank = TaskCrossViewAttentionBank(
+                self.num_tasks, self.width, cross_view_mode, cross_view_layer,
+                cross_view_dim, cross_view_heads, cross_view_scale)
         self._last_fusion_weights: Optional[torch.Tensor] = None
         self._last_base_fused_logits: Optional[torch.Tensor] = None
 
@@ -520,6 +543,8 @@ class MultiLaneModel(nn.Module):
         self.view_fusion_module.restore_task(task_id)
         if self.joint_summary_bank is not None:
             self.joint_summary_bank.restore_task(task_id)
+        if self.cross_view_bank is not None:
+            self.cross_view_bank.restore_task(task_id)
         self._current_task_id = int(task_id)
 
     def restore_task(self, task_id: int) -> None:
@@ -534,6 +559,8 @@ class MultiLaneModel(nn.Module):
         self.view_fusion_module.restore_task(task_id)
         if self.joint_summary_bank is not None:
             self.joint_summary_bank.restore_task(task_id)
+        if self.cross_view_bank is not None:
+            self.cross_view_bank.restore_task(task_id)
         self._current_task_id = int(task_id)
 
     def set_adapter_runtime_enabled(self, enabled: bool) -> None:
@@ -820,6 +847,7 @@ class MultiLaneModel(nn.Module):
         person_patch_mask: Optional[torch.Tensor] = None,
         condition_valid: Optional[torch.Tensor] = None,
         image_view: str = "full",
+        summary_cache=None,
     ) -> torch.Tensor:
         # The released block applies its first LayerNorm before both selector
         # aggregation and prompt attention.  Keep the residual stream itself
@@ -870,6 +898,17 @@ class MultiLaneModel(nn.Module):
                 selector_image_tokens,
                 torch.softmax(similarity, dim=-1),
             )
+        if (self.cross_view_bank is not None and self.cross_view_runtime_enabled
+                and layer_id == self.cross_view_bank.layer_index):
+            if summary_cache is None:
+                raise RuntimeError("Cross-view attention requires a per-forward source cache")
+            if image_view == "full":
+                summary_cache["full"] = (tuple(lane_ids), selected)
+            elif image_view == "person":
+                source_ids, source = summary_cache["full"]
+                if source_ids != tuple(lane_ids):
+                    raise RuntimeError("Cross-view source task order mismatch")
+                selected = self.cross_view_bank(selected, source, selectors, lane_ids)
         return self._task_attention_ffn(block, lane_tokens, lane_ids, layer_id,
                                         task_cls, selectors, selected, image_view)
 
@@ -1010,7 +1049,8 @@ class MultiLaneModel(nn.Module):
         return torch.cat(outputs, dim=1)
 
     def _encode_single_lanes(
-        self, images: ModelInputs, all_seen_lanes: bool, image_view: str = "full"
+        self, images: ModelInputs, all_seen_lanes: bool, image_view: str = "full",
+        summary_cache=None,
     ) -> torch.Tensor:
         if self.adapter_mode == "moe_frozen_ffn_activate_freeze":
             return self._encode_frozen_moe_lanes(images, all_seen_lanes, image_view)
@@ -1081,6 +1121,7 @@ class MultiLaneModel(nn.Module):
                     layer_id, lane_ids, person_descriptor,
                     paired["bbox"], paired["condition_valid"],
                 )
+            cross_kwargs = {} if summary_cache is None else {"summary_cache": summary_cache}
             lane_tokens = self._lane_block(
                 block,
                 image_tokens,
@@ -1092,6 +1133,7 @@ class MultiLaneModel(nn.Module):
                 paired["person_patch_mask"] if person_tokens is not None else None,
                 paired["condition_valid"] if person_tokens is not None else None,
                 image_view,
+                **cross_kwargs,
             )
             if not self.parax_runtime_enabled or self.parax_post_mode:
                 with torch.no_grad():
@@ -1213,6 +1255,14 @@ class MultiLaneModel(nn.Module):
             features["full"] = self._encode_single_lanes(
                 images["full"], all_seen_lanes, image_view="full"
             )
+        elif self.cross_view_bank is not None and self.cross_view_runtime_enabled:
+            summary_cache = {}
+            try:
+                features = {name: self._encode_single_lanes(
+                    images[name], all_seen_lanes, image_view=name,
+                    summary_cache=summary_cache) for name in self.view_fusion_module.view_names}
+            finally:
+                summary_cache.clear()
         else:
             features = {
                 name: self._encode_single_lanes(
@@ -1454,6 +1504,8 @@ class MultiLaneModel(nn.Module):
         yield from self.view_fusion_module.active_parameters()
         if self.joint_summary_bank is not None:
             yield from self.joint_summary_bank.active_parameters()
+        if self.cross_view_bank is not None:
+            yield from self.cross_view_bank.active_parameters()
 
     def adapter_optimizer_parameters(self) -> Iterable[nn.Parameter]:
         if self.adapter_bank is not None:
@@ -1489,6 +1541,9 @@ class MultiLaneModel(nn.Module):
         if self.joint_summary_bank is not None:
             names.extend(f"joint_summary_bank.{name}"
                          for name, p in self.joint_summary_bank.named_parameters() if p.requires_grad)
+        if self.cross_view_bank is not None:
+            names.extend(f"cross_view_bank.{name}"
+                         for name, p in self.cross_view_bank.named_parameters() if p.requires_grad)
         if self.adapter_bank is not None:
             names.extend(
                 f"adapter_bank.{name}"

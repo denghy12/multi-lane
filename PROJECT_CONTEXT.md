@@ -1,5 +1,47 @@
 # 项目上下文
 
+## 2026-10-21：开始实现人物条件摘要注意力，按用户要求完整8任务
+
+新隔离分支codex/person-conditioned-cross-view-20261021，基于83f6282；原主工作树和test-only保留。
+新增第6层Summarize后Full→Person注意力，保留三路Task Forward；person_self/task_full/person_full同容量控制。
+seed0、fullTRAIN、8×30epoch、B64、主LR.0125/新增LR.0004、aux0、每任务完整冻结；关闭MoE/ParaX/image-token adapter。
+用户本次8task val/test要求覆盖此前3task/holdout建议；不通过test挑参数。GPU5/6外部占用，GPU0空闲，拟三臂并行。
+匹配baseline_noaux优先只读核验复用；新旧默认路径预测需验证。当前仅实现中，尚未启动正式训练。
+执行协议docs/person_conditioned_cross_view_execution_20261021.md，下一步远程单元测试、并行真实短跑、通过后正式队列。
+
+## 2026-10-21：用户要求Full→Person摘要交互详细计划，暂不改代码
+
+新增docs/person_conditioned_cross_view_feasibility_plan_20261021.md；仅文档，不改业务代码/配置/脚本、不启动训练或测试。
+MulT方向澄清：Person提供Q、Full提供K/V，信息方向Full→Person。保留三路任务状态，索引[5]一次摘要交互，原MSA/Drop & Replace/FFN/末端融合及head保留。
+建议每任务独立四头宽64、固定scale.1、零输出初始化，无新FFN；196608参数/任务、8任务1572864参数。
+核心四组：aux0匹配B0、Person自注意力、任务Selector Query读Full、Person Query读Full；后三组同参数量。
+先导拟seed0 task0–2×30ep/B64/主LR.0125/新增LR.0004、相同90/10原图holdout/4560更新，仅validation。
+完整说明Full摘要压缩限制、Full非纯背景、共享梯度仍可改当前Full、Person增强分支非单路、loss语义与旧依赖完整冻结。
+只建议预先锁定晋级条件，尚未执行/获准实施；不将普通attention或冻结机制本身宣称创新，不复用历史test调参。
+三个上下文已同步，业务源码diff保持空；无需模型测试。
+
+
+## 2026-10-21：按模块筛选三视图融合论文，仅研究建议
+
+核对MulT(ACL2019)定向crossmodal attention、MBT(NeurIPS2021)持久融合tokens、CCIM(CVPR2023)背景原型、
+EmotiCon(CVPR2020)场景/邻近交互、MISA(MM2020)共享私有表示，原论文方法与本项目迁移假设分开记录。
+当前retained的临时三组摘要在Drop & Replace后丢弃，没有持久三视图状态/多融合token；与MBT不同，不能据此断言失败根因。
+若优先融合模块创新，建议从人物条件定向交互或受限持久token中只选一个主机制；CCIM须先有背景偏置证据，MISA为备选。
+已有Face硬mask不算新贡献；不原样重启历史query-delta、后置残差、私有参数或梯度修正路线。
+文档docs/three_view_fusion_module_literature_20261021.md含来源、接入点、限制和最小消融；未启动实验或改业务代码，无需模型测试。
+
+
+## 2026-10-21：三任务先导已完整结束，暂不扩大；后续建议改为证据层诊断
+
+pilot_seed0_20261021_01三臂和批次exit0，各90epoch/4560成功更新/0跳步，三份checkpoint/恢复与跨臂配对核验通过。
+完整validation最终/三阶段均值：三路aux0 44.3003/52.0944，固定摘要44.6137/52.5977，三组摘要43.8444/52.1276。
+三组摘要未同时胜过匹配控制；TRAIN holdout也未一致改善（task2仅79人），不能用该局部提升晋级8task/test。
+78份正式非checkpoint产物已同步本地并逐文件SHA匹配；没有新增模型前向、训练或test。
+用户询问后续方向；复盘排除原样重启类别权重OOF、Face表情替换/后置残差、排序蒸馏、框条件Selector及MoE超参路线。
+优先候选：在原三视图框架中审计并补充目标人物姿态/交互关系证据；备选先诊断背景依赖，再考虑CCIM启发的偏置控制。
+这些均是未验证假设，未获新执行指令、未启动新实验；保留B0。现有分支仅更新分析/上下文，不需模型测试。
+
+
 2026-10-21启动健康核验：两组task0已完成前6epoch，每epoch76成功更新、0跳步；配置逐项符合预锁。
 服务器pilot源码仍clean 22d1ae0，fixed在GPU5后续队列；健康快照已同步并SHA匹配，正式尚无最终结果。
 

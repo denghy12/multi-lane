@@ -120,6 +120,11 @@ def build_model(config: Mapping[str, Any], visual: torch.nn.Module) -> MultiLane
         selector_condition_layers=tuple(config.get("selector_condition_layers", (1,))),
         selector_condition_hidden_dim=int(config.get("selector_condition_hidden_dim", 32)),
         selector_condition_scale=float(config.get("selector_condition_scale", 0.1)),
+        cross_view_mode=str(config.get("cross_view_mode", "disabled")),
+        cross_view_layer=int(config.get("cross_view_layer", 5)),
+        cross_view_dim=int(config.get("cross_view_dim", 64)),
+        cross_view_heads=int(config.get("cross_view_heads", 4)),
+        cross_view_scale=float(config.get("cross_view_scale", 0.1)),
         view_fusion=str(config.get("view_fusion", "disabled")),
         view_classifier_mode=str(config.get("view_classifier_mode", "shared_post_fusion")),
     )

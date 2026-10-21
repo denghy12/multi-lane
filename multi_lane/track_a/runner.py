@@ -2549,6 +2549,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         ),
         default="disabled",
     )
+    parser.add_argument("--cross-view-mode", choices=("disabled", "person_self", "task_full", "person_full"), default="disabled")
+    parser.add_argument("--cross-view-layer", type=int, default=5)
+    parser.add_argument("--cross-view-dim", type=int, default=64)
+    parser.add_argument("--cross-view-heads", type=int, default=4)
+    parser.add_argument("--cross-view-scale", type=float, default=0.1)
     parser.add_argument("--joint-summary-mode", choices=("disabled", "fixed", "dense", "moe", "retained"), default="disabled")
     parser.add_argument("--joint-summary-bottleneck", type=int, default=16)
     parser.add_argument("--joint-summary-experts", type=int, default=4)
@@ -2811,6 +2816,13 @@ def main() -> None:
 
 
 def run(args: argparse.Namespace) -> None:
+    if args.cross_view_mode != "disabled" and (
+        not args.moe_paired_audit or args.view_auxiliary_loss_weight != 0
+        or args.view_gradient_routing != "joint" or args.view_gradient_audit
+        or args.view_path_gradient_audit_batches or args.loss_routing != "joint_bce"
+        or args.joint_summary_mode != "disabled"
+    ):
+        raise ValueError("Cross-view summaries require paired joint BCE, aux0 and three original task paths")
     if args.joint_summary_mode != "disabled" and (
         not args.moe_paired_audit or args.view_auxiliary_loss_weight != 0
         or args.view_gradient_routing != "joint" or args.view_evaluation_diagnostics
@@ -3259,6 +3271,11 @@ def run(args: argparse.Namespace) -> None:
         selector_condition_layers=args.selector_condition_layers,
         selector_condition_hidden_dim=args.selector_condition_hidden_dim,
         selector_condition_scale=args.selector_condition_scale,
+        cross_view_mode=args.cross_view_mode,
+        cross_view_layer=args.cross_view_layer,
+        cross_view_dim=args.cross_view_dim,
+        cross_view_heads=args.cross_view_heads,
+        cross_view_scale=args.cross_view_scale,
         joint_summary_mode=args.joint_summary_mode,
         joint_summary_bottleneck=args.joint_summary_bottleneck,
         joint_summary_experts=args.joint_summary_experts,
@@ -3332,6 +3349,8 @@ def run(args: argparse.Namespace) -> None:
     fusion_parameters_per_task = model.view_fusion_module.parameter_count_per_task()
     if model.joint_summary_bank is not None:
         fusion_parameters_per_task += model.joint_summary_bank.parameter_count_per_task()
+    if model.cross_view_bank is not None:
+        fusion_parameters_per_task += model.cross_view_bank.parameter_count_per_task()
     print(
         f"trainable_parameters={lane_parameters + classifier_parameters + adapter_parameters_per_task + parax_parameters + condition_parameters_per_task + fusion_parameters_per_task} "
         f"selector_mode={model.selector_mode} selectors_total={model.selectors.numel()} "
@@ -3644,6 +3663,16 @@ def run(args: argparse.Namespace) -> None:
         "full_private_classifier": (
             args.view_classifier_mode == "full_private_per_view"
         ),
+        "cross_view_mode": args.cross_view_mode,
+        "cross_view_layer": args.cross_view_layer,
+        "cross_view_dim": args.cross_view_dim,
+        "cross_view_heads": args.cross_view_heads,
+        "cross_view_scale": args.cross_view_scale,
+        "cross_view_parameters_per_task": model.cross_view_bank.parameter_count_per_task() if model.cross_view_bank is not None else 0,
+        "cross_view_task_semantics": "task_local_frozen_after_task_no_cross_task_reuse" if model.cross_view_bank is not None else None,
+        "cross_view_person_endpoint": "full_conditioned_person" if args.cross_view_mode in {"person_full", "task_full"} else "person_only",
+        "cross_view_position": "after_summarize_before_task_msa_person_residual" if model.cross_view_bank is not None else None,
+        "cross_view_output_initialization": "zero" if model.cross_view_bank is not None else None,
         "joint_summary_mode": args.joint_summary_mode,
         "joint_summary_bottleneck": args.joint_summary_bottleneck,
         "joint_summary_experts": args.joint_summary_experts,
@@ -3670,7 +3699,7 @@ def run(args: argparse.Namespace) -> None:
         ),
         "view_fusion_learning_rate": (
             args.view_fusion_learning_rate
-            if (model.view_fusion_module.learned or args.joint_summary_mode in {"dense", "moe"}) else None
+            if (model.view_fusion_module.learned or args.joint_summary_mode in {"dense", "moe"} or model.cross_view_bank is not None) else None
         ),
         "view_residual_scale": (
             args.view_residual_scale
@@ -4054,6 +4083,7 @@ def run(args: argparse.Namespace) -> None:
         from .audit_moe_activate_freeze import ActivateFreezeAudit
         freeze_audit = ActivateFreezeAudit(model, train_source, output, device)
     joint_audits = {}
+    cross_view_audits = {}
     for task_id in range(args.max_tasks):
         print(f"begin_task={task_id}", flush=True)
         if freeze_audit is not None:
@@ -4064,6 +4094,11 @@ def run(args: argparse.Namespace) -> None:
             joint_before = tensor_state_digest({n: v for n, v in model.joint_summary_bank.state_dict().items()
                                                if int(n.split(".")[1]) < task_id})
             model.joint_summary_bank.reset_statistics()
+        cross_view_before = None
+        if model.cross_view_bank is not None:
+            cross_view_before = tensor_state_digest({n: v for n, v in model.cross_view_bank.state_dict().items()
+                                                     if int(n.split(".")[1]) < task_id})
+            model.cross_view_bank.reset_statistics()
         if crossfit_enabled:
             fit_indices, calibration_indices = crossfit_fold_indices(
                 train_source,
@@ -4276,6 +4311,17 @@ def run(args: argparse.Namespace) -> None:
             joint_audits[str(task_id)] = dict(old_fusion_unchanged=True, before=joint_before,
                                              after=joint_after, training_statistics=model.joint_summary_bank.statistics())
             (output / "joint_summary_audit.json").write_text(json.dumps(joint_audits, indent=2) + "\n")
+        if model.cross_view_bank is not None:
+            cross_view_after = tensor_state_digest({n: v for n, v in model.cross_view_bank.state_dict().items()
+                                                    if int(n.split(".")[1]) < task_id})
+            if cross_view_before != cross_view_after:
+                raise RuntimeError("Old task cross-view attention parameters changed")
+            cross_view_audits[str(task_id)] = dict(
+                old_fusion_unchanged=True, before=cross_view_before, after=cross_view_after,
+                training_statistics=model.cross_view_bank.statistics(),
+                final_gradient_norms={n: float(p.grad.float().norm()) if p.grad is not None else None
+                                      for n, p in model.cross_view_bank.tasks[task_id].named_parameters()})
+            (output / "cross_view_audit.json").write_text(json.dumps(cross_view_audits, indent=2) + "\n")
         if freeze_audit is not None:
             freeze_audit.finish(task_id)
         if recovery_state is not None:
@@ -4288,7 +4334,7 @@ def run(args: argparse.Namespace) -> None:
                                initial_selector_prompt_classifier_sha256=base_initialization_digest,
                                frozen_visual_sha256_before=frozen_visual_before,
                                activate_freeze_audit=freeze_audit.rows if freeze_audit is not None else None,
-                               joint_summary_audit=joint_audits),
+                               joint_summary_audit=joint_audits, cross_view_audit=cross_view_audits),
                           output / "recovery_checkpoints" / f"task{task_id}_before_reporting.pth")
             del recovery_state
             print(f"TASK_RECOVERY_SAVED task={task_id} before_reporting=1", flush=True)

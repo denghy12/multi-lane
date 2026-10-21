@@ -42,6 +42,7 @@ def verify(root, expected_tasks, baseline):
             all_held.update(x.rsplit('#person=', 1)[0] for x in split['calibration_sample_ids'])
         assert all_fit and all_held and not (all_fit & all_held), 'Cross-task holdout leakage'
     audits = read(train / 'joint_summary_audit.json') if config['joint_summary_mode'] != 'disabled' else {}
+    cross_view_audits = read(train / 'cross_view_audit.json') if config.get('cross_view_mode', 'disabled') != 'disabled' else {}
     previous = None
     checks = []
     for task in range(expected_tasks):
@@ -57,7 +58,7 @@ def verify(root, expected_tasks, baseline):
             for name in state:
                 if name.startswith('prompts.'):
                     assert torch.equal(previous[name][:, :task], state[name][:, :task]), name
-                if name.startswith('joint_summary_bank.tasks.') and int(name.split('.')[2]) < task:
+                if name.startswith(('joint_summary_bank.tasks.', 'cross_view_bank.tasks.')) and int(name.split('.')[2]) < task:
                     assert torch.equal(previous[name], state[name]), name
             old_classes = sum(config['task_sizes'][:task])
             for name in ('head.weight', 'head.bias'):
@@ -71,6 +72,16 @@ def verify(root, expected_tasks, baseline):
                 if config['joint_summary_mode'] == 'moe':
                     assert abs(sum(values['soft_mass']) - values['samples']) < 1e-4 * values['samples']
                     assert sum(values['hard_load']) == config['joint_summary_top_k'] * values['samples']
+        if cross_view_audits:
+            row = cross_view_audits[str(task)]
+            assert row['old_fusion_unchanged'] and row['before'] == row['after']
+            assert row['training_statistics']
+            assert config['cross_view_parameters_per_task'] == 4 * 768 * config['cross_view_dim']
+            for values in row['training_statistics'].values():
+                assert values['samples'] > 0
+            names = ('q.weight', 'k.weight', 'v.weight', 'out.weight')
+            assert set(row['final_gradient_norms']) == set(names)
+            assert all(value is not None and value > 0 for value in row['final_gradient_norms'].values())
         recovery = torch.load(train / 'recovery_checkpoints' / f'task{task}_before_reporting.pth',
                               map_location='cpu', weights_only=False)
         assert recovery['kind'] == 'task_boundary_before_reporting' and recovery['task_id'] == task
@@ -84,9 +95,11 @@ def verify(root, expected_tasks, baseline):
         checks.append(dict(task=task, updates=updates, skipped=skipped,
                            checkpoint_sha256=_sha256(path), recovery_model_equal=True))
         previous = state
-    result = dict(status='verified', checks=checks, source_git=config['git'],
+    if expected_tasks == 8 and config['training_budget_mode'] == 'epochs' and not config.get('calibration_fraction', 0):
+        assert sum(row['updates'] for row in checks) == 13950
+    result = dict(status='verified' , checks=checks, source_git=config['git'],
                   original_B0=str(baseline), original_B0_auxiliary_weight=reference_config['view_auxiliary_loss_weight'],
-                  current_auxiliary_weight=0, mode=config['joint_summary_mode'])
+                  current_auxiliary_weight=0, mode=config['joint_summary_mode'], cross_view_mode=config.get('cross_view_mode', 'disabled'))
     (root / 'verification.json').write_text(json.dumps(result, indent=2) + '\n')
     print(json.dumps(result, indent=2))
 

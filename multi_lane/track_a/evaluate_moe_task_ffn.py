@@ -95,6 +95,11 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         moe_router_logit_scale=config.get("moe_router_logit_scale") or 2.0,
         moe_router_temperature=config.get("moe_router_temperature") or 1.0,
         moe_noise_std=config.get("moe_noise_std") if config.get("moe_noise_std") is not None else 0.5,
+        cross_view_mode=config.get("cross_view_mode", "disabled"),
+        cross_view_layer=config.get("cross_view_layer", 5),
+        cross_view_dim=config.get("cross_view_dim", 64),
+        cross_view_heads=config.get("cross_view_heads", 4),
+        cross_view_scale=config.get("cross_view_scale", 0.1),
         joint_summary_mode=config.get("joint_summary_mode", "disabled"),
         joint_summary_bottleneck=config.get("joint_summary_bottleneck", 16),
         joint_summary_experts=config.get("joint_summary_experts", 4),
@@ -118,6 +123,7 @@ def evaluate_split(source_run: Path, output: Path, split: str,
     views = {}
     routing = {}
     hashes = {}
+    cross_view_statistics = {}
     for task_id in task_ids:
         checkpoint = source_run / "compact_checkpoints" / f"task{task_id}.pth"
         before_hash = _sha256(checkpoint)
@@ -132,6 +138,8 @@ def evaluate_split(source_run: Path, output: Path, split: str,
             model.adapter_bank.reset_route_statistics()
         if model.joint_summary_bank is not None:
             model.joint_summary_bank.reset_statistics()
+        if model.cross_view_bank is not None:
+            model.cross_view_bank.reset_statistics()
         view = (
             LabelView(source, range(len(source)), seen_indices(task_id),
                       include_sample_id=True)
@@ -143,6 +151,8 @@ def evaluate_split(source_run: Path, output: Path, split: str,
                        amp=True, score_output_path=output / "scores" / f"task{task_id}.npz")
         routing[str(task_id)] = model.adapter_bank.route_statistics() if model.adapter_bank is not None else {}
         rows.append(row)
+        if model.cross_view_bank is not None:
+            cross_view_statistics[str(task_id)] = model.cross_view_bank.statistics()
         if model.joint_summary_bank is not None:
             routing[str(task_id)] = model.joint_summary_bank.statistics()
             views[str(task_id)] = {"status": "not_applicable", "reason": "single_joint_task_path_has_no_independent_view_endpoints"}
@@ -167,6 +177,9 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         "summary": summarize_tasks(rows),
         "view_diagnostics": views,
         "route_statistics": routing,
+        "cross_view_mode": model.cross_view_mode,
+        "cross_view_statistics": cross_view_statistics,
+        "person_endpoint_semantics": config.get("cross_view_person_endpoint", "person_only"),
         "joint_summary_mode": model.joint_summary_mode,
         "checkpoint_tasks": task_ids,
         "joint_residual_runtime_enabled": not disable_joint_residual,
