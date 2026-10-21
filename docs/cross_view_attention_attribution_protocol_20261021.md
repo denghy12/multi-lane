@@ -58,3 +58,5 @@ validation固定90%规则共373人/175原图可交换。所有筛选只用几何
 完整8任务双split归因已由clean提交ae56624启动，tmux=`cross_view_attribution_full8_seed0_20261021`，run ID保持`formal_seed0_20261021_01`。GPU0四进程：task_full_val、task_full_test、person_full_val、person_full_test。启动健康快照确认四进程正常，task0正常/关闭两条件已完成、原预测逐值重放；各进程继续后续边界。GPU约6275MiB/100%。
 
 validation可交换373人/175图；test可交换811人/372图。16份源checkpoint SHA仍与历史核验记录一致，原主树/test-only/来源树状态未变。`output/cross_view_attribution/implementation_20261021/formal_start_health.json`保存启动快照。后续仅文档同步，不改变运行源码；完整结果尚未结束。
+
+静态测试/短跑/配对及健康产物54份同步本地并SHA匹配。启动后任务Query validation先完成全部8边界，其他进程继续；完整双split归因仍需等待全部进程结束。
