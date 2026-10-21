@@ -1,5 +1,7 @@
 # 下一步任务
 
+2026-10-21实现核验：新9项机制测试及391项全量测试通过。检查新增初始化发现torch.manual_seed会同时重置CUDA RNG，已改成仅CPU默认generator初始化并增加CUDA RNG测试；待远程验证该修正。旧默认关闭路径task0/2/7全validation重放进行中；尚未启动正式训练。
+
 ## 2026-10-21：开始实现人物条件摘要注意力，按用户要求完整8任务
 
 新隔离分支codex/person-conditioned-cross-view-20261021，基于83f6282；原主工作树和test-only保留。

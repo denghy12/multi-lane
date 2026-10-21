@@ -54,7 +54,8 @@ class TaskCrossViewAttentionBank(nn.Module):
         self.tasks = nn.ModuleList()
         with torch.random.fork_rng(devices=[]):
             for task in range(num_tasks):
-                torch.manual_seed(101_003 + task)
+                # Seed CPU weights only; torch.manual_seed would also reset CUDA RNG.
+                torch.default_generator.manual_seed(101_003 + task)
                 self.tasks.append(SummaryAttention(width, inner_dim, heads, scale))
         self.requires_grad_(False)
         self.reset_statistics()

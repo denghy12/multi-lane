@@ -136,6 +136,14 @@ class CrossViewAttentionTest(unittest.TestCase):
         model.cross_view_runtime_enabled = True
         with torch.no_grad(): self.assertTrue(torch.equal(before, model.seen_logits(images)))
 
+    @unittest.skipUnless(torch.cuda.is_available(), 'CUDA RNG audit')
+    def test_initialization_preserves_cuda_rng(self):
+        torch.cuda.manual_seed_all(345)
+        cuda = torch.cuda.get_rng_state().clone(); cpu = torch.get_rng_state().clone()
+        TaskCrossViewAttentionBank(2, 8, 'person_full', inner_dim=4, heads=2)
+        self.assertTrue(torch.equal(cuda, torch.cuda.get_rng_state()))
+        self.assertTrue(torch.equal(cpu, torch.get_rng_state()))
+
     def test_invalid_configurations_rejected(self):
         for kwargs in (dict(mode='bad'), dict(inner_dim=3, heads=2), dict(scale=float('nan'))):
             args = dict(num_tasks=2, width=8, mode='person_full'); args.update(kwargs)
