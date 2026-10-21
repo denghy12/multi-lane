@@ -52,3 +52,9 @@
 修正后403项全量测试通过（CPU运行跳过1项CUDA RNG，随后原cross-view 10项含CUDA RNG补测通过）。smoke_seed0_20261021_02两个来源的task0/2/7各2batch均完成，batch exit0。正常开启结果及三分支与历史逐值一致；同人Query重放逐值一致；Full/Face和不可交换样本不变；原checkpoint/配置/Face manifest SHA及模型/视觉参数前后不变。短跑每边界实际33名可交换者均产生Person logits变化，确认真实替换生效；这不是效果结论。
 
 validation固定90%规则共373人/175原图可交换。所有筛选只用几何，不修改阈值。正式拟formal_seed0_20261021_01，4进程并行（任务Query/人物Query×val/test），全部8边界和完整人群。
+
+## 正式运行已启动
+
+完整8任务双split归因已由clean提交ae56624启动，tmux=`cross_view_attribution_full8_seed0_20261021`，run ID保持`formal_seed0_20261021_01`。GPU0四进程：task_full_val、task_full_test、person_full_val、person_full_test。启动健康快照确认四进程正常，task0正常/关闭两条件已完成、原预测逐值重放；各进程继续后续边界。GPU约6275MiB/100%。
+
+validation可交换373人/175图；test可交换811人/372图。16份源checkpoint SHA仍与历史核验记录一致，原主树/test-only/来源树状态未变。`output/cross_view_attribution/implementation_20261021/formal_start_health.json`保存启动快照。后续仅文档同步，不改变运行源码；完整结果尚未结束。

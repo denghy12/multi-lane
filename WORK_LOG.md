@@ -1,5 +1,13 @@
 # 工作日志
 
+## 2026-10-22：完整8任务只读归因已启动，四进程运行正常
+
+formal_seed0_20261021_01（保留启动run ID）在GPU0四进程并行：task_full/person_full各完整validation和test。评估执行提交ae56624，分支codex/cross-view-attention-attribution-20261021；原训练源码/16份checkpoint保留并逐份匹配历史SHA。无训练更新。
+启动核验四进程均完成task0正常/关闭残差对照，正常预测与历史逐值相同；任务Query val已完成task0–3，人物Query val完成task0–1，两个test完成task0；仍在运行，不是最终结论。GPU0约6275MiB/100%。
+固定90%几何规则：validation2397人中373人/175图可交换，test5368人中811人/372图。报告全人群和可交换/不可交换、可靠Face子集；Query替换只改变Q，不改Person底座/Full K/V/Face/head。
+403项全测及CUDA补测、smoke_02双来源task0/2/7历史重放/同人Query/端点与不可交换样本不变核验通过。源checkpoint SHA、模型和冻结视觉参数不变；主树/test-only/原来源树状态SHA与开始一致。
+下一步等全部8边界/两split及batch exit0，完整同步后比较on−off条件贡献与人物Query交换效果。本轮输出output/cross_view_attribution、日志logs/cross_view_attribution；配置见docs/cross_view_attention_attribution_protocol_20261021.md。不根据中途test更改条件或阈值。
+
 2026-10-21归因启动前核验完成：修正后403项全测通过（1 CUDA RNG在CPU时跳过，另10项cross-view CUDA补测通过），smoke_seed0_20261021_02双来源task0/2/7各2batch/总批次exit0。历史正常预测、同人Query均逐值一致；Full/Face、不交换样本不变；原权重/源SHA不变。每边界33名可交换者均真实改变Person logits。
 准备formal_seed0_20261021_01在GPU0四进程并行8task val/test；不重训。validation共373人/175原图符合预锁90%规则。初次smoke失败保留并已定位mask搬运类型修复。正式尚未产出完整结果。
 
