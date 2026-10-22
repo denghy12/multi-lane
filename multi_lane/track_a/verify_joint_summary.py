@@ -21,7 +21,8 @@ def verify(root, expected_tasks, baseline):
     assert summary['status'] == 'complete' and summary['config'] == config
     assert config['git']['dirty'] is False and config['max_tasks'] == expected_tasks
     assert len(summary['task_metrics']) == expected_tasks and config['seed'] == 0
-    assert config['view_auxiliary_loss_weight'] == 0 and config['adapter_mode'] == 'disabled'
+    assert config['view_auxiliary_loss_weight'] == reference_config['view_auxiliary_loss_weight']
+    assert config['adapter_mode'] == 'disabled'
     assert config['parax_mode'] == 'disabled' and protocol['frozen_visual_unchanged']
     for key in ('initial_selector_prompt_classifier_sha256', 'frozen_visual_sha256_before'):
         assert protocol[key] == reference[key], key
@@ -77,17 +78,23 @@ def verify(root, expected_tasks, baseline):
             row = cross_view_audits[str(task)]
             assert row['old_fusion_unchanged'] and row['before'] == row['after']
             assert row['training_statistics']
-            assert config['cross_view_parameters_per_task'] == 4 * 768 * config['cross_view_dim']
+            context = config['cross_view_mode'].endswith('_context')
+            assert config['cross_view_parameters_per_task'] == (2 * 768 * config['cross_view_dim'] + 1 if context else 4 * 768 * config['cross_view_dim'])
             for values in row['training_statistics'].values():
                 assert values['samples'] > 0
-            names = ('q.weight', 'k.weight', 'v.weight', 'out.weight')
+            names = ('q.weight', 'k.weight', 'gate_logit') if context else ('q.weight', 'k.weight', 'v.weight', 'out.weight')
             assert set(row['final_gradient_norms']) == set(names)
             # A single final batch may legitimately have a zero gradient. Real
             # two-step smoke tests establish connectivity; here require finite
             # gradients and a trained (nonzero) output projection instead.
             assert all(value is not None and math.isfinite(value) and value >= 0
                        for value in row['final_gradient_norms'].values())
-            assert state[f'cross_view_bank.tasks.{task}.out.weight'].abs().sum() > 0
+            if context:
+                for values in row['training_statistics'].values():
+                    assert values['person_summary_overwritten'] is False
+                    assert 0 < values['mass_mean'] <= config['cross_view_context_max_mass']
+            else:
+                assert state[f'cross_view_bank.tasks.{task}.out.weight'].abs().sum() > 0
             assert all(torch.isfinite(value).all() for name, value in state.items()
                        if name.startswith('cross_view_bank.'))
         recovery = torch.load(train / 'recovery_checkpoints' / f'task{task}_before_reporting.pth',
@@ -107,7 +114,7 @@ def verify(root, expected_tasks, baseline):
         assert sum(row['updates'] for row in checks) == 13950
     result = dict(status='verified' , checks=checks, source_git=config['git'],
                   original_B0=str(baseline), original_B0_auxiliary_weight=reference_config['view_auxiliary_loss_weight'],
-                  current_auxiliary_weight=0, mode=config['joint_summary_mode'], cross_view_mode=config.get('cross_view_mode', 'disabled'))
+                  current_auxiliary_weight=config['view_auxiliary_loss_weight'], mode=config['joint_summary_mode'], cross_view_mode=config.get('cross_view_mode', 'disabled'))
     (root / 'verification.json').write_text(json.dumps(result, indent=2) + '\n')
     print(json.dumps(result, indent=2))
 

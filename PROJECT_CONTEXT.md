@@ -1,5 +1,11 @@
 # 项目上下文
 
+## 2026-10-23：独立上下文Attention分支，准备GPU0排队
+
+用户要求单独改进摘要Attention；另一叠加分支不动。新分支exp/summary-context-attention-20261023从e81f2f2创建。保留Person原摘要，在第6层让任务MSA另读原Full Value构成的上下文K/V；学习Q/K及组gate，份额初始5%、上限10%，每任务98305参数，任务结束完整冻结。不是严格零初始化等价。四组baseline/legacy_task_residual/task_context/person_context均全TRAIN、aux0.1、seed0、8×30epoch、B64、Adam主LR0.0125/模块0.0004、cosine、workers0、AMP/TF32。无位置/MoE/ParaX/image-token Adapter，保留三路Task Forward与原head。
+
+计划docs/summary_context_attention_plan_20261023.md。先CPU全测；GPU0排在三模块叠加完整formal之后，连续空闲后先四组2任务短跑，通过才自动完整8任务validation/test，validation另做task0/2/7开关及人物Query交换。当前未声明测试或启动完成。概率上限不是范数上限；若只有关闭后保留的收益，不宣称推理融合成功。
+
 启动后静态产物54份（测试、失败与修正短跑、配对manifest、源SHA和健康快照）已同步本地，逐文件SHA256匹配。最新进度：任务Query validation已完成全部8边界；其test完成task0–2，人物Query validation完成task0–4、test完成task0–1，其余继续。此为运行进度，不是完整归因结论。
 
 ## 2026-10-22：完整8任务只读归因已启动，四进程运行正常

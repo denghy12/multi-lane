@@ -2549,11 +2549,12 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         ),
         default="disabled",
     )
-    parser.add_argument("--cross-view-mode", choices=("disabled", "person_self", "task_full", "person_full"), default="disabled")
+    parser.add_argument("--cross-view-mode", choices=("disabled", "person_self", "task_full", "person_full", "task_full_context", "person_full_context"), default="disabled")
     parser.add_argument("--cross-view-layer", type=int, default=5)
     parser.add_argument("--cross-view-dim", type=int, default=64)
     parser.add_argument("--cross-view-heads", type=int, default=4)
     parser.add_argument("--cross-view-scale", type=float, default=0.1)
+    parser.add_argument("--cross-view-context-max-mass", type=float, default=0.1)
     parser.add_argument("--joint-summary-mode", choices=("disabled", "fixed", "dense", "moe", "retained"), default="disabled")
     parser.add_argument("--joint-summary-bottleneck", type=int, default=16)
     parser.add_argument("--joint-summary-experts", type=int, default=4)
@@ -2817,12 +2818,12 @@ def main() -> None:
 
 def run(args: argparse.Namespace) -> None:
     if args.cross_view_mode != "disabled" and (
-        not args.moe_paired_audit or args.view_auxiliary_loss_weight != 0
+        not args.moe_paired_audit
         or args.view_gradient_routing != "joint" or args.view_gradient_audit
         or args.view_path_gradient_audit_batches or args.loss_routing != "joint_bce"
         or args.joint_summary_mode != "disabled"
     ):
-        raise ValueError("Cross-view summaries require paired joint BCE, aux0 and three original task paths")
+        raise ValueError("Cross-view summaries require paired joint BCE and three original task paths")
     if args.joint_summary_mode != "disabled" and (
         not args.moe_paired_audit or args.view_auxiliary_loss_weight != 0
         or args.view_gradient_routing != "joint" or args.view_evaluation_diagnostics
@@ -3276,6 +3277,7 @@ def run(args: argparse.Namespace) -> None:
         cross_view_dim=args.cross_view_dim,
         cross_view_heads=args.cross_view_heads,
         cross_view_scale=args.cross_view_scale,
+        cross_view_context_max_mass=args.cross_view_context_max_mass,
         joint_summary_mode=args.joint_summary_mode,
         joint_summary_bottleneck=args.joint_summary_bottleneck,
         joint_summary_experts=args.joint_summary_experts,
@@ -3668,11 +3670,12 @@ def run(args: argparse.Namespace) -> None:
         "cross_view_dim": args.cross_view_dim,
         "cross_view_heads": args.cross_view_heads,
         "cross_view_scale": args.cross_view_scale,
+        "cross_view_context_max_mass": args.cross_view_context_max_mass,
         "cross_view_parameters_per_task": model.cross_view_bank.parameter_count_per_task() if model.cross_view_bank is not None else 0,
         "cross_view_task_semantics": "task_local_frozen_after_task_no_cross_task_reuse" if model.cross_view_bank is not None else None,
-        "cross_view_person_endpoint": "full_conditioned_person" if args.cross_view_mode in {"person_full", "task_full"} else "person_only",
-        "cross_view_position": "after_summarize_before_task_msa_person_residual" if model.cross_view_bank is not None else None,
-        "cross_view_output_initialization": "zero" if model.cross_view_bank is not None else None,
+        "cross_view_person_endpoint": "full_conditioned_person" if args.cross_view_mode in {"person_full", "task_full", "person_full_context", "task_full_context"} else "person_only",
+        "cross_view_position": ("independent_context_kv_at_person_task_msa" if model.cross_view_bank.is_context else "after_summarize_before_task_msa_person_residual") if model.cross_view_bank is not None else None,
+        "cross_view_output_initialization": ("original_source_values_gate_logit_zero_near_identity" if model.cross_view_bank.is_context else "zero") if model.cross_view_bank is not None else None,
         "joint_summary_mode": args.joint_summary_mode,
         "joint_summary_bottleneck": args.joint_summary_bottleneck,
         "joint_summary_experts": args.joint_summary_experts,

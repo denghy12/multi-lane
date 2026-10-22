@@ -8,6 +8,7 @@ import math
 import torch
 from torch import nn
 from torch.nn import functional as F
+from .summary_context import SummaryContextReader
 
 
 class SummaryAttention(nn.Module):
@@ -44,22 +45,26 @@ class SummaryAttention(nn.Module):
 
 class TaskCrossViewAttentionBank(nn.Module):
     MODES = ('disabled', 'person_self', 'task_full', 'person_full')
+    CONTEXT_MODES = ('task_full_context', 'person_full_context')
+    ALL_MODES = MODES + CONTEXT_MODES
 
     def __init__(self, num_tasks, width, mode, layer_index=5, inner_dim=64,
-                 heads=4, scale=.1):
+                 heads=4, scale=.1, context_max_mass=.1):
         super().__init__()
-        if (mode not in self.MODES[1:] or min(num_tasks, width, inner_dim, heads) <= 0
+        if (mode not in self.ALL_MODES[1:] or min(num_tasks, width, inner_dim, heads) <= 0
                 or inner_dim % heads or layer_index < 0
                 or not math.isfinite(scale) or not 0 < scale <= 1):
             raise ValueError('Invalid cross-view attention configuration')
         self.mode, self.layer_index = mode, layer_index
+        self.is_context = mode in self.CONTEXT_MODES
         self.current_task_id = -1
         self.tasks = nn.ModuleList()
         with torch.random.fork_rng(devices=[]):
             for task in range(num_tasks):
                 # Seed CPU weights only; torch.manual_seed would also reset CUDA RNG.
                 torch.default_generator.manual_seed(101_003 + task)
-                self.tasks.append(SummaryAttention(width, inner_dim, heads, scale))
+                self.tasks.append(SummaryContextReader(width, inner_dim, heads, context_max_mass)
+                                  if self.is_context else SummaryAttention(width, inner_dim, heads, scale))
         self.requires_grad_(False)
         self.reset_statistics()
 
@@ -88,6 +93,12 @@ class TaskCrossViewAttentionBank(nn.Module):
         for key, row in self._statistics.items():
             n = row['samples']
             result = {k: v.cpu().tolist() for k, v in row.items()}
+            if self.is_context:
+                for name in ('base_norm', 'context_norm', 'context_ratio', 'mass', 'entropy'):
+                    result[name + '_mean'] = float((row[name + '_sum'] / n).cpu())
+                result['person_summary_overwritten'] = False
+                out[key] = result
+                continue
             for name in ('base_norm', 'residual_norm', 'ratio', 'cosine', 'entropy'):
                 result[name+'_mean'] = float((row[name+'_sum']/n).cpu())
             result['query_std_across_images'] = (
@@ -103,18 +114,33 @@ class TaskCrossViewAttentionBank(nn.Module):
                 or len(lane_ids) != person.shape[0]):
             raise ValueError('Cross-view summary shapes/tasks do not match')
         if query_override is not None and (
-            self.mode != 'person_full' or query_override.shape != person.shape
+            self.mode not in {'person_full', 'person_full_context'} or query_override.shape != person.shape
             or query_mask is None or query_mask.dtype != torch.bool
             or query_mask.shape != (person.shape[1],)
         ):
             raise ValueError('Query override is restricted to matching person_full summaries')
-        result = []
+        result, masses = [], []
         for index, task in enumerate(lane_ids):
             p, f, s = person[index], full[index], selectors[index]
-            query = s if self.mode == 'task_full' else p
+            query = s if self.mode in {'task_full', 'task_full_context'} else p
             source = p if self.mode == 'person_self' else f
             options = {} if query_override is None else dict(
                 query_override=query_override[index], query_mask=query_mask)
+            if self.is_context:
+                context, weights, _, mass = self.tasks[task](query, source, **options)
+                result.append(context.to(p.dtype)); masses.append(mass)
+                with torch.no_grad():
+                    bn = p.float().norm(dim=-1).mean(-1).double()
+                    cn = context.float().norm(dim=-1).mean(-1).double()
+                    row = dict(samples=bn.new_tensor(len(p)), base_norm_sum=bn.sum(),
+                               context_norm_sum=cn.sum(), context_ratio_sum=(cn/bn.clamp_min(1e-12)).sum(),
+                               mass_sum=mass.double()*len(p),
+                               entropy_sum=(-(weights.double()*weights.double().clamp_min(1e-30).log()).sum(-1)).mean((1,2)).sum())
+                    key = f'task{task}/layer{self.layer_index}'
+                    if key not in self._statistics: self._statistics[key] = row
+                    else:
+                        for name, value in row.items(): self._statistics[key][name].add_(value)
+                continue
             delta, weights, normalized_query = self.tasks[task](query, source, **options)
             delta = delta.to(p.dtype)
             result.append(p + delta)
@@ -136,4 +162,6 @@ class TaskCrossViewAttentionBank(nn.Module):
                 else:
                     for name, value in row.items():
                         self._statistics[key][name].add_(value)
+        if self.is_context:
+            return torch.stack(result), torch.stack(masses)
         return torch.stack(result)

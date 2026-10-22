@@ -35,7 +35,8 @@ def evaluate_split(source_run: Path, output: Path, split: str,
                    disable_moe_runtime: bool = False,
                    disable_specialist_runtime: bool = False,
                    expected_tasks: int = 8, workers: int = None,
-                   checkpoint_tasks=None, disable_joint_residual: bool = False) -> dict:
+                   checkpoint_tasks=None, disable_joint_residual: bool = False,
+                   disable_cross_view_runtime: bool = False) -> dict:
     if split not in {"val", "test"}:
         raise ValueError("Split must be val or test")
     expected_tasks = 1 if allow_smoke else expected_tasks
@@ -43,7 +44,7 @@ def evaluate_split(source_run: Path, output: Path, split: str,
     if (not task_ids or len(set(task_ids)) != len(task_ids)
             or any(t < 0 or t >= expected_tasks for t in task_ids)):
         raise ValueError("Invalid checkpoint selection")
-    if (checkpoint_tasks is not None or disable_joint_residual) and split != "val":
+    if (checkpoint_tasks is not None or disable_joint_residual or disable_cross_view_runtime) and split != "val":
         raise ValueError("Joint residual attribution is validation-only")
     if output.exists():
         raise FileExistsError(output)
@@ -100,6 +101,7 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         cross_view_dim=config.get("cross_view_dim", 64),
         cross_view_heads=config.get("cross_view_heads", 4),
         cross_view_scale=config.get("cross_view_scale", 0.1),
+        cross_view_context_max_mass=config.get("cross_view_context_max_mass", 0.1),
         joint_summary_mode=config.get("joint_summary_mode", "disabled"),
         joint_summary_bottleneck=config.get("joint_summary_bottleneck", 16),
         joint_summary_experts=config.get("joint_summary_experts", 4),
@@ -109,6 +111,9 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         view_classifier_mode=config["view_classifier_mode"],
     ).float().to(device)
     model.assert_visual_frozen()
+    if disable_cross_view_runtime and model.cross_view_bank is None:
+        raise ValueError("Cross-view runtime intervention requires a cross-view model")
+    model.cross_view_runtime_enabled = model.cross_view_bank is not None and not disable_cross_view_runtime
     if disable_joint_residual:
         if config.get("joint_summary_mode") not in {"dense", "moe"}:
             raise ValueError("Residual intervention requires learned joint summaries")
@@ -178,6 +183,7 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         "view_diagnostics": views,
         "route_statistics": routing,
         "cross_view_mode": model.cross_view_mode,
+        "cross_view_runtime_enabled": model.cross_view_runtime_enabled,
         "cross_view_statistics": cross_view_statistics,
         "person_endpoint_semantics": config.get("cross_view_person_endpoint", "person_only"),
         "joint_summary_mode": model.joint_summary_mode,
@@ -220,6 +226,8 @@ def main() -> None:
                         help="Validation-only selected checkpoint boundaries.")
     parser.add_argument("--disable-joint-residual", action="store_true",
                         help="Zero every task-local joint residual scale in memory only.")
+    parser.add_argument("--disable-cross-view-runtime", action="store_true",
+                        help="Validation-only: retain jointly trained parameters, omit cross-view reads.")
     args = parser.parse_args()
     if args.allow_smoke and args.split != "val":
         parser.error("Smoke replay is validation-only")
@@ -233,7 +241,8 @@ def main() -> None:
                    disable_specialist_runtime=args.disable_specialist_runtime,
                    expected_tasks=args.expected_tasks, workers=args.workers,
                    checkpoint_tasks=args.checkpoint_tasks,
-                   disable_joint_residual=args.disable_joint_residual)
+                   disable_joint_residual=args.disable_joint_residual,
+                   disable_cross_view_runtime=args.disable_cross_view_runtime)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,9 @@
 # 工作日志
 
+## 2026-10-23：实现保留Person摘要的独立上下文Attention
+
+新分支exp/summary-context-attention-20261023从e81f2f2创建，不动用户primary、test-only或叠加实验。新增原Value上下文读取及接收端分组注意力：原Person摘要不相加、不替换；上下文份额初始5%、上限10%，每任务98305参数。四组同全TRAIN/aux0.1、seed0、8任务×30epoch；补精确关闭原路径、原摘要保留、梯度、旧任务保护、compact重放及队列依赖测试，先语法检查，待远程CPU全测。GPU0需等待前序叠加完整结束，再GPU短跑及正式validation/test。新增计划文档，尚无实验结果，不以test选模块开关。
+
 启动后静态产物54份（测试、失败与修正短跑、配对manifest、源SHA和健康快照）已同步本地，逐文件SHA256匹配。最新进度：任务Query validation已完成全部8边界；其test完成task0–2，人物Query validation完成task0–4、test完成task0–1，其余继续。此为运行进度，不是完整归因结论。
 
 ## 2026-10-22：完整8任务只读归因已启动，四进程运行正常

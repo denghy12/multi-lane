@@ -30,6 +30,7 @@ from .selector_conditioning import TaskSelectorConditioner
 from .view_fusion import TaskwiseViewFusion
 from .joint_summary import TaskJointSummaryBank
 from .cross_view_attention import TaskCrossViewAttentionBank
+from .summary_context import mix_context_attention
 
 ModelInputs = Union[torch.Tensor, Dict[str, torch.Tensor]]
 
@@ -105,6 +106,7 @@ class MultiLaneModel(nn.Module):
         cross_view_dim: int = 64,
         cross_view_heads: int = 4,
         cross_view_scale: float = 0.1,
+        cross_view_context_max_mass: float = 0.1,
     ) -> None:
         super().__init__()
         if not task_sizes or any(int(size) <= 0 for size in task_sizes):
@@ -256,7 +258,7 @@ class MultiLaneModel(nn.Module):
             or view_classifier_mode != "shared_post_fusion" or detach_view_fusion_features
         ):
             raise ValueError("Joint summaries require shared Selectors/Prompts, three views and no other adapter")
-        if cross_view_mode not in TaskCrossViewAttentionBank.MODES:
+        if cross_view_mode not in TaskCrossViewAttentionBank.ALL_MODES:
             raise ValueError("Invalid cross-view mode")
         if cross_view_mode != "disabled" and (
             joint_summary_mode != "disabled" or adapter_mode != "disabled"
@@ -487,7 +489,7 @@ class MultiLaneModel(nn.Module):
         if cross_view_mode != "disabled":
             self.cross_view_bank = TaskCrossViewAttentionBank(
                 self.num_tasks, self.width, cross_view_mode, cross_view_layer,
-                cross_view_dim, cross_view_heads, cross_view_scale)
+                cross_view_dim, cross_view_heads, cross_view_scale, cross_view_context_max_mass)
         self._last_fusion_weights: Optional[torch.Tensor] = None
         self._last_base_fused_logits: Optional[torch.Tensor] = None
 
@@ -777,6 +779,8 @@ class MultiLaneModel(nn.Module):
         layer_id: int,
         image_view: str = "full",
         key_valid: Optional[torch.Tensor] = None,
+        context_tokens=None,
+        context_mass=None,
     ) -> torch.Tensor:
         task_count, batch, token_count, width = task_tokens.shape
         attention = block.attn
@@ -826,6 +830,9 @@ class MultiLaneModel(nn.Module):
             weights = weights.masked_fill(~valid[None, :, None, None, :], float("-inf"))
         weights = torch.softmax(weights * (self.head_dim**-0.5), dim=-1)
         output = torch.matmul(weights, value)
+        if context_tokens is not None:
+            output = mix_context_attention(query, output, context_tokens, attention,
+                                           self.num_heads, self.head_dim, context_mass)
         output = output.permute(0, 1, 3, 2, 4).reshape(
             task_count, batch, token_count, width
         )
@@ -898,6 +905,7 @@ class MultiLaneModel(nn.Module):
                 selector_image_tokens,
                 torch.softmax(similarity, dim=-1),
             )
+        context_options = {}
         if (self.cross_view_bank is not None and self.cross_view_runtime_enabled
                 and layer_id == self.cross_view_bank.layer_index):
             if summary_cache is None:
@@ -917,16 +925,23 @@ class MultiLaneModel(nn.Module):
                     mask = summary_cache.get("person_query_mask")
                     options = {} if override is None else {
                         "query_override": override, "query_mask": mask}
-                    selected = self.cross_view_bank(selected, source, selectors, lane_ids, **options)
+                    read = self.cross_view_bank(selected, source, selectors, lane_ids, **options)
+                    if self.cross_view_bank.is_context:
+                        context, mass = read
+                        context_options = dict(context_tokens=context, context_mass=mass)
+                    else:
+                        selected = read
         return self._task_attention_ffn(block, lane_tokens, lane_ids, layer_id,
-                                        task_cls, selectors, selected, image_view)
+                                        task_cls, selectors, selected, image_view, **context_options)
 
     def _task_attention_ffn(self, block, lane_tokens, lane_ids, layer_id,
                             task_cls, selectors, selected, image_view="full",
-                            summary_valid=None):
+                            summary_valid=None, context_tokens=None, context_mass=None):
         """Released task attention, Drop & Replace and FFN after Summarize."""
         summarized = torch.cat([task_cls, selected], dim=2)
         attention_kwargs = {} if summary_valid is None else {"key_valid": summary_valid}
+        if context_tokens is not None:
+            attention_kwargs.update(context_tokens=context_tokens, context_mass=context_mass)
         attention_output = self._prompt_attention(
             block,
             summarized,
@@ -1269,7 +1284,7 @@ class MultiLaneModel(nn.Module):
             donor_cache = {}
             try:
                 if "cross_view_query_donor" in images:
-                    if self.training or torch.is_grad_enabled() or self.cross_view_mode != "person_full":
+                    if self.training or torch.is_grad_enabled() or self.cross_view_mode not in {"person_full", "person_full_context"}:
                         raise ValueError("Person Query intervention is no-grad evaluation-only")
                     donor = images["cross_view_query_donor"]
                     mask = images.get("cross_view_query_mask")

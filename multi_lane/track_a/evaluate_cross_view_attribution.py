@@ -24,8 +24,8 @@ def audit_source(source):
     assert s['status']=='complete' and s['config']==c and c['git']['dirty'] is False
     assert c['seed']==0 and c['max_tasks']==8 and c['save_compact_checkpoints']
     assert c['adapter_mode']==c['parax_mode']==c['joint_summary_mode']=='disabled'
-    assert c['cross_view_mode'] in ('task_full','person_full')
-    assert c['cross_view_layer']==5 and c['view_auxiliary_loss_weight']==0
+    assert c['cross_view_mode'] in ('task_full','person_full','task_full_context','person_full_context')
+    assert c['cross_view_layer']==5 and c['view_auxiliary_loss_weight'] in (0,.1)
     assert c['eval_batch_size']==64 and c['threshold']==.5
     assert c['view_fusion']=='fixed_three_view' and c['view_classifier_mode']=='shared_post_fusion'
     assert sum(r['optimizer_steps'] for rows in h.values() for r in rows)==13950
@@ -72,7 +72,7 @@ def evaluate_condition(model,source,plan,classes,condition,device,batch_size,smo
             if smoke_batches and batch_index>=smoke_batches:break
             images=attribution_inputs(images,device)
             with torch.cuda.amp.autocast(): fused,views=model.seen_logits_with_views(images)
-            if condition=='on' and model.cross_view_mode=='person_full' and batch_index==0:
+            if condition=='on' and model.cross_view_mode in ('person_full','person_full_context') and batch_index==0:
                 identity=dict(images,cross_view_query_donor=images['person'],
                               cross_view_query_mask=torch.ones(len(y),dtype=torch.bool,device=device))
                 with torch.cuda.amp.autocast(): control,control_views=model.seen_logits_with_views(identity)
@@ -133,7 +133,7 @@ def evaluate(args):
     assert len(source)==(2397 if args.split=='val' else 5368)
     plan=plan_for_source(source,args.minimum_visibility)
     args.output.mkdir(parents=True);write(args.output/'query_pairs.json',plan)
-    modes=['on','residual_off']+(['query_swap'] if c['cross_view_mode']=='person_full' else [])
+    modes=['on','residual_off']+(['query_swap'] if c['cross_view_mode'] in ('person_full','person_full_context') else [])
     for condition in modes:(args.output/condition).mkdir()
     rows={mode:[] for mode in modes};details={mode:{} for mode in modes};replay={};start=time.time()
     for task in args.checkpoint_tasks:
