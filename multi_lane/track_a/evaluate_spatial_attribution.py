@@ -1,5 +1,6 @@
 """Read-only on/off and same-image box controls, preserving the recipient views."""
 import argparse
+from .spatial_resume import checkpoint_source_git
 import json
 from dataclasses import asdict
 from pathlib import Path
@@ -69,7 +70,7 @@ def evaluate(args):
     for task in args.checkpoint_tasks:
         path = args.source_run / 'compact_checkpoints' / f'task{task}.pth'
         hashes[str(path)] = _sha256(path)
-        restore_compact_model_state(model, _torch_load(path), task, config['git'])
+        restore_compact_model_state(model, _torch_load(path), task, checkpoint_source_git(config, task))
         model.requires_grad_(False).eval()
         before = tensor_state_digest(compact_model_state_dict(model))
         reference = None

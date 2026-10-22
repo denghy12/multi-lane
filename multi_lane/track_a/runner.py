@@ -2686,6 +2686,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument("--eval-workers", type=int, default=None, help="Reporting DataLoader workers; defaults to training workers")
     parser.add_argument("--save-pre-evaluation-recovery", action="store_true", help="Atomically save task-boundary model/optimizer/RNG state before reporting")
+    parser.add_argument("--resume-spatial-boundary", type=Path, help="Continue the locked spatial experiment from a complete pre-reporting task snapshot")
     parser.add_argument("--moe-num-experts", type=int, default=22)
     parser.add_argument("--moe-top-k", type=int, default=2)
     parser.add_argument("--moe-freeze-count", type=int, default=2, help="Experts selected for cumulative freezing per layer/task; independent of Router Top-k")
@@ -4078,6 +4079,13 @@ def run(args: argparse.Namespace) -> None:
         "moe_allocation_accounting": "shared_pool_charged_once_to_task0_then_router_only" if args.adapter_mode in ACTIVATE_FREEZE_MODES else None,
         "parax_parameters": parax_parameters,
     }
+    resume = None
+    if args.resume_spatial_boundary is not None:
+        from .spatial_resume import prepare_boundary, restore_boundary_model
+        resume = prepare_boundary(args.resume_spatial_boundary, config, output)
+        restore_boundary_model(model, resume)
+        if resume["provenance"]["frozen_visual_sha256_before"] != frozen_visual_before:
+            raise ValueError("Resume frozen CLIP differs from the original run")
     (output / "config.json").write_text(
         json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
@@ -4103,11 +4111,29 @@ def run(args: argparse.Namespace) -> None:
     joint_audits = {}
     cross_view_audits = {}
     spatial_audits = {}
-    for task_id in range(args.max_tasks):
+    first_task = 0
+    if resume is not None:
+        first_task = resume["task_id"]
+        provenance = resume["provenance"]
+        task_rows = [TaskMetrics(**row) for row in provenance["completed_reporting"]]
+        calibration_rows = [TaskMetrics(**row) for row in resume["inherited_calibration_rows"]]
+        training_history = provenance["training_history"]
+        paired_task_audits = provenance["paired_task_audits"]
+        spatial_audits = provenance["spatial_summary_audit"]
+        for t in range(first_task):
+            record = json.loads((output / "calibration_split_provenance" / f"task{t}.json").read_text())
+            calibration_counts[str(t)] = dict(eligible=len(record["fit_sample_ids"]) + len(record["calibration_sample_ids"]),
+                                              fit=len(record["fit_sample_ids"]), calibration=len(record["calibration_sample_ids"]), face_filter_removed=0)
+        if model.spatial_summary_bank is not None:
+            (output / "spatial_summary_audit.json").write_text(json.dumps(spatial_audits, indent=2) + "\n")
+        print(f"RESUME_BOUNDARY task={first_task} inherited_updates={config['resumed_from']['inherited_updates']} no_retraining=1", flush=True)
+    for task_id in range(first_task, args.max_tasks):
+        resuming_boundary = resume is not None and task_id == first_task
         print(f"begin_task={task_id}", flush=True)
         if freeze_audit is not None:
             freeze_audit.begin(task_id)
-        model.activate_task(task_id)
+        if not resuming_boundary:
+            model.activate_task(task_id)
         joint_before = None
         if model.joint_summary_bank is not None:
             joint_before = tensor_state_digest({n: v for n, v in model.joint_summary_bank.state_dict().items()
@@ -4275,106 +4301,114 @@ def run(args: argparse.Namespace) -> None:
             if args.protected_parax_staged_training:
                 model.parax_bank.requires_grad_(False)
         recovery_state = {} if args.save_pre_evaluation_recovery else None
-        history = train_task(
-            model, train_loader, val_loader, device, task_id,
-            args.epochs, learning_rate, args.weight_decay,
-            args.temperature, amp,
-            adapter_learning_rate=args.adapter_learning_rate,
-            adapter_weight_decay=args.adapter_weight_decay,
-            selector_condition_learning_rate=args.selector_condition_learning_rate,
-            view_fusion_learning_rate=args.view_fusion_learning_rate,
-            view_auxiliary_loss_weight=args.view_auxiliary_loss_weight,
-            view_gradient_routing=args.view_gradient_routing,
-            view_dgl_unimodal_weight=args.view_dgl_unimodal_weight,
-            view_gradient_audit_enabled=args.view_gradient_audit,
-            view_path_gradient_audit_epochs=(
-                args.view_path_gradient_audit_epochs or ()
-            ),
-            view_path_gradient_audit_batches=(
-                args.view_path_gradient_audit_batches
-            ),
-            loss_mode=args.training_loss_mode,
-            loss_routing=args.loss_routing,
-            asl_gamma_neg=args.asl_gamma_neg,
-            asl_gamma_pos=args.asl_gamma_pos,
-            asl_clip=args.asl_clip,
-            asl_eps=args.asl_eps,
-            optimizer_updates_per_task=task_update_budget,
-            adapter_regularization=args.adapter_regularization,
-            adapter_regularization_fraction=args.adapter_regularization_fraction,
-            adapter_regularization_calibration_updates=(
-                args.adapter_regularization_calibration_updates
-            ),
-            selector_view_residual_regularization=(
-                args.selector_view_residual_regularization
-            ),
-            scheduler_mode=args.scheduler_mode,
-            scheduler_min_lr_ratio=args.scheduler_min_lr_ratio,
-            scheduler_warmup_ratio=args.scheduler_warmup_ratio,
-            scheduler_multistep_milestone_fractions=(
-                args.scheduler_multistep_milestones
-            ),
-            scheduler_multistep_gamma=args.scheduler_multistep_gamma,
-            gradient_clip_norm=args.gradient_clip_norm,
-            parax_distillation_weight=args.parax_distillation_weight,
-            parax_residual_penalty_weight=args.parax_residual_penalty_weight,
-            parax_projector_alignment_weight=args.parax_projector_alignment_weight,
-            supervised_loss_scale=args.supervised_loss_scale,
-            amp_initial_scale=args.amp_initial_scale,
-            amp_growth_interval=args.amp_growth_interval,
-            moe_balance_weight=(
-                args.moe_balance_weight if args.adapter_mode in {"moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} else 0.0
-            ),
-            recovery_state=recovery_state,
-        )
-        if model.joint_summary_bank is not None:
-            joint_after = tensor_state_digest({n: v for n, v in model.joint_summary_bank.state_dict().items()
-                                              if int(n.split(".")[1]) < task_id})
-            if joint_after != joint_before:
-                raise RuntimeError("Old task fusion parameters changed")
-            joint_audits[str(task_id)] = dict(old_fusion_unchanged=True, before=joint_before,
-                                             after=joint_after, training_statistics=model.joint_summary_bank.statistics())
-            (output / "joint_summary_audit.json").write_text(json.dumps(joint_audits, indent=2) + "\n")
-        if model.cross_view_bank is not None:
-            cross_view_after = tensor_state_digest({n: v for n, v in model.cross_view_bank.state_dict().items()
-                                                    if int(n.split(".")[1]) < task_id})
-            if cross_view_before != cross_view_after:
-                raise RuntimeError("Old task cross-view attention parameters changed")
-            cross_view_audits[str(task_id)] = dict(
-                old_fusion_unchanged=True, before=cross_view_before, after=cross_view_after,
-                training_statistics=model.cross_view_bank.statistics(),
-                final_gradient_norms={n: float(p.grad.float().norm()) if p.grad is not None else None
-                                      for n, p in model.cross_view_bank.tasks[task_id].named_parameters()})
-            (output / "cross_view_audit.json").write_text(json.dumps(cross_view_audits, indent=2) + "\n")
-        if model.spatial_summary_bank is not None:
-            spatial_after = tensor_state_digest({n: v for n, v in model.spatial_summary_bank.state_dict().items()
-                                                 if int(n.split(".")[1]) < task_id})
-            if spatial_after != spatial_before:
-                raise RuntimeError("Old task spatial summary parameters changed")
-            parameter = model.spatial_summary_bank.tasks[task_id]
-            spatial_audits[str(task_id)] = dict(
-                old_spatial_unchanged=True, before=spatial_before, after=spatial_after,
-                training_statistics=model.spatial_summary_bank.statistics(),
-                final_gradient_norm=float(parameter.grad.float().norm()) if parameter.grad is not None else None,
-                parameter_norm=float(parameter.detach().float().norm()))
-            (output / "spatial_summary_audit.json").write_text(json.dumps(spatial_audits, indent=2) + "\n")
-        if freeze_audit is not None:
-            freeze_audit.finish(task_id)
-        if recovery_state is not None:
-            from .task_recovery import save_boundary
-            save_boundary(model, compact_model_state_dict(model), task_id, config,
-                          recovery_state, train_loader.generator,
-                          dict(training_history={**training_history, str(task_id): history},
-                               completed_reporting=[asdict(x) for x in task_rows],
-                               paired_task_audits=paired_task_audits,
-                               initial_selector_prompt_classifier_sha256=base_initialization_digest,
-                               frozen_visual_sha256_before=frozen_visual_before,
-                               activate_freeze_audit=freeze_audit.rows if freeze_audit is not None else None,
-                               joint_summary_audit=joint_audits, cross_view_audit=cross_view_audits,
-                               spatial_summary_audit=spatial_audits),
-                          output / "recovery_checkpoints" / f"task{task_id}_before_reporting.pth")
-            del recovery_state
-            print(f"TASK_RECOVERY_SAVED task={task_id} before_reporting=1", flush=True)
+        if resuming_boundary:
+            history = resume["provenance"]["training_history"][str(task_id)]
+            train_loader.generator.set_state(resume["sampler_generator"])
+            from .task_recovery import restore_rng
+            restore_rng(resume["rng"])
+            model.train(resume["model_training"])
+            print(f"RESUME_REPORT task={task_id} rng_restored=1 optimizer_updates_repeated=0", flush=True)
+        else:
+            history = train_task(
+                model, train_loader, val_loader, device, task_id,
+                args.epochs, learning_rate, args.weight_decay,
+                args.temperature, amp,
+                adapter_learning_rate=args.adapter_learning_rate,
+                adapter_weight_decay=args.adapter_weight_decay,
+                selector_condition_learning_rate=args.selector_condition_learning_rate,
+                view_fusion_learning_rate=args.view_fusion_learning_rate,
+                view_auxiliary_loss_weight=args.view_auxiliary_loss_weight,
+                view_gradient_routing=args.view_gradient_routing,
+                view_dgl_unimodal_weight=args.view_dgl_unimodal_weight,
+                view_gradient_audit_enabled=args.view_gradient_audit,
+                view_path_gradient_audit_epochs=(
+                    args.view_path_gradient_audit_epochs or ()
+                ),
+                view_path_gradient_audit_batches=(
+                    args.view_path_gradient_audit_batches
+                ),
+                loss_mode=args.training_loss_mode,
+                loss_routing=args.loss_routing,
+                asl_gamma_neg=args.asl_gamma_neg,
+                asl_gamma_pos=args.asl_gamma_pos,
+                asl_clip=args.asl_clip,
+                asl_eps=args.asl_eps,
+                optimizer_updates_per_task=task_update_budget,
+                adapter_regularization=args.adapter_regularization,
+                adapter_regularization_fraction=args.adapter_regularization_fraction,
+                adapter_regularization_calibration_updates=(
+                    args.adapter_regularization_calibration_updates
+                ),
+                selector_view_residual_regularization=(
+                    args.selector_view_residual_regularization
+                ),
+                scheduler_mode=args.scheduler_mode,
+                scheduler_min_lr_ratio=args.scheduler_min_lr_ratio,
+                scheduler_warmup_ratio=args.scheduler_warmup_ratio,
+                scheduler_multistep_milestone_fractions=(
+                    args.scheduler_multistep_milestones
+                ),
+                scheduler_multistep_gamma=args.scheduler_multistep_gamma,
+                gradient_clip_norm=args.gradient_clip_norm,
+                parax_distillation_weight=args.parax_distillation_weight,
+                parax_residual_penalty_weight=args.parax_residual_penalty_weight,
+                parax_projector_alignment_weight=args.parax_projector_alignment_weight,
+                supervised_loss_scale=args.supervised_loss_scale,
+                amp_initial_scale=args.amp_initial_scale,
+                amp_growth_interval=args.amp_growth_interval,
+                moe_balance_weight=(
+                    args.moe_balance_weight if args.adapter_mode in {"moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} else 0.0
+                ),
+                recovery_state=recovery_state,
+            )
+            if model.joint_summary_bank is not None:
+                joint_after = tensor_state_digest({n: v for n, v in model.joint_summary_bank.state_dict().items()
+                                                  if int(n.split(".")[1]) < task_id})
+                if joint_after != joint_before:
+                    raise RuntimeError("Old task fusion parameters changed")
+                joint_audits[str(task_id)] = dict(old_fusion_unchanged=True, before=joint_before,
+                                                 after=joint_after, training_statistics=model.joint_summary_bank.statistics())
+                (output / "joint_summary_audit.json").write_text(json.dumps(joint_audits, indent=2) + "\n")
+            if model.cross_view_bank is not None:
+                cross_view_after = tensor_state_digest({n: v for n, v in model.cross_view_bank.state_dict().items()
+                                                        if int(n.split(".")[1]) < task_id})
+                if cross_view_before != cross_view_after:
+                    raise RuntimeError("Old task cross-view attention parameters changed")
+                cross_view_audits[str(task_id)] = dict(
+                    old_fusion_unchanged=True, before=cross_view_before, after=cross_view_after,
+                    training_statistics=model.cross_view_bank.statistics(),
+                    final_gradient_norms={n: float(p.grad.float().norm()) if p.grad is not None else None
+                                          for n, p in model.cross_view_bank.tasks[task_id].named_parameters()})
+                (output / "cross_view_audit.json").write_text(json.dumps(cross_view_audits, indent=2) + "\n")
+            if model.spatial_summary_bank is not None:
+                spatial_after = tensor_state_digest({n: v for n, v in model.spatial_summary_bank.state_dict().items()
+                                                     if int(n.split(".")[1]) < task_id})
+                if spatial_after != spatial_before:
+                    raise RuntimeError("Old task spatial summary parameters changed")
+                parameter = model.spatial_summary_bank.tasks[task_id]
+                spatial_audits[str(task_id)] = dict(
+                    old_spatial_unchanged=True, before=spatial_before, after=spatial_after,
+                    training_statistics=model.spatial_summary_bank.statistics(),
+                    final_gradient_norm=float(parameter.grad.float().norm()) if parameter.grad is not None else None,
+                    parameter_norm=float(parameter.detach().float().norm()))
+                (output / "spatial_summary_audit.json").write_text(json.dumps(spatial_audits, indent=2) + "\n")
+            if freeze_audit is not None:
+                freeze_audit.finish(task_id)
+            if recovery_state is not None:
+                from .task_recovery import save_boundary
+                save_boundary(model, compact_model_state_dict(model), task_id, config,
+                              recovery_state, train_loader.generator,
+                              dict(training_history={**training_history, str(task_id): history},
+                                   completed_reporting=[asdict(x) for x in task_rows],
+                                   paired_task_audits=paired_task_audits,
+                                   initial_selector_prompt_classifier_sha256=base_initialization_digest,
+                                   frozen_visual_sha256_before=frozen_visual_before,
+                                   activate_freeze_audit=freeze_audit.rows if freeze_audit is not None else None,
+                                   joint_summary_audit=joint_audits, cross_view_audit=cross_view_audits,
+                                   spatial_summary_audit=spatial_audits),
+                              output / "recovery_checkpoints" / f"task{task_id}_before_reporting.pth")
+                del recovery_state
+                print(f"TASK_RECOVERY_SAVED task={task_id} before_reporting=1", flush=True)
         if model.parax_staged_mode or args.protected_parax_staged_training:
             # Keep baseline training, initialization, and DataLoader RNG
             # identical across tasks. All extra route work is isolated.

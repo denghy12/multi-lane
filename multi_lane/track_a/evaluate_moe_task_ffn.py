@@ -1,6 +1,7 @@
 """Evaluate frozen Task-Forward MoE checkpoints or a paired baseline on one split."""
 
 from __future__ import annotations
+from .spatial_resume import checkpoint_source_git
 
 import argparse
 import json
@@ -130,7 +131,7 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         checkpoint = source_run / "compact_checkpoints" / f"task{task_id}.pth"
         before_hash = _sha256(checkpoint)
         payload = _torch_load(checkpoint)
-        restore_compact_model_state(model, payload, task_id, config["git"])
+        restore_compact_model_state(model, payload, task_id, checkpoint_source_git(config, task_id))
         model.eval()
         if model.adapter_bank is not None:
             model.set_adapter_runtime_enabled(not disable_moe_runtime)

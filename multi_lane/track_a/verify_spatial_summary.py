@@ -1,5 +1,6 @@
 """Verify paired training budgets, original-image holdout and old dependencies."""
 import argparse
+from .spatial_resume import checkpoint_source_git
 import json
 import math
 from pathlib import Path
@@ -58,7 +59,7 @@ def verify(root, tasks=8, smoke=False):
                 assert protocol['tasks'][str(task)][key] == reference_protocol['tasks'][str(task)][key]
             path = train / 'compact_checkpoints' / f'task{task}.pth'
             payload = _torch_load(path); state = payload['model']
-            assert payload['source_git'] == config['git'] and payload['task_id'] == task
+            assert payload['source_git'] == checkpoint_source_git(config, task) and payload['task_id'] == task
             assert all(torch.isfinite(v).all() for v in state.values())
             if previous is not None:
                 assert torch.equal(previous['selectors'][:task], state['selectors'][:task])
