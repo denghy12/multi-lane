@@ -24,3 +24,8 @@ CLIP ViT-B/16；Full legacy crop .05–1，Person margin.15/letterbox，Face原m
 真实CLIP预检cad0b96通过：零参数三组逐值等价，旧task0/2/7正常预测逐值重放，几何交换仅改Full；源checkpoint SHA未变。峰值分配760.50MiB、保留1044MiB。报告output/target_anchored_summarization/implementation_20261022/real_initialization_01.json。
 
 smoke_01训练三组均exit0/0跳步，验证器因weights_only=True拒绝完整训练恢复元数据而失败（非模型训练失败）。修复可信快照读取并补回归；无效框覆盖统计归零但不改预测公式。失败产物保留，使用新run smoke_seed0_20261022_02重跑，正式未启动。
+
+## 正式启动门槛已通过
+
+最终415项全测通过。smoke_seed0_20261022_02全batch exit0，三组各4成功更新/0跳步，六评估exit0，恢复重放逐值相同；空间关/框交换固定Person/Face，可交换33人中task0/1的Full预测31/33、33/33真实改变。smoke01与02六份方法状态逐值一致。峰值分配2575.41/2576.23/2576.23MiB，保留约2710–2714MiB。准备formal_seed0_20261022_01，源码随后锁定提交。
+本次用户完整8任务要求覆盖原三任务先导的性能晋级门槛：不根据中间val/test终止某臂或修改超参，仅遇正确性/资源故障停止并保留产物。训练完成后先跨组三方审计，再三组完整val/test六进程评估，最后target task0/2/7完整val做空间关闭与同图框交换归因。
