@@ -26,10 +26,14 @@ def validate_boundary(payload, current):
             or current['git'].get('dirty') is not False or old.get('resumed_from')):
         raise ValueError('Boundary lacks clean, single-hop provenance')
     differences = [key for key in set(old) | set(current)
-                   if key != 'git' and old.get(key) != current.get(key)]
+                   if key != 'git' and (bool(old.get(key)) != bool(current.get(key))
+                   if key == 'module_stacking' else old.get(key) != current.get(key))]
     if differences:
         raise ValueError('Resume configuration differs: ' + ', '.join(sorted(differences)))
-    if (old.get('adapter_mode') != 'disabled' or old.get('parax_mode') != 'disabled'
+    if old.get('module_stacking'):
+        from .module_stacking import validate_config
+        validate_config(old)
+    elif (old.get('adapter_mode') != 'disabled' or old.get('parax_mode') != 'disabled'
             or old.get('joint_summary_mode') != 'disabled' or old.get('cross_view_mode') != 'disabled'
             or old.get('selector_conditioning', 'disabled') != 'disabled'
             or old.get('view_fusion') != 'fixed_three_view'

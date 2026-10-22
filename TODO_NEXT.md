@@ -1,5 +1,60 @@
 # 下一步任务
 
+## 2026-10-22：开始实现三模块叠加与GPU0自动队列
+
+用户已授权开始，并补充显存不足可自动分轮确保八组均排队。新分支exp/three-module-stacking-20261022从1e28bfb创建，保留原分析文档。实现显式module_stacking协议、同一读取路径中A+C组合、原task_full摘要B缓存、aux.1统一监督、image_token的训练/评估/完整恢复支持；新增八组分阶段内存队列、严格训练/冻结/holdout核验及汇总/validation关闭归因。锁定seed0/8task/30epoch/B64，原图90/10，主LR.0125/模块LR.0004，joint BCE+aux.1，无ASL。
+
+新增8项组合机制回归与真实CLIP八组初始化预检入口，当前仅本地语法和diff检查通过，尚未运行远程测试/短跑或正式实验。GPU0初始空闲约24GiB，拟最多4并发/单进程18%分配器/5600MiB余量，按实测峰值调整并发，资源不足自动等待且不减batch；训练之后自动排完整val/test和F111关闭归因。执行记录docs/three_module_stacking_execution_20261022.md。原主树153/test-only5行及状态SHA已记录，不触碰；下一步提交实验分支、Git-only创建远程独立worktree并验证。
+
+## 2026-10-22：待实施的现有三模块叠加方案（本轮只规划）
+
+详细方案docs/three_module_stacking_ablation_plan_20261022.md已完成。用户先验证既有Image-token Adapter＋摘要Attention＋人物位置三模块叠加，优先于上轮新Query结构建议。仅规划，不启动训练或只读GPU诊断。
+
+后续若执行：锁定2^3八格F000/100/010/001/110/101/011/111，先单模块、再两两、最后三者；不能只对比F000与F111或因两两无收益删除格子。A shared索引1/b32/scale.1，B任务Selector Query索引5/内宽64/4头/scale.1，C原target几何12层共享。共同90/10原图manifest、aux.1 joint BCE、无ASL、seed0/8task/30epoch/B64、主LR.0125/模块LR.0004；当前八格重训配对。
+
+实现前需明确支持目前被禁止的三模块组合、A支路softmax消费C偏置、B源缓存依赖A/C状态、B允许统一aux.1、全部模块optimizer/冻结和完整恢复。不要顺便切人物Query、增层、改变scale或改Frozen Forward。先保存完整恢复状态再评估；沿最近GPU0约束时以最重配置探针确定并发，不承诺八组全并行。
+
+评价保留全部8阶段val/test、F111 task0/2/7 val去一模块和全关；报告组合对子组合增量及二/三阶交互，明确off非重训baseline、bootstrap非训练seed。方案入口尚未实现。
+
+## 2026-10-22：两条正向候选的结合讨论，尚未授权实施
+
+先保留既定只读整图位置组task0/2/7 validation开关诊断。不要直接叠加摘要Attention和位置bias，或用两轮绝对分数预期加法收益：前者全TRAIN/aux0/13950更新，后者90% fit/aux0.1/12660更新，且两者关闭新增项后仍保留收益。
+
+后续可选研究方向需区分目标：摘要后Attention是跨视图表示传递，需保护Person私有证据和约束目标对应；Full位置摘要是人物条件证据选择，需让几何与人物内容形成有用对应；训练时使用、推理移除是独立训练策略假设，需从训练协议和匹配普通扰动控制重新验证，不能把当前off当独立训练成功。
+
+若用户授权结合方案，优先研究在Full Patch Summarization中联合任务语义、Person内容和人物几何调整读取权重，保持原Full Value、Person/Face Task Forward及旧任务冻结；不默认继承旧Full→Person残差。先统一监督/数据/预算并做无条件、仅位置、仅内容、联合四组，在TRAIN原图holdout与validation验证推理净贡献及同图人物条件对应，再决定是否扩完整训练。当前仅方案讨论，未改模型或运行实验。
+
+## 2026-10-22：目标人物空间摘要完整8任务分析结束
+
+formal_gpu0_resume_seed0_20261022_01三组训练、六路val/test、位置归因及总batch全exit0，全部8任务/240epoch/12660更新/0跳步，恢复/旧参数/原图隔离核验通过。执行1e28bfb远程clean；原primary153/test-only5行及SHA保持。233份正式非checkpoint产物已同步本地并SHA一致，48份checkpoint/恢复SHA复核，未下载/修改权重。
+
+完整固定人群val2397/test5368：匹配原方法最终42.1351/31.8525、阶段平均48.3591/35.3942；整图位置42.5486/32.1509、48.5989/35.9578；目标人物位置42.9717/32.3127、48.9116/35.7182。目标对匹配原方法val/test均8/8阶段为正，最终+.8367/+.4601；相对整图位置最终+.4231/+.1618，但test阶段平均−.2396，不能说真实人物位置稳定优于一般空间偏好。
+
+target同checkpoint task0/2/7正常−关闭validation融合为+.00212/+.00279/−.00051，最终关闭42.9723仍保留对基线+.8372。373人/175图换框均真实改变Full，PFace及不可交换者固定；最终本人/换框融合41.3038/41.2804，仅+.0234，500次原图bootstrap区间[−.0164,+.1276]；Full39.3664/39.7758，差−.4094且区间跨0。标签不同369人分层也没有明确正确框优势。不能把框敏感当人物对应成功，也不能把关闭当重训原方法。
+
+目标最终test Full/Person/可靠Face/融合30.6782/29.7310/28.3097/32.3127，相比基线+.1811/+.3834/+.5106/+.4601；性能改善保留在共同训练参数中更符合证据，尚不能确定为正则化或跨seed稳定收益。目标对原方法最终原图bootstrap val[+.0202,+1.4962]/test[+.0309,+.9295]，只条件固定seed0，非训练seed证明；对整图位置区间跨0。历史全TRAIN B0仅参考，本轮90% fit不能混为匹配控制。
+
+独立复算276个指标最大逐类差4.41e−13；首次派生CPU sigmoid线程未匹配产生两处末位差异，按OMP1重新导出后归档位置干预逐类完全一致，原结果无改动。分析仅NumPy/CPU数学及读权重，无新模型前向、训练、梯度或额外test推理。
+
+完整报告docs/target_anchored_summary_complete_results_20261022.md；分析JSON/脚本/manifest在output/target_anchored_summarization/analysis_20261022_complete_01。结论：保留性能候选与历史B0，当前人物条件推理净收益门槛未过，不直接加绑定loss、放大bias、扩MoE或合并main。建议下一步现有整图位置控制task0/2/7做只读关闭归因，区分一般空间先验/训练扰动；本轮未启动，后续若追训练过程收益需另立匹配扰动控制与validation复验。
+
+三个上下文及执行/迁移记录同步更新，只有本地分析文档与ignored统计变化，不重跑模型单元测试、不提交推送。此前“运行中/等待完整结果/前三任务阶段分析”均由本条完整结论覆盖。
+
+
+## 2026-10-22 14:56 CST：GPU0迁移已完成，三组正式接续健康
+
+formal_gpu0_resume_seed0_20261022_01在远程/mnt/haoyuan/workspace/multi-lane-main-target-summary-gpu0-resume-20261022运行，HEAD1e28bfbb6be898df79d933352a4c5a13e6cfccc1、clean，分支fix/target-summary-gpu0-resume-20261022。baseline/absolute/target三个训练PID805547/805550/805553全部GPU0，均完成task4第6轮，每轮62更新/0跳步；GPU0总使用9908MiB。
+
+三组task0–3全部120epoch/8760更新完整继承，只在新进程重做task3报告，没有重复训练更新；接续task4–7新增3900更新，最终仍12660。恢复后的task3模型与源完整边界逐tensor一致，17份继承文件/组共51份SHA保持，旧训练PID776820/776823/776826及旧控制器776747均退出，仅释放本批次GPU4/5/6占用，不触碰其他作业。原主树153行/test-only5行及状态SHA与开始一致。
+
+421项全测与两轮GPU0真实恢复smoke通过，六份方法状态/后续RNG/采样/优化器等逐值一致，旧前缀来源兼容检查及六评估/位置归因均通过。210份静态验证产物已同步并SHA一致；正式launch、恢复manifest、暂停/迁移验证与启动健康记录同步本地。后续全部完整8task validation/test六进程和target task0/2/7位置归因自动在GPU0执行。
+
+当前训练仍在进行，尚无最终8任务结果。后续查询应优先读取新worktree及formal_gpu0_resume_seed0_20261022_01；旧formal_seed0_20261022_01在task3训练结束处因用户迁移要求停止，其目录保留，不等待其完成标记。报告docs/target_summary_gpu0_migration_20261022.md。启动状态仅本地更新，远程代码锁定不改；不合并main。
+
+
+正式GPU0接续控制器已启动并等待task3保存边界：运行HEAD1e28bfb，tmux spatial_summary_gpu0_formal_20261022，目标批次formal_gpu0_resume_seed0_20261022_01，入口日志logs/target_summary_gpu0_migration/implementation_20261022/formal_driver.log。源baseline/absolute/target最后核验到task3第28/29/28轮、零跳步，旧控制器仍暂停，未提前结束训练。两轮GPU0恢复smoke全链路通过，421项测试通过；无需用户手动接续。当前仍在等待真实迁移，不把排队状态写成GPU0已训练。
+
+
 GPU0正式迁移门槛全部通过：421项默认全测；从task0恢复继续更新及从task1继承旧compact前缀的两轮三组真实smoke均完整exit0，六进程GPU0评估与位置归因通过，六份方法状态逐值对齐来源。task1结束的RNG/sampler/optimizer/scheduler/scaler/requires_grad全等。将源码锁定随后文档提交，调度formal_gpu0_resume_seed0_20261022_01等待task3三份完整快照；当下原任务尚在最后数轮，不能提前声称GPU0正式训练已开始。模型、超参、预算及测试协议不变，后续全部训练/评价GPU0。
 
 

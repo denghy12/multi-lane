@@ -2686,6 +2686,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument("--eval-workers", type=int, default=None, help="Reporting DataLoader workers; defaults to training workers")
     parser.add_argument("--save-pre-evaluation-recovery", action="store_true", help="Atomically save task-boundary model/optimizer/RNG state before reporting")
+    parser.add_argument("--module-stacking", action="store_true", help="Locked three-module factorial protocol with shared contraction and aux0.1")
     parser.add_argument("--resume-spatial-boundary", type=Path, help="Continue the locked spatial experiment from a complete pre-reporting task snapshot")
     parser.add_argument("--moe-num-experts", type=int, default=22)
     parser.add_argument("--moe-top-k", type=int, default=2)
@@ -2818,7 +2819,10 @@ def main() -> None:
 
 
 def run(args: argparse.Namespace) -> None:
-    if args.spatial_summary_mode != "disabled" and (
+    if args.module_stacking:
+        from .module_stacking import validate_arguments
+        validate_arguments(args)
+    if args.spatial_summary_mode != "disabled" and not args.module_stacking and (
         not args.moe_paired_audit or args.loss_routing != "joint_bce"
         or args.view_gradient_routing != "joint" or args.adapter_mode != "disabled"
         or args.parax_mode != "disabled" or args.cross_view_mode != "disabled"
@@ -2826,7 +2830,7 @@ def run(args: argparse.Namespace) -> None:
     ):
         raise ValueError("Spatial summaries require paired original three-view joint BCE")
     if args.cross_view_mode != "disabled" and (
-        not args.moe_paired_audit or args.view_auxiliary_loss_weight != 0
+        not args.moe_paired_audit or (args.view_auxiliary_loss_weight != 0 and not args.module_stacking)
         or args.view_gradient_routing != "joint" or args.view_gradient_audit
         or args.view_path_gradient_audit_batches or args.loss_routing != "joint_bce"
         or args.joint_summary_mode != "disabled"
@@ -2843,7 +2847,7 @@ def run(args: argparse.Namespace) -> None:
                              or args.protected_parax_paired_audit or args.moe_paired_audit)
     if args.moe_paired_audit and (
         TRAINING_PROTOCOL != "incremental"
-        or args.adapter_mode not in {"disabled", "moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_frozen_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"}
+        or args.adapter_mode not in ({"disabled", "image_token"} if args.module_stacking else {"disabled", "moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_frozen_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"})
         or args.parax_mode != "disabled" or args.view_fusion != "fixed_three_view"
         or args.selector_mode != "shared" or args.prompt_mode != "shared"
         or args.loss_routing != "joint_bce"
@@ -3239,7 +3243,7 @@ def run(args: argparse.Namespace) -> None:
 
     if args.eval_workers is not None and args.eval_workers < 0:
         raise ValueError("eval-workers must be nonnegative")
-    if args.save_pre_evaluation_recovery and (args.adapter_mode not in {*ACTIVATE_FREEZE_MODES, "disabled"} or not args.skip_validation_eval or not args.moe_paired_audit):
+    if args.save_pre_evaluation_recovery and (args.adapter_mode not in ({"disabled", "image_token"} if args.module_stacking else {*ACTIVATE_FREEZE_MODES, "disabled"}) or not args.skip_validation_eval or not args.moe_paired_audit):
         raise ValueError("Boundary recovery requires paired MoE/baseline training with skip-validation-eval")
     metadata = git_metadata(root)
     visual = load_openai_clip_visual(args.clip_checkpoint)
@@ -3281,6 +3285,7 @@ def run(args: argparse.Namespace) -> None:
         selector_condition_hidden_dim=args.selector_condition_hidden_dim,
         selector_condition_scale=args.selector_condition_scale,
         spatial_summary_mode=args.spatial_summary_mode,
+        module_stacking=args.module_stacking,
         cross_view_mode=args.cross_view_mode,
         cross_view_layer=args.cross_view_layer,
         cross_view_dim=args.cross_view_dim,
@@ -3361,6 +3366,8 @@ def run(args: argparse.Namespace) -> None:
         fusion_parameters_per_task += model.joint_summary_bank.parameter_count_per_task()
     if model.cross_view_bank is not None:
         fusion_parameters_per_task += model.cross_view_bank.parameter_count_per_task()
+    if args.module_stacking and model.spatial_summary_bank is not None:
+        fusion_parameters_per_task += model.spatial_summary_bank.parameter_count_per_task()
     print(
         f"trainable_parameters={lane_parameters + classifier_parameters + adapter_parameters_per_task + parax_parameters + condition_parameters_per_task + fusion_parameters_per_task} "
         f"selector_mode={model.selector_mode} selectors_total={model.selectors.numel()} "
@@ -3539,6 +3546,7 @@ def run(args: argparse.Namespace) -> None:
         "initial_selector_prompt_classifier_sha256": base_initialization_digest,
         "fixed_view_paired_audit": bool(args.fixed_view_paired_audit),
         "moe_paired_audit": bool(args.moe_paired_audit),
+        "module_stacking": bool(args.module_stacking),
         "fixed_view_sampler_protocol": "seed_plus_1009_times_task" if (args.fixed_view_paired_audit or args.protected_parax_paired_audit or args.moe_paired_audit) else None,
         "frozen_visual_sha256_before": frozen_visual_before,
         "training_loss_mode": args.training_loss_mode,
@@ -4120,6 +4128,9 @@ def run(args: argparse.Namespace) -> None:
         training_history = provenance["training_history"]
         paired_task_audits = provenance["paired_task_audits"]
         spatial_audits = provenance["spatial_summary_audit"]
+        cross_view_audits = provenance["cross_view_audit"]
+        if model.cross_view_bank is not None:
+            (output / "cross_view_audit.json").write_text(json.dumps(cross_view_audits, indent=2) + "\n")
         for t in range(first_task):
             record = json.loads((output / "calibration_split_provenance" / f"task{t}.json").read_text())
             calibration_counts[str(t)] = dict(eligible=len(record["fit_sample_ids"]) + len(record["calibration_sample_ids"]),

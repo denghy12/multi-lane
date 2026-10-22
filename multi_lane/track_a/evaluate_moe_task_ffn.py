@@ -5,6 +5,7 @@ from .spatial_resume import checkpoint_source_git
 
 import argparse
 import json
+import time
 from dataclasses import asdict
 from pathlib import Path
 
@@ -36,7 +37,8 @@ def evaluate_split(source_run: Path, output: Path, split: str,
                    disable_moe_runtime: bool = False,
                    disable_specialist_runtime: bool = False,
                    expected_tasks: int = 8, workers: int = None,
-                   checkpoint_tasks=None, disable_joint_residual: bool = False) -> dict:
+                   checkpoint_tasks=None, disable_joint_residual: bool = False,
+                   disable_stacking_modules=()) -> dict:
     if split not in {"val", "test"}:
         raise ValueError("Split must be val or test")
     expected_tasks = 1 if allow_smoke else expected_tasks
@@ -49,6 +51,13 @@ def evaluate_split(source_run: Path, output: Path, split: str,
     if output.exists():
         raise FileExistsError(output)
     config = json.loads((source_run / "config.json").read_text())
+    if config.get("module_stacking"):
+        from .module_stacking import validate_config
+        validate_config(config)
+    if disable_stacking_modules and (not config.get("module_stacking") or split != "val"):
+        raise ValueError("Stacking bypass is validation-only and requires the factorial protocol")
+    if set(disable_stacking_modules) - {"A", "B", "C"}:
+        raise ValueError("Unknown stacking runtime module")
     summary = json.loads((source_run / "seed_summary.json").read_text())
     if not 1 <= expected_tasks <= len(TASK_SIZES):
         raise ValueError("Invalid checkpoint task count")
@@ -57,7 +66,7 @@ def evaluate_split(source_run: Path, output: Path, split: str,
     expected_tasks = 1 if allow_smoke else expected_tasks
     if (summary.get("status") != "complete" or summary.get("config") != config
         or config.get("git", {}).get("dirty") is not False
-        or config.get("adapter_mode") not in {"moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_frozen_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4", "disabled"}
+        or config.get("adapter_mode") not in ({"disabled", "image_token"} if config.get("module_stacking") else {"moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_frozen_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4", "disabled"})
         or (config.get("adapter_mode") == "disabled" and not config.get("moe_paired_audit"))
         or config.get("parax_mode") != "disabled"
         or not config.get("save_compact_checkpoints")
@@ -85,6 +94,10 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         adapter_bottleneck_dim=config["adapter_bottleneck_dim"],
         adapter_layer_indices=config["adapter_layer_indices"],
         adapter_residual_scale=config["adapter_residual_scale"],
+        adapter_activation=config["adapter_activation"],
+        adapter_task_initialization=config["adapter_task_initialization"],
+        adapter_view_mode=config.get("adapter_view_mode", "shared"),
+        adapter_view_bottleneck_dim=config.get("adapter_view_bottleneck_dim", 0),
         moe_num_experts=config.get("moe_num_experts") if config.get("moe_num_experts") is not None else 4,
         moe_top_k=config.get("moe_top_k") if config.get("moe_top_k") is not None else 2,
         moe_dropout=config.get("moe_dropout") if config.get("moe_dropout") is not None else 0.1,
@@ -97,6 +110,7 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         moe_router_temperature=config.get("moe_router_temperature") or 1.0,
         moe_noise_std=config.get("moe_noise_std") if config.get("moe_noise_std") is not None else 0.5,
         spatial_summary_mode=config.get("spatial_summary_mode", "disabled"),
+        module_stacking=config.get("module_stacking", False),
         cross_view_mode=config.get("cross_view_mode", "disabled"),
         cross_view_layer=config.get("cross_view_layer", 5),
         cross_view_dim=config.get("cross_view_dim", 64),
@@ -127,6 +141,8 @@ def evaluate_split(source_run: Path, output: Path, split: str,
     hashes = {}
     cross_view_statistics = {}
     spatial_statistics = {}
+    timings = {}
+    torch.cuda.reset_peak_memory_stats(device)
     for task_id in task_ids:
         checkpoint = source_run / "compact_checkpoints" / f"task{task_id}.pth"
         before_hash = _sha256(checkpoint)
@@ -137,8 +153,11 @@ def evaluate_split(source_run: Path, output: Path, split: str,
             model.set_adapter_runtime_enabled(not disable_moe_runtime)
         if config.get("adapter_mode") in {"moe_task_ffn_v3", "moe_task_ffn_v4"}:
             model.adapter_bank.specialist_runtime_enabled = not disable_specialist_runtime
-        if model.adapter_bank is not None:
+        if model.adapter_bank is not None and hasattr(model.adapter_bank, "reset_route_statistics"):
             model.adapter_bank.reset_route_statistics()
+        if disable_stacking_modules:
+            from .module_stacking import runtime_bypass
+            runtime_bypass(model, disable_stacking_modules)
         if model.joint_summary_bank is not None:
             model.joint_summary_bank.reset_statistics()
         if model.cross_view_bank is not None:
@@ -152,9 +171,14 @@ def evaluate_split(source_run: Path, output: Path, split: str,
             dataset_view(source, seen_indices(task_id), include_sample_id=True)
         )
         loader = evaluation_loader(view, batch_size, config, workers)
+        torch.cuda.synchronize(device)
+        started = time.monotonic()
         row = evaluate(model, loader, device, task_id, config["threshold"],
                        amp=True, score_output_path=output / "scores" / f"task{task_id}.npz")
-        routing[str(task_id)] = model.adapter_bank.route_statistics() if model.adapter_bank is not None else {}
+        torch.cuda.synchronize(device)
+        timings[str(task_id)] = dict(fused_evaluation_seconds=time.monotonic()-started,
+                                    people=len(view))
+        routing[str(task_id)] = model.adapter_bank.route_statistics() if hasattr(model.adapter_bank, "route_statistics") else {}
         rows.append(row)
         if model.cross_view_bank is not None:
             cross_view_statistics[str(task_id)] = model.cross_view_bank.statistics()
@@ -198,6 +222,11 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         "full_cohort": bool(full_cohort),
         "cohort_samples": len(source) if full_cohort else None,
         "moe_runtime_enabled": model.adapter_bank is not None and not disable_moe_runtime,
+        "disabled_stacking_modules": list(disable_stacking_modules),
+        "module_stacking": config.get("module_stacking", False),
+        "inference_timings": timings,
+        "peak_allocated_mib": torch.cuda.max_memory_allocated(device)/1024**2,
+        "peak_reserved_mib": torch.cuda.max_memory_reserved(device)/1024**2,
         "specialist_runtime_enabled": model.adapter_bank is not None and not disable_specialist_runtime,
     }
     (output / "result.json").write_text(json.dumps(result, indent=2) + "\n")
@@ -229,6 +258,7 @@ def main() -> None:
                         help="Validation-only selected checkpoint boundaries.")
     parser.add_argument("--disable-joint-residual", action="store_true",
                         help="Zero every task-local joint residual scale in memory only.")
+    parser.add_argument("--disable-stacking-modules", nargs="+", choices=("A", "B", "C"), default=[])
     args = parser.parse_args()
     if args.allow_smoke and args.split != "val":
         parser.error("Smoke replay is validation-only")
@@ -242,7 +272,8 @@ def main() -> None:
                    disable_specialist_runtime=args.disable_specialist_runtime,
                    expected_tasks=args.expected_tasks, workers=args.workers,
                    checkpoint_tasks=args.checkpoint_tasks,
-                   disable_joint_residual=args.disable_joint_residual)
+                   disable_joint_residual=args.disable_joint_residual,
+                   disable_stacking_modules=args.disable_stacking_modules)
 
 
 if __name__ == "__main__":

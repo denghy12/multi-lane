@@ -1,5 +1,7 @@
 # 目标人物条件Patch Summarization：前三任务阶段分析
 
+> 更新：完整8任务已结束，请以[完整结果与机制分析](target_anchored_summary_complete_results_20261022.md)为准。本文保留为当时前三任务快照，不是最终结论。
+
 本记录核验时间：2026-10-22 13:56 CST。**完整实验尚未结束，本文件不是8任务最终报告。**
 
 用户要求查看结束结果；实际核对服务器后发现，`formal_seed0_20261022_01`三组仍在训练。共同保存了task0/1/2的compact checkpoint、TRAIN原图留出预测和阶段validation预测，当前三组进入task3并完成第2轮。主控制器仍存活；`completion.json`、三组`full_val/result.json`、`full_test/result.json`和正式位置归因均尚未生成。

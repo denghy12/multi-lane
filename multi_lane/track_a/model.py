@@ -107,6 +107,7 @@ class MultiLaneModel(nn.Module):
         cross_view_heads: int = 4,
         cross_view_scale: float = 0.1,
         spatial_summary_mode: str = "disabled",
+        module_stacking: bool = False,
     ) -> None:
         super().__init__()
         if not task_sizes or any(int(size) <= 0 for size in task_sizes):
@@ -260,7 +261,20 @@ class MultiLaneModel(nn.Module):
             raise ValueError("Joint summaries require shared Selectors/Prompts, three views and no other adapter")
         if spatial_summary_mode not in TaskSpatialSummary.MODES:
             raise ValueError("Invalid spatial summary mode")
-        if spatial_summary_mode != "disabled" and (
+        self.module_stacking = bool(module_stacking)
+        if self.module_stacking and (
+            adapter_mode not in {"disabled", "image_token"}
+            or cross_view_mode not in {"disabled", "task_full"}
+            or spatial_summary_mode not in {"disabled", "target"}
+            or parax_mode != "disabled" or joint_summary_mode != "disabled"
+            or selector_conditioning != "disabled" or view_fusion != "fixed_three_view"
+            or selector_mode != "shared" or prompt_mode != "shared"
+            or view_classifier_mode != "shared_post_fusion" or detach_view_fusion_features
+            or adapter_view_bottleneck_dim != 0 or adapter_view_mode != "shared"
+            or (cross_view_mode != "disabled" and not 0 <= cross_view_layer < len(blocks))
+        ):
+            raise ValueError("Module stacking permits only shared image-token, task Query and target geometry")
+        if spatial_summary_mode != "disabled" and not self.module_stacking and (
             adapter_mode != "disabled" or parax_mode != "disabled"
             or selector_conditioning != "disabled" or joint_summary_mode != "disabled"
             or cross_view_mode != "disabled" or view_fusion != "fixed_three_view"
@@ -276,7 +290,7 @@ class MultiLaneModel(nn.Module):
             or view_fusion != "fixed_three_view" or selector_mode != "shared"
             or prompt_mode != "shared" or view_classifier_mode != "shared_post_fusion"
             or detach_view_fusion_features or not 0 <= cross_view_layer < len(blocks)
-        ):
+        ) and not self.module_stacking:
             raise ValueError("Cross-view attention requires original shared three-view paths without other adapters")
         self.visual_encoder = visual_encoder
         self.visual_encoder.requires_grad_(False)
@@ -896,7 +910,26 @@ class MultiLaneModel(nn.Module):
         # Condition only the query used to read image tokens. Drop-and-replace
         # must still restore the ORIGINAL selectors, not the modified queries.
         queries = selectors if query_delta is None else selectors + query_delta.to(selectors.dtype)
-        if self.adapter_mode == "image_token" and self.adapter_runtime_enabled:
+        if self.module_stacking:
+            # All eight arms use the SAME contraction path, including runtime
+            # bypasses. Adapted tokens serve both K and V; never write them to
+            # the Frozen Forward. Geometry belongs to this very same softmax.
+            selector_image_tokens = (
+                self.adapter_bank.adapted_tokens_for_layer(
+                    layer_id, frozen_normalized_image, lane_ids, image_view
+                ) if self.adapter_mode == "image_token" and self.adapter_runtime_enabled
+                else frozen_normalized_image.unsqueeze(0).expand(len(lane_ids), -1, -1, -1)
+            )
+            similarity = torch.einsum("tbsc,tbnc->tbsn", queries, selector_image_tokens) * self.width**-0.5
+            if spatial_summary is None:
+                attention = torch.softmax(similarity, dim=-1)
+            else:
+                bias, overlap, visibility = spatial_summary
+                attention = torch.softmax(similarity + bias.to(similarity.dtype), dim=-1)
+                self.spatial_summary_bank.observe(layer_id, lane_ids, bias, overlap,
+                                                  visibility, similarity, attention)
+            selected = torch.einsum("tbnc,tbsn->tbsc", selector_image_tokens, attention)
+        elif self.adapter_mode == "image_token" and self.adapter_runtime_enabled:
             selector_image_tokens = self.adapter_bank.adapted_tokens_for_layer(
                 layer_id, frozen_normalized_image, lane_ids, image_view
             )
