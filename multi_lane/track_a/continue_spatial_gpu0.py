@@ -64,6 +64,8 @@ def run(args):
         raise RuntimeError('Clean worktree required')
     source = args.source_root / 'output/target_anchored_summarization' / args.source_run_id
     original = json.loads((source/'launch.json').read_text())
+    source_command = original['train'][0]['command']
+    face_root = source_command[source_command.index('--face-manifest-root') + 1]
     assert bool(original['smoke']) == args.smoke
     tasks = 2 if args.smoke else 8
     assert original['tasks'] == tasks
@@ -139,7 +141,7 @@ def run(args):
             for split,folder in splits:
                 arguments=['--source-run',root/arm/'train','--output',root/arm/folder,
                     '--split',split,'--expected-tasks',str(tasks),'--data-root',config['data_root'],
-                    '--clip-checkpoint',config['clip_checkpoint'],'--face-manifest-root',config['face_manifest_root'],
+                    '--clip-checkpoint',config['clip_checkpoint'],'--face-manifest-root',face_root,
                     '--batch-size','64','--workers','0']
                 if folder!='replay_val':arguments+=['--full-cohort']
                 process,record=launch('multi_lane.track_a.evaluate_moe_task_ffn',arguments,0,logs/arm/(folder+'.log'),arm+'_'+folder)
@@ -161,7 +163,7 @@ def run(args):
         config=json.loads((root/'target/train/config.json').read_text())
         arguments=['--source-run',root/'target/train','--output',root/'target/spatial_attribution_val',
             '--data-root',config['data_root'],'--clip-checkpoint',config['clip_checkpoint'],
-            '--face-manifest-root',config['face_manifest_root'],'--checkpoint-tasks']
+            '--face-manifest-root',face_root,'--checkpoint-tasks']
         arguments+=['0','1','--smoke-batches','2'] if args.smoke else ['0','2','7']
         process,record=launch('multi_lane.track_a.evaluate_spatial_attribution',arguments,0,logs/'attribution.log','attribution')
         wait_all([process],[record],logs/'attribution_status.json')

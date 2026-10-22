@@ -1,5 +1,8 @@
 # 项目上下文
 
+GPU0迁移预检：Track-A模式416项测试通过；资源探针首次读取错误的face_manifest_root字段而在模型前向前退出，已按归档face_manifest.root核对，并让控制器沿用源launch原始Face路径；不改任何训练配置或源进程。准备完整默认测试发现与GPU0真实恢复smoke，失败探针未改权重或产生预测。
+
+
 GPU0迁移实现预检更新：新增spatial_resume严格配置/来源/完成预算校验、原文件SHA复制、完整模型与requires_grad恢复、原随机数及sampler恢复；runner跳过已训练任务更新，只重做边界报告再激活下一任务。原任务按协议重置Adam，旧optimizer/scaler/scheduler快照保留不伪装连续使用。checkpoint来源按继承前缀与新执行Git分别核验，原模型结构/训练损失不改。新增GPU0接续控制器：三组16%显存分配上限/启动总余量14GB，恢复当前任务compact与源边界模型逐值核验后才结束旧已暂停PID，后续六路val/test及位置归因全部GPU0。已调度task3边界暂停器，旧控制器为T状态，训练尚在等待task3结束；准备4项新增回归、全测与三组真实恢复短跑（对比未中断权重逐值一致）。当前不声称迁移完成。
 
 

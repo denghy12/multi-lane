@@ -89,6 +89,17 @@ class SpatialResumeTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError,'Unexpected process'):
             identity(os.getpid(),'not-the-running-experiment',Path.cwd())
 
+    def test_continuation_keeps_training_arguments_and_source_command(self):
+        from multi_lane.track_a.continue_spatial_gpu0 import command_arguments
+        command = ['python','-c','runpy','--training-protocol','incremental',
+                   '--epochs','30','--train-batch-size','64','--output-root','old/train']
+        original = list(command)
+        actual = command_arguments({'command':command},Path('new/train'),Path('saved.pth'))
+        self.assertEqual(command,original)
+        self.assertEqual(actual,['--training-protocol','incremental','--epochs','30',
+                                 '--train-batch-size','64','--output-root','new/train',
+                                 '--resume-spatial-boundary','saved.pth'])
+
 
 if __name__ == '__main__':
     unittest.main()
