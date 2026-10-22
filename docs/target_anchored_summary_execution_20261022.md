@@ -29,3 +29,23 @@ smoke_01训练三组均exit0/0跳步，验证器因weights_only=True拒绝完整
 
 最终415项全测通过。smoke_seed0_20261022_02全batch exit0，三组各4成功更新/0跳步，六评估exit0，恢复重放逐值相同；空间关/框交换固定Person/Face，可交换33人中task0/1的Full预测31/33、33/33真实改变。smoke01与02六份方法状态逐值一致。峰值分配2575.41/2576.23/2576.23MiB，保留约2710–2714MiB。准备formal_seed0_20261022_01，源码随后锁定提交。
 本次用户完整8任务要求覆盖原三任务先导的性能晋级门槛：不根据中间val/test终止某臂或修改超参，仅遇正确性/资源故障停止并保留产物。训练完成后先跨组三方审计，再三组完整val/test六进程评估，最后target task0/2/7完整val做空间关闭与同图框交换归因。
+
+## 正式运行状态
+
+formal_seed0_20261022_01已启动，源码锁定b0d826342a55165f805ff25eec846df5688296ea；两端同分支codex/target-anchored-summary-20261022/upstream一致，服务器启动前clean。tmux为spatial_summary_formal_seed0_20261022；训练baseline/absolute/target位于GPU4/5/6，PID776820/776823/776826，均进入task0且初始底座SHA相同。启动时GPU4/5/6余量7201/7221/6641MiB，均超过5600MiB门槛。显存分配器上限16%，每卡一个本轮作业。
+
+总入口日志logs/target_anchored_summarization/implementation_20261022/formal_driver.log；训练日志logs/target_anchored_summarization/formal_seed0_20261022_01/<arm>/train.log；输出output/target_anchored_summarization/formal_seed0_20261022_01。训练完成后自动审计、并行三组validation/test，再做target task0/2/7位置归因；暂无最终结果。预检与短跑155份静态产物已同步本地并SHA全部一致，checkpoint仅保留服务器。本地启动记录不修改运行中的远程代码。
+
+启动健康核验（2026-10-22 12:42 CST）：三组均完成task0第1个epoch，各76次成功更新、0跳步、无异常栈/OOM；三个训练进程存活。首轮loss仅用于数值健康检查，不作性能判断。正式launch.json和startup_health_01.json已同步本地。
+
+## 2026-10-22 13:56 CST：核实实验尚未结束，完成前三任务只读阶段分析
+
+用户要求查看结束结果；实查formal_seed0_20261022_01的三组进程仍存活，task0/1/2各90epoch、4560成功更新/0跳步完成，已进入task3第2轮；完成标记、三组正式完整val/test及位置归因尚未生成。源码仍锁定b0d8263/远程clean，没有重启、调参或额外GPU评估。
+
+阶段reporting validation（人数2285/2375/2381，类别5/8/11）：baseline58.1525/57.8075/44.4069，absolute59.2844/57.9388/44.3322，target58.4303/58.3855/44.9024。目标相对基线三阶段平均+0.4505，但相对整图控制仅+0.0543；500次原图配对bootstrap各阶段区间均跨0。TRAIN留出target−baseline为+.4720/−.3055/−1.1915，最后仅79人。不能把这些当固定2397人的完整正式val，更没有最终test数值。
+
+空间参数非零/梯度有限，训练期偏置与attention KL较小、无饱和；这些支持分支在学习，不证明正确人物绑定或最终推理净收益。9份compact CPU核验旧Selector/Prompt/head行/空间参数逐值冻结且SHA不变；同人旧类AP近持平，累计阶段mAP下降不能直接解读为遗忘。
+
+27份已完成预测/划分源文件同步并SHA一致，18个NPZ逐类AP重算差0；无新模型前向/训练/梯度/test访问。阶段报告docs/target_anchored_summary_partial_results_20261022.md，ignored快照/脚本/JSON在output/target_anchored_summarization/analysis_20261022_partial_01。原主树153/test-only5行及状态SHA不变。三个上下文与执行记录同步更新；本轮仅文档和只读分析，不重跑模型测试、不提交推送、不改运行中的远程代码。
+
+下一步仍是原控制器完成全部8任务、六路完整val/test及target task0/2/7空间关闭/同图换框，再同步最终产物判断人物对应及互补性。当前不根据中间指标停止某组、修改bias/LR或启用绑定损失。
