@@ -20,3 +20,5 @@ CLIP ViT-B/16；Full legacy crop .05–1，Person margin.15/letterbox，Face原m
 ## 首轮验证
 
 9f9f6de新增10项机制测试及远程413项全量回归通过。控制器和真实CLIP/历史重放检查已备好：每个子进程Torch分配器上限16%，启动需5600MiB余量，防止本轮无界占用显存；仍不能阻止外部作业之后自行增长。smoke为三组各2任务×2更新，训练后完整val与原reporting cohort恢复重放，并做前2batch框交换核验，不访问test。正式尚未启动。
+
+真实CLIP预检cad0b96通过：零参数三组逐值等价，旧task0/2/7正常预测逐值重放，几何交换仅改Full；源checkpoint SHA未变。峰值分配760.50MiB、保留1044MiB。报告output/target_anchored_summarization/implementation_20261022/real_initialization_01.json。

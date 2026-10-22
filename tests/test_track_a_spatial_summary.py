@@ -1,6 +1,8 @@
 import copy
+import tempfile
 import unittest
 from unittest.mock import patch
+from pathlib import Path
 import torch
 from PIL import Image
 
@@ -148,6 +150,33 @@ class SpatialSummaryTest(unittest.TestCase):
         with self.assertRaises(ValueError): TaskSpatialSummary(1, 2, 'bad')
         with self.assertRaises(ValueError):
             MultiLaneModel(fixtures.FakeVisual(), (2, 1), spatial_summary_mode='target')
+
+    def test_attribution_dataset_changes_only_box_and_keeps_recipient_visibility(self):
+        from multi_lane.track_a.evaluate_spatial_attribution import SpatialAttributionDataset
+        from multi_lane.track_a.cross_view_query_pairs import make_pairs
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'scene.png'
+            Image.new('RGB', (200, 200), (21, 40, 75)).save(path)
+            class Source:
+                file_paths = [str(path), str(path)]
+                body_bboxes = [[30,30,80,180], [120,20,170,170]]
+                sample_ids = ['val:scene#person=0', 'val:scene#person=1']
+                def __len__(self): return 2
+                def __getitem__(self, index):
+                    with Image.open(path) as image:
+                        images = PairedFullPersonTransform(train=False, emit_spatial_geometry=True)(image, self.body_bboxes[index])
+                    images.update(face=torch.zeros_like(images['full']), face_reliable=torch.tensor(True))
+                    return images, torch.tensor([1., 0.])
+            source = Source()
+            plan = make_pairs(source.sample_ids, source.body_bboxes, [(200,200)]*2)
+            self.assertEqual(plan['eligible_people'], 2)
+            normal = SpatialAttributionDataset(source, plan, [0])
+            swapped = SpatialAttributionDataset(source, plan, [0], True)
+            a, y, sid, index = normal[0]; b, alt_y, alt_sid, alt_index = swapped[0]
+            self.assertFalse(torch.equal(a['spatial_bbox'], b['spatial_bbox']))
+            for key in a:
+                if key != 'spatial_bbox': self.assertTrue(torch.equal(a[key], b[key]), key)
+            self.assertTrue(torch.equal(y, alt_y)); self.assertEqual((sid,index), (alt_sid,alt_index))
 
 
 if __name__ == '__main__': unittest.main()
