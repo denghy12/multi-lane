@@ -2456,6 +2456,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         metavar="FRACTION",
     )
     parser.add_argument("--scheduler-multistep-gamma", type=float, default=0.1)
+    parser.add_argument("--spatial-summary-mode", choices=("disabled", "absolute", "target"), default="disabled")
     parser.add_argument("--train-batch-size", type=int, default=64)
     parser.add_argument("--eval-batch-size", type=int, default=64)
     parser.add_argument("--workers", type=int, default=2)
@@ -2816,6 +2817,13 @@ def main() -> None:
 
 
 def run(args: argparse.Namespace) -> None:
+    if args.spatial_summary_mode != "disabled" and (
+        not args.moe_paired_audit or args.loss_routing != "joint_bce"
+        or args.view_gradient_routing != "joint" or args.adapter_mode != "disabled"
+        or args.parax_mode != "disabled" or args.cross_view_mode != "disabled"
+        or args.joint_summary_mode != "disabled" or args.selector_conditioning != "disabled"
+    ):
+        raise ValueError("Spatial summaries require paired original three-view joint BCE")
     if args.cross_view_mode != "disabled" and (
         not args.moe_paired_audit or args.view_auxiliary_loss_weight != 0
         or args.view_gradient_routing != "joint" or args.view_gradient_audit
@@ -3271,6 +3279,7 @@ def run(args: argparse.Namespace) -> None:
         selector_condition_layers=args.selector_condition_layers,
         selector_condition_hidden_dim=args.selector_condition_hidden_dim,
         selector_condition_scale=args.selector_condition_scale,
+        spatial_summary_mode=args.spatial_summary_mode,
         cross_view_mode=args.cross_view_mode,
         cross_view_layer=args.cross_view_layer,
         cross_view_dim=args.cross_view_dim,
@@ -3385,6 +3394,7 @@ def run(args: argparse.Namespace) -> None:
             jitter_strength=args.person_color_jitter_strength,
             jitter_probability=args.person_color_jitter_probability,
             full_crop_mode=args.full_crop_mode,
+            emit_spatial_geometry=args.spatial_summary_mode != "disabled",
         )
         multi_view_train = ThreeViewTransform(train=True, **multi_view_options)
         multi_view_eval = ThreeViewTransform(train=False, **multi_view_options)
@@ -3663,6 +3673,14 @@ def run(args: argparse.Namespace) -> None:
         "full_private_classifier": (
             args.view_classifier_mode == "full_private_per_view"
         ),
+        "spatial_summary_mode": args.spatial_summary_mode,
+        "spatial_summary_parameters_per_task": model.spatial_summary_bank.parameter_count_per_task() if model.spatial_summary_bank is not None else 0,
+        "spatial_summary_learning_rate": args.view_fusion_learning_rate if model.spatial_summary_bank is not None else None,
+        "spatial_summary_layers": list(range(len(model.visual_encoder.transformer.resblocks))) if model.spatial_summary_bank is not None else [],
+        "spatial_summary_layer_parameters_shared": True,
+        "spatial_summary_geometry": "untruncated_actual_full_crop_flip_xyxy_and_real_visibility_v1",
+        "spatial_summary_bias_bound": 1.0,
+        "spatial_summary_binding_loss_weight": 0.0,
         "cross_view_mode": args.cross_view_mode,
         "cross_view_layer": args.cross_view_layer,
         "cross_view_dim": args.cross_view_dim,
@@ -3699,7 +3717,7 @@ def run(args: argparse.Namespace) -> None:
         ),
         "view_fusion_learning_rate": (
             args.view_fusion_learning_rate
-            if (model.view_fusion_module.learned or args.joint_summary_mode in {"dense", "moe"} or model.cross_view_bank is not None) else None
+            if (model.view_fusion_module.learned or args.joint_summary_mode in {"dense", "moe"} or model.cross_view_bank is not None or model.spatial_summary_bank is not None) else None
         ),
         "view_residual_scale": (
             args.view_residual_scale
@@ -4084,6 +4102,7 @@ def run(args: argparse.Namespace) -> None:
         freeze_audit = ActivateFreezeAudit(model, train_source, output, device)
     joint_audits = {}
     cross_view_audits = {}
+    spatial_audits = {}
     for task_id in range(args.max_tasks):
         print(f"begin_task={task_id}", flush=True)
         if freeze_audit is not None:
@@ -4099,6 +4118,11 @@ def run(args: argparse.Namespace) -> None:
             cross_view_before = tensor_state_digest({n: v for n, v in model.cross_view_bank.state_dict().items()
                                                      if int(n.split(".")[1]) < task_id})
             model.cross_view_bank.reset_statistics()
+        spatial_before = None
+        if model.spatial_summary_bank is not None:
+            spatial_before = tensor_state_digest({n: v for n, v in model.spatial_summary_bank.state_dict().items()
+                                                  if int(n.split(".")[1]) < task_id})
+            model.spatial_summary_bank.reset_statistics()
         if crossfit_enabled:
             fit_indices, calibration_indices = crossfit_fold_indices(
                 train_source,
@@ -4322,6 +4346,18 @@ def run(args: argparse.Namespace) -> None:
                 final_gradient_norms={n: float(p.grad.float().norm()) if p.grad is not None else None
                                       for n, p in model.cross_view_bank.tasks[task_id].named_parameters()})
             (output / "cross_view_audit.json").write_text(json.dumps(cross_view_audits, indent=2) + "\n")
+        if model.spatial_summary_bank is not None:
+            spatial_after = tensor_state_digest({n: v for n, v in model.spatial_summary_bank.state_dict().items()
+                                                 if int(n.split(".")[1]) < task_id})
+            if spatial_after != spatial_before:
+                raise RuntimeError("Old task spatial summary parameters changed")
+            parameter = model.spatial_summary_bank.tasks[task_id]
+            spatial_audits[str(task_id)] = dict(
+                old_spatial_unchanged=True, before=spatial_before, after=spatial_after,
+                training_statistics=model.spatial_summary_bank.statistics(),
+                final_gradient_norm=float(parameter.grad.float().norm()) if parameter.grad is not None else None,
+                parameter_norm=float(parameter.detach().float().norm()))
+            (output / "spatial_summary_audit.json").write_text(json.dumps(spatial_audits, indent=2) + "\n")
         if freeze_audit is not None:
             freeze_audit.finish(task_id)
         if recovery_state is not None:
@@ -4334,7 +4370,8 @@ def run(args: argparse.Namespace) -> None:
                                initial_selector_prompt_classifier_sha256=base_initialization_digest,
                                frozen_visual_sha256_before=frozen_visual_before,
                                activate_freeze_audit=freeze_audit.rows if freeze_audit is not None else None,
-                               joint_summary_audit=joint_audits, cross_view_audit=cross_view_audits),
+                               joint_summary_audit=joint_audits, cross_view_audit=cross_view_audits,
+                               spatial_summary_audit=spatial_audits),
                           output / "recovery_checkpoints" / f"task{task_id}_before_reporting.pth")
             del recovery_state
             print(f"TASK_RECOVERY_SAVED task={task_id} before_reporting=1", flush=True)

@@ -1,5 +1,45 @@
 # 项目上下文
 
+## 2026-10-22：开始实现目标人物空间摘要，用户要求完整8任务双split
+
+新隔离分支codex/target-anchored-summary-20261022，起点e81f2f2；旧分析/计划及原主/test-only工作树保留。用户要求8task覆盖原三任务先导，保留原图90/10 fit/holdout；三组disabled/absolute/target，seed0、8×30ep、B64、12660更新，主LR.0125/空间LR.0004、aux.1，禁用MoE/ParaX/adapter/旧cross-view。未来训练后并行完整val2397/test5368，不启用绑定损失。
+已实现未验证：未截断真实crop/flip框元数据、Full原汇聚logits几何偏置、60参数/task跨层共享、零初始化/无效回退、优化器/保存恢复/旧任务保护；新增机制测试。当前尚未正式运行，先Git-only远程完整单测/真实smoke。完整配置docs/target_anchored_summary_execution_20261022.md。
+
+
+## 2026-10-22研究计划：目标人物锚定的Patch Summarization，尚未实现
+
+用户要求针对当前失败机制仔细研究下一阶段，并明确先不改代码。本轮只读论文/当前实现/已有validation预测，新增docs/target_anchored_patch_summarization_plan_20261022.md及ignored只读统计JSON，未修改业务代码、配置、训练脚本、源checkpoint；未新建实现分支、提交推送、启动GPU或访问新的test。
+
+新核对：aux0匹配基线完整val2397人/1705图，同图多人527图/1219人，其中519图/1203人有标签集合不同；692次同图与第一人比较，Full logits逐值完全相同，Person平均绝对差2.4388。说明Full提供共用场景判断，不自动为指定人物选择不同证据；不是Full无用或提分已被保证。来源SHA及统计在output/target_anchored_summarization/planning_20261022。
+
+建议首个新假设：保留三路Task Forward，在Full Summarize的softmax前加入“人物框–patch相对几何”标量偏置；原语义Selectors和值tokens不改，不再向Person写生成残差。每任务10×6=60空间参数，12层共享，八任务480；全零初始退化B0；按真实Full crop/flip映射未截断框、可见性连续门控，完全不可见回退。保持原MSA/Prefix-Tuning/D&R/分类头/末端权重，所有旧依赖完整封存。
+
+先导拟P0原方法/P1无目标位置但相同visibility门控/P2真实目标位置三组，seed0 task0–2、TRAIN原图90/10 holdout、30ep/B64、主LR.0125/空间LR.0004、融合BCE+aux.1统一监督；先不test。P1/P2同参数初始化；全部需新匹配训练，不能复用fullTRAIN点值冒充控制。正确框/关闭空间项/只换框且保留本人的visibility和Person/Face验证净贡献。门槛及风险见计划，不自动启动。
+
+DSCT/SCG仅借鉴空间与语义关系原则，不照搬检测器；本方案首先是融合前的目标相关证据提取，尚不是已验证三路交互创新。只有机制先导通过、TRAIN当前类配对量足够，才单独比较同图人物当前类绑定监督；不将全26类或同情绪人物当负样本。历史val/test已反复观察，不能称独立未见验证。
+
+---
+
+
+## 2026-10-22最新结论：跨视图Attention完整8任务归因结束
+
+formal_seed0_20261021_01四进程及batch均exit0，全部8边界、val2397/test5368固定全人群结束；batch verified。100份正式结果/日志同步本地，逐文件SHA一致。训练/新模型前向均未在本次分析中执行，源checkpoint及参数前后不变；正式归因评估本身为只读前向。
+
+任务Selector Query on/off：val最终42.8976/42.9132、平均48.8781/48.8744；test最终32.4993/32.5461、平均35.9290/35.9438，未显示推理残差净收益。人物摘要Query on/off：val最终42.1003/43.1086、平均47.8098/48.9567；test最终31.7499/32.3252、平均35.1945/35.7301；完整人群全部8阶段关闭更好。人物端点关闭恢复val5.9295/test4.4624，Full/Face逐值不变。
+
+同图可见多人Query交换：373人/175val图、811人/372test图；最终可交换子集本人/另一人Query mAP为39.3885/39.6085、27.9853/28.2418。所有可交换者预测均改变，未显示正确人物Query优势；几何不合格者完全不变。标签不同者描述性分层仍无原Query总体优势，不能因此声称反向优势或所有人物条件方法无效。
+
+validation原图配对bootstrap500次：人物Query关闭−开启+1.0083，95%[.6946,1.3213]；任务Query+.0157，[-.1622,.1920]；交换者swap−原+.2200，[-.6086,1.7794]。固定seed0人群抽样区间，不替代训练seed重复。关闭后相对aux0基线点估计优势仍在，但区间跨0，不能宣称训练策略成功。
+
+主要解释：有内容依赖不等于学到人物对应；实际残差/底座.262–1.407，可能改写人物证据；Full重复注入与仅融合BCE缺少互补性约束。摘要压缩/D&R是共同限制而非已证实唯一原因。task0已见损害，当前不是新增遗忘证据。存在局部类别及早期test可交换子集受益，不能说每个样本都受损。
+
+结论：停止扩展本版人物摘要写回方案；任务Query不作为有效推理融合模块；保留B0。后续若研究训练后移除分支，须视为独立新假设，不能直接当新基线；本轮不启动新训练/不改超参/不合并main。
+报告docs/cross_view_attention_attribution_results_20261022.md；可复核JSON/脚本output/cross_view_attribution/analysis_20261022。当前分支codex/cross-view-attention-attribution-20261021，HEAD e81f2f2；分析仅本地文档，未提交推送，业务源码未改。原主树/test-only/source状态与启动一致。
+
+---
+
+以下为历史记录，运行状态以顶部最新条目为准。
+
 启动后静态产物54份（测试、失败与修正短跑、配对manifest、源SHA和健康快照）已同步本地，逐文件SHA256匹配。最新进度：任务Query validation已完成全部8边界；其test完成task0–2，人物Query validation完成task0–4、test完成task0–1，其余继续。此为运行进度，不是完整归因结论。
 
 ## 2026-10-22：完整8任务只读归因已启动，四进程运行正常

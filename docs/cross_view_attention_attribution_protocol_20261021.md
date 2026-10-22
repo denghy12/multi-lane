@@ -60,3 +60,7 @@ validation固定90%规则共373人/175原图可交换。所有筛选只用几何
 validation可交换373人/175图；test可交换811人/372图。16份源checkpoint SHA仍与历史核验记录一致，原主树/test-only/来源树状态未变。`output/cross_view_attribution/implementation_20261021/formal_start_health.json`保存启动快照。后续仅文档同步，不改变运行源码；完整结果尚未结束。
 
 静态测试/短跑/配对及健康产物54份同步本地并SHA匹配。启动后任务Query validation先完成全部8边界，其他进程继续；完整双split归因仍需等待全部进程结束。
+
+## 2026-10-22完成标记
+
+四进程及总batch均exit0，完整8边界val/test结束，全部保护检查通过。100份正式日志/输出已同步本地且SHA一致，源checkpoint保留不变。详细结果与机制分析见[cross_view_attention_attribution_results_20261022.md](cross_view_attention_attribution_results_20261022.md)。上述“运行中”段落为启动时历史记录。此次分析未重训、未改业务代码，也未据test修改配对阈值或选择新参数。

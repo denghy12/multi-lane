@@ -1,5 +1,43 @@
 # 下一步任务
 
+## 2026-10-22：开始实现目标人物空间摘要，用户要求完整8任务双split
+
+新隔离分支codex/target-anchored-summary-20261022，起点e81f2f2；旧分析/计划及原主/test-only工作树保留。用户要求8task覆盖原三任务先导，保留原图90/10 fit/holdout；三组disabled/absolute/target，seed0、8×30ep、B64、12660更新，主LR.0125/空间LR.0004、aux.1，禁用MoE/ParaX/adapter/旧cross-view。未来训练后并行完整val2397/test5368，不启用绑定损失。
+已实现未验证：未截断真实crop/flip框元数据、Full原汇聚logits几何偏置、60参数/task跨层共享、零初始化/无效回退、优化器/保存恢复/旧任务保护；新增机制测试。当前尚未正式运行，先Git-only远程完整单测/真实smoke。完整配置docs/target_anchored_summary_execution_20261022.md。
+
+
+## 2026-10-22当前待讨论方案：任务语义与目标位置共同决定Full汇聚
+
+用户本轮只要求研究计划，明确先不修改代码。计划已写docs/target_anchored_patch_summarization_plan_20261022.md；现无新GPU任务、实现代码或自动8task/test队列。
+
+已完成：论文/旧负结果复盘；已有val预测核对Full同图人物完全相同（527多人图，519图标签有差异）；只读统计保存并检查源SHA；三个上下文更新。
+
+建议第一步假设：Full Summarize的原semantic logits加目标–patch相对几何偏置（60参数/任务、跨12层共享），保持Frozen Forward/三条Task Forward/原MSA与D&R/末端融合和head。不是重启旧bbox query-delta或Person残差，也不是已经证明的三视图交互模块。
+
+未来获执行指令后才做：先预检TRAIN当前任务fit框/可见性/配对量，独立实验分支实现；零参数与默认关闭等价/输入及RNG/几何与旧依赖保护smoke；P0原三视图/P1无目标位置同可见性/P2目标位置的seed0 task0–2、原图holdout+validation，统一aux.1监督和预算，不直接跑test。必须检验P2超过两控制且运行时有净贡献，正确框优于同图交换框；否则停止。
+
+仅第一阶段机制通过后，才考虑同图当前类标签差异的绑定监督，保持同一Full像素及相同配对visibility、监督/成本匹配；不把所有人物当负样本，不使用未来类标签。再经先导重复性验证才决定完整8任务及锁定test；历史test已有多轮观察须如实报告。
+
+---
+
+
+## 2026-10-22最新判断：本轮已完成，当前无待运行归因作业
+
+- [x] task_full/person_full全部8task validation/test正常开启及残差关闭。
+- [x] 人物Query同图可见多人交换；固定几何配对，完整及可交换/Face可靠性子集。
+- [x] 四进程/batch exit0，历史正常重放、本人Query控制、固定端点及源参数不变核验。
+- [x] 100份正式日志/结果同步本地、SHA匹配；320个mAP复算、500次validation原图配对bootstrap；报告与三个上下文更新。
+
+结果：人物Query关闭残差最终val+1.0083/test+.5753，8阶段全人群均改善；任务Query关闭差值+.0157/+.0468，未显示可靠净收益。正确Query在373/811可交换人物子集未优于同图另一人Query，预测真实改变不能当关联正确的证明。个别类别和早期test子集有收益，不泛化为所有样本或所有attention都无效。
+
+当前建议（未启动新训练）：保留B0；停止本版人物摘要Query→Full摘要→Person残差路线；任务Query记录为共同训练可能带来的间接作用，不宣称推理融合成功。关闭结果非重训B0，其相对aux0优势区间跨0，不作为已验证新方法。若继续，应先提出真实目标人物关系证据/约束的新假设，而不是重复调scale/头数/冻结或旧Selector条件。
+
+本轮报告docs/cross_view_attention_attribution_results_20261022.md，原始output/cross_view_attribution/formal_seed0_20261021_01，复算output/cross_view_attribution/analysis_20261022。分析文档待用户审阅，业务源码未改、没有新实验待批准或自动排队；远程checkpoint保留。此前“等待运行结束/拟执行task0/2/7归因”条目均为历史状态，已被本次完整8任务归因覆盖。
+
+---
+
+以下为历史记录，运行状态以顶部最新条目为准。
+
 启动后静态产物54份（测试、失败与修正短跑、配对manifest、源SHA和健康快照）已同步本地，逐文件SHA256匹配。最新进度：任务Query validation已完成全部8边界；其test完成task0–2，人物Query validation完成task0–4、test完成task0–1，其余继续。此为运行进度，不是完整归因结论。
 
 ## 2026-10-22：完整8任务只读归因已启动，四进程运行正常

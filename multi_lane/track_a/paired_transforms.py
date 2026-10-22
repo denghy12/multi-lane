@@ -22,7 +22,8 @@ class PairedFullPersonTransform:
     def __init__(self, train: bool, normalization: str = "clip",
                  crop_scale=(0.05, 1.0), margin: float = 0.15,
                  jitter_strength: float = 0.1, jitter_probability: float = 0.2,
-                 full_crop_mode: str = "legacy", patch_grid_size: int = 14):
+                 full_crop_mode: str = "legacy", patch_grid_size: int = 14,
+                 emit_spatial_geometry: bool = False):
         # Lazy import avoids a runner import cycle.
         from .runner import build_transforms, PadToSquare, CLIP_IMAGE_MEAN
         if not math.isfinite(margin) or not 0 <= margin <= 1:
@@ -37,6 +38,7 @@ class PairedFullPersonTransform:
             jitter_strength, jitter_probability,
         )
         self.train = train
+        self.emit_spatial_geometry = bool(emit_spatial_geometry)
         self.margin = margin
         self.crop_scale = tuple(crop_scale)
         self.full_crop_mode = full_crop_mode
@@ -81,6 +83,19 @@ class PairedFullPersonTransform:
         if flip:
             a, c = 1 - c, 1 - a
         return torch.tensor([a, b, c, d, visible, 1.0], dtype=torch.float32)
+
+    @staticmethod
+    def untruncated_geometry(box, crop, flip: bool):
+        """Target coordinates in the actual Full crop; keep off-canvas extents."""
+        if box is None:
+            return torch.zeros(4)
+        top, left, height, width = crop
+        x1, y1, x2, y2 = box
+        a, c = (x1 - left) / width, (x2 - left) / width
+        b, d = (y1 - top) / height, (y2 - top) / height
+        if flip:
+            a, c = 1 - c, 1 - a
+        return torch.tensor([a, b, c, d], dtype=torch.float32)
 
     @staticmethod
     def _randint(low: int, high: int) -> int:
@@ -180,6 +195,7 @@ class PairedFullPersonTransform:
                 full = TF.hflip(full)
             full = self.to_tensor(full)
             geometry = self.geometry(box, crop, flip)
+            spatial_box = self.untruncated_geometry(box, crop, flip)
         else:
             # Match Resize(256, bicubic) -> CenterCrop(224) exactly, including
             # torchvision's rounding for odd sizes. Geometry follows that path.
@@ -195,6 +211,7 @@ class PairedFullPersonTransform:
                 else (top, left, 224, 224)
             )
             geometry = self.geometry(scaled_box, crop, False)
+            spatial_box = self.untruncated_geometry(scaled_box, crop, False)
             full = self.to_tensor(TF.crop(resized, *crop))
             flip = False
 
@@ -214,10 +231,12 @@ class PairedFullPersonTransform:
             person = self.to_tensor(person)
         else:
             person = self.person_eval(person)
-        return ({"full": full, "person": person, "bbox": geometry,
-                 "person_patch_mask": person_patch_mask,
-                 "condition_valid": (geometry[4] > 0).float() * geometry[5]},
-                flip)
+        result = {"full": full, "person": person, "bbox": geometry,
+                  "person_patch_mask": person_patch_mask,
+                  "condition_valid": (geometry[4] > 0).float() * geometry[5]}
+        if self.emit_spatial_geometry:
+            result.update(spatial_bbox=spatial_box, spatial_visibility=geometry[4] * geometry[5])
+        return result, flip
 
     def __call__(self, image, bbox):
         result, _ = self._apply(image, bbox)

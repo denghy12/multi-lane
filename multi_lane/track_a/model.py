@@ -30,6 +30,7 @@ from .selector_conditioning import TaskSelectorConditioner
 from .view_fusion import TaskwiseViewFusion
 from .joint_summary import TaskJointSummaryBank
 from .cross_view_attention import TaskCrossViewAttentionBank
+from .spatial_summary import TaskSpatialSummary
 
 ModelInputs = Union[torch.Tensor, Dict[str, torch.Tensor]]
 
@@ -105,6 +106,7 @@ class MultiLaneModel(nn.Module):
         cross_view_dim: int = 64,
         cross_view_heads: int = 4,
         cross_view_scale: float = 0.1,
+        spatial_summary_mode: str = "disabled",
     ) -> None:
         super().__init__()
         if not task_sizes or any(int(size) <= 0 for size in task_sizes):
@@ -256,6 +258,16 @@ class MultiLaneModel(nn.Module):
             or view_classifier_mode != "shared_post_fusion" or detach_view_fusion_features
         ):
             raise ValueError("Joint summaries require shared Selectors/Prompts, three views and no other adapter")
+        if spatial_summary_mode not in TaskSpatialSummary.MODES:
+            raise ValueError("Invalid spatial summary mode")
+        if spatial_summary_mode != "disabled" and (
+            adapter_mode != "disabled" or parax_mode != "disabled"
+            or selector_conditioning != "disabled" or joint_summary_mode != "disabled"
+            or cross_view_mode != "disabled" or view_fusion != "fixed_three_view"
+            or selector_mode != "shared" or prompt_mode != "shared"
+            or view_classifier_mode != "shared_post_fusion" or detach_view_fusion_features
+        ):
+            raise ValueError("Spatial summaries require original shared three-view pathways")
         if cross_view_mode not in TaskCrossViewAttentionBank.MODES:
             raise ValueError("Invalid cross-view mode")
         if cross_view_mode != "disabled" and (
@@ -481,6 +493,10 @@ class MultiLaneModel(nn.Module):
                 joint_summary_bottleneck, joint_summary_experts, joint_summary_top_k,
                 joint_summary_scale,
             )
+        self.spatial_summary_mode = spatial_summary_mode
+        self.spatial_summary_runtime_enabled = spatial_summary_mode != "disabled"
+        self.spatial_summary_bank = (TaskSpatialSummary(self.num_tasks, self.num_selectors, spatial_summary_mode)
+                                     if spatial_summary_mode != "disabled" else None)
         self.cross_view_mode = cross_view_mode
         self.cross_view_runtime_enabled = cross_view_mode != "disabled"
         self.cross_view_bank = None
@@ -540,6 +556,8 @@ class MultiLaneModel(nn.Module):
             self.parax_bank.activate_task(task_id)
         if self.selector_conditioner is not None:
             self.selector_conditioner.restore_task(task_id)
+        if self.spatial_summary_bank is not None:
+            self.spatial_summary_bank.restore_task(task_id)
         self.view_fusion_module.restore_task(task_id)
         if self.joint_summary_bank is not None:
             self.joint_summary_bank.restore_task(task_id)
@@ -556,6 +574,8 @@ class MultiLaneModel(nn.Module):
             self.parax_bank.restore_task(task_id)
         if self.selector_conditioner is not None:
             self.selector_conditioner.restore_task(task_id)
+        if self.spatial_summary_bank is not None:
+            self.spatial_summary_bank.restore_task(task_id)
         self.view_fusion_module.restore_task(task_id)
         if self.joint_summary_bank is not None:
             self.joint_summary_bank.restore_task(task_id)
@@ -848,6 +868,7 @@ class MultiLaneModel(nn.Module):
         condition_valid: Optional[torch.Tensor] = None,
         image_view: str = "full",
         summary_cache=None,
+        spatial_summary=None,
     ) -> torch.Tensor:
         # The released block applies its first LayerNorm before both selector
         # aggregation and prompt attention.  Keep the residual stream itself
@@ -893,11 +914,14 @@ class MultiLaneModel(nn.Module):
             similarity = torch.einsum(
                 "tbsc,bnc->tbsn", queries, selector_image_tokens
             ) * (self.width**-0.5)
-            selected = torch.einsum(
-                "bnc,tbsn->tbsc",
-                selector_image_tokens,
-                torch.softmax(similarity, dim=-1),
-            )
+            if spatial_summary is None:
+                attention = torch.softmax(similarity, dim=-1)
+            else:
+                bias, overlap, visibility = spatial_summary
+                attention = torch.softmax(similarity + bias.to(similarity.dtype), dim=-1)
+                self.spatial_summary_bank.observe(layer_id, lane_ids, bias, overlap,
+                                                  visibility, similarity, attention)
+            selected = torch.einsum("bnc,tbsn->tbsc", selector_image_tokens, attention)
         if (self.cross_view_bank is not None and self.cross_view_runtime_enabled
                 and layer_id == self.cross_view_bank.layer_index):
             if summary_cache is None:
@@ -1097,6 +1121,12 @@ class MultiLaneModel(nn.Module):
         if self.adapter_bank is not None and self.adapter_mode not in {"moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"}:
             self.adapter_bank.reset_auxiliary_metrics()
         image_tokens = self._visual_tokens(images)
+        spatial_summary = None
+        if self.spatial_summary_bank is not None and self.spatial_summary_runtime_enabled and image_view == "full":
+            if paired is None or not {"spatial_bbox", "spatial_visibility"} <= paired.keys():
+                raise ValueError("Spatial summaries require crop-mapped target geometry")
+            spatial_summary = self.spatial_summary_bank.bias(
+                paired["spatial_bbox"], paired["spatial_visibility"], image_tokens.shape[1], lane_ids)
         lane_tokens = self._initial_lane_tokens(
             images.shape[0], lane_ids, image_view=image_view
         )
@@ -1131,6 +1161,8 @@ class MultiLaneModel(nn.Module):
                     paired["bbox"], paired["condition_valid"],
                 )
             cross_kwargs = {} if summary_cache is None else {"summary_cache": summary_cache}
+            if spatial_summary is not None:
+                cross_kwargs["spatial_summary"] = spatial_summary
             lane_tokens = self._lane_block(
                 block,
                 image_tokens,
@@ -1264,6 +1296,10 @@ class MultiLaneModel(nn.Module):
             features["full"] = self._encode_single_lanes(
                 images["full"], all_seen_lanes, image_view="full"
             )
+        elif self.spatial_summary_bank is not None:
+            features = {name: self._encode_single_lanes(
+                images if name == "full" else images[name], all_seen_lanes, image_view=name)
+                for name in self.view_fusion_module.view_names}
         elif self.cross_view_bank is not None and self.cross_view_runtime_enabled:
             summary_cache = {}
             donor_cache = {}
@@ -1532,6 +1568,8 @@ class MultiLaneModel(nn.Module):
             yield from self.joint_summary_bank.active_parameters()
         if self.cross_view_bank is not None:
             yield from self.cross_view_bank.active_parameters()
+        if self.spatial_summary_bank is not None:
+            yield from self.spatial_summary_bank.active_parameters()
 
     def adapter_optimizer_parameters(self) -> Iterable[nn.Parameter]:
         if self.adapter_bank is not None:
@@ -1570,6 +1608,9 @@ class MultiLaneModel(nn.Module):
         if self.cross_view_bank is not None:
             names.extend(f"cross_view_bank.{name}"
                          for name, p in self.cross_view_bank.named_parameters() if p.requires_grad)
+        if self.spatial_summary_bank is not None:
+            names.extend(f"spatial_summary_bank.{name}"
+                         for name, p in self.spatial_summary_bank.named_parameters() if p.requires_grad)
         if self.adapter_bank is not None:
             names.extend(
                 f"adapter_bank.{name}"

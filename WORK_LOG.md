@@ -1,5 +1,39 @@
 # 工作日志
 
+## 2026-10-22：开始实现目标人物空间摘要，用户要求完整8任务双split
+
+新隔离分支codex/target-anchored-summary-20261022，起点e81f2f2；旧分析/计划及原主/test-only工作树保留。用户要求8task覆盖原三任务先导，保留原图90/10 fit/holdout；三组disabled/absolute/target，seed0、8×30ep、B64、12660更新，主LR.0125/空间LR.0004、aux.1，禁用MoE/ParaX/adapter/旧cross-view。未来训练后并行完整val2397/test5368，不启用绑定损失。
+已实现未验证：未截断真实crop/flip框元数据、Full原汇聚logits几何偏置、60参数/task跨层共享、零初始化/无效回退、优化器/保存恢复/旧任务保护；新增机制测试。当前尚未正式运行，先Git-only远程完整单测/真实smoke。完整配置docs/target_anchored_summary_execution_20261022.md。
+
+
+## 2026-10-22：下一阶段文献核对与数据流方案完成，仅文档
+
+读取MULTI-LANE §3.3、DSCT原论文方法及SCG原论文空间条件方法，对照本地Summarize、几何变换和旧Person-conditioned Selector结果。确认旧bbox/Person query-delta、selector-specific Person patches及target-aware裁剪均已有负结果，未把旧路线换名当新机制。
+
+只读已有baseline aux0 task7完整val分支NPZ，527张多人原图中519张标签有差异，Full对同图人物完全相同；2397人/1705图，来源SHA在saved_validation_person_binding_audit.json。只用NumPy读取保存预测，无新前向/训练/梯度、新test或GPU资源操作，源文件SHA前后一致。
+
+新增docs/target_anchored_patch_summarization_plan_20261022.md：提出Full压缩之前显式人物–patch空间偏置，原语义Selectors/值tokens/Person与Face路径/末端融合保持；60参数/task跨12层共享。解释与旧查询残差、摘要后跨注意力、目标裁剪的区别；给出三组先导、同checkpoint框交换/关闭、TRAIN当前类绑定监督的独立后续条件、预算/风险/停止门槛。P1保留同visibility门控，交换保留本人门控，避免位置和可见性混淆；标明全局CLS捷径、部分可见坐标、深层patch全局混合和评估集反复观察的限制。
+
+三个上下文同步更新，未创建实现分支、未提交/推送；业务源码/配置/训练脚本均未改，所以无需运行模型测试。此前未提交归因报告及三上下文修改保留，远程工作树未访问或修改。新方案尚未被当作执行指令启动。
+
+---
+
+
+## 2026-10-22：完整8任务Attention归因同步、复算与机制分析完成
+
+核验formal_seed0_20261021_01四进程/总batch exit0，32个正常开启边界逐值重放历史预测、本人Query控制/Full和Face不变/不可交换者不变/模型及源SHA保护全部通过。下载100份日志与结果并逐文件SHA验证，未下载或修改checkpoint。原primary默认status153行SHA ea2e261e581efb0c9c7a56bfcf7078611374fcd25f9348512e102de0ab888ccf，test-only5行SHA e9d1479fb6a0354fee4017234173b00a8cc237895f556f80c7129e4555d16152，来源74ece12及归因e81f2f2远程均clean，未触碰其他工作树。
+
+新增ignored output下纯NumPy分析脚本/JSON，重算80条件边界×4端点=320个mAP，最大误差5.69e-14；500次validation原图配对bootstrap及标签不同人物描述分层，无新模型推理/梯度/训练。未依据test改条件。
+人物Query on→off val42.1003→43.1086、test31.7499→32.3252，8阶段全人群均提高，Person恢复5.9295/4.4624；任务Query42.8976→42.9132、32.4993→32.5461整体近持平。本人→同图另一人Query在373/811可交换者最终39.3885→39.6085、27.9853→28.2418；每人预测均发生变化。交换差值抽样区间跨0，不能说另一人Query可靠更好。
+
+新增docs/cross_view_attention_attribution_results_20261022.md，逐任务/分支/子集表及结构解释完整；三个上下文均更新。推理残差无净贡献与训练间接作用分开，人物对应未获支持；实际大残差/重复Full/融合监督缺口为有证据支持的解释而非唯一已证实根因。保留局部类别受益及seed0限制。
+
+业务源码/配置/训练脚本未改，仅分析文档、协议完成标记、ignored统计；无需重跑模型测试。未新增训练、提交/推送或main合并。产物已同步本地，无需用户再次手动同步这100份结果；源checkpoint仍在远程保留。
+
+---
+
+以下为历史记录，运行状态以顶部最新条目为准。
+
 启动后静态产物54份（测试、失败与修正短跑、配对manifest、源SHA和健康快照）已同步本地，逐文件SHA256匹配。最新进度：任务Query validation已完成全部8边界；其test完成task0–2，人物Query validation完成task0–4、test完成task0–1，其余继续。此为运行进度，不是完整归因结论。
 
 ## 2026-10-22：完整8任务只读归因已启动，四进程运行正常

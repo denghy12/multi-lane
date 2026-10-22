@@ -95,6 +95,7 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         moe_router_logit_scale=config.get("moe_router_logit_scale") or 2.0,
         moe_router_temperature=config.get("moe_router_temperature") or 1.0,
         moe_noise_std=config.get("moe_noise_std") if config.get("moe_noise_std") is not None else 0.5,
+        spatial_summary_mode=config.get("spatial_summary_mode", "disabled"),
         cross_view_mode=config.get("cross_view_mode", "disabled"),
         cross_view_layer=config.get("cross_view_layer", 5),
         cross_view_dim=config.get("cross_view_dim", 64),
@@ -124,6 +125,7 @@ def evaluate_split(source_run: Path, output: Path, split: str,
     routing = {}
     hashes = {}
     cross_view_statistics = {}
+    spatial_statistics = {}
     for task_id in task_ids:
         checkpoint = source_run / "compact_checkpoints" / f"task{task_id}.pth"
         before_hash = _sha256(checkpoint)
@@ -140,6 +142,8 @@ def evaluate_split(source_run: Path, output: Path, split: str,
             model.joint_summary_bank.reset_statistics()
         if model.cross_view_bank is not None:
             model.cross_view_bank.reset_statistics()
+        if model.spatial_summary_bank is not None:
+            model.spatial_summary_bank.reset_statistics()
         view = (
             LabelView(source, range(len(source)), seen_indices(task_id),
                       include_sample_id=True)
@@ -161,6 +165,8 @@ def evaluate_split(source_run: Path, output: Path, split: str,
                 model, loader, device, task_id, config["threshold"], amp=True,
                 score_output_path=output / "view_scores" / f"task{task_id}.npz",
             )
+        if model.spatial_summary_bank is not None:
+            spatial_statistics[str(task_id)] = model.spatial_summary_bank.statistics()
         hashes[str(task_id)] = _sha256(checkpoint)
         if hashes[str(task_id)] != before_hash:
             raise RuntimeError("Source checkpoint changed during attribution")
@@ -177,6 +183,8 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         "summary": summarize_tasks(rows),
         "view_diagnostics": views,
         "route_statistics": routing,
+        "spatial_summary_mode": model.spatial_summary_mode,
+        "spatial_summary_statistics": spatial_statistics,
         "cross_view_mode": model.cross_view_mode,
         "cross_view_statistics": cross_view_statistics,
         "person_endpoint_semantics": config.get("cross_view_person_endpoint", "person_only"),

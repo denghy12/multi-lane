@@ -71,7 +71,8 @@ def make_source(config, data_root, face_manifest_root, split):
                               crop_scale=config["train_crop_scale"], margin=config["person_crop_margin"],
                               jitter_strength=config["person_color_jitter_strength"],
                               jitter_probability=config["person_color_jitter_probability"],
-                              full_crop_mode=config["full_crop_mode"]) if three else None
+                              full_crop_mode=config["full_crop_mode"],
+                              emit_spatial_geometry=config.get("spatial_summary_mode", "disabled") != "disabled") if three else None
     return EMOTIC(str(resolve_dataset_parent(data_root)), train=False, transform=transform,
                   eval_splits=(split,), input_mode="full", person_crop_margin=config["person_crop_margin"],
                   multi_view_transform=multi, face_manifest_root=face_manifest_root if three else None)
