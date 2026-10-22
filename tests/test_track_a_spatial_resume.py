@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import torch
 
@@ -99,6 +100,21 @@ class SpatialResumeTest(unittest.TestCase):
         self.assertEqual(actual,['--training-protocol','incremental','--epochs','30',
                                  '--train-batch-size','64','--output-root','new/train',
                                  '--resume-spatial-boundary','saved.pth'])
+
+    def test_original_processes_not_terminated_if_restored_model_differs(self):
+        from multi_lane.track_a.continue_spatial_gpu0 import retire_paused
+        from multi_lane.track_a.spatial_resume import sha256
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);old=root/'old.pth'
+            new=root/'new/baseline/train/compact_checkpoints/task0.pth'
+            new.parent.mkdir(parents=True)
+            torch.save({'model':{'weight':torch.tensor([1.])}},old)
+            torch.save({'model':{'weight':torch.tensor([2.])}},new)
+            record={'task':0,'controller':999999,'processes':{'baseline':{
+                'pid':999998,'checkpoint':str(old),'sha256':sha256(old)}}}
+            with patch('multi_lane.track_a.continue_spatial_gpu0.os.kill') as kill:
+                with self.assertRaises(AssertionError):retire_paused(record,root,root/'new')
+                kill.assert_not_called()
 
 
 if __name__ == '__main__':
