@@ -51,3 +51,7 @@ GPU0三组真实恢复smoke已启动：从旧2task×2update短跑的task0边界�
 ## 恢复短跑通过
 
 三组恢复后的task0/1六份模型状态与未中断来源逐值相同；task1完整rng、sampler_generator、training_state、requires_grad也逐值一致。三训练、六评估及位置归因全部exit0，正常预测重放及旧参数/恢复检查通过。只新增负向保护回归，运行代码未再变。原三组task3约第21–22轮，暂停器继续等待保存边界；正式接续控制器将在该边界后自动于GPU0启动。
+
+## 正式迁移门槛全部通过
+
+421项默认全测通过。补充smoke_gpu0_prefix_seed0_20261022_01从task1边界恢复，真实验证继承的旧compact前缀与新执行来源混合加载，三组模型状态逐值一致；六评估和位置归因均exit0。两轮smoke均无test，原始失败探针与成功记录保留。准备调度formal_gpu0_resume_seed0_20261022_01等待三组task3快照，原三组最后数轮继续，尚未实际迁移完成。

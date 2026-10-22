@@ -1,5 +1,8 @@
 # 项目上下文
 
+GPU0正式迁移门槛全部通过：421项默认全测；从task0恢复继续更新及从task1继承旧compact前缀的两轮三组真实smoke均完整exit0，六进程GPU0评估与位置归因通过，六份方法状态逐值对齐来源。task1结束的RNG/sampler/optimizer/scheduler/scaler/requires_grad全等。将源码锁定随后文档提交，调度formal_gpu0_resume_seed0_20261022_01等待task3三份完整快照；当下原任务尚在最后数轮，不能提前声称GPU0正式训练已开始。模型、超参、预算及测试协议不变，后续全部训练/评价GPU0。
+
+
 GPU0恢复短跑已全链路完成：三组训练exit0、六路GPU0并行validation及位置归因exit0。六份task0/1模型状态与未中断来源逐值相同；三组task1恢复状态的Python/NumPy/Torch CPU/CUDA RNG、sampler generator、Adam/scheduler/scaler/参数组及requires_grad全部逐值一致。原420项全测通过；另补“恢复模型不等则禁止结束旧PID”的负向保护回归，准备421项全测。八路径资源探针B64三视图保留1252MiB，支持后续GPU0六评估。真实三组当前task3约21–22轮，边界暂停等待中，旧控制器已T停止；即将调度GPU0正式接续控制器等待task3快照，继承8760更新后只新增3900更新，不改变总12660预算。
 
 
