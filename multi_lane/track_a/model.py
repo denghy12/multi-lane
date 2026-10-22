@@ -918,9 +918,13 @@ class MultiLaneModel(nn.Module):
                 attention = torch.softmax(similarity, dim=-1)
             else:
                 bias, overlap, visibility = spatial_summary
-                attention = torch.softmax(similarity + bias.to(similarity.dtype), dim=-1)
-                self.spatial_summary_bank.observe(layer_id, lane_ids, bias, overlap,
-                                                  visibility, similarity, attention)
+                if self.spatial_summary_mode == "regional":
+                    attention = self.spatial_summary_bank.regional_attention(
+                        similarity, overlap, visibility, lane_ids, layer_id)
+                else:
+                    attention = torch.softmax(similarity + bias.to(similarity.dtype), dim=-1)
+                    self.spatial_summary_bank.observe(layer_id, lane_ids, bias, overlap,
+                                                      visibility, similarity, attention)
             selected = torch.einsum("bnc,tbsn->tbsc", selector_image_tokens, attention)
         if (self.cross_view_bank is not None and self.cross_view_runtime_enabled
                 and layer_id == self.cross_view_bank.layer_index):

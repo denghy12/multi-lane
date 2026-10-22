@@ -19,7 +19,7 @@ def load_boundary(path):
     return torch.load(path, map_location='cpu', weights_only=False)
 
 
-def verify(root, tasks=8, smoke=False):
+def verify(root, tasks=8, smoke=False, arms=None):
     checks = []
     reference = None
     reference_protocol = None
@@ -30,7 +30,7 @@ def verify(root, tasks=8, smoke=False):
                  'view_classifier_mode', 'train_crop_scale', 'input_normalization', 'amp', 'tf32',
                  'full_crop_mode', 'person_crop_margin', 'training_loss_mode',
                  'amp_initial_scale', 'amp_growth_interval', 'max_tasks')
-    for arm, mode in [('baseline', 'disabled'), ('absolute', 'absolute'), ('target', 'target')]:
+    for arm, mode in (arms or [('baseline', 'disabled'), ('absolute', 'absolute'), ('target', 'target')]):
         train = root / arm / 'train'
         config, summary = read(train / 'config.json'), read(train / 'seed_summary.json')
         protocol, history = read(train / 'paired_protocol_audit.json'), read(train / 'training_history.json')
@@ -80,8 +80,12 @@ def verify(root, tasks=8, smoke=False):
                 assert row['old_spatial_unchanged'] and row['before'] == row['after']
                 assert row['parameter_norm'] > 0 and row['final_gradient_norm'] is not None and math.isfinite(row['final_gradient_norm'])
                 assert set(row['training_statistics']) == {f'task{task}/layer{layer}' for layer in range(12)}
-                assert config['spatial_summary_parameters_per_task'] == 60
-                assert state[f'spatial_summary_bank.tasks.{task}'].shape == (10, 6)
+                features = 1 if mode == 'regional' else 6
+                assert config['spatial_summary_parameters_per_task'] == 10 * features
+                assert state[f'spatial_summary_bank.tasks.{task}'].shape == (10, features)
+                if mode == 'regional':
+                    assert config['spatial_summary_regional_protocol']['global_share'] == .5
+                    assert config['spatial_summary_regional_protocol']['body_quota_bounds'] == [.25, .75]
             recovery = load_boundary(train / 'recovery_checkpoints' / f'task{task}_before_reporting.pth')
             assert recovery['task_id'] == task and recovery['kind'] == 'task_boundary_before_reporting'
             assert recovery['model'].keys() == state.keys()

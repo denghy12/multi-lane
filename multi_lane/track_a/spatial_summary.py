@@ -8,7 +8,7 @@ from torch.nn import functional as F
 
 
 class TaskSpatialSummary(nn.Module):
-    MODES = ("disabled", "absolute", "target")
+    MODES = ("disabled", "absolute", "target", "regional")
 
     def __init__(self, num_tasks: int, num_selectors: int, mode: str):
         super().__init__()
@@ -16,7 +16,8 @@ class TaskSpatialSummary(nn.Module):
             raise ValueError("Invalid spatial summary configuration")
         self.mode = mode
         self.tasks = nn.ParameterList([
-            nn.Parameter(torch.zeros(num_selectors, 6)) for _ in range(num_tasks)
+            nn.Parameter(torch.zeros(num_selectors, 1 if mode == "regional" else 6))
+            for _ in range(num_tasks)
         ])
         self.current_task_id = -1
         self.requires_grad_(False)
@@ -80,11 +81,73 @@ class TaskSpatialSummary(nn.Module):
 
     def bias(self, boxes, visibility, token_count, lane_ids):
         phi, v, actual_overlap = self.geometry_features(boxes, visibility, token_count)
+        if self.mode == "regional":
+            return None, actual_overlap, v
         weights = torch.stack([self.tasks[t] for t in lane_ids])
         # A zero parameter matrix exactly preserves original similarity logits.
         with torch.autocast(device_type=boxes.device.type, enabled=False):
             bias = torch.einsum("tmf,bnf->tbmn", weights.float(), phi).tanh() * v[None, :, None, None]
         return bias, actual_overlap, v
+
+    def regional_attention(self, similarity, overlap, visibility, lane_ids, layer):
+        """Keep global evidence, independently normalize body/outside evidence.
+
+        No generated Values or changes to the Frozen Forward. The 50% global
+        share is fixed; only the task/selector body quota in [.25,.75] is learned.
+        A region below .25 patch-equivalents, absent context, or invalid geometry
+        falls back EXACTLY to the historical softmax (including its dtype).
+        """
+        if self.mode != "regional":
+            raise ValueError("Regional attention requires regional mode")
+        original = similarity.softmax(-1)
+        with torch.autocast(device_type=similarity.device.type, enabled=False):
+            body = overlap.detach().float()
+            outside = 1 - body
+            outside = outside.clone()
+            outside[:, 0] = 0  # CLS belongs to neither spatial region.
+            usable = (body.sum(-1) >= .25) & (outside.sum(-1) >= .25)
+            mix = .5 * visibility.float() * usable.float()
+
+            def regional(mask):
+                scores = similarity.float() + mask.clamp_min(1e-30).log()[None, :, None]
+                scores = scores.masked_fill(mask[None, :, None] <= 0, -torch.inf)
+                # Empty rows must never enter softmax as all -inf, even when
+                # their result will later be discarded by the exact fallback.
+                scores = torch.where(mask.sum(-1)[None, :, None, None] > 0,
+                                     scores, torch.zeros_like(scores))
+                return scores.softmax(-1)
+
+            a_body, a_outside = regional(body), regional(outside)
+            quota = .25 + .5 * torch.stack([self.tasks[t] for t in lane_ids]).float().sigmoid()
+            regional_a = quota[:, None] * a_body + (1 - quota[:, None]) * a_outside
+            combined = ((1 - mix[None, :, None, None]) * original.float()
+                        + mix[None, :, None, None] * regional_a)
+            attention = torch.where(mix[None, :, None, None] > 0,
+                                    combined.to(original.dtype), original)
+        self.observe_regional(layer, lane_ids, original, attention, overlap, quota, mix)
+        return attention
+
+    @torch.no_grad()
+    def observe_regional(self, layer, lane_ids, original, attention, overlap, quota, mix):
+        original, attention = original.float(), attention.float()
+        for index, task in enumerate(lane_ids):
+            a, p = attention[index], original[index]
+            row = dict(samples=a.new_tensor(len(a)),
+                       regional_mix_sum=mix.sum(),
+                       body_quota_sum=quota[index].mean() * len(a),
+                       active_region_sum=(mix > 0).float().sum(),
+                       original_target_mass_sum=(p * overlap[:, None]).sum(-1).mean(-1).sum(),
+                       target_overlap_mass_sum=(a * overlap[:, None]).sum(-1).mean(-1).sum(),
+                       cls_mass_sum=a[..., 0].mean(-1).sum(),
+                       attention_l1_sum=(a-p).abs().sum(-1).mean(-1).sum(),
+                       attention_kl_sum=(a * (a.clamp_min(1e-30).log()
+                                             - p.clamp_min(1e-30).log())).sum(-1).mean(-1).sum())
+            key = f"task{task}/layer{layer}"
+            if key not in self._statistics:
+                self._statistics[key] = row
+            else:
+                for name, value in row.items():
+                    self._statistics[key][name].add_(value)
 
     def reset_statistics(self):
         self._statistics = {}

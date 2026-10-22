@@ -2456,7 +2456,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         metavar="FRACTION",
     )
     parser.add_argument("--scheduler-multistep-gamma", type=float, default=0.1)
-    parser.add_argument("--spatial-summary-mode", choices=("disabled", "absolute", "target"), default="disabled")
+    parser.add_argument("--spatial-summary-mode", choices=("disabled", "absolute", "target", "regional"), default="disabled")
     parser.add_argument("--train-batch-size", type=int, default=64)
     parser.add_argument("--eval-batch-size", type=int, default=64)
     parser.add_argument("--workers", type=int, default=2)
@@ -3680,7 +3680,14 @@ def run(args: argparse.Namespace) -> None:
         "spatial_summary_layers": list(range(len(model.visual_encoder.transformer.resblocks))) if model.spatial_summary_bank is not None else [],
         "spatial_summary_layer_parameters_shared": True,
         "spatial_summary_geometry": "untruncated_actual_full_crop_flip_xyxy_and_real_visibility_v1",
-        "spatial_summary_bias_bound": 1.0,
+        "spatial_summary_bias_bound": None if args.spatial_summary_mode == "regional" else 1.0,
+        "spatial_summary_regional_protocol": ({
+            "version": 1, "global_share": .5, "body_quota_bounds": [.25, .75],
+            "body_quota_initial": .5, "minimum_region_patch_equivalents": .25,
+            "cls_in_regions": False, "visibility_scaled": True,
+            "invalid_or_empty_fallback": "original_softmax_exact",
+            "values": "original_frozen_normalized_full_tokens",
+        } if args.spatial_summary_mode == "regional" else None),
         "spatial_summary_binding_loss_weight": 0.0,
         "cross_view_mode": args.cross_view_mode,
         "cross_view_layer": args.cross_view_layer,

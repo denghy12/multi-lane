@@ -39,7 +39,7 @@ def validate_boundary(payload, current):
             or old.get('reporting_split') != 'val' or old.get('also_report_test')
             or not old.get('skip_validation_eval') or not old.get('moe_paired_audit')
             or not old.get('save_pre_evaluation_recovery')
-            or old.get('spatial_summary_mode') not in ('disabled', 'absolute', 'target')):
+            or old.get('spatial_summary_mode') not in ('disabled', 'absolute', 'target', 'regional')):
         raise ValueError('Resume is limited to the original spatial experiment profile')
     task = payload['task_id']
     if not 0 <= task < old['max_tasks']:

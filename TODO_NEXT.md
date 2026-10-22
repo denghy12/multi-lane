@@ -1,5 +1,13 @@
 # 下一步任务
 
+## 2026-10-23：独立人物区域摘要实现，GPU0依赖排队准备
+
+用户授权改进目标位置摘要路线并运行seed0完整8任务validation/test。新隔离分支exp/target-region-summary-20261023从1e28bfb创建，未修改另一个叠加实验工作树。新regional模式在Full Summarization内对人体覆盖率和区域外分别归一化，保留至少50%原全图注意力；每任务10个有界比例，12层共享，旧任务整体冻结。有效性按真实Full crop/flip框和可见性，区域不足0.25patch等价面积或无效时精确回退。原Value、10摘要token、三Task Forward及末端固定融合不改，无MoE/Attention/Adapter等叠加。
+
+三组baseline/old_bias/regional匹配重训：EMOTIC、seed0、8×30epoch、B64、原图90/10、每组12660更新；主Adam LR.0125/空间.0004、WD0/cosine、joint BCE+aux.1、AMP/TF32、workers0。输入沿用既有相对路径；日志logs/target_region_summary，输出output/target_region_summary。执行方案docs/target_region_summary_execution_20261023.md。
+
+计划CPU回归后Git-only部署独立服务器worktree，持久队列等待另一分支three_module_stacking/formal_seed0_20261023_01完整完成，再自动真实CLIP检查、三组2task短跑、regional精确恢复核验、正式8task及完整val/test、两个位置方案task0/2/7 val关闭/同图换框。GPU0固定、最多3并发/16%显存上限/5600MiB启动余量，不终止其他作业。当前仅实现和静态检查，未声称CPU回归或GPU预检通过；不合并main，不依据test调参。
+
 GPU0正式迁移门槛全部通过：421项默认全测；从task0恢复继续更新及从task1继承旧compact前缀的两轮三组真实smoke均完整exit0，六进程GPU0评估与位置归因通过，六份方法状态逐值对齐来源。task1结束的RNG/sampler/optimizer/scheduler/scaler/requires_grad全等。将源码锁定随后文档提交，调度formal_gpu0_resume_seed0_20261022_01等待task3三份完整快照；当下原任务尚在最后数轮，不能提前声称GPU0正式训练已开始。模型、超参、预算及测试协议不变，后续全部训练/评价GPU0。
 
 

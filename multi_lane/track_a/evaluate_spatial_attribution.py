@@ -55,7 +55,7 @@ def evaluate(args):
     config = json.loads((args.source_run / 'config.json').read_text())
     summary = json.loads((args.source_run / 'seed_summary.json').read_text())
     assert summary['status'] == 'complete' and summary['config'] == config
-    assert config['spatial_summary_mode'] == 'target' and config['git']['dirty'] is False
+    assert config['spatial_summary_mode'] in ('target', 'regional') and config['git']['dirty'] is False
     assert all(0 <= task < config['max_tasks'] for task in args.checkpoint_tasks)
     meta = git_metadata(Path(__file__).resolve().parents[2]); assert not meta['dirty']
     set_seed(0, config['tf32']); device = torch.device('cuda')

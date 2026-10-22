@@ -10,6 +10,7 @@ from .export_compact_test_scores import build_model, _torch_load, _sha256, resto
 from .openai_clip_loader import load_openai_clip_visual
 from .paired_transforms import move_model_inputs
 from .runner import LabelView, set_seed, tensor_state_digest
+from .spatial_resume import checkpoint_source_git
 
 
 def audit(args):
@@ -52,12 +53,26 @@ def audit(args):
             changed, alternate = target.seen_logits_with_views(dict(images, spatial_bbox=images['spatial_bbox'].roll(1,0)))
         assert all(torch.equal(views[k], alternate[k]) for k in ('person','face'))
         assert not torch.equal(normal, changed)
+    regional = fresh('regional')
+    for name, value in base.state_dict().items():
+        assert torch.equal(value, regional.state_dict()[name]), name
+    with torch.no_grad(), torch.cuda.amp.autocast():
+        regional_logits, regional_views = regional.seen_logits_with_views(images)
+        assert all(torch.equal(regional_views[k], reference_views[k]) for k in ('person', 'face'))
+        assert not torch.equal(regional_logits, expected)
+        regional.spatial_summary_runtime_enabled = False
+        assert torch.equal(regional.seen_logits(images), expected)
+        regional.spatial_summary_runtime_enabled = True
+        invisible = dict(images, spatial_visibility=torch.zeros_like(images['spatial_visibility']))
+        assert torch.equal(regional.seen_logits(invisible), expected)
+    initial['regional'] = 'common_parameters_equal_full_changes_off_and_invalid_exact_base'
+    del regional, regional_logits, regional_views
     del target, base, expected, reference_views, actual, views, alternate, normal, changed
     torch.cuda.empty_cache()
     replay = {}
     old = build_model(original, visual).float().to(device)
     for task, checkpoint in zip((0,2,7), checkpoints):
-        restore_compact_model_state(old, _torch_load(checkpoint), task, original['git'])
+        restore_compact_model_state(old, _torch_load(checkpoint), task, checkpoint_source_git(original, task))
         old.eval().requires_grad_(False)
         with torch.no_grad(), torch.cuda.amp.autocast():
             actual = old.seen_logits(images).float().cpu().numpy()
