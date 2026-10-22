@@ -1,4 +1,7 @@
 import copy
+import json
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import patch
 import torch
@@ -145,6 +148,41 @@ class ModuleStackingTest(unittest.TestCase):
         self.assertEqual(contrasts['ABC'], 0); self.assertEqual(contrasts['AB_given_C0'], 0)
         self.assertEqual(contrasts['C_given_AB'], 3)
         with self.assertRaises(ValueError): factorial_contrasts({'F000':30})
+
+    def test_memory_queue_waits_and_drains_all_eight_jobs_over_multiple_waves(self):
+        from multi_lane.track_a.run_module_stacking import run_queue
+        class Process:
+            count = 0
+            def __init__(self, *args, **kwargs):
+                Process.count += 1; self.pid = Process.count; self.polls = 0
+            def poll(self):
+                self.polls += 1; return 0 if self.polls > 1 else None
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);jobs=[dict(name=arm+'/train',module='test',arguments=[]) for arm in ARMS]
+            with patch('multi_lane.track_a.run_module_stacking.free_memory',side_effect=[2000]+[10000]*8), \
+                 patch('multi_lane.track_a.run_module_stacking.subprocess.Popen',side_effect=Process), \
+                 patch('multi_lane.track_a.run_module_stacking.time.sleep'):
+                records=run_queue(jobs,root/'logs',root/'status.json',2,.18,5600)
+            self.assertEqual(len(records),8)
+            self.assertEqual({r['name'] for r in records},{j['name'] for j in jobs})
+            self.assertTrue(all(r['exit']==0 and r['gpu']==0 for r in records))
+            status=json.loads((root/'status.json').read_text())
+            self.assertEqual(status['pending'],[]);self.assertFalse(status['failed'])
+
+    def test_failed_job_cannot_silently_drop_unstarted_experiments(self):
+        from multi_lane.track_a.run_module_stacking import run_queue
+        class Process:
+            pid=17
+            def poll(self):return 1
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);jobs=[dict(name=arm+'/train',module='test',arguments=[]) for arm in ARMS]
+            with patch('multi_lane.track_a.run_module_stacking.free_memory',return_value=10000), \
+                 patch('multi_lane.track_a.run_module_stacking.subprocess.Popen',return_value=Process()), \
+                 patch('multi_lane.track_a.run_module_stacking.time.sleep'):
+                with self.assertRaises(RuntimeError):run_queue(jobs,root/'logs',root/'status.json',1,.18,5600)
+            status=json.loads((root/'status.json').read_text())
+            self.assertTrue(status['failed']);self.assertEqual(len(status['pending']),7)
+            self.assertEqual(status['records'][0]['exit'],1)
 
 
 if __name__ == '__main__': unittest.main()
