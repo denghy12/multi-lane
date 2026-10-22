@@ -1,5 +1,11 @@
 # 工作日志
 
+## 2026-10-23：区域摘要回归通过，准备持久GPU0依赖队列
+
+exp/target-region-summary-20261023已通过Git-only部署至服务器独立worktree multi-lane-main-target-region-summary-20261023。远程CPU环境OMP1的427项Track-A回归通过（1项CUDA专用检查跳过），新增9项机制/队列测试均通过。原primary/test-only状态SHA分别ea2e261e…/e9d1479f…保持。代码提交d9757f1；接下来的文档锁定提交不改训练逻辑。
+
+准备tmux target_region_queue_seed0_20261023_01，formal_seed0_20261023_01，明确等待另一分支three_module_stacking/formal_seed0_20261023_01完整完成，随后自动真实CLIP/历史重放、三组短跑、regional边界精确恢复、正式3组8task与完整val/test、task0/2/7 validation关闭/换框。当前尚未声称GPU预检通过或正式训练已开始；将核验排队状态并同步日志。入口bash scripts/emotic/run_target_region_summary.sh，预期输出output/target_region_summary/queue_formal_seed0_20261023_01/status.json。
+
 ## 2026-10-23：独立人物区域摘要实现，GPU0依赖排队准备
 
 用户授权改进目标位置摘要路线并运行seed0完整8任务validation/test。新隔离分支exp/target-region-summary-20261023从1e28bfb创建，未修改另一个叠加实验工作树。新regional模式在Full Summarization内对人体覆盖率和区域外分别归一化，保留至少50%原全图注意力；每任务10个有界比例，12层共享，旧任务整体冻结。有效性按真实Full crop/flip框和可见性，区域不足0.25patch等价面积或无效时精确回退。原Value、10摘要token、三Task Forward及末端固定融合不改，无MoE/Attention/Adapter等叠加。
