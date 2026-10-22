@@ -1329,6 +1329,17 @@ class MultiLaneModel(nn.Module):
             features["full"] = self._encode_single_lanes(
                 images["full"], all_seen_lanes, image_view="full"
             )
+        elif self.module_stacking:
+            if "cross_view_query_donor" in images:
+                raise ValueError("Factorial task Query does not accept Person Query donors")
+            summary_cache = {}
+            try:
+                features = {name: self._encode_single_lanes(
+                    images if name == "full" else images[name], all_seen_lanes,
+                    image_view=name, summary_cache=summary_cache)
+                    for name in self.view_fusion_module.view_names}
+            finally:
+                summary_cache.clear()
         elif self.spatial_summary_bank is not None:
             features = {name: self._encode_single_lanes(
                 images if name == "full" else images[name], all_seen_lanes, image_view=name)

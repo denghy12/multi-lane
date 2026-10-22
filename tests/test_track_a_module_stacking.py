@@ -134,6 +134,7 @@ class ModuleStackingTest(unittest.TestCase):
             '--view-auxiliary-loss-weight','.1','--save-pre-evaluation-recovery',
             '--amp-initial-scale','1024','--amp-growth-interval','1000000000',
             '--person-transform-mode','letterbox','--person-crop-margin','.15',
+            '--reporting-split','val',
             '--skip-validation-eval','--save-compact-checkpoints','--adapter-layer-indices','1',
             '--adapter-bottleneck-dim','32','--adapter-learning-rate','.0004'])
         validate_arguments(args)
