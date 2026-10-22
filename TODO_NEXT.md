@@ -1,5 +1,8 @@
 # 下一步任务
 
+2026-10-22实现验证更新：新增10项空间机制测试及远程413项完整回归通过；源码9f9f6de已通过Git-only同步新远程worktree。原主树和test-only保持原样。新增三组批次控制器、恢复/旧参数/原图holdout核验、只读空间关闭/框交换评估，以及真实CLIP零初始化与历史task0/2/7重放检查；正式尚未启动，下一步真实预检和2任务×2更新短跑。训练GPU4/5/6、评估GPU1–6拟每卡1进程，每进程Torch分配器上限16%（约3.9GiB），启动要求至少5600MiB余量；不足等待，不干预外部进程。
+
+
 ## 2026-10-22：开始实现目标人物空间摘要，用户要求完整8任务双split
 
 新隔离分支codex/target-anchored-summary-20261022，起点e81f2f2；旧分析/计划及原主/test-only工作树保留。用户要求8task覆盖原三任务先导，保留原图90/10 fit/holdout；三组disabled/absolute/target，seed0、8×30ep、B64、12660更新，主LR.0125/空间LR.0004、aux.1，禁用MoE/ParaX/adapter/旧cross-view。未来训练后并行完整val2397/test5368，不启用绑定损失。
