@@ -74,7 +74,8 @@ class TaskSpatialSummary(nn.Module):
                   - torch.maximum(x - half, real_boxes[:, 0, None])).clamp_min(0)
         real_y = (torch.minimum(y + half, real_boxes[:, 3, None])
                   - torch.maximum(y - half, real_boxes[:, 1, None])).clamp_min(0)
-        actual_overlap = (real_x * real_y * grid ** 2).clamp(0, 1)
+        actual_overlap = ((real_x * real_y * grid ** 2).clamp(0, 1)
+                          * (valid & (v > 0))[:, None])
         return F.pad(phi, (0, 0, 1, 0)), v, F.pad(actual_overlap, (1, 0))
 
     def bias(self, boxes, visibility, token_count, lane_ids):

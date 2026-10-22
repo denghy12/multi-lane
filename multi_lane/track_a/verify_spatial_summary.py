@@ -11,6 +11,13 @@ def read(path):
     return json.loads(path.read_text())
 
 
+def load_boundary(path):
+    # These are our locally generated, trusted complete training snapshots.
+    # RNG/optimizer provenance includes Python objects (e.g. TorchVersion),
+    # unlike the compact tensor-only checkpoints loaded by _torch_load.
+    return torch.load(path, map_location='cpu', weights_only=False)
+
+
 def verify(root, tasks=8, smoke=False):
     checks = []
     reference = None
@@ -74,7 +81,7 @@ def verify(root, tasks=8, smoke=False):
                 assert set(row['training_statistics']) == {f'task{task}/layer{layer}' for layer in range(12)}
                 assert config['spatial_summary_parameters_per_task'] == 60
                 assert state[f'spatial_summary_bank.tasks.{task}'].shape == (10, 6)
-            recovery = _torch_load(train / 'recovery_checkpoints' / f'task{task}_before_reporting.pth')
+            recovery = load_boundary(train / 'recovery_checkpoints' / f'task{task}_before_reporting.pth')
             assert recovery['task_id'] == task and recovery['kind'] == 'task_boundary_before_reporting'
             assert recovery['model'].keys() == state.keys()
             assert all(torch.equal(value, recovery['model'][name]) for name, value in state.items())

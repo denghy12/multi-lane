@@ -178,5 +178,18 @@ class SpatialSummaryTest(unittest.TestCase):
                 if key != 'spatial_bbox': self.assertTrue(torch.equal(a[key], b[key]), key)
             self.assertTrue(torch.equal(y, alt_y)); self.assertEqual((sid,index), (alt_sid,alt_index))
 
+    def test_complete_recovery_loader_accepts_version_and_rng_metadata(self):
+        import numpy as np
+        from multi_lane.track_a.verify_spatial_summary import load_boundary
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'boundary.pth'
+            state = dict(torch_version=torch.__version__, numpy_rng=np.random.get_state(),
+                         model={'weight': torch.ones(2)})
+            torch.save(state, path)
+            actual = load_boundary(path)
+            self.assertEqual(actual['torch_version'], state['torch_version'])
+            self.assertTrue(np.array_equal(actual['numpy_rng'][1], state['numpy_rng'][1]))
+            self.assertTrue(torch.equal(actual['model']['weight'], state['model']['weight']))
+
 
 if __name__ == '__main__': unittest.main()
