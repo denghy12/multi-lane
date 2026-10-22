@@ -27,11 +27,15 @@ def write(path, value):
 def dependency_ready(root):
     if (root / 'failure.json').exists():
         raise RuntimeError('Preceding experiment failed; inspect its preserved artifacts')
+    preceding_queue = root.parent / ('queue_' + root.name) / 'status.json'
+    if preceding_queue.exists() and read(preceding_queue).get('status') == 'failed':
+        raise RuntimeError('Preceding experiment queue failed; inspect its preserved status')
     completion = root / 'completion.json'
     if not completion.exists():
         return False
     value = read(completion)
-    if value.get('status') != 'complete' or value.get('smoke') is not False or value.get('tasks') != 8:
+    if (value.get('status') != 'complete' or value.get('smoke') is not False
+            or value.get('tasks') != 8 or value.get('validation_and_test_complete') is not True):
         raise ValueError('Dependency must be a completed formal eight-task experiment')
     return True
 

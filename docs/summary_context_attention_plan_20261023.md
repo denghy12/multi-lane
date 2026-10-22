@@ -50,10 +50,14 @@ Full/Person/Face CLS → 原固定特征融合 → 原分类头
 
 ## 排队与验证
 
-先等待另一个工作树`../multi-lane-main-three-module-stacking-20261022/output/three_module_stacking/formal_seed0_20261023_01/completion.json`：必须正式8任务complete，不能把smoke结束当完整结束；前序failure则停止本队列并保留原因。之后GPU0连续3次20秒检查无计算进程、利用率≤5%、空闲≥22000MiB才启动，不暂停其他进程。
+实际核对还发现此前已登记的人物区域摘要队列。因此顺序固定为三模块叠加→人物区域摘要→本次上下文Attention。本次直接等待`../multi-lane-main-target-region-summary-20261023/output/target_region_summary/formal_seed0_20261023_01/completion.json`，其上游已等待叠加组。必须正式8任务complete且validation/test完成，不能把smoke或训练结束当完整结束；前序failure或队列failed则停止本队列并保留原因。之后GPU0连续3次20秒检查无计算进程、利用率≤5%、空闲≥22000MiB才启动，不暂停其他进程。
 
 CPU全测记录必须与排队HEAD一致。轮到后先自动四组各2任务/每任务2更新GPU smoke：核验AMP、梯度、任务保护、compact与完整恢复模型相同、validation重放；只用validation，不访问test。全部通过才启动四组正式8任务。训练完成先审计，再并行validation/test；保存每任务报告之前的完整恢复快照。任一作业失败停止发新作业，已启动作业完成后退出，不覆盖结果。
 
 正式validation额外对三种Attention模型task0/2/7进行同checkpoint开关归因；person_context同时做固定规则同图Query交换，核验Full/Face逐值不变、不可交换者不变、本人Query重放一致。仅test正常推理，不以test选择开关。
 
 成功判断首先看匹配基线和旧残差的validation最终/阶段平均，以及开启对关闭的融合净收益；Person端点只作证据，不以单路分数替代融合指标。若人物Query优于任务Query，还需本人条件相对交换条件有可重复优势。若仍只有关闭后保留的模型间收益，结论转为训练过程影响，不能宣称上下文推理有效。所有结论仍限seed0。
+
+## 已完成的实现验证
+
+首轮远程CPU测试412项完成，411通过、1项CUDA RNG检查因隐藏GPU跳过；新版9项机制/队列测试包含原摘要逐值不变、原参数/RNG一致、运行时关闭精确回到同参数原路径、原Value凸汇聚、接收端组概率、梯度与AMP、旧任务冻结与compact重放及同图身份Query检查。GPU短跑仍需轮到GPU0后进行，不将CPU通过写成真实GPU预检通过。队列依赖硬化后还会针对最终HEAD重跑完整CPU测试。

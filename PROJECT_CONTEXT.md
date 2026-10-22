@@ -2,6 +2,8 @@
 
 ## 2026-10-23：独立上下文Attention分支，准备GPU0排队
 
+首轮远程CPU全测412项完成（411通过、CUDA RNG1项跳过），尚未GPU短跑。运行中新增已登记的target_region_summary前序队列，实际顺序应为叠加→人物区域摘要→本组；本组直接等待区域摘要formal完整validation/test结束，避免两条队列同时从叠加完成处起跑。依赖硬化后将对最终HEAD重跑CPU全测并登记队列，不改模型或训练配置。
+
 用户要求单独改进摘要Attention；另一叠加分支不动。新分支exp/summary-context-attention-20261023从e81f2f2创建。保留Person原摘要，在第6层让任务MSA另读原Full Value构成的上下文K/V；学习Q/K及组gate，份额初始5%、上限10%，每任务98305参数，任务结束完整冻结。不是严格零初始化等价。四组baseline/legacy_task_residual/task_context/person_context均全TRAIN、aux0.1、seed0、8×30epoch、B64、Adam主LR0.0125/模块0.0004、cosine、workers0、AMP/TF32。无位置/MoE/ParaX/image-token Adapter，保留三路Task Forward与原head。
 
 计划docs/summary_context_attention_plan_20261023.md。先CPU全测；GPU0排在三模块叠加完整formal之后，连续空闲后先四组2任务短跑，通过才自动完整8任务validation/test，validation另做task0/2/7开关及人物Query交换。当前未声明测试或启动完成。概率上限不是范数上限；若只有关闭后保留的收益，不宣称推理融合成功。

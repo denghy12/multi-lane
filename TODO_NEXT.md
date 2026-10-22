@@ -2,6 +2,8 @@
 
 ## 2026-10-23：独立上下文Attention排队执行
 
+首轮CPU412项（411通过、1项CUDA跳过）。最终依赖为target_region_summary/formal_seed0_20261023_01，实际FIFO叠加→人物区域摘要→本组。硬化“正式8任务且validation/test完整完成”检查后，先复测最终HEAD再登记持久化队列；GPU smoke尚未运行，不在前序结束前占GPU0。
+
 先CPU完整测试并核对Git HEAD；随后在GPU0排队，必须等待三模块叠加正式8任务完成，而非smoke结束。轮到后四组各2任务/2更新GPU短跑，全部通过才完整seed0 8任务训练及validation/test。四组baseline/legacy_task_residual/task_context/person_context均全TRAIN、aux0.1，同数据/初始化/预算；保留原三路路径，新版只让Person任务MSA另读Full上下文，不覆盖原人物摘要。正式validation附task0/2/7关闭及同图人物Query交换。计划docs/summary_context_attention_plan_20261023.md。尚未声明队列或测试通过；失败保留产物，不改前序任务，不合并main。
 
 启动后静态产物54份（测试、失败与修正短跑、配对manifest、源SHA和健康快照）已同步本地，逐文件SHA256匹配。最新进度：任务Query validation已完成全部8边界；其test完成task0–2，人物Query validation完成task0–4、test完成task0–1，其余继续。此为运行进度，不是完整归因结论。

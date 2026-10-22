@@ -150,6 +150,8 @@ class SummaryContextTest(unittest.TestCase):
             (root/'completion.json').write_text(json.dumps(dict(status='complete',tasks=2,smoke=True)))
             with self.assertRaises(ValueError):dependency_ready(root)
             (root/'completion.json').write_text(json.dumps(dict(status='complete',tasks=8,smoke=False)))
+            with self.assertRaises(ValueError):dependency_ready(root)
+            (root/'completion.json').write_text(json.dumps(dict(status='complete',tasks=8,smoke=False,validation_and_test_complete=True)))
             self.assertTrue(dependency_ready(root))
             (root/'failure.json').write_text('{}')
             with self.assertRaises(RuntimeError):dependency_ready(root)
