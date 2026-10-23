@@ -1,5 +1,9 @@
 # 项目上下文
 
+## 2026-10-23：准备将4组排队训练分流GPU1
+
+用户授权排队任务GPU1并行。实查GPU1空闲约24GB；GPU0叠加F111 task6末尾、区域baseline/old_bias task3、上下文baseline task2完成。待启动4组为regional及上下文legacy_task_residual/task_context/person_context，原smoke已全complete。新分支只写外部调度，拟保留GPU0 PID1007621/1028009/1028035/1028353，不重启训练；冻结两个旧派发父进程后接管3个训练子进程并读取真实退出码。未启动训练及两家后续评估CUDA_VISIBLE_DEVICES=1。GPU1预算训练4.5GB/评估2.5GB、余量2GB、最多4训练/8评估，原科学代码、任务顺序和学习超参不变。计划docs/gpu1_pending_split_20261023.md，尚未声称测试或分流启动完成。
+
 ## 2026-10-23：GPU0空闲资源并行调度准备
 
 用户授权提高GPU0并行效率。实查GPU0使用3425/24564MiB；叠加7组完整8任务已训练，F111由task2进入task3；区域和上下文仅等待。新调度分支只替换外部资源放行，不改科学源码HEAD/训练超参。准备核验并移交两个无子任务等待控制器，保留F111和叠加控制器；共享原子预留4500MiB/作业、2000MiB余量，前序叠加活动时保留8000MiB（最多新增3），之后最多5新增作业。区域/上下文各自smoke及恢复审计仍是正式训练前提，不能跳过。计划docs/gpu0_shared_scheduling_20261023.md，尚未宣称移交或并行启动完成。
