@@ -10,9 +10,10 @@ import sys
 import time
 
 
-def historical_training_flags(data, clip, out, smoke=False):
+def historical_training_flags(data, clip, out, smoke=False, seed=0):
     """The archived f1ada22 disabled-selector control used paired inputs."""
-    flags=['--seed','0','--data-root',str(data),'--clip-checkpoint',str(clip),'--output-root',str(out/'train'),
+    if seed not in {0,1,2}:raise ValueError('Historical audit uses seeds 0/1/2')
+    flags=['--seed',str(seed),'--data-root',str(data),'--clip-checkpoint',str(clip),'--output-root',str(out/'train'),
         '--epochs','30','--train-batch-size','64','--eval-batch-size','64','--workers','2',
         '--paired-full-person','--person-transform-mode','letterbox','--person-crop-margin','.15',
         '--person-color-jitter-strength','.1','--person-color-jitter-probability','.2',
@@ -38,14 +39,34 @@ def historical_configuration_differences(actual, expected):
             if k not in artifact_keys and actual.get(k)!=expected.get(k)}
 
 
+def export_historical_reference(train, export, wrapper_git):
+    config=json.loads((train/'config.json').read_text())
+    summary=json.loads((train/'seed_summary.json').read_text())
+    export.mkdir()
+    converted=copy.deepcopy(config)
+    converted.update(legacy_full_reference=True,strong_full_asl=False,module_stacking=False,
+        view_fusion='disabled',view_classifier_mode='shared_post_fusion',selector_mode='shared',prompt_mode='shared',
+        parax_mode='disabled',cross_view_mode='disabled',spatial_summary_mode='disabled',joint_summary_mode='disabled',
+        person_color_jitter_strength=0.,person_color_jitter_probability=0.,
+        historical_export=dict(wrapper_git=wrapper_git,original_config_sha256=hashlib.sha256((train/'config.json').read_bytes()).hexdigest(),
+            original_source_run=str(train),checkpoint_policy='hardlink_immutable_historical_compact'))
+    (export/'config.json').write_text(json.dumps(converted,indent=2)+'\n')
+    summary['config']=converted
+    (export/'seed_summary.json').write_text(json.dumps(summary,indent=2)+'\n')
+    (export/'compact_checkpoints').mkdir()
+    for t in range(config['max_tasks']):os.link(train/'compact_checkpoints'/f'task{t}.pth',export/'compact_checkpoints'/f'task{t}.pth')
+
+
 def main():
     p=argparse.ArgumentParser();p.add_argument('--legacy-root',type=Path,required=True)
     p.add_argument('--output',type=Path,required=True);p.add_argument('--data-root',type=Path,required=True)
     p.add_argument('--clip-checkpoint',type=Path,required=True);p.add_argument('--smoke',action='store_true')
     p.add_argument('--historical-config',type=Path,help='Archived exact config; fail before any update on mismatch')
+    p.add_argument('--seed',type=int,choices=[0,1,2],default=0)
     a=p.parse_args()
     if a.historical_config is not None:a.historical_config=a.historical_config.resolve()
     expected=json.loads(a.historical_config.read_text()) if a.historical_config else None
+    if expected is not None:expected['seed']=a.seed
     if expected is not None and a.smoke:raise ValueError('Exact historical config requires the full budget')
     from .strong_full_asl import LEGACY_COMMIT
     from .runner import git_metadata
@@ -99,30 +120,19 @@ def main():
         torch.save(snapshot,temporary);temporary.replace(path);captured.append(task)
         return history
     old.train_task=train
-    flags=historical_training_flags(data,clip,out,a.smoke)
+    flags=historical_training_flags(data,clip,out,a.smoke,seed=a.seed)
     sys.argv=['historical_runner',*flags];old.main()
     config=json.loads((out/'train/config.json').read_text());summary=json.loads((out/'train/seed_summary.json').read_text())
     assert captured==list(range(2 if a.smoke else 8)) and summary['status']=='complete'
     assert summary['completed_optimizer_updates']==(4 if a.smoke else 13950)
     history=json.loads((out/'train/training_history.json').read_text())
     assert not any(row['skipped_optimizer_steps'] for rows in history.values() for row in rows)
-    export=out/'export';export.mkdir()
-    converted=copy.deepcopy(config)
-    converted.update(legacy_full_reference=True,strong_full_asl=False,module_stacking=False,
-        view_fusion='disabled',view_classifier_mode='shared_post_fusion',selector_mode='shared',prompt_mode='shared',
-        parax_mode='disabled',cross_view_mode='disabled',spatial_summary_mode='disabled',joint_summary_mode='disabled',
-        person_color_jitter_strength=0.,person_color_jitter_probability=0.,
-        historical_export=dict(wrapper_git=wrapper_git,original_config_sha256=hashlib.sha256((out/'train/config.json').read_bytes()).hexdigest(),
-            original_source_run=str(out/'train'),checkpoint_policy='hardlink_immutable_historical_compact'))
-    (export/'config.json').write_text(json.dumps(converted,indent=2)+'\n')
-    summary['config']=converted;(export/'seed_summary.json').write_text(json.dumps(summary,indent=2)+'\n')
-    (export/'compact_checkpoints').mkdir()
-    for t in captured:os.link(out/'train/compact_checkpoints'/f'task{t}.pth',export/'compact_checkpoints'/f'task{t}.pth')
+    export_historical_reference(out/'train',out/'export',wrapper_git)
     (out/'reference_verification.json').write_text(json.dumps(dict(status='verified',source_commit=LEGACY_COMMIT,
         wrapper_git=wrapper_git,updates=summary['completed_optimizer_updates'],skipped=0,tasks=captured,
         original_metrics=summary['metrics'],historical_anchor={'final_mAP':32.53651921448899,'average_mAP':39.144491444469374},
         strict_configuration_verified=expected is not None,
-        historical_anchor_matched=None if a.smoke else all(abs(summary['metrics'][k]-v)<1e-4 for k,v in
+        historical_anchor_matched=None if a.smoke or a.seed!=0 else all(abs(summary['metrics'][k]-v)<1e-4 for k,v in
             {'final_mAP':32.53651921448899,'average_mAP':39.144491444469374}.items()),
         configuration=flags,completed_unix=time.time()),indent=2)+'\n')
     print('HISTORICAL_FULL_REFERENCE_COMPLETE',flush=True)

@@ -40,3 +40,9 @@
 - 输入沿原EMOTIC及CLIP ViT-B-16.pt SHA5806e77...，不换数据、预训练、种子或按test调参。
 - 新输出output/strong_full_asl_three_view/historical_exact_seed0_20261023_01；日志同层logs/strong_full_asl_three_view/historical_exact_seed0_20261023_01。
 - 当前为修正与启动前记录。必须以后续historical_configuration_audit及实际训练/最终指标确认，不预先保证等于32.5365。
+
+## 后续更正：运行环境是已验证的复现因素
+
+补齐paired配置后，CPU1包装运行仍沿前次偏离轨迹；原生旧入口在默认72线程下前两轮与历史loss精确匹配。额外受控原生CPU1短跑也回到偏离轨迹，排除了仅由包装器引起的解释。CPU正交初始化检查显示Prompt存在约1e−8差异且部分FP16舍入不同，随机数状态仍相同。这解释了为何仅比较seed/超参数不够。最终8任务是否重现全部四指标，仍等运行结束确认。
+
+用户进一步要求后续全部使用旧标准，不再产生全人群新实验；旧记录保留但不作后续主标准。原生seed0继续完整运行，补seed1/2统一CPU72的Full旧配置；三种子分别报告。

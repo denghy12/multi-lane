@@ -54,7 +54,7 @@ def run_queue(jobs, logs, status, gpus, per_gpu=1, fraction=.3, minimum_free=650
             if eligible:
                 gpu=min(eligible,key=lambda g:(counts[g],state[g]['utilization']//20,-state[g]['free'],g))
                 job=pending.pop(0);log=logs/(job['name']+'.log');log.parent.mkdir(parents=True,exist_ok=True)
-                env=dict(os.environ,CUDA_VISIBLE_DEVICES=str(gpu),OMP_NUM_THREADS='1',MKL_NUM_THREADS='1',PYTHONUNBUFFERED='1')
+                env=dict(os.environ,CUDA_VISIBLE_DEVICES=str(gpu),OMP_NUM_THREADS='72',MKL_NUM_THREADS='72',PYTHONUNBUFFERED='1')
                 code=(f'import runpy,torch;torch.cuda.set_per_process_memory_fraction({fraction});'
                       f'runpy.run_module({job["module"]!r},run_name="__main__")')
                 command=[sys.executable,'-u','-c',code,*job['arguments']]
@@ -71,12 +71,13 @@ def run_queue(jobs, logs, status, gpus, per_gpu=1, fraction=.3, minimum_free=650
 
 
 def evaluation_job(args,root,arm,split,folder,extra=()):
+    if getattr(args,'evaluation_cohort','historical')!='historical':
+        raise ValueError('Use the archived seen-positive cohort for all subsequent experiments')
     source=root/arm/('export' if arm=='R_LEGACY' else 'train')
     return dict(name=arm+'/'+folder,module='multi_lane.track_a.evaluate_moe_task_ffn',arguments=list(map(str,[
         '--source-run',source,'--output',root/arm/folder,'--split',split,
         '--data-root',args.data_root,'--clip-checkpoint',args.clip_checkpoint,'--face-manifest-root',args.face_manifest_root,
-        '--expected-tasks',2 if args.smoke else 8,'--batch-size',64,'--workers',0,
-        *(['--full-cohort'] if getattr(args,'evaluation_cohort','historical')=='full' else []),*extra])))
+        '--expected-tasks',2 if args.smoke else 8,'--batch-size',64,'--workers',0,*extra])))
 
 
 def summarize(root, arms, smoke):
@@ -181,6 +182,6 @@ if __name__=='__main__':
     p.add_argument('--gpus',type=int,nargs='+',default=list(range(8)))
     p.add_argument('--train-per-gpu',type=int,default=1);p.add_argument('--eval-per-gpu',type=int,default=2)
     p.add_argument('--memory-fraction',type=float,default=.3);p.add_argument('--minimum-free-mib',type=int,default=6500)
-    p.add_argument('--evaluation-cohort',choices=['historical','full'],default='historical',
-                   help='Historical seen-positive people by default; full cohort is a separate sensitivity analysis')
+    p.add_argument('--evaluation-cohort',choices=['historical'],default='historical',
+                   help='Archived seen-positive evaluation; required for all subsequent experiments')
     p.add_argument('--smoke',action='store_true');run(p.parse_args())

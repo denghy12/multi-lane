@@ -12,6 +12,9 @@ class HistoricalProtocolTest(unittest.TestCase):
         for flag,value in [('--person-crop-margin','.15'),('--person-color-jitter-strength','.1'),
                            ('--person-color-jitter-probability','.2'),('--workers','2')]:
             self.assertEqual(flags[flags.index(flag)+1],value)
+        for seed in [1,2]:
+            flags=historical_training_flags(Path('data'),Path('clip'),Path('out'),seed=seed)
+            self.assertEqual(flags[flags.index('--seed')+1],str(seed))
 
     def test_configuration_guard_accepts_only_checkpoint_retention_changes(self):
         archived=dict(paired_full_person=True,save_compact_checkpoints=False,workers=2)
@@ -24,7 +27,7 @@ class HistoricalProtocolTest(unittest.TestCase):
         args=SimpleNamespace(data_root='data',clip_checkpoint='clip',face_manifest_root='face',smoke=False)
         self.assertNotIn('--full-cohort',evaluation_job(args,Path('out'),'T_ASL','test','test')['arguments'])
         args.evaluation_cohort='full'
-        self.assertIn('--full-cohort',evaluation_job(args,Path('out'),'T_ASL','test','test')['arguments'])
+        with self.assertRaises(ValueError):evaluation_job(args,Path('out'),'T_ASL','test','test')
 
 
 if __name__=='__main__':unittest.main()
