@@ -1,6 +1,14 @@
 # 恢复历史评估标准与Full复现配置审计
 
-2026-10-23。按用户要求，后续主报告恢复原samples_intersect_seen_classes标准；固定全人群保留为敏感性分析，不能混用阶段平均。
+2026-10-23。按用户最新要求，后续全部使用原samples_intersect_seen_classes标准，不再以固定全人群标准启动新实验。此前全人群产物保留供审计，不能混用阶段平均。
+
+## 最新执行状态与结论边界
+
+- 已确认32.5365/39.1445/32.5756/49.3827确实属于seed0，不是seed误标；同时查到历史seed1/2的正式独立三视图结果，见下文。新增seed1/2是复现核验，不能按test选择一个seed代替seed0。
+- 原生旧代码、CPU72的seed0完整8任务继续运行，PID1139164；独立控制器historical_exact_seed0_20261023_02接管完成后的validation，不重启该训练。
+- seed1/2已分别启动historical_exact_seed1_20261023_01、historical_exact_seed2_20261023_01，训练PID1146811/1146812，均GPU0。首个更新前的配置审计differences={}；除了seed及两个权重保存字段，训练配置与归档一致。9项相关回归通过。尚未完成的结果不能称为已复现。
+- CPU1包装对照historical_exact_seed0_20261023_01已计划终止，保留日志和planned_diagnostic_stop.json。原生CPU1两轮短跑也已结束；二者均为数值轨迹诊断，不是完整性能结果。
+- 当前新增模型工作只补Full三种子，暂不重训Attention/位置或全部叠加矩阵。GPU1–7不使用。
 
 ## 发现的两类原因
 
@@ -34,7 +42,7 @@
 
 ## 代码修正与复现安排
 
-- run_strong_full_asl默认evaluation_cohort=historical，不再自动添加--full-cohort；全人群必须显式选择full并在元数据中单列。
+- run_strong_full_asl只接受evaluation_cohort=historical，不再允许full或添加--full-cohort。保留过去产物，不覆盖或删除。
 - legacy_full_reference补回paired-full-person、margin.15、jitter.1/.2；增加--historical-config校验。首个训练更新前逐字段比对归档，只允许保存compact权重的两个产物字段不同，其余不同则停止。
 - 修正版历史Full只用GPU0，原f1ada22源码、seed0、8任务、全TRAIN、30epoch、B64、workers2、Adam主LR.0125/Adapter LR.0004、cosine、AMP/TF32、旧scaler/全局采样、Adapter-ASL9.8/0/.05。第2层b32/scale.1。旧test原生评估，完成后自动补相同旧标准validation。
 - 输入沿原EMOTIC及CLIP ViT-B-16.pt SHA5806e77...，不换数据、预训练、种子或按test调参。
@@ -46,3 +54,21 @@
 补齐paired配置后，CPU1包装运行仍沿前次偏离轨迹；原生旧入口在默认72线程下前两轮与历史loss精确匹配。额外受控原生CPU1短跑也回到偏离轨迹，排除了仅由包装器引起的解释。CPU正交初始化检查显示Prompt存在约1e−8差异且部分FP16舍入不同，随机数状态仍相同。这解释了为何仅比较seed/超参数不够。最终8任务是否重现全部四指标，仍等运行结束确认。
 
 用户进一步要求后续全部使用旧标准，不再产生全人群新实验；旧记录保留但不作后续主标准。原生seed0继续完整运行，补seed1/2统一CPU72的Full旧配置；三种子分别报告。
+
+## 旧三视图为什么有效，当前为什么没有超过强Full
+
+历史正式总表为output/emotic_track_a_fixed_three_view_test/20260909_213052/control/fixed_three_view_seed012_test_summary.json。以下均为历史存档，不能当作本次补跑已完成：
+
+| seed | 独立Full最终 | 独立Full阶段平均 | 独立三视图最终 | 独立三视图阶段平均 | 最终增益 |
+|---|---:|---:|---:|---:|---:|
+| 0 | 32.5365 | 39.1445 | 33.3392 | 40.2855 | +0.8026 |
+| 1 | 32.1347 | 39.0210 | 32.9575 | 40.1154 | +0.8228 |
+| 2 | 31.7973 | 38.6119 | 32.7390 | 39.7815 | +0.9417 |
+
+历史方法对三视图分别训练完整MULTI-LANE任务分支，各自的Selectors、Prefix-Tuning、Image-token Adapter和分类头私有；各路独立BCE/Adapter-ASL监督，之后融合sigmoid概率。因此加入Person/Face不会反向改变已经学好的Full。当前三视图则让同一任务参数接受三路图像，先按固定权重融合任务特征，再经共享分类头，用融合BCE及融合Adapter-ASL训练（视图辅助BCE=0）。参数共享、监督位置及融合位置同时改变，不能称为“原强Full只增加两路输入”。三视图共享与三套独立模型的参数成本也不同。
+
+当前三视图ASL的test Full端点30.5910，融合32.1638，仍有+1.5728；历史独立Full32.5365，旧三视图33.3392，有+0.8026。当前Person29.3844/Face24.8671并不比旧独立Person28.7474/Face24.3729低，因此不能简单归罪于局部视图没学会。主要可观察问题是共享训练后的Full端点削弱，以及三路校准/互补关系改变；这不等于已经证明梯度冲突或某个视图导致退化。
+
+MULTI-LANE原本通过任务专属Selectors与Prefix-Tuning，从Frozen Forward读取任务所需证据；若同一组可训练参数被迫同时适配整图、人物框与人脸三种分布，融合损失只要求加权总预测正确，并不要求Full保持原先的独立判别能力。这是机制解释，需与只读端点替换及匹配重训区分，不能仅由mAP断言优化冲突。
+
+此前9月16日validation研究已发现：保持概率融合规则，只替换独立Full可从42.8238到43.7217；共享模型单纯改概率融合却下降。不能把换融合公式、私有小Adapter、梯度隔离等已失败方案重新当成未经验证的新改进。本次补scripts/emotic/audit_historical_three_view_endpoints.py，对当前seed0完整八阶段进行固定权重的全2^3端点替换，仅作归因，不选择test规则。
