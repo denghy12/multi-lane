@@ -183,8 +183,14 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         loader = evaluation_loader(view, batch_size, config, workers)
         torch.cuda.synchronize(device)
         started = time.monotonic()
-        row = evaluate(model, loader, device, task_id, config["threshold"],
-                       amp=True, score_output_path=output / "scores" / f"task{task_id}.npz")
+        combined_views = None
+        if config.get("strong_full_asl") and model.view_fusion != "disabled":
+            from .strong_full_evaluation import evaluate_fused_and_views
+            row, combined_views = evaluate_fused_and_views(model, loader, device, task_id, config["threshold"],
+                True, output / "scores" / f"task{task_id}.npz", output / "view_scores" / f"task{task_id}.npz")
+        else:
+            row = evaluate(model, loader, device, task_id, config["threshold"],
+                           amp=True, score_output_path=output / "scores" / f"task{task_id}.npz")
         torch.cuda.synchronize(device)
         timings[str(task_id)] = dict(fused_evaluation_seconds=time.monotonic()-started,
                                     people=len(view))
@@ -192,7 +198,9 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         rows.append(row)
         if model.cross_view_bank is not None:
             cross_view_statistics[str(task_id)] = model.cross_view_bank.statistics()
-        if model.view_fusion == "disabled":
+        if combined_views is not None:
+            views[str(task_id)] = combined_views
+        elif model.view_fusion == "disabled":
             views[str(task_id)] = {"status": "not_applicable", "reason": "single_Full_equals_fused"}
         elif model.joint_summary_bank is not None:
             routing[str(task_id)] = model.joint_summary_bank.statistics()
@@ -237,6 +245,7 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         "disabled_stacking_modules": list(disable_stacking_modules),
         "module_stacking": config.get("module_stacking", False),
         "strong_full_asl": config.get("strong_full_asl", False),
+        "single_forward_fused_and_views": bool(config.get("strong_full_asl") and model.view_fusion != "disabled"),
         "inference_timings": timings,
         "peak_allocated_mib": torch.cuda.max_memory_allocated(device)/1024**2,
         "peak_reserved_mib": torch.cuda.max_memory_reserved(device)/1024**2,

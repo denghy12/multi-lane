@@ -841,6 +841,22 @@ def view_path_gradient_audit(
     return result
 
 
+def strong_full_gradient_diagnostics(model, gradient_scale):
+    """Read the first batch's unscaled gradient norms without modifying gradients."""
+    groups = {"selectors": (model.selectors,), "prompts": tuple(model.prompts),
+              "classifier": tuple(model.classifier_optimizer_parameters()),
+              "adapter": tuple(model.adapter_optimizer_parameters())}
+    if model.cross_view_bank is not None:
+        groups["attention"] = tuple(model.cross_view_bank.active_parameters())
+    if model.spatial_summary_bank is not None:
+        groups["position"] = tuple(model.spatial_summary_bank.active_parameters())
+    result = {}
+    for name, parameters in groups.items():
+        values = [p.grad.detach().float().square().sum() for p in parameters if p.grad is not None]
+        result["strong_grad_"+name+"_norm"] = float(torch.stack(values).sum().sqrt().cpu()) / gradient_scale if values else 0.
+    return result
+
+
 def backward_routed_training_losses(
     model_loss: torch.Tensor,
     adapter_loss: torch.Tensor,
@@ -1816,6 +1832,7 @@ def train_task(
         )
         epoch_start = time.time()
         epoch_path_gradient_audits: List[Dict[str, float]] = []
+        epoch_parameter_gradients = {}
         condition_samples = 0
         condition_valid_total = 0.0
         condition_visible_total = 0.0
@@ -2131,6 +2148,8 @@ def train_task(
                         adapter_gradient_totals.get(key, 0.0) + float(value)
                     )
                 adapter_gradient_batches += 1
+            if getattr(model, "strong_full_asl", False) and batch_index == 0:
+                epoch_parameter_gradients = strong_full_gradient_diagnostics(model, scale_before)
             if gradient_clip_norm > 0:
                 # GradScaler keeps gradients scaled until unscale_. Clip the
                 # complete optimizer parameter set after unscaling so the
@@ -2324,6 +2343,7 @@ def train_task(
                 row[key] = sum(
                     audit[key] for audit in epoch_path_gradient_audits
                 ) / len(epoch_path_gradient_audits)
+        row.update(epoch_parameter_gradients)
         history.append(row)
         print(
             f"task={task_id} cycle={epoch + 1} "

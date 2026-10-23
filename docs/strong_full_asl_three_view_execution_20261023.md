@@ -11,3 +11,6 @@
 ## 实现与第一轮预检
 
 432项回归通过，真实CLIP B64初始化7组公共参数/RNG/同视图输出逐值一致；冻结视觉不变。首次smoke因单Full误传Face参数被入口拦截（0更新），修正后smoke_seed0_20261023_02八组训练均complete/0跳步。最重2818.77MiB/保留3034，单Full ASL1357.87MiB。验证器补区分短跑updates和正式epoch预算；新调度按训练→逐组完整性核验→该组val/test及预声明归因的依赖流水执行，评估只用本批已释放卡，每卡最多2路，不与本批活动训练抢同卡。正式未启动。
+
+2026-10-23预检补记：3868f61完整433项回归通过；新流水smoke03八组训练均0跳步，16份同checkpoint validation重放逐值一致，历史Full导出/单视图评估也通过。恢复probe从cd1489d task0接续至task1，model/requires_grad/optimizer-scheduler-scaler/RNG/sampler及两阶段val logits全部逐值一致。当前最后6路关闭归因短跑仍在执行，正式未启动。补充首批各参数组梯度范数只读日志，并实现仅新三视图协议单前向导出融合及各视图score，待数值等价核验；没有更改训练损失或模型公式。
+

@@ -6,7 +6,7 @@ import torch
 import test_track_a_reproduction as fixtures
 from multi_lane.track_a.model import MultiLaneModel
 from multi_lane.track_a.runner import (build_optimizer_groups, backward_routed_training_losses,
-    compute_training_loss,compute_asymmetric_training_loss,parse_args)
+    compute_training_loss,compute_asymmetric_training_loss,parse_args,strong_full_gradient_diagnostics)
 from multi_lane.track_a.strong_full_asl import ARMS,modes,validate_arguments
 from multi_lane.track_a.run_strong_full_asl import training_arguments,run_queue
 from pathlib import Path
@@ -61,6 +61,25 @@ class StrongFullASLTest(unittest.TestCase):
         for p,g in zip(main,expected_main):self.assertTrue(torch.equal(p.grad,g))
         for p,g in zip(adapter,expected_adapter):self.assertTrue(torch.equal(p.grad,g))
         self.assertTrue(all(p.grad is None for p in model.visual_encoder.parameters()))
+        before=[p.grad.clone() for p in (*main,*adapter)]
+        norms=strong_full_gradient_diagnostics(model,1.)
+        self.assertEqual(set(norms),{'strong_grad_'+n+'_norm' for n in ['selectors','prompts','classifier','adapter','attention','position']})
+        self.assertTrue(all(torch.equal(p.grad,g) for p,g in zip((*main,*adapter),before)))
+    def test_one_forward_evaluation_matches_previous_fused_metrics_and_scores(self):
+        import numpy as np
+        from dataclasses import asdict
+        from multi_lane.track_a.runner import evaluate
+        from multi_lane.track_a.strong_full_evaluation import evaluate_fused_and_views
+        model=self.model();model.activate_task(0);model.eval()
+        images=self.images();labels=torch.tensor([[1.,0.],[0.,1.],[1.,1.]])
+        loader=[(images,labels,['image0#person=0','image1#person=0','image1#person=1'])]
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            original=evaluate(model,loader,torch.device('cpu'),0,.5,False,root/'old.npz')
+            new,_=evaluate_fused_and_views(model,loader,torch.device('cpu'),0,.5,False,root/'new.npz',root/'views.npz')
+            self.assertEqual(asdict(original),asdict(new))
+            with np.load(root/'old.npz') as a,np.load(root/'new.npz') as b:
+                for k in ['logits','probabilities','targets','sample_ids']:self.assertTrue(np.array_equal(a[k],b[k]),k)
     def test_queue_fans_out_dependent_jobs_and_preserves_failed_pending(self):
         class Process:
             pid=9

@@ -1,5 +1,7 @@
 # 项目上下文
 
+2026-10-23预检补记：3868f61完整433项回归通过；新流水smoke03八组训练均0跳步，16份同checkpoint validation重放逐值一致，历史Full导出/单视图评估也通过。恢复probe从cd1489d task0接续至task1，model/requires_grad/optimizer-scheduler-scaler/RNG/sampler及两阶段val logits全部逐值一致。当前最后6路关闭归因短跑仍在执行，正式未启动。补充首批各参数组梯度范数只读日志，并实现仅新三视图协议单前向导出融合及各视图score，待数值等价核验；没有更改训练损失或模型公式。
+
 2026-10-23短跑更新核验：cd1489d八组真实B64×2task×2updates训练全结束/0跳步，历史包装也成功；最重ASL Both峰值2818.77MiB/保留3034，单Full ASL1357.87MiB。正式尚未启动。短跑汇总需识别updates预算的scheduler/epochs元数据，已修正；新增训练完成即完整性核验并接续各组val/test的多卡流水排程，释放的单视图卡不空等，其余训练继续。接着验证新调度、评估和恢复。
 
 2026-10-23预检进展：432项回归及真实CLIP B64七组初始化通过。首轮smoke在首个单Full启动前被Face manifest参数合法性检查拦截（无更新），已让单视图命令不传三视图专属参数；保留失败记录并用新run_id重跑。另保持旧快照缺省strong标志兼容。正式尚未启动。
