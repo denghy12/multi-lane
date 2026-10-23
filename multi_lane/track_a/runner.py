@@ -2686,6 +2686,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument("--eval-workers", type=int, default=None, help="Reporting DataLoader workers; defaults to training workers")
     parser.add_argument("--save-pre-evaluation-recovery", action="store_true", help="Atomically save task-boundary model/optimizer/RNG state before reporting")
+    parser.add_argument("--strong-full-asl", action="store_true", help="Locked seven-arm full-TRAIN Image-token Adapter BCE/ASL transfer")
     parser.add_argument("--module-stacking", action="store_true", help="Locked three-module factorial protocol with shared contraction and aux0.1")
     parser.add_argument("--resume-spatial-boundary", type=Path, help="Continue the locked spatial experiment from a complete pre-reporting task snapshot")
     parser.add_argument("--moe-num-experts", type=int, default=22)
@@ -2819,17 +2820,20 @@ def main() -> None:
 
 
 def run(args: argparse.Namespace) -> None:
+    if args.strong_full_asl:
+        from .strong_full_asl import validate_arguments as validate_strong
+        validate_strong(args)
     if args.module_stacking:
         from .module_stacking import validate_arguments
         validate_arguments(args)
-    if args.spatial_summary_mode != "disabled" and not args.module_stacking and (
+    if args.spatial_summary_mode != "disabled" and not (args.module_stacking or args.strong_full_asl) and (
         not args.moe_paired_audit or args.loss_routing != "joint_bce"
         or args.view_gradient_routing != "joint" or args.adapter_mode != "disabled"
         or args.parax_mode != "disabled" or args.cross_view_mode != "disabled"
         or args.joint_summary_mode != "disabled" or args.selector_conditioning != "disabled"
     ):
         raise ValueError("Spatial summaries require paired original three-view joint BCE")
-    if args.cross_view_mode != "disabled" and (
+    if args.cross_view_mode != "disabled" and not args.strong_full_asl and (
         not args.moe_paired_audit or (args.view_auxiliary_loss_weight != 0 and not args.module_stacking)
         or args.view_gradient_routing != "joint" or args.view_gradient_audit
         or args.view_path_gradient_audit_batches or args.loss_routing != "joint_bce"
@@ -2844,7 +2848,7 @@ def run(args: argparse.Namespace) -> None:
     ):
         raise ValueError("Joint summaries require paired joint BCE, zero per-view auxiliary loss and no endpoint diagnostics")
     paired_protocol_audit = (TRAINING_PROTOCOL == "joint26" or args.fixed_view_paired_audit
-                             or args.protected_parax_paired_audit or args.moe_paired_audit)
+                             or args.protected_parax_paired_audit or args.moe_paired_audit or args.strong_full_asl)
     if args.moe_paired_audit and (
         TRAINING_PROTOCOL != "incremental"
         or args.adapter_mode not in ({"disabled", "image_token"} if args.module_stacking else {"disabled", "moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_frozen_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"})
@@ -3243,7 +3247,7 @@ def run(args: argparse.Namespace) -> None:
 
     if args.eval_workers is not None and args.eval_workers < 0:
         raise ValueError("eval-workers must be nonnegative")
-    if args.save_pre_evaluation_recovery and (args.adapter_mode not in ({"disabled", "image_token"} if args.module_stacking else {*ACTIVATE_FREEZE_MODES, "disabled"}) or not args.skip_validation_eval or not args.moe_paired_audit):
+    if args.save_pre_evaluation_recovery and (args.adapter_mode not in ({"disabled", "image_token"} if (args.module_stacking or args.strong_full_asl) else {*ACTIVATE_FREEZE_MODES, "disabled"}) or not args.skip_validation_eval or not (args.moe_paired_audit or args.strong_full_asl)):
         raise ValueError("Boundary recovery requires paired MoE/baseline training with skip-validation-eval")
     metadata = git_metadata(root)
     visual = load_openai_clip_visual(args.clip_checkpoint)
@@ -3286,6 +3290,7 @@ def run(args: argparse.Namespace) -> None:
         selector_condition_scale=args.selector_condition_scale,
         spatial_summary_mode=args.spatial_summary_mode,
         module_stacking=args.module_stacking,
+        strong_full_asl=args.strong_full_asl,
         cross_view_mode=args.cross_view_mode,
         cross_view_layer=args.cross_view_layer,
         cross_view_dim=args.cross_view_dim,
@@ -3366,7 +3371,7 @@ def run(args: argparse.Namespace) -> None:
         fusion_parameters_per_task += model.joint_summary_bank.parameter_count_per_task()
     if model.cross_view_bank is not None:
         fusion_parameters_per_task += model.cross_view_bank.parameter_count_per_task()
-    if args.module_stacking and model.spatial_summary_bank is not None:
+    if (args.module_stacking or args.strong_full_asl) and model.spatial_summary_bank is not None:
         fusion_parameters_per_task += model.spatial_summary_bank.parameter_count_per_task()
     print(
         f"trainable_parameters={lane_parameters + classifier_parameters + adapter_parameters_per_task + parax_parameters + condition_parameters_per_task + fusion_parameters_per_task} "
@@ -3547,7 +3552,8 @@ def run(args: argparse.Namespace) -> None:
         "fixed_view_paired_audit": bool(args.fixed_view_paired_audit),
         "moe_paired_audit": bool(args.moe_paired_audit),
         "module_stacking": bool(args.module_stacking),
-        "fixed_view_sampler_protocol": "seed_plus_1009_times_task" if (args.fixed_view_paired_audit or args.protected_parax_paired_audit or args.moe_paired_audit) else None,
+        "strong_full_asl": bool(args.strong_full_asl),
+        "fixed_view_sampler_protocol": "seed_plus_1009_times_task" if (args.fixed_view_paired_audit or args.protected_parax_paired_audit or args.moe_paired_audit or args.strong_full_asl) else None,
         "frozen_visual_sha256_before": frozen_visual_before,
         "training_loss_mode": args.training_loss_mode,
         "parameter_group_loss_routing": args.loss_routing,
@@ -4171,10 +4177,10 @@ def run(args: argparse.Namespace) -> None:
             fit_indices, calibration_indices = fit_calibration_indices(
                 train_source, task_indices(task_id), args.calibration_fraction
             )
-        if args.export_calibration_view_scores or (args.moe_paired_audit and args.calibration_fraction > 0):
+        if args.export_calibration_view_scores or args.strong_full_asl or (args.moe_paired_audit and args.calibration_fraction > 0):
             split_record = {
                 "task_id": task_id, "source_split": "train",
-                "training_exclusion": True,
+                "training_exclusion": args.calibration_fraction > 0 if args.strong_full_asl else True,
                 "split_salt": "emotic-reliability-calibration-v1",
                 "fit_sample_ids": [str(train_source.sample_ids[i]) for i in fit_indices],
                 "calibration_sample_ids": [str(train_source.sample_ids[i]) for i in calibration_indices],
@@ -4210,7 +4216,7 @@ def run(args: argparse.Namespace) -> None:
             seen_indices(task_id),
             include_sample_id=args.save_evaluation_scores,
         )
-        sampler_seed = fixed_view_sampler_seed(args.seed, task_id, TRAINING_PROTOCOL, args.fixed_view_paired_audit or args.protected_parax_paired_audit or args.moe_paired_audit)
+        sampler_seed = fixed_view_sampler_seed(args.seed, task_id, TRAINING_PROTOCOL, args.fixed_view_paired_audit or args.protected_parax_paired_audit or args.moe_paired_audit or args.strong_full_asl)
         train_loader = DataLoader(
             train_view, batch_size=args.train_batch_size, shuffle=True,
             num_workers=args.workers, pin_memory=True, drop_last=False,
@@ -4241,6 +4247,7 @@ def run(args: argparse.Namespace) -> None:
                 "reporting_instances": len(reporting_view),
                 "reporting_sample_ids_sha256": ids_digest([str(reporting_source.sample_ids[i]) for i in reporting_view.indices]),
                 "test_loaded": test_source is not None,
+                "adapter_objective": "ASL(fused)" if args.strong_full_asl and args.loss_routing == "adapter_asl" else "same_as_model",
                 "loss": (
                     f"{args.supervised_loss_scale} * (BCE(fused) + "
                     f"{args.view_auxiliary_loss_weight} * mean(BCE(available views)))"

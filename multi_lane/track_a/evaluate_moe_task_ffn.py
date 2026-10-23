@@ -51,10 +51,19 @@ def evaluate_split(source_run: Path, output: Path, split: str,
     if output.exists():
         raise FileExistsError(output)
     config = json.loads((source_run / "config.json").read_text())
+    if config.get("legacy_full_reference"):
+        from .strong_full_asl import LEGACY_COMMIT
+        if (config["git"]["commit"] != LEGACY_COMMIT or config.get("view_fusion") != "disabled"
+                or config.get("parameter_group_loss_routing") != "adapter_asl"
+                or not config.get("historical_export")):
+            raise ValueError("Historical Full provenance differs")
+    if config.get("strong_full_asl"):
+        from .strong_full_asl import validate_config
+        validate_config(config)
     if config.get("module_stacking"):
         from .module_stacking import validate_config
         validate_config(config)
-    if disable_stacking_modules and (not config.get("module_stacking") or split != "val"):
+    if disable_stacking_modules and (not (config.get("module_stacking") or config.get("strong_full_asl")) or split != "val"):
         raise ValueError("Stacking bypass is validation-only and requires the factorial protocol")
     if set(disable_stacking_modules) - {"A", "B", "C"}:
         raise ValueError("Unknown stacking runtime module")
@@ -66,7 +75,7 @@ def evaluate_split(source_run: Path, output: Path, split: str,
     expected_tasks = 1 if allow_smoke else expected_tasks
     if (summary.get("status") != "complete" or summary.get("config") != config
         or config.get("git", {}).get("dirty") is not False
-        or config.get("adapter_mode") not in ({"disabled", "image_token"} if config.get("module_stacking") else {"moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_frozen_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4", "disabled"})
+        or config.get("adapter_mode") not in ({"disabled", "image_token"} if (config.get("module_stacking") or config.get("strong_full_asl") or config.get("legacy_full_reference")) else {"moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_frozen_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4", "disabled"})
         or (config.get("adapter_mode") == "disabled" and not config.get("moe_paired_audit"))
         or config.get("parax_mode") != "disabled"
         or not config.get("save_compact_checkpoints")
@@ -111,6 +120,7 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         moe_noise_std=config.get("moe_noise_std") if config.get("moe_noise_std") is not None else 0.5,
         spatial_summary_mode=config.get("spatial_summary_mode", "disabled"),
         module_stacking=config.get("module_stacking", False),
+        strong_full_asl=config.get("strong_full_asl", False),
         cross_view_mode=config.get("cross_view_mode", "disabled"),
         cross_view_layer=config.get("cross_view_layer", 5),
         cross_view_dim=config.get("cross_view_dim", 64),
@@ -182,7 +192,9 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         rows.append(row)
         if model.cross_view_bank is not None:
             cross_view_statistics[str(task_id)] = model.cross_view_bank.statistics()
-        if model.joint_summary_bank is not None:
+        if model.view_fusion == "disabled":
+            views[str(task_id)] = {"status": "not_applicable", "reason": "single_Full_equals_fused"}
+        elif model.joint_summary_bank is not None:
             routing[str(task_id)] = model.joint_summary_bank.statistics()
             views[str(task_id)] = {"status": "not_applicable", "reason": "single_joint_task_path_has_no_independent_view_endpoints"}
         else:
@@ -224,6 +236,7 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         "moe_runtime_enabled": model.adapter_bank is not None and not disable_moe_runtime,
         "disabled_stacking_modules": list(disable_stacking_modules),
         "module_stacking": config.get("module_stacking", False),
+        "strong_full_asl": config.get("strong_full_asl", False),
         "inference_timings": timings,
         "peak_allocated_mib": torch.cuda.max_memory_allocated(device)/1024**2,
         "peak_reserved_mib": torch.cuda.max_memory_reserved(device)/1024**2,

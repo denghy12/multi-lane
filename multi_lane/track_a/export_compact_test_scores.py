@@ -122,6 +122,7 @@ def build_model(config: Mapping[str, Any], visual: torch.nn.Module) -> MultiLane
         selector_condition_scale=float(config.get("selector_condition_scale", 0.1)),
         spatial_summary_mode=str(config.get("spatial_summary_mode", "disabled")),
         module_stacking=bool(config.get("module_stacking", False)),
+        strong_full_asl=bool(config.get("strong_full_asl", False)),
         cross_view_mode=str(config.get("cross_view_mode", "disabled")),
         cross_view_layer=int(config.get("cross_view_layer", 5)),
         cross_view_dim=int(config.get("cross_view_dim", 64)),

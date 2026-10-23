@@ -1,5 +1,69 @@
 # 工作日志
 
+## 2026-10-23：开始实现并执行强Full ASL三视图七组及历史复现
+
+用户授权开始修改、全空闲显卡高效并行完整8task validation/test，覆盖此前GPU0-only限制。已新建exp/strong-full-asl-three-view-20261023（基于0fb85f1），保留此前全部未提交分析文档；计划七组全TRAIN/aux0/seed0/30epoch/B64/主LR.0125/模块LR4e-4，BCE更新原任务及Attention/位置、ASL只更新Adapter。历史f1ada22工作树clean，旧32.5365输出无checkpoint，增加只读旧源码驱动的R历史Full复现及快照导出。
+
+远程primary153行/test-only5行及SHA保持；GPU0、2–7约24GB空闲，GPU1有其他作业/约10.7GB可用，144CPU/528GB磁盘可用。新多卡队列按实际显存准入，不减少B64或干预外部作业。当前正在实现独立协议、评估/恢复兼容、分组梯度测试及真实CLIP初始化核验，尚未运行预检或正式训练。后续Git-only同步新远程worktree，检查通过再正式启动；本条不会把实现阶段当实验已开始。
+
+## 2026-10-23：强Full Adapter-ASL迁移三视图的详细计划（未执行）
+
+用户明确要保留Full＋Image-token Adapter＋Adapter-ASL迁到三视图，再加摘要Attention/目标人物位置；本轮只规划。方案docs/strong_full_asl_three_view_ablation_plan_20261023.md：Adapter始终开启，主矩阵全TRAIN/calibration0/aux0，model参数含Selectors/Prompt/head/Attention/位置用BCE，Image-token Adapter仅用ASL9.8/0/.05，ASL读取融合预测而非独立各视图loss。
+
+七组新配置：单Full BCE/ASL、三视图 BCE/ASL，以及三视图ASL+Attention/+位置/+两者；前四格分离视图迁移和ASL监督，后四格（复用三视图ASL）分离两个新模块。seed0/8task/30epoch/B64/主LR.0125/模块4e-4/WD0/cosine，无新专家或任务复用。每组预期13950updates、七组97650；必要时另加历史严格Full复现R（预计无旧checkpoint可复用，执行前核验），总八组111600updates。R与新配对采样/AMP设置区分，不承诺新S-ASL精确32.5365；固定完整val2397/test5368，历史39.1445另列旧口径。
+
+新七组统一近期稳定AMP初始1024/growth1e9，严格R保留旧数值/全局sampler；共享初始化、Full增强/RNG、分组梯度、缓存、冻结及恢复需预检。现有module_stacking/runner硬限制jointBCE/.1holdout/.1aux，不是只改loss命令即可；需独立协议，不破坏旧矩阵。GPU0沿最近约束，ASL最重B64测峰值后定并发/自动分轮，当前不查询或操作GPU。
+
+预声明task0/2/7 validation开关：ASL底座offAdapter，Attention组offAttention，位置组off位置，组合offAttention/off位置/off两项。先与同期强Full比较，再看对三视图ASL底座增量；不能只以战胜弱BCE为成功，也不保证旧Full预测不变。aux.1、独立三视图/保护Full/seed扩展均后置有条件，不混入主矩阵。本轮仅文档及三个上下文更新；无业务代码、训练/前向、提交推送或新执行分支，不触碰其他工作树。
+
+## 2026-10-23 14:40 CST：旧Full32.5365基线澄清，修正跨轮阶段平均比较
+
+用户指出旧单Full为32.5365/39.1445/32.5756/49.3827。已核对本地主树历史config/summary/scores：四列为test最终mAP/阶段平均/cF1/oF1。旧Full有第2层Image-token Adapter b32/s.1/LR4e-4，任务参数BCE、Adapter专属ASL9.8/0/.05，全TRAIN13950updates；disabled仅关闭Person条件。本轮F000关闭Adapter，三视图共享任务参数，joint融合BCE+aux.1，90%fit12660updates；不是同一基线复现，不能只由数据减少解释。
+
+只读CPU按旧各阶段sample IDs筛当前存档并核对classes/targets：旧Full阶段平均39.1445；当前F000固定完整人群35.4273→旧人群38.7443；AB35.7581→旧人群39.0871。旧人数3142/4600/4691/5232/5342/5354/5367/5368，新每阶段5368；平均差主要有人群口径因素，不能直接解释成性能下降。最终两边5368人/26类IDs及targets全等，旧Full32.5365、当前F000 Full端点30.5598/融合31.9391、AB融合32.4286；AB尚低旧Full.1079，不能宣布超越强Full。
+
+建议优先保留并解释旧强Full训练配方，未来以统一数据/损失/评估的桥接控制研究三视图，不能只对较弱本轮对照汇报增益。ASL/数据量/共享训练的各自因果未隔离；未启动新训练/GPU前向/提交推送。详见docs/historical_full_baseline_clarification_20261023.md及output/three_module_stacking/analysis_20261023_historical_full_01。三个上下文及完整报告已同步更新，原主树只读。
+
+## 2026-10-23 14:28 CST：完整八组validation/test、运行时归因与CPU复算
+
+用户要求仔细分析已结束实验，包含validation/test及结构原因。formal_seed0_20261023_01已完整结束：八组各240epoch/12660更新/0跳步，16路完整validation/test及F111 task0/2/7四路关闭归因全部exit0，completion为complete、无failure。远程执行树clean、HEAD0fb85f1，原primary153行/test-only5行及SHA保持。598份非checkpoint产物同步本地并SHA全等；128份checkpoint仅记录SHA未下载。独立CPU复算652项逐类AP最大误差3.98e-13，八组task7 val存档逐值重放；本轮无新模型前向/训练。
+
+按基线/A/B/C/AB/AC/BC/ABC，最终val为42.5650/42.4311/42.4323/42.6478/42.9530/41.8702/42.4916/42.3712；最终test为31.9391/31.8358/32.2804/32.1179/32.4286/31.8614/32.2555/32.1765。AB最佳最终val/test，较本轮基线+.3880/+.4896，阶段平均48.5646/35.7581（基线48.5026/35.4273）；C单独val平均48.8647最高，ABC test平均35.8087最高。不能称AB四指标全面最优，也不支持三模块普遍叠加。
+
+ABC−AB的task6三类对26类mAP贡献val−.6332/test−.3875，其余23类分别+.0515/+.1354；两split都集中小样本task6。F111 task7关A/B/C/全关val为42.3373/42.2222/42.3755/42.2100（全开42.3712），关C未恢复AB42.9530或task6三类。主要差异留在共同训练的任务参数，不能断言即时位置bias过强或旧任务漂移。AB的Full两split变强，Person端点未同步增强，融合−Full只小增；不能宣称人物对应/互补已解决。
+
+1000次原图配对bootstrap：AB−基线val95%[−.3395,+1.0274]、test[+.0793,+.8921]；AB−Attention的test区间跨0，ABC−AB与全部F111开关区间均跨0。仅固定seed0的样本不确定性、无多重校正，不代表训练seed稳定或机制已证实。不要用历史全TRAIN B0替代本轮90%fit匹配基线；历史test阶段平均36.2781仍高于本轮所有组。
+
+新增docs/three_module_stacking_complete_results_20261023.md，包含全部8阶段val/test、参数/内存/开关/子集/任务6逐类/置信区间与后续控制。CPU分析脚本和JSON在output/three_module_stacking/analysis_20261023_complete_01；使用本地NumPy运行，不依赖Torch。已同步检查更新三个上下文、执行记录及阶段报告覆盖说明。保留所有历史/用户未提交文档；不改本地主树及远程代码、未运行新的训练或GPU前向，也未提交推送。没有业务实现变化，故未重复模型单元测试；完成存档复算和git diff检查。
+
+## 2026-10-23：三模块训练归档只读核验与阶段性结果分析
+
+12:07补记：F010完整validation也已结束，最终42.4323、阶段平均48.3613；新增17份正式val产物同步本地并SHA全等（合计309份），task7与训练归档逐值一致。当前3/16完整评估作业结束，test及关闭归因仍未齐全。
+
+用户要求分析结束实验。检查确认八组训练均完成，但正式val/test及F111关闭归因仍在运行，已明确告知，未终止/迁移/重启任何作业。12:02远程F000/F100完整val结束，其余仍自动排队，无completion/failure；执行树clean、0fb85f1，原primary153/test-only5行及状态SHA保持。
+
+同步292份已完成非checkpoint产物并全部SHA核对，0份权重下载。八组task7完整val2397人/1705原图对齐，直接使用归档probabilities独立CPU复算，与训练summary差<1e-8；F000/F100正式task7归档逐值一致。八组各240epoch/12660更新/0跳步、冻结/holdout/恢复核验全部通过。分析脚本初次从package导入触发本地缺失Torch，改为runpy加载纯协议并复用AP公式后完成，无模型前向/参数更新。
+
+最终val基线42.5650，A42.4311/B42.4323/C42.6478/AB42.9530/AC41.8702/BC42.4916/ABC42.3712。1000次配对原图bootstrap所有对基线区间均跨0；AB+.3880区间[−.3395,+1.0274]，ABC-AB−.5817区间[−1.3295,+.1306]。二阶AB+.6545/AC−.6438/BC−.0236、三阶+.0028均不确定。三模块回落主要task6：三类贡献−.6332，其余23类贡献+.0515；不直接宣布普遍视图冲突。
+
+核对源实现：A只改Selector证据K/V，C改变Full Summarize softmax，B任务Q读Full摘要写Person。B训练残差已有足够幅度、C未饱和且KL小、A各任务幅度差异大，不重复使用“未训练/弱分支/过强bias”作为未经验证解释。训练期task0/1/2报告人群不同，未把其8阶段均值或forgetting当正式结果。完整test、分支净收益、开关归因仍待现有队列。
+
+新增阶段报告docs/three_module_stacking_partial_results_20261023.md；CPU脚本/逐类统计/区间/SHA清单在output/three_module_stacking/analysis_20261023_partial_01。三个上下文及执行记录同步更新，原有未提交文档保留；没有业务代码改动，未重复跑模型测试、未提交推送、未新增训练。
+
+## 2026-10-23：三模块八组正式队列已在GPU0启动
+
+正式批次formal_seed0_20261023_01，tmux stacking_formal_seed0_20261023_01；两端exp/three-module-stacking-20261022、HEAD0fb85f1ed8c277c48ca4267d2dbe7ec1be8fcbf6/upstream一致，远程执行工作树clean。F000/F100/F010/F001四组GPU0并行，PID916442/916468/916494/916520均完成task0第1轮各76更新、0跳步，初始化底座SHA相同。F110/F101/F011及F111按队列自动接续；每组seed0、完整8任务×30epoch、B64、12660更新，统一原图90/10与aux.1 joint BCE，未访问新test或按指标筛组。当前只有启动健康状态，尚无正式最终mAP。
+
+431项完整回归、真实CLIP B64八组初始化逐值一致、八组各2task×2updates短跑、16路validation/重放、4路F111关闭归因全部通过。真实task0边界恢复至task1后model/requires_grad/optimizer/scheduler/scaler/RNG/sampler及val存档逐值相同，来源SHA不变。最重F111短跑峰值分配2658.84MiB/保留2806MiB；GPU0最多4并发/单进程分配器18%/启动余量5600MiB，容量不足自动等待、多轮排队，不减batch、不干预外部任务。
+
+训练结束后控制器自动核验八组预算/冻结/恢复，再在GPU0队列并行完整8阶段val/test共16作业，最后F111 task0/2/7做关闭A/B/C/全关validation，输出交互与原图bootstrap。正式入口日志logs/three_module_stacking/implementation_20261022_01/formal_driver_01.log；组日志logs/three_module_stacking/formal_seed0_20261023_01；结果output/three_module_stacking/formal_seed0_20261023_01。283份静态预检/启动产物已同步本地并SHA全等，36份checkpoint仅存SHA未下载。原服务器主树153行/test-only5行及状态SHA保持；不合并main，不修改已锁定远程代码。本条及执行记录启动状态仅本地未提交更新。
+
+## 2026-10-23：中断后继续，431项回归通过，GPU0八组短跑进行中
+
+两端分支exp/three-module-stacking-20261022锁定0fb85f1，工作树均clean；431项完整回归通过，真实CLIP B64八组共同参数/RNG与初始输出逐值一致。GPU0空闲核验后，通过tmux stacking_smoke_seed0_20261023_01启动smoke_seed0_20261023_01，最多4并发、每组2task×2updates、仅validation。七组已complete，F111进行中，前两轮自动分队正常，0跳步；尚未启动正式8任务训练。
+
+另调度stacking_recovery_probe_20261023_01：等待F111短跑训练完成，独立输出继承task0完整边界再训练task1，核对模型/optimizer/scheduler/scaler/RNG/sampler及val存档逐值一致，来源checkpoint不改。日志在logs/three_module_stacking/implementation_20261022_01。待全部短跑评价及恢复核验通过，再锁定执行版本启动正式GPU0队列；不会重复启动中断前作业。
+
 2026-10-23预检进展：exp/three-module-stacking-20261022已Git-only创建远程独立工作树，d4a4238完整429项回归通过，真实CLIP B64八组共同参数/RNG和零初始化预测逐值相同，冻结视觉不变，初始化峰值742.1MiB。修复了旧空间分支绕过B缓存的组合调度问题；另补显存等待/多轮排满八组及失败未运行清单两项队列测试。下一步八组2task×2update smoke、validation并行重放、全恢复一致性后正式启动；目前正式未启动，不把短跑作为性能结果。GPU0限定和自动多轮排队持续有效，数据/超参不改。
 
 ## 2026-10-22：开始实现三模块叠加与GPU0自动队列

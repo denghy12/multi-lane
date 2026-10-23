@@ -30,7 +30,10 @@ def validate_boundary(payload, current):
                    if key == 'module_stacking' else old.get(key) != current.get(key))]
     if differences:
         raise ValueError('Resume configuration differs: ' + ', '.join(sorted(differences)))
-    if old.get('module_stacking'):
+    if old.get('strong_full_asl'):
+        from .strong_full_asl import validate_config
+        validate_config(old)
+    elif old.get('module_stacking'):
         from .module_stacking import validate_config
         validate_config(old)
     elif (old.get('adapter_mode') != 'disabled' or old.get('parax_mode') != 'disabled'
@@ -88,6 +91,8 @@ def prepare_boundary(path, config, output):
         if t < task:
             folders += [(folder, f'task{t}.{suffix}') for folder, suffix in
                         [('compact_checkpoints', 'pth'), ('val_scores', 'npz'), ('calibration_scores', 'npz')]]
+        if payload['config'].get('strong_full_asl'):
+            folders = [(folder, name) for folder, name in folders if folder != 'calibration_scores']
         for folder, name in folders:
             src, dst = source / folder / name, output / folder / name
             if dst.exists():
@@ -98,9 +103,9 @@ def prepare_boundary(path, config, output):
             if sha256(src) != value or sha256(dst) != value:
                 raise RuntimeError('Inherited artifact changed during copying')
             inherited[str(dst.relative_to(output))] = dict(source=str(src), sha256=value)
-    rows = json.loads((source / 'calibration_metrics.json').read_text()) if task else []
+    rows = json.loads((source / 'calibration_metrics.json').read_text()) if task and not payload['config'].get('strong_full_asl') else []
     payload['inherited_calibration_rows'] = [r for r in rows if r['task_id'] < task]
-    if len(payload['inherited_calibration_rows']) != task:
+    if len(payload['inherited_calibration_rows']) != task and not payload['config'].get('strong_full_asl'):
         raise ValueError('Source holdout reporting prefix is incomplete')
     if sha256(path) != before:
         raise RuntimeError('Source boundary changed while preparing resume')

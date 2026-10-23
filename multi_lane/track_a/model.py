@@ -108,6 +108,7 @@ class MultiLaneModel(nn.Module):
         cross_view_scale: float = 0.1,
         spatial_summary_mode: str = "disabled",
         module_stacking: bool = False,
+        strong_full_asl: bool = False,
     ) -> None:
         super().__init__()
         if not task_sizes or any(int(size) <= 0 for size in task_sizes):
@@ -254,14 +255,19 @@ class MultiLaneModel(nn.Module):
             raise ValueError("Invalid joint summary mode")
         if joint_summary_mode != "disabled" and (
             adapter_mode != "disabled" or parax_mode != "disabled"
-            or selector_conditioning != "disabled" or view_fusion != "fixed_three_view"
+            or selector_conditioning != "disabled" or (view_fusion != "fixed_three_view"
+                and not (self.strong_full_asl and view_fusion == "disabled"))
             or selector_mode != "shared" or prompt_mode != "shared"
             or view_classifier_mode != "shared_post_fusion" or detach_view_fusion_features
         ):
             raise ValueError("Joint summaries require shared Selectors/Prompts, three views and no other adapter")
         if spatial_summary_mode not in TaskSpatialSummary.MODES:
             raise ValueError("Invalid spatial summary mode")
-        self.module_stacking = bool(module_stacking)
+        self.strong_full_asl = bool(strong_full_asl)
+        self.module_stacking = bool(module_stacking or strong_full_asl)
+        if self.strong_full_asl and (adapter_mode != "image_token" or (
+                view_fusion == "disabled" and (cross_view_mode != "disabled" or spatial_summary_mode != "disabled"))):
+            raise ValueError("Strong Full requires Image-token Adapter and single-view modules disabled")
         if self.module_stacking and (
             adapter_mode not in {"disabled", "image_token"}
             or cross_view_mode not in {"disabled", "task_full"}
