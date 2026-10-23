@@ -255,8 +255,7 @@ class MultiLaneModel(nn.Module):
             raise ValueError("Invalid joint summary mode")
         if joint_summary_mode != "disabled" and (
             adapter_mode != "disabled" or parax_mode != "disabled"
-            or selector_conditioning != "disabled" or (view_fusion != "fixed_three_view"
-                and not (self.strong_full_asl and view_fusion == "disabled"))
+            or selector_conditioning != "disabled" or view_fusion != "fixed_three_view"
             or selector_mode != "shared" or prompt_mode != "shared"
             or view_classifier_mode != "shared_post_fusion" or detach_view_fusion_features
         ):
@@ -273,7 +272,8 @@ class MultiLaneModel(nn.Module):
             or cross_view_mode not in {"disabled", "task_full"}
             or spatial_summary_mode not in {"disabled", "target"}
             or parax_mode != "disabled" or joint_summary_mode != "disabled"
-            or selector_conditioning != "disabled" or view_fusion != "fixed_three_view"
+            or selector_conditioning != "disabled" or (view_fusion != "fixed_three_view"
+                and not (self.strong_full_asl and view_fusion == "disabled"))
             or selector_mode != "shared" or prompt_mode != "shared"
             or view_classifier_mode != "shared_post_fusion" or detach_view_fusion_features
             or adapter_view_bottleneck_dim != 0 or adapter_view_mode != "shared"

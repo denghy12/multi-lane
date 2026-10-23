@@ -1,5 +1,7 @@
 # 工作日志
 
+2026-10-23实现预检补记：2b698b2已Git-only同步远程独立strong-full-asl工作树；首轮4项新增测试中3项通过，单Full构造限制发现一处条件作用域错误，已修正并安排含旧功能的完整回归。正式训练尚未启动。
+
 ## 2026-10-23：开始实现并执行强Full ASL三视图七组及历史复现
 
 用户授权开始修改、全空闲显卡高效并行完整8task validation/test，覆盖此前GPU0-only限制。已新建exp/strong-full-asl-three-view-20261023（基于0fb85f1），保留此前全部未提交分析文档；计划七组全TRAIN/aux0/seed0/30epoch/B64/主LR.0125/模块LR4e-4，BCE更新原任务及Attention/位置、ASL只更新Adapter。历史f1ada22工作树clean，旧32.5365输出无checkpoint，增加只读旧源码驱动的R历史Full复现及快照导出。
