@@ -4,7 +4,7 @@
 
 旧概率融合规则及Face掩码固定，8阶段×3视图IDs/labels/classes核验通过。旧三套独立模型33.3392/40.2855的四指标复现；当前共享原特征融合32.1638/39.1273，单改概率融合31.9319/38.8677，故公式更换不能修复。保持当前P/Face，仅换旧独立Full后33.5724/40.2616；所有4种P/Face背景下换独立Full均增加1.3349–1.6406。此为只读预测重组归因，不是新训练模型的成绩，不能据test选组合。旧/新配置还不同；同期现代单Full32.2519对共享Full30.5910的1.6609差距也支持Full削弱，尚未分离哪个共享组件导致。
 
-原生seed0 task0–2共90轮训练字段（除耗时）、完整阶段指标和score全部字段与历史逐值相同；task3–7未完成，seed1/2训练仍运行GPU0。14份线程/端点/启动产物已同步本地并逐SHA核验，archive SHA190f1ba5e19a3727c6cd7cf0f8ef9e16cd3bf08150a570657bb60687b9e3da5f。报告docs/historical_standard_alignment_20261023.md及output/strong_full_asl_three_view/historical_three_view_endpoint_audit_20261023_01/summary.csv。主树/test-only状态153/5行及SHA不变。
+原生seed0 task0–2共90轮训练字段（除耗时）、完整阶段指标和score全部字段与历史逐值相同；task3–7未完成，seed1/2训练仍运行GPU0。seed1/2前21轮主loss与Adapter loss亦各自匹配历史到8位小数、0跳步；该额外审计已同步本地，SHA8a9c0410da67489395f9a6ed463ae132031cb0f82d2aed2c560745e2ad5f0416。14份线程/端点/启动产物已同步本地并逐SHA核验，archive SHA190f1ba5e19a3727c6cd7cf0f8ef9e16cd3bf08150a570657bb60687b9e3da5f。报告docs/historical_standard_alignment_20261023.md及output/strong_full_asl_three_view/historical_three_view_endpoint_audit_20261023_01/summary.csv。主树/test-only状态153/5行及SHA不变。
 
 下一步等待三Full完整旧标准test+val，核对四指标和每阶段人群；不重复启动。未来既保留Full32.5365/39.1445锚点，也保留独立三视图33.3392/40.2855强参照，先在validation设计有实质差异的完整Full保护方案，不能重包装旧阴性控制。
 
