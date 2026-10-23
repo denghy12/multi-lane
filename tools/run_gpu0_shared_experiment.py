@@ -43,13 +43,25 @@ def run(args):
     status=dict(status='preflight',family=args.family,source_head=args.source_head,control_head=control_head,
                 gpu=0,pid=os.getpid(),scheduler='shared_memory_admission',
                 previous_controller_pid=original.get('pid',args.previous_pid),run_id=args.run_id,
-                full_training_budget_unchanged=True,changed_only_resource_admission=True)
+                full_training_budget_unchanged=True,changed_only_resource_admission=True,
+                effective_allocator_fraction=.16,effective_local_concurrency=3 if args.family=='regional' else 4)
     def save_status():
         write(old_state,status);write(args.control/(args.family+'_status.json'),status)
     save_status()
 
     def run_jobs(jobs,logs,path,parallelism=None):
         limit=(3 if args.family=='regional' else 4) if parallelism is None else parallelism
+        # Preserve original scientific launch declarations and separately record
+        # effective resource overrides, rather than silently rewriting provenance.
+        for job in jobs:
+            arguments=list(map(str,job['arguments']))
+            for option in ('--output-root','--source-run'):
+                if option in arguments:
+                    batch_root=Path(arguments[arguments.index(option)+1]).parent.parent
+                    write(batch_root/'resource_override.json',dict(source_head=args.source_head,
+                        control_head=control_head,allocator_fraction=.16,local_concurrency=limit,
+                        global_admission=str(args.control),changed_only_resources=True,
+                        original_protocol_preserved=True))
         pending,active,records=list(jobs),[],[]
         failed=False
         while pending or active:
