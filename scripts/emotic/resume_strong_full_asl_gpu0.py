@@ -81,10 +81,8 @@ def main(args):
                        evaluation_gpus=[0], eval_per_gpu=2, training_restarted=False,
                        preserved_training=[dict(name=r['name'], pid=r['pid'], gpu=r['gpu'],
                                                 start_ticks=r['adopted_start_ticks']) for r in active]))
-    # SIGTERM is delivered on continuing the stopped dispatcher; children are untouched.
-    import signal
-    os.kill(args.old_controller, signal.SIGTERM)
-    os.kill(args.old_controller, signal.SIGCONT)
+    # Keep the stopped dispatcher's tmux session alive while its children run.
+    # Closing its pane can SIGHUP the whole original session, including training.
     completed = {r['name'].split('/')[0] for r in records
                  if r['name'].endswith('/train') and r.get('exit') == 0}
     known = {r['name'] for r in records} | {j['name'] for j in pending}
@@ -157,6 +155,9 @@ def main(args):
             write(status, dict(records=records, pending=pending, failed=failed, evaluation_gpus=[0]))
             if pending or active:
                 time.sleep(3)
+        import signal
+        os.kill(args.old_controller, signal.SIGTERM)
+        os.kill(args.old_controller, signal.SIGCONT)
         with (logs / 'training_verification.log').open('x') as stream:
             with redirect_stdout(stream):
                 verify(root, 8, False)

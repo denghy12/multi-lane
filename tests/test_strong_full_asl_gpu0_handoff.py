@@ -6,9 +6,28 @@ spec = importlib.util.spec_from_file_location('gpu0_handoff', Path(__file__).res
                                              'scripts/emotic/resume_strong_full_asl_gpu0.py')
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
+recover_spec = importlib.util.spec_from_file_location('gpu0_recovery', Path(__file__).resolve().parents[1] /
+                                                     'scripts/emotic/recover_strong_full_asl_gpu0.py')
+recovery = importlib.util.module_from_spec(recover_spec)
+recover_spec.loader.exec_module(recovery)
 
 
 class HandoffTest(unittest.TestCase):
+    def test_recovery_keeps_training_flags_and_only_changes_output_and_boundary(self):
+        original = ['--output-root', 'old/train', '--train-batch-size', '64', '--loss-routing', 'adapter_asl']
+        resumed = recovery.recovery_arguments(original, Path('new/train'), Path('old/task5.pth'))
+        self.assertEqual(original[1], 'old/train')
+        self.assertEqual(resumed, ['--output-root', 'new/train', '--train-batch-size', '64',
+                                  '--loss-routing', 'adapter_asl', '--resume-spatial-boundary', 'old/task5.pth'])
+
+    def test_five_training_jobs_can_share_gpu0_but_evaluation_is_limited(self):
+        training = [(None, dict(name='T/train'))] * 4
+        self.assertTrue(recovery.eligible(dict(name='new/train'), training, 7000))
+        self.assertFalse(recovery.eligible(dict(name='new/train'), training, 6000))
+        self.assertFalse(recovery.eligible(dict(name='new/train'), training + training[:1], 20000))
+        evaluation = [(None, dict(name='T/full_val'))] * 2
+        self.assertFalse(recovery.eligible(dict(name='new/full_test'), evaluation, 20000))
+
     def test_live_training_is_never_reported_complete_from_old_marker(self):
         r = dict(name='T_ASL/train', adopted_start_ticks='123')
         self.assertIsNone(module.adopted_exit(r, dict(start='123', state='R'),
