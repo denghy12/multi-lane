@@ -31,6 +31,15 @@ class SplitTest(unittest.TestCase):
         self.assertFalse(module.can_start(24564,6499,[],'train'))
         self.assertFalse(module.can_start(24564,4499,[],'eval'))
 
+    def test_existing_foreign_memory_is_reserved(self):
+        total=module.effective_capacity(24564,7800,482)
+        self.assertTrue(module.can_start(total,16000,[dict(kind='train',budget=4500)]*2,'train'))
+        self.assertFalse(module.can_start(total,16000,[dict(kind='train',budget=4500)]*3,'train'))
+
+    def test_capacity_returns_when_foreign_job_exits(self):
+        total=module.effective_capacity(24564,0,482)
+        self.assertTrue(module.can_start(total,16000,[dict(kind='train',budget=4500)]*3,'train'))
+
     def test_inherited_running_process_is_not_restarted(self):
         value=module.process_state(os.getpid())
         self.assertIsNone(module.inherited_exit(os.getpid(),value['start']))

@@ -30,6 +30,10 @@ def can_start(total,free,leases,kind):
             and sum(x['budget'] for x in leases)+budget+2000<=total and free>=budget+2000)
 
 
+def effective_capacity(total,foreign_mib,driver_mib):
+    return max(0,total-foreign_mib-driver_mib)
+
+
 class Admission:
     def __init__(self,root,family):self.root=Path(root);self.family=family
 
@@ -40,9 +44,18 @@ class Admission:
             state=json.loads(path.read_text()) if path.exists() else dict(leases={},history=[])
             total,free=map(int,subprocess.check_output(['nvidia-smi','-i','1',
                 '--query-gpu=memory.total,memory.free','--format=csv,noheader,nounits'],text=True).strip().split(','))
-            state['last_check']=dict(gpu=1,total=total,free=free,headroom=2000,checked_unix=time.time())
+            capacity=json.loads((self.root/'capacity.json').read_text())
+            rows=subprocess.check_output(['nvidia-smi','--query-compute-apps=gpu_uuid,pid,used_memory',
+                                           '--format=csv,noheader,nounits'],text=True).splitlines()
+            foreign=0
+            for row in rows:
+                uuid,pid,memory=(x.strip() for x in row.split(','))
+                if uuid==capacity['gpu_uuid'] and pid in capacity['foreign_pids']:foreign+=int(memory)
+            available=effective_capacity(total,foreign,capacity['driver_reserve_mib'])
+            state['last_check']=dict(gpu=1,total=total,effective_capacity=available,foreign_mib=foreign,
+                                    free=free,headroom=2000,checked_unix=time.time())
             process=None
-            if can_start(total,free,list(state['leases'].values()),kind):
+            if can_start(available,free,list(state['leases'].values()),kind):
                 log.parent.mkdir(parents=True,exist_ok=True)
                 with log.open('x') as stream:
                     process=subprocess.Popen(command,stdout=stream,stderr=subprocess.STDOUT,
