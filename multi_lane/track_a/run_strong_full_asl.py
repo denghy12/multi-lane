@@ -33,7 +33,7 @@ def memory_state(gpus):
     return {int(a):dict(free=int(b),utilization=int(c)) for a,b,c in (r.split(',') for r in rows.splitlines()) if int(a) in gpus}
 
 
-def run_queue(jobs, logs, status, gpus, per_gpu=1, fraction=.3, minimum_free=6500):
+def run_queue(jobs, logs, status, gpus, per_gpu=1, fraction=.3, minimum_free=6500, on_success=None):
     pending=list(jobs);active=[];records=[];failed=False;last_wait=0
     while pending or active:
         for process,record in list(active):
@@ -41,11 +41,16 @@ def run_queue(jobs, logs, status, gpus, per_gpu=1, fraction=.3, minimum_free=650
             if code is not None:
                 record.update(exit=code,finished_unix=time.time());active.remove((process,record));failed|=code!=0
                 print(f'FINISH {record["name"]} gpu={record["gpu"]} exit={code}',flush=True)
+                if code == 0 and on_success is not None:
+                    pending.extend(on_success(record))
         if failed and not active:
             write(status,dict(records=records,pending=pending,failed=True));raise RuntimeError(f'Queue failed: {status}')
         if pending and not failed:
             state=memory_state(gpus);counts={g:sum(r['gpu']==g for _,r in active) for g in gpus}
-            eligible=[g for g in gpus if counts[g]<per_gpu and state[g]['free']>=minimum_free]
+            training_gpus={r['gpu'] for _,r in active if r['name'].endswith('/train')}
+            eligible=[g for g in gpus if counts[g]<per_gpu and state[g]['free']>=minimum_free
+                      and g not in training_gpus]
+            # One training job per card; evaluations only fill released cards.
             if eligible:
                 gpu=min(eligible,key=lambda g:(counts[g],state[g]['utilization']//20,-state[g]['free'],g))
                 job=pending.pop(0);log=logs/(job['name']+'.log');log.parent.mkdir(parents=True,exist_ok=True)
@@ -103,6 +108,10 @@ def summarize(root, arms, smoke):
 
 def run(args):
     if not args.run_id or '/' in args.run_id or args.run_id in {'.','..'}:raise ValueError('Invalid run ID')
+    if args.train_per_gpu != 1 or not 1 <= args.eval_per_gpu <= 3:
+        raise ValueError('Use one training process and 1..3 evaluation processes per card')
+    if not .2 <= args.memory_fraction <= .4 or args.minimum_free_mib < 4000:
+        raise ValueError('Invalid memory admission limits')
     if len(set(args.gpus))!=len(args.gpus) or not set(args.gpus)<=set(range(8)):raise ValueError('Invalid GPUs')
     if subprocess.check_output(['git','status','--porcelain'],text=True).strip():raise RuntimeError('Clean checkout required')
     if shutil.disk_usage('.').free<30*1024**3:raise RuntimeError('Need 30 GiB of output space')
@@ -124,22 +133,39 @@ def run(args):
             jobs.append(dict(name='R_LEGACY/train',module='multi_lane.track_a.legacy_full_reference',arguments=list(map(str,[
                 '--legacy-root',args.legacy_root,'--output',root/'R_LEGACY',
                 '--data-root',args.data_root,'--clip-checkpoint',args.clip_checkpoint,*(['--smoke'] if args.smoke else [])]))))
-        run_queue(jobs,logs,logs/'training_queue.json',args.gpus,args.train_per_gpu,args.memory_fraction,args.minimum_free_mib)
-        cmd=[sys.executable,'-m','multi_lane.track_a.verify_strong_full_asl',str(root),'--tasks',str(protocol['tasks'])]
-        if args.smoke:cmd+=['--smoke']
-        with (logs/'training_verification.log').open('x') as stream:subprocess.run(cmd,stdout=stream,stderr=subprocess.STDOUT,check=True)
-        jobs=[]
-        for arm in arms:
-            jobs += [evaluation_job(args,root,arm,'val','full_val'),evaluation_job(args,root,arm,
-                'val' if args.smoke else 'test','replay_val' if args.smoke else 'full_test')]
-        run_queue(jobs,logs,logs/'evaluation_queue.json',args.gpus,args.eval_per_gpu,args.memory_fraction,args.minimum_free_mib)
+        completed=set();evaluation_submitted=set()
         tasks=['0','1'] if args.smoke else ['0','2','7']
-        jobs=[]
-        for arm,controls in [('T_ASL',[('off_A',['A'])]),('T_ASL_ATTN',[('off_B',['B'])]),
-                ('T_ASL_POS',[('off_C',['C'])]),('T_ASL_BOTH',[('off_B',['B']),('off_C',['C']),('off_BC',['B','C'])])]:
-            for name,disabled in controls:jobs.append(evaluation_job(args,root,arm,'val','runtime_'+name,
-                ['--checkpoint-tasks',*tasks,'--disable-stacking-modules',*disabled]))
-        run_queue(jobs,logs,logs/'runtime_queue.json',args.gpus,args.eval_per_gpu,args.memory_fraction,args.minimum_free_mib)
+        controls={'T_ASL':[('off_A',['A'])], 'T_ASL_ATTN':[('off_B',['B'])],
+                  'T_ASL_POS':[('off_C',['C'])], 'T_ASL_BOTH':[('off_B',['B']),('off_C',['C']),('off_BC',['B','C'])]}
+        def ready(record):
+            arm,kind=record['name'].split('/');extra=[]
+            if kind=='train':
+                completed.add(arm)
+                if 'S_BCE' in completed:
+                    for candidate in arms:
+                        if candidate not in completed or candidate in evaluation_submitted:continue
+                        if candidate!='R_LEGACY':
+                            from .verify_strong_full_asl import verify
+                            selected=('S_BCE',) if candidate=='S_BCE' else ('S_BCE',candidate)
+                            with (logs/(candidate+'_verification.log')).open('x') as stream:
+                                from contextlib import redirect_stdout
+                                with redirect_stdout(stream):verify(root,protocol['tasks'],args.smoke,
+                                    arms=selected,output_name='source_verification_'+candidate+'.json')
+                        else:
+                            audit=json.loads((root/candidate/'reference_verification.json').read_text())
+                            if audit['status']!='verified' or audit['skipped']!=0:raise ValueError('Legacy source incomplete')
+                        evaluation_submitted.add(candidate)
+                        extra += [evaluation_job(args,root,candidate,'val','full_val'),evaluation_job(args,root,candidate,
+                            'val' if args.smoke else 'test','replay_val' if args.smoke else 'full_test')]
+            elif kind=='full_val':
+                for name,disabled in controls.get(arm,[]):extra.append(evaluation_job(args,root,arm,'val','runtime_'+name,
+                    ['--checkpoint-tasks',*tasks,'--disable-stacking-modules',*disabled]))
+            return extra
+        run_queue(jobs,logs,logs/'pipeline_queue.json',args.gpus,args.eval_per_gpu,args.memory_fraction,args.minimum_free_mib,on_success=ready)
+        from .verify_strong_full_asl import verify
+        with (logs/'training_verification.log').open('x') as stream:
+            from contextlib import redirect_stdout
+            with redirect_stdout(stream):verify(root,protocol['tasks'],args.smoke)
         summarize(root,arms,args.smoke)
         protocol['status']='complete';write(root/'completion.json',protocol)
         (logs/'batch_exit_status.txt').write_text('0\n');print('STRONG_FULL_ASL_COMPLETE '+str(root),flush=True)

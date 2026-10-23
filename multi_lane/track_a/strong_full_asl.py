@@ -67,7 +67,8 @@ def validate_config(config):
         expected.pop(key)  # inactive attention stores nullable architecture fields
     check(config, expected)
     check(config, dict(learning_rate=.0125, optimizer='Adam_reset_per_task',
-        scheduler='CosineAnnealingLR_reset_per_task', epochs_per_task=30,
+        scheduler=('CosineAnnealingLR_reset_per_task_by_optimizer_step' if config.get('optimizer_updates_per_task') is not None else 'CosineAnnealingLR_reset_per_task'),
+        epochs_per_task=None if config.get('optimizer_updates_per_task') is not None else 30,
         adapter_learning_rate=.0004, adapter_weight_decay=0.,
         adapter_task_initialization='independent', adapter_parameter_objective=(
             'bce' if config['parameter_group_loss_routing']=='joint_bce' else 'asl')))

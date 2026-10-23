@@ -61,6 +61,28 @@ class StrongFullASLTest(unittest.TestCase):
         for p,g in zip(main,expected_main):self.assertTrue(torch.equal(p.grad,g))
         for p,g in zip(adapter,expected_adapter):self.assertTrue(torch.equal(p.grad,g))
         self.assertTrue(all(p.grad is None for p in model.visual_encoder.parameters()))
+    def test_queue_fans_out_dependent_jobs_and_preserves_failed_pending(self):
+        class Process:
+            pid=9
+            def poll(self):return 0
+        with tempfile.TemporaryDirectory() as tmp:
+            extra=dict(name='eval',module='x',arguments=[])
+            with patch('multi_lane.track_a.run_strong_full_asl.memory_state',return_value={0:dict(free=24000,utilization=0)}), \
+                 patch('multi_lane.track_a.run_strong_full_asl.subprocess.Popen',side_effect=lambda *x,**y:Process()), \
+                 patch('multi_lane.track_a.run_strong_full_asl.time.sleep'):
+                rows=run_queue([dict(name='base/train',module='x',arguments=[])],Path(tmp),Path(tmp)/'ok.json',[0],
+                    on_success=lambda r:[extra] if r['name'].endswith('/train') else [])
+            self.assertEqual([r['name'] for r in rows],['base/train','eval'])
+            class Failed:
+                pid=10
+                def poll(self):return 1
+            with patch('multi_lane.track_a.run_strong_full_asl.memory_state',return_value={0:dict(free=24000,utilization=0)}), \
+                 patch('multi_lane.track_a.run_strong_full_asl.subprocess.Popen',side_effect=lambda *x,**y:Failed()), \
+                 patch('multi_lane.track_a.run_strong_full_asl.time.sleep'):
+                with self.assertRaises(RuntimeError):run_queue([dict(name='bad',module='x',arguments=[]),dict(name='pending',module='x',arguments=[])],
+                    Path(tmp),Path(tmp)/'failed.json',[0])
+            import json
+            self.assertEqual(json.loads((Path(tmp)/'failed.json').read_text())['pending'][0]['name'],'pending')
     def test_gpu_queue_spreads_jobs_and_preserves_pending_on_failure(self):
         class Process:
             pid=7

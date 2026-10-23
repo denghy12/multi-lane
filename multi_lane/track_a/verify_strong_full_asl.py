@@ -10,7 +10,7 @@ from .export_compact_test_scores import _torch_load, _sha256
 from .spatial_resume import checkpoint_source_git
 
 
-def verify(root, tasks=8, smoke=False):
+def verify(root, tasks=8, smoke=False, arms=ARMS, output_name="training_verification.json"):
     reference = reference_protocol = splits_reference = None
     checks=[]
     keys=('seed','task_sizes','train_batch_size','eval_batch_size','epochs_per_task',
@@ -19,7 +19,7 @@ def verify(root, tasks=8, smoke=False):
         'person_crop_margin','full_crop_mode','input_normalization','training_loss_mode',
         'workers','eval_workers','amp','tf32','amp_initial_scale','amp_growth_interval',
         'git','initial_selector_prompt_classifier_sha256','frozen_visual_sha256_before')
-    for arm in ARMS:
+    for arm in arms:
         train=root/arm/'train';c=read(train/'config.json');s=read(train/'seed_summary.json')
         validate_config(c);assert arm_for(c)==arm
         assert s['status']=='complete' and s['config']==c and not c['git']['dirty']
@@ -67,7 +67,7 @@ def verify(root, tasks=8, smoke=False):
             recovery_equals_compact=True,checkpoint_sha256=_sha256(path),
             peak_allocated_mib=audit['peak_allocated_mib'],peak_reserved_mib=audit['peak_reserved_mib']))
     result=dict(status='verified',tasks=tasks,smoke=smoke,checks=checks)
-    (root/'training_verification.json').write_text(json.dumps(result,indent=2)+'\n')
+    (root/output_name).write_text(json.dumps(result,indent=2)+'\n')
     print(json.dumps(result,indent=2),flush=True);return result
 
 if __name__=='__main__':
