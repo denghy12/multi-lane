@@ -59,7 +59,8 @@ def main():
         return history
     old.train_task=train
     flags=['--seed','0','--data-root',str(data),'--clip-checkpoint',str(clip),'--output-root',str(out/'train'),
-        '--epochs','30','--train-batch-size','64','--eval-batch-size','64','--workers','0',
+        '--epochs','30','--train-batch-size','64','--eval-batch-size','64','--workers','2',
+        '--person-transform-mode','letterbox',
         '--source-learning-rate','.05','--source-reference-batch-size','256','--weight-decay','0',
         '--scheduler-mode','cosine','--scheduler-min-lr-ratio','0','--scheduler-warmup-ratio','0',
         '--training-loss-mode','legacy_full_zero','--loss-routing','adapter_asl',
