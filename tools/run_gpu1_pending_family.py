@@ -47,6 +47,12 @@ def main(args):
 
     def run_jobs(jobs,path,adopted=()):
         active=[];records=[];pending=list(jobs);failed=False
+        standard_path=logs/({'training_gpu01.json':'training_queue.json',
+                             'evaluation_gpu1.json':'evaluation_queue.json',
+                             'attribution_gpu1.json':'attribution_queue.json'}[path.name])
+        def save_jobs():
+            value=dict(records=records,pending=pending,failed=failed,actual_gpu_routing=True)
+            write(path,value);write(standard_path,value)
         for item in adopted:
             match=[j for j in pending if j['name']==item['name']]
             assert len(match)==1 and match[0]['arguments']==item['arguments']
@@ -65,7 +71,7 @@ def main(args):
                     print('FINISH',record['name'],'gpu',record['gpu'],'exit',code,flush=True)
             if adopted and inherited_remaining==0 and not parent_released:release_parent()
             if failed and not active:
-                write(path,dict(records=records,pending=pending,failed=True));raise RuntimeError('Job failed; outputs preserved')
+                save_jobs();raise RuntimeError('Job failed; outputs preserved')
             if not failed and pending:
                 job=pending[0];key=family+'/'+str(path)+'/'+job['name']
                 job_kind='train' if job['module'].endswith('.runner') else 'eval'
@@ -78,7 +84,7 @@ def main(args):
                     pending.pop(0);record=dict(job,pid=process.pid,gpu=1,lease_key=key,command=command,
                                               log=str(log),started_unix=time.time(),adopted=False)
                     records.append(record);active.append((process,record));print('START',job['name'],'gpu1',process.pid,flush=True)
-            write(path,dict(records=records,pending=pending,failed=failed,actual_gpu_routing=True))
+            save_jobs()
             if pending or active:time.sleep(5)
         return records
 
@@ -137,6 +143,7 @@ def main(args):
         status.update(status='complete',finished_unix=time.time());save()
     except BaseException as error:
         status.update(status='failed',error=repr(error));save();write(root/'failure_gpu01.json',status)
+        write(root/'failure.json',status);(logs/'batch_exit_status.txt').write_text('1\n')
         raise
 
 
