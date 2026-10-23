@@ -75,7 +75,8 @@ def evaluation_job(args,root,arm,split,folder,extra=()):
     return dict(name=arm+'/'+folder,module='multi_lane.track_a.evaluate_moe_task_ffn',arguments=list(map(str,[
         '--source-run',source,'--output',root/arm/folder,'--split',split,
         '--data-root',args.data_root,'--clip-checkpoint',args.clip_checkpoint,'--face-manifest-root',args.face_manifest_root,
-        '--expected-tasks',2 if args.smoke else 8,'--batch-size',64,'--workers',0,'--full-cohort',*extra])))
+        '--expected-tasks',2 if args.smoke else 8,'--batch-size',64,'--workers',0,
+        *(['--full-cohort'] if getattr(args,'evaluation_cohort','historical')=='full' else []),*extra])))
 
 
 def summarize(root, arms, smoke):
@@ -122,6 +123,7 @@ def run(args):
     protocol=dict(status='running',seed=0,tasks=2 if args.smoke else 8,smoke=args.smoke,gpus=args.gpus,
         train_per_gpu=args.train_per_gpu,eval_per_gpu=args.eval_per_gpu,memory_fraction=args.memory_fraction,
         minimum_free_mib=args.minimum_free_mib,arms=arms,test_used_for_selection=False,
+        evaluation_cohort=args.evaluation_cohort,
         head=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
         branch=subprocess.check_output(['git','branch','--show-current'],text=True).strip(),
         inputs={k:str(getattr(args,k)) for k in ['data_root','clip_checkpoint','face_manifest_root']},
@@ -179,4 +181,6 @@ if __name__=='__main__':
     p.add_argument('--gpus',type=int,nargs='+',default=list(range(8)))
     p.add_argument('--train-per-gpu',type=int,default=1);p.add_argument('--eval-per-gpu',type=int,default=2)
     p.add_argument('--memory-fraction',type=float,default=.3);p.add_argument('--minimum-free-mib',type=int,default=6500)
+    p.add_argument('--evaluation-cohort',choices=['historical','full'],default='historical',
+                   help='Historical seen-positive people by default; full cohort is a separate sensitivity analysis')
     p.add_argument('--smoke',action='store_true');run(p.parse_args())

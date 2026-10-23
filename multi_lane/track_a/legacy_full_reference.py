@@ -10,10 +10,43 @@ import sys
 import time
 
 
+def historical_training_flags(data, clip, out, smoke=False):
+    """The archived f1ada22 disabled-selector control used paired inputs."""
+    flags=['--seed','0','--data-root',str(data),'--clip-checkpoint',str(clip),'--output-root',str(out/'train'),
+        '--epochs','30','--train-batch-size','64','--eval-batch-size','64','--workers','2',
+        '--paired-full-person','--person-transform-mode','letterbox','--person-crop-margin','.15',
+        '--person-color-jitter-strength','.1','--person-color-jitter-probability','.2',
+        '--source-learning-rate','.05','--source-reference-batch-size','256','--weight-decay','0',
+        '--scheduler-mode','cosine','--scheduler-min-lr-ratio','0','--scheduler-warmup-ratio','0',
+        '--training-loss-mode','legacy_full_zero','--loss-routing','adapter_asl',
+        '--asl-gamma-neg','9.8','--asl-gamma-pos','0','--asl-clip','.05','--asl-eps','1e-8',
+        '--input-mode','full','--input-normalization','clip','--train-crop-scale','.05','1',
+        '--full-crop-mode','legacy','--selector-conditioning','disabled','--adapter-mode','image_token',
+        '--adapter-bottleneck-dim','32','--adapter-layer-indices','1','--adapter-residual-scale','.1',
+        '--adapter-activation','relu','--adapter-task-init','independent','--adapter-learning-rate','.0004',
+        '--adapter-weight-decay','0','--calibration-fraction','0','--save-evaluation-scores',
+        '--reporting-split','val' if smoke else 'test','--evaluation-score-purpose','validation_search' if smoke else 'fixed_test_fusion',
+        '--save-compact-checkpoints','--no-save-checkpoints','--max-tasks','2' if smoke else '8']
+    if smoke:flags+=['--optimizer-updates-per-task','2']
+    return flags
+
+
+def historical_configuration_differences(actual, expected):
+    # These two changes only retain immutable weights for later validation.
+    artifact_keys={'save_compact_checkpoints','compact_checkpoint_excludes_frozen_visual'}
+    return {k:[expected.get(k),actual.get(k)] for k in sorted(actual.keys()|expected.keys())
+            if k not in artifact_keys and actual.get(k)!=expected.get(k)}
+
+
 def main():
     p=argparse.ArgumentParser();p.add_argument('--legacy-root',type=Path,required=True)
     p.add_argument('--output',type=Path,required=True);p.add_argument('--data-root',type=Path,required=True)
-    p.add_argument('--clip-checkpoint',type=Path,required=True);p.add_argument('--smoke',action='store_true');a=p.parse_args()
+    p.add_argument('--clip-checkpoint',type=Path,required=True);p.add_argument('--smoke',action='store_true')
+    p.add_argument('--historical-config',type=Path,help='Archived exact config; fail before any update on mismatch')
+    a=p.parse_args()
+    if a.historical_config is not None:a.historical_config=a.historical_config.resolve()
+    expected=json.loads(a.historical_config.read_text()) if a.historical_config else None
+    if expected is not None and a.smoke:raise ValueError('Exact historical config requires the full budget')
     from .strong_full_asl import LEGACY_COMMIT
     from .runner import git_metadata
     wrapper_git=git_metadata(Path(__file__).resolve().parents[2])
@@ -34,6 +67,14 @@ def main():
     original=old.train_task
     captured=[]
     def train(*args,**kwargs):
+        if not captured and expected is not None:
+            actual=json.loads((out/'train/config.json').read_text())
+            differences=historical_configuration_differences(actual,expected)
+            (out/'historical_configuration_audit.json').write_text(json.dumps(dict(
+                status='verified' if not differences else 'mismatch',differences=differences,
+                allowed_artifact_changes=['save_compact_checkpoints','compact_checkpoint_excludes_frozen_visual'],
+                historical_config_sha256=hashlib.sha256(a.historical_config.read_bytes()).hexdigest()),indent=2)+'\n')
+            if differences:raise ValueError('Historical configuration differs before training: '+str(differences))
         holders={};adam=torch.optim.Adam;cosine=torch.optim.lr_scheduler.CosineAnnealingLR;scaler=torch.cuda.amp.GradScaler
         def wrap(key,fn):
             def create(*x,**y):
@@ -58,21 +99,7 @@ def main():
         torch.save(snapshot,temporary);temporary.replace(path);captured.append(task)
         return history
     old.train_task=train
-    flags=['--seed','0','--data-root',str(data),'--clip-checkpoint',str(clip),'--output-root',str(out/'train'),
-        '--epochs','30','--train-batch-size','64','--eval-batch-size','64','--workers','2',
-        '--person-transform-mode','letterbox',
-        '--source-learning-rate','.05','--source-reference-batch-size','256','--weight-decay','0',
-        '--scheduler-mode','cosine','--scheduler-min-lr-ratio','0','--scheduler-warmup-ratio','0',
-        '--training-loss-mode','legacy_full_zero','--loss-routing','adapter_asl',
-        '--asl-gamma-neg','9.8','--asl-gamma-pos','0','--asl-clip','.05','--asl-eps','1e-8',
-        '--input-mode','full','--input-normalization','clip','--train-crop-scale','.05','1',
-        '--full-crop-mode','legacy','--selector-conditioning','disabled','--adapter-mode','image_token',
-        '--adapter-bottleneck-dim','32','--adapter-layer-indices','1','--adapter-residual-scale','.1',
-        '--adapter-activation','relu','--adapter-task-init','independent','--adapter-learning-rate','.0004',
-        '--adapter-weight-decay','0','--calibration-fraction','0','--save-evaluation-scores',
-        '--reporting-split','val' if a.smoke else 'test','--evaluation-score-purpose','validation_search' if a.smoke else 'fixed_test_fusion',
-        '--save-compact-checkpoints','--no-save-checkpoints','--max-tasks','2' if a.smoke else '8']
-    if a.smoke:flags+=['--optimizer-updates-per-task','2']
+    flags=historical_training_flags(data,clip,out,a.smoke)
     sys.argv=['historical_runner',*flags];old.main()
     config=json.loads((out/'train/config.json').read_text());summary=json.loads((out/'train/seed_summary.json').read_text())
     assert captured==list(range(2 if a.smoke else 8)) and summary['status']=='complete'
@@ -94,6 +121,7 @@ def main():
     (out/'reference_verification.json').write_text(json.dumps(dict(status='verified',source_commit=LEGACY_COMMIT,
         wrapper_git=wrapper_git,updates=summary['completed_optimizer_updates'],skipped=0,tasks=captured,
         original_metrics=summary['metrics'],historical_anchor={'final_mAP':32.53651921448899,'average_mAP':39.144491444469374},
+        strict_configuration_verified=expected is not None,
         historical_anchor_matched=None if a.smoke else all(abs(summary['metrics'][k]-v)<1e-4 for k,v in
             {'final_mAP':32.53651921448899,'average_mAP':39.144491444469374}.items()),
         configuration=flags,completed_unix=time.time()),indent=2)+'\n')
