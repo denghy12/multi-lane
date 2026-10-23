@@ -93,7 +93,10 @@ def main():
     for t in captured:os.link(out/'train/compact_checkpoints'/f'task{t}.pth',export/'compact_checkpoints'/f'task{t}.pth')
     (out/'reference_verification.json').write_text(json.dumps(dict(status='verified',source_commit=LEGACY_COMMIT,
         wrapper_git=wrapper_git,updates=summary['completed_optimizer_updates'],skipped=0,tasks=captured,
-        original_metrics=summary['metrics'],configuration=flags,completed_unix=time.time()),indent=2)+'\n')
+        original_metrics=summary['metrics'],historical_anchor={'final_mAP':32.53651921448899,'average_mAP':39.144491444469374},
+        historical_anchor_matched=None if a.smoke else all(abs(summary['metrics'][k]-v)<1e-4 for k,v in
+            {'final_mAP':32.53651921448899,'average_mAP':39.144491444469374}.items()),
+        configuration=flags,completed_unix=time.time()),indent=2)+'\n')
     print('HISTORICAL_FULL_REFERENCE_COMPLETE',flush=True)
 
 if __name__=='__main__':main()
