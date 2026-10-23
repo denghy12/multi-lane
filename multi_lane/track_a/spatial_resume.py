@@ -27,7 +27,7 @@ def validate_boundary(payload, current):
         raise ValueError('Boundary lacks clean, single-hop provenance')
     differences = [key for key in set(old) | set(current)
                    if key != 'git' and (bool(old.get(key)) != bool(current.get(key))
-                   if key == 'module_stacking' else old.get(key) != current.get(key))]
+                   if key in {'module_stacking', 'strong_full_asl'} else old.get(key) != current.get(key))]
     if differences:
         raise ValueError('Resume configuration differs: ' + ', '.join(sorted(differences)))
     if old.get('strong_full_asl'):

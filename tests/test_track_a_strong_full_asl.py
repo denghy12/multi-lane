@@ -27,7 +27,9 @@ class StrongFullASLTest(unittest.TestCase):
     def test_all_declared_arguments_validate_without_relaxing_old_profile(self):
         a=SimpleNamespace(data_root=Path('data'),clip_checkpoint=Path('clip'),face_manifest_root=Path('face'),smoke=True)
         for arm in ARMS:
-            args=parse_args(training_arguments(a,Path('output/demo'),arm));validate_arguments(args)
+            flags=training_arguments(a,Path('output/demo'),arm)
+            self.assertEqual('--face-manifest-root' in flags,arm.startswith('T_'))
+            args=parse_args(flags);validate_arguments(args)
             args.view_auxiliary_loss_weight=.1
             with self.assertRaises(ValueError):validate_arguments(args)
     def test_same_view_initial_outputs_and_rng_paired(self):

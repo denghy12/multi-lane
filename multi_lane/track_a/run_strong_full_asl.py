@@ -21,6 +21,8 @@ def training_arguments(args, root, arm):
     result[result.index('--output-root')+1]=str(root/arm/'train')
     for flag,value in {'--calibration-fraction':'0','--view-auxiliary-loss-weight':'0',
             '--adapter-weight-decay':'0'}.items():result[result.index(flag)+1]=value
+    if arm.startswith('S_'):
+        i=result.index('--face-manifest-root');del result[i:i+2]
     result+=['--strong-full-asl']
     for key,value in modes(arm).items():result[result.index('--'+key.replace('_','-'))+1]=value
     return result
