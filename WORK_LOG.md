@@ -1,5 +1,21 @@
 # 工作日志
 
+## 2026-10-24：用户要求利用空闲显存，准备GPU0从4组扩到6组并行
+
+实测GPU0 12785MiB已用/11297MiB空闲、计算100%/显存带宽68%，4组正在运行且0跳步，seed1原轨迹前13轮仍匹配；/dev/shm仅185MiB。选择保留B64与完整历史配方，增加并行，不在当前训练中改batch破坏复现。新分支codex/b32-gpu0-adaptive-concurrency-20261024；新增独立接管调度器和动态资源策略，模型工作树00fbf90不改。最多6训练、最多4评估、GPU余量6000MiB/共享内存余量1024MiB、12秒启动间隔。
+
+接管只SIGSTOP旧调度器1430541并保持其tmux，不给原4训练发送信号；新作业仍原工作树/原CLI/CPU72启动，不重训、不改epoch/随机流，全部仍旧标准8任务val/test。只有全部作业完成后才清理暂停的旧调度器，防止旧面板关闭带走训练。现有7项本地调度测试通过，待Git-only部署、远程检查和dry-run；尚未称6并行已生效。方案docs/historical_b32_gpu0_scheduling_20261024.md。
+
+## 2026-10-24：历史b32正式18组已在GPU0启动，seed1前两轮精确匹配历史
+
+formal_seed013_20261024_01已启动，tmux historical_b32_formal_seed013_20261024，运行源码锁定00fbf90c2b86176cc03a2ac1b75a7fec31a5e71e，两端branch/HEAD/upstream在启动时一致且clean。首批四进程均GPU0：seed1 THREE_BASE PID1430615、seed0 THREE_BASE PID1430769、seed3 THREE_BASE PID1431304、seed0 FULL_BASE PID1431843；其余14训练自动排队，完成后自动36份完整8阶段val/test。三路已完成前2epoch各84更新/0跳步，Full前5epoch正常；seed1两轮主loss .67947638/.66449360与Adapter .03236856/.02941815均与历史逐字匹配，不能预称最终32.6800已复现。GPU0约12785MiB/100%利用，其他GPU不使用。
+
+smoke_seed013_20261024_01完成，新旧36b7753 seed1 Full/三视图全部方法张量、训练loss与完整预测逐值等价；seed3 aux0正常。12份常规重放/4对视图重放全等，冻结/恢复/初始化/全局采样器核验通过。454项完整回归（1skip）和最终14项相关检查通过；本地轻量导入因无Torch不能执行，实际验证均使用远程ddp环境。本条覆盖此前“正式待启动”状态。
+
+正式输出output/historical_b32_search/formal_seed013_20261024_01，日志对应logs，控制日志logs/historical_b32_search/implementation_20261024_01/formal_driver.log。18组均全TRAIN/seed0,1,3/8×30epoch/B64/Adam-cosine/旧标准，基准b32 scale.03/Adapter LR.0004/aux.1/Person颜色扰动0；seed0/3各六个单因素变体。允许Test参与选择，探索排名和全部结果会保留，不用最好seed替代强参照。源代码运行中不更改；最新启动记录仅本地上下文未提交。
+
+95份短跑/正式启动非checkpoint产物已同步本地并逐SHA核验，archive SHA8a432f1a957c5a705d992b14b82f189a535f78ce7173af7a5b20a70c3ad90b41。原主树153行/test-only5行及状态SHA未变，历史36b7753源码clean。等待完整completion后同步并分析，禁止重复启动；方案docs/historical_b32_seed03_search_plan_20261024.md。
+
 ## 2026-10-24：历史b32新旧两基准短跑逐值等价，准备18组正式队列
 
 smoke_seed013_20261024_01 completion=complete。seed1 THREE_BASE/FULL_BASE相对不可修改36b7753的两任务四更新，所有方法张量、loss/LR/步数及全部阶段预测逐值等价。seed3 THREE_AUX_0正常；三组新训练0skip、旧参数与Frozen视觉不变、恢复model等于compact、同seed初始化和三视图采样RNG核验通过。12份常规重评估与训练预测一致，4对视图NPZ逐字段重放一致。454项完整回归通过（1skip）。
