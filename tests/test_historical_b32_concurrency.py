@@ -9,6 +9,14 @@ spec.loader.exec_module(module)
 
 
 class B32ConcurrencyTest(unittest.TestCase):
+    def test_dispatcher_retirement_requires_detached_training_sessions(self):
+        records = [dict(kind='train', pid=19)]
+        safe = dict(state='R', session=19, process_group=19, tty=0)
+        self.assertTrue(module.detached_trainers(records, {19: safe}))
+        for changed in (dict(session=1), dict(process_group=1), dict(tty=34817), dict(state='Z')):
+            self.assertFalse(module.detached_trainers(records, {19: dict(safe, **changed)}))
+        self.assertFalse(module.detached_trainers(records, {}))
+
     def test_six_train_slots_are_memory_gated(self):
         active = [dict(kind='train')] * 5
         self.assertTrue(module.eligible(dict(kind='train'), active, 7000, 1800, module.DEFAULT_POLICY))

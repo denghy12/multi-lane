@@ -1,5 +1,11 @@
 # 下一步任务
 
+## 2026-10-24：6槽首次暂停式接管中止，改用独立会话验证后退出旧调度器
+
+控制器7fa561d已Git-only部署multi-lane-main-b32-gpu0-controller-20261024，远程21项相关测试和dry-run通过。但首次SIGSTOP后原调度器未保持T状态，接管在写handoff/启动新训练之前中止；原4组继续、队列仍正常，已SIGCONT回滚。日志concurrency_20261024_01/driver.log保留，原训练从未重启。不能把首次尝试说成成功，也不猜测外部SIGCONT原因。
+
+已核实4个训练各自SID=PGID=PID、TTY=0（与原Popen start_new_session=True一致）。改为先严格验证独立会话，再只SIGTERM旧调度器PID，不发信号给训练PID/组，接管原队列。增加会话不独立即拒绝的回归，本地8项通过；待更新独立控制工作树后再dry-run与正式接管。模型00fbf90、B64、8任务/18组不改。4槽吞吐参考约1158 view-images/s（末3epoch近似，跨任务/评估会影响比较），记录于concurrency_before_audit.json；seed1最近3轮loss与历史仍匹配。
+
 ## 2026-10-24：用户要求利用空闲显存，准备GPU0从4组扩到6组并行
 
 实测GPU0 12785MiB已用/11297MiB空闲、计算100%/显存带宽68%，4组正在运行且0跳步，seed1原轨迹前13轮仍匹配；/dev/shm仅185MiB。选择保留B64与完整历史配方，增加并行，不在当前训练中改batch破坏复现。新分支codex/b32-gpu0-adaptive-concurrency-20261024；新增独立接管调度器和动态资源策略，模型工作树00fbf90不改。最多6训练、最多4评估、GPU余量6000MiB/共享内存余量1024MiB、12秒启动间隔。

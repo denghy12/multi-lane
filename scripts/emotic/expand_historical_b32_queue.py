@@ -1,7 +1,7 @@
 """Adopt the live b32 dispatcher and raise GPU0 concurrency without restarting jobs.
 
-The model checkout stays immutable. The old dispatcher's tmux pane remains alive
-and stopped until all work finishes, so its training children retain their session.
+The model checkout stays immutable. A dispatcher can be retired only after every
+training child is verified to have its own session and no controlling terminal.
 """
 import argparse
 import json
@@ -19,6 +19,7 @@ def proc_info(pid):
         root = Path('/proc') / str(pid)
         fields = (root / 'stat').read_text().rsplit(')', 1)[1].split()
         return dict(state=fields[0], start=fields[19],
+            process_group=int(fields[2]), session=int(fields[3]), tty=int(fields[4]),
             command=(root / 'cmdline').read_bytes().replace(b'\0', b' ').decode(),
             wait_status=int(fields[49]) if len(fields) > 49 else None)
     except FileNotFoundError:
@@ -65,6 +66,13 @@ def get_flag(flags, flag):
     return flags[flags.index(flag) + 1]
 
 
+def detached_trainers(records, processes):
+    return bool(records) and all(r['kind'] == 'train' and processes.get(r['pid']) is not None
+        and processes[r['pid']]['state'] != 'Z'
+        and processes[r['pid']]['session'] == processes[r['pid']]['process_group'] == r['pid']
+        and processes[r['pid']]['tty'] == 0 for r in records)
+
+
 def main(args):
     source = args.source_worktree.resolve()
     sys.path.insert(0, str(source))
@@ -87,19 +95,25 @@ def main(args):
     assert Path(os.readlink(f'/proc/{args.old_controller}/cwd')) == source
     snapshot = json.loads(status_path.read_text())
     assert not snapshot['failed']
+    before = [r for r in snapshot['records'] if 'exit' not in r]
+    assert detached_trainers(before, {r['pid']: proc_info(r['pid']) for r in before}), \
+        'Training must be detached from the old tmux session before retiring its dispatcher'
     print('PREFLIGHT', json.dumps(dict(active=[r['name'] for r in snapshot['records'] if 'exit' not in r],
         pending=len(snapshot['pending']), batch_size_unchanged=64, policy=DEFAULT_POLICY)), flush=True)
     if args.dry_run:
         return
-    # Stop only dispatch; existing training processes continue without a signal.
-    os.kill(args.old_controller, signal.SIGSTOP)
+    # Every child is a separate session leader without a controlling terminal.
+    # Terminate only the dispatcher PID; never its process group or training PIDs.
+    write(root / 'concurrency_handoff_preflight.json', dict(old_controller=old,
+        verified_detached_children=before, changed_unix=time.time()))
+    os.kill(args.old_controller, signal.SIGTERM)
     for _ in range(100):
         current = proc_info(args.old_controller)
-        if current and current['state'] == 'T':
+        if current is None or current['state'] == 'Z':
             break
         time.sleep(.05)
     else:
-        raise RuntimeError('Original dispatcher did not stop')
+        raise RuntimeError('Original dispatcher did not exit')
     try:
         snapshot = json.loads(status_path.read_text())
         assert not snapshot['failed']
@@ -112,6 +126,7 @@ def main(args):
             if info and info['state'] != 'Z':
                 assert r['module'] in info['command'] and args.run_id in info['command']
                 assert Path(os.readlink(f"/proc/{r['pid']}/cwd")) == source
+                assert info['session'] == info['process_group'] == r['pid'] and info['tty'] == 0
             r['adopted_start_ticks'] = info['start'] if info else 'already_exited'
         write(root / 'queue_before_concurrency_handoff.json', snapshot)
         write(policy_path, DEFAULT_POLICY)
@@ -119,12 +134,13 @@ def main(args):
             controller_pid=os.getpid(), model_head=protocol['head'],
             controller_head=subprocess.check_output(['git', '-C', str(Path(__file__).resolve().parents[2]),
                 'rev-parse', 'HEAD'], text=True).strip(), training_restarted=False, batch_size_changed=False,
+            old_dispatcher_retired=True, detached_sessions_verified=True,
             gpu=0, initial_policy=DEFAULT_POLICY, adopted_unix=time.time(),
             preserved_processes=[dict(name=r['name'], pid=r['pid'], start=r['adopted_start_ticks']) for r in active])
         write(handoff_path, handoff)
     except BaseException:
-        # Before adoption succeeds the old queue remains the only dispatcher.
-        os.kill(args.old_controller, signal.SIGCONT)
+        # The retained snapshot and original training PIDs support safe recovery.
+        # Do not restart the old loop, which could dispatch duplicate commands.
         raise
     first = protocol['training_arguments']['seed1/THREE_BASE']
     params = SimpleNamespace(smoke=False, data_root=Path(get_flag(first, '--data-root')),
@@ -213,15 +229,11 @@ def main(args):
             same_seed_three_view_sampler_rng_equal=True, runtime_scheduler_handoff=handoff,
             initial_parallelism=protocol['parallelism'], parallelism=last_policy['max_parallel'])
         write(root / 'completion.json', protocol)
-        # Only now release the old tmux pane; all of its training children ended.
-        old_now = proc_info(args.old_controller)
-        if old_now and old_now['start'] == old['start']:
-            os.kill(args.old_controller, signal.SIGTERM); os.kill(args.old_controller, signal.SIGCONT)
         handoff.update(status='complete', finished_unix=time.time()); write(handoff_path, handoff)
         print('HISTORICAL_B32_SEARCH_COMPLETE', root, flush=True)
     except BaseException as error:
         write(root / 'failure.json', dict(error=repr(error), controller='six_slot_handoff',
-            queue=str(status_path), old_controller_retained_stopped=True))
+            queue=str(status_path), old_dispatcher_retired=True, training_pids_preserved=True))
         raise
 
 
