@@ -10,9 +10,16 @@ from multi_lane.track_a.model import MultiLaneModel
 from multi_lane.track_a.runner import (parse_args, build_optimizer_groups, compute_training_loss,
     compute_asymmetric_training_loss, compute_view_objective_losses, train_task)
 from multi_lane.track_a.historical_feature_fusion import ARMS, modes, training_arguments, validate_arguments, validate_config
+from multi_lane.track_a.run_historical_feature_fusion import evaluation_job
 
 
 class HistoricalFeatureFusionTest(unittest.TestCase):
+    def test_evaluation_uses_old_worker_count_and_cohort(self):
+        args = SimpleNamespace(data_root=Path('data'), clip_checkpoint=Path('clip'), face_manifest_root=Path('face'), smoke=True)
+        job = evaluation_job(args, Path('out'), 'THREE_ASL_AUX', 'val', 'historical_val')
+        self.assertEqual(job['arguments'][job['arguments'].index('--workers') + 1], '2')
+        self.assertNotIn('--full-cohort', job['arguments'])
+
     def test_serialized_worker_default_is_resolved(self):
         inputs = SimpleNamespace(data_root=Path('data'), clip_checkpoint=Path('clip'), face_manifest_root=Path('face'), smoke=True)
         args = parse_args(training_arguments(inputs, Path('output/demo'), 'THREE_ASL_AUX'))

@@ -1,5 +1,13 @@
 # 下一步任务
 
+## 2026-10-24：Full新旧短跑全部方法参数等价，保留权重仅接续workers2评估
+
+smoke_seed0_20261024_02四组及原生f1ada Full均完成，Full两任务全部方法张量、loss/LR/步数逐值等价；四组初始化base SHA2fb4071185ac375fef174e18e066c3eca800db733aa8197f8a116f17350cc2b0一致，训练0skips、旧参数冻结、完整边界保存核验通过。13项相关回归通过；此前447项全回归通过(1skip)。
+
+发现CPU72配eval workers0导致四主进程合计约135核用于逐图预处理，GPU利用率低；已计划停止02控制器及4个评估PID1290562/1291109/1291188/1292518，所有训练早已结束且权重保留，不重训。补evaluation-only smoke复用模式，03仅以只读链接复用02完整训练，改回旧workers2核验8路validation重放；当前正在部署，尚未称03完成或正式启动。第二轮native等价及planned_evaluation_restart.json保留。正式评估也workers2，最多4并发预取预计低于4GiB共享内存。
+
+正式Full完成时增加四指标精确锚点守卫，防止较弱桥接结果被当强Full。新增测试检查workers2/历史人群。方案与3上下文同步；原始failed01及planned02都保留。
+
 ## 2026-10-24：447项回归通过，短跑训练完成，修正评估workers审计后重验
 
 远程独立工作树multi-lane-main-feature-fusion-asl-20261024已Git-only部署d6f10aa，四组smoke_seed0_20261024_01训练均完成2task×2updates、0skips；调度器在Full结束后的配置检查因CLI eval_workers=None保存为resolved2而失败，尚未开始完整smoke评估及原生Full对照，不是训练失败。其余子进程独立session均正常完成，源产物保留；已修正validate_config预期2并补回归。将用新run-id完整验证后才正式启动，不把失败的控制器当正式成功。

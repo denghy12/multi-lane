@@ -55,6 +55,11 @@ def verify_train(root, arm, tasks, smoke):
         previous = state
     count = sum(row['optimizer_steps'] for rows in h.values() for row in rows)
     assert count == (tasks * 2 if smoke else 13950) == s['completed_optimizer_updates']
+    if arm == 'FULL_ASL' and not smoke:
+        anchor = dict(final_mAP=32.53651921448899, average_mAP=39.144491444469374,
+                      final_cF1=32.57561689786514, final_oF1=49.38271604938272)
+        assert all(abs(s['metrics'][key] - value) < 1e-8 for key, value in anchor.items()), \
+            'Full bridge did not reproduce the archived four-metric anchor'
     result = dict(status='verified', arm=arm, updates=count, skipped=0,
         old_parameters_unchanged=True, recovery_equals_compact=True, global_sampler_rng=True,
         initial_base_sha256=c['initial_selector_prompt_classifier_sha256'],
@@ -89,7 +94,7 @@ def evaluation_job(args, root, arm, split, folder):
         arguments=list(map(str, ['--source-run', root / arm / 'train', '--output', root / arm / folder,
             '--split', split, '--data-root', args.data_root, '--clip-checkpoint', args.clip_checkpoint,
             '--face-manifest-root', args.face_manifest_root, '--expected-tasks', 2 if args.smoke else 8,
-            '--batch-size', 64, '--workers', 0])))
+            '--batch-size', 64, '--workers', 2])))
 
 
 def run(args):
@@ -115,11 +120,30 @@ def run(args):
     write(root / 'protocol.json', protocol)
     pending = [dict(name=arm + '/train', module='multi_lane.track_a.runner',
                     arguments=protocol['training_arguments'][arm]) for arm in ARMS]
-    if args.smoke:
+    audits = {}
+    if args.reuse_training_root is not None:
+        if not args.smoke:
+            raise ValueError('Training reuse is limited to completed smoke checks')
+        source = args.reuse_training_root.resolve()
+        for arm in (*ARMS, 'NATIVE_FULL'):
+            assert json.loads((source / arm / 'train/seed_summary.json').read_text())['status'] == 'complete'
+            if arm == 'NATIVE_FULL':
+                (root / arm).symlink_to(source / arm, target_is_directory=True)
+            else:
+                (root / arm).mkdir()
+                (root / arm / 'train').symlink_to(source / arm / 'train', target_is_directory=True)
+                audits[arm] = verify_train(root, arm, protocol['tasks'], True)
+        protocol['reused_training_root'] = str(source)
+        protocol['source_training_protocol'] = json.loads((source / 'protocol.json').read_text())
+        protocol['native_full_equivalence'] = verify_smoke_full(root)
+        write(root / 'protocol.json', protocol)
+        pending = [evaluation_job(args, root, arm, 'val', folder)
+                   for arm in ARMS for folder in ('historical_val', 'replay_val')]
+    elif args.smoke:
         pending.append(dict(name='NATIVE_FULL/train', module='multi_lane.track_a.legacy_full_reference',
             arguments=list(map(str, ['--legacy-root', args.legacy_root, '--output', root / 'NATIVE_FULL',
                 '--data-root', args.data_root, '--clip-checkpoint', args.clip_checkpoint, '--smoke']))))
-    active = []; records = []; failed = False; audits = {}
+    active = []; records = []; failed = False
     env = dict(os.environ, CUDA_VISIBLE_DEVICES='0', OMP_NUM_THREADS='72', MKL_NUM_THREADS='72', PYTHONUNBUFFERED='1')
     try:
         while pending or active:
@@ -185,4 +209,5 @@ if __name__ == '__main__':
         parser.add_argument('--' + key, type=Path, required=True)
     parser.add_argument('--smoke', action='store_true')
     parser.add_argument('--smoke-root', type=Path)
+    parser.add_argument('--reuse-training-root', type=Path, help='Reuse complete smoke weights for an evaluation-only check')
     run(parser.parse_args())
