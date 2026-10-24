@@ -20,6 +20,7 @@ class HistoricalB32SearchTest(unittest.TestCase):
         cells = experiment_cells()
         self.assertEqual(len(cells), 18)
         self.assertEqual(len(set(cells)), 18)
+        self.assertEqual(cells[:3], [(1, 'THREE_BASE'), (0, 'THREE_BASE'), (3, 'THREE_BASE')])
         base = recipe('THREE_BASE')
         for seed in (0, 3):
             profiles = [p for s, p in cells if s == seed]

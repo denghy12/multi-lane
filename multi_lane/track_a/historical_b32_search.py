@@ -91,6 +91,7 @@ def training_arguments(args, root, seed, profile, native=False):
 def experiment_cells(smoke=False):
     if smoke:
         return [(1, 'THREE_BASE'), (1, 'FULL_BASE'), (3, 'THREE_AUX_0')]
-    cells = [(s, p) for s in (1, 0, 3) for p in ('THREE_BASE', 'FULL_BASE')]
+    cells = [(1, 'THREE_BASE'), (0, 'THREE_BASE'), (3, 'THREE_BASE'),
+             (0, 'FULL_BASE'), (1, 'FULL_BASE'), (3, 'FULL_BASE')]
     cells += [(s, p) for p in PROFILES if p not in {'THREE_BASE', 'FULL_BASE'} for s in (0, 3)]
     return cells
