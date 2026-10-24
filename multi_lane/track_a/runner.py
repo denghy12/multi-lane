@@ -2707,6 +2707,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--eval-workers", type=int, default=None, help="Reporting DataLoader workers; defaults to training workers")
     parser.add_argument("--save-pre-evaluation-recovery", action="store_true", help="Atomically save task-boundary model/optimizer/RNG state before reporting")
     parser.add_argument("--strong-full-asl", action="store_true", help="Locked seven-arm full-TRAIN Image-token Adapter BCE/ASL transfer")
+    parser.add_argument("--historical-feature-fusion", action="store_true", help="Original feature fusion, historical RNG/AMP and auxiliary BCE/ASL controls")
     parser.add_argument("--module-stacking", action="store_true", help="Locked three-module factorial protocol with shared contraction and aux0.1")
     parser.add_argument("--resume-spatial-boundary", type=Path, help="Continue the locked spatial experiment from a complete pre-reporting task snapshot")
     parser.add_argument("--moe-num-experts", type=int, default=22)
@@ -2840,6 +2841,9 @@ def main() -> None:
 
 
 def run(args: argparse.Namespace) -> None:
+    if args.historical_feature_fusion:
+        from .historical_feature_fusion import validate_arguments
+        validate_arguments(args)
     if args.strong_full_asl:
         from .strong_full_asl import validate_arguments as validate_strong
         validate_strong(args)
@@ -3267,7 +3271,7 @@ def run(args: argparse.Namespace) -> None:
 
     if args.eval_workers is not None and args.eval_workers < 0:
         raise ValueError("eval-workers must be nonnegative")
-    if args.save_pre_evaluation_recovery and (args.adapter_mode not in ({"disabled", "image_token"} if (args.module_stacking or args.strong_full_asl) else {*ACTIVATE_FREEZE_MODES, "disabled"}) or not args.skip_validation_eval or not (args.moe_paired_audit or args.strong_full_asl)):
+    if args.save_pre_evaluation_recovery and not args.historical_feature_fusion and (args.adapter_mode not in ({"disabled", "image_token"} if (args.module_stacking or args.strong_full_asl) else {*ACTIVATE_FREEZE_MODES, "disabled"}) or not args.skip_validation_eval or not (args.moe_paired_audit or args.strong_full_asl)):
         raise ValueError("Boundary recovery requires paired MoE/baseline training with skip-validation-eval")
     metadata = git_metadata(root)
     visual = load_openai_clip_visual(args.clip_checkpoint)
@@ -3346,13 +3350,13 @@ def run(args: argparse.Namespace) -> None:
     model.assert_visual_frozen()
     frozen_visual_before = (
         tensor_state_digest(model.visual_encoder.state_dict())
-        if paired_protocol_audit else None
+        if paired_protocol_audit or args.historical_feature_fusion else None
     )
     base_initialization_digest = (
         tensor_state_digest({
             name: value for name, value in model.state_dict().items()
             if name == "selectors" or name.startswith(("prompts.", "head."))
-        }) if paired_protocol_audit else None
+        }) if paired_protocol_audit or args.historical_feature_fusion else None
     )
     if paired_protocol_audit:
         torch.cuda.reset_peak_memory_stats(device)
@@ -3573,6 +3577,7 @@ def run(args: argparse.Namespace) -> None:
         "moe_paired_audit": bool(args.moe_paired_audit),
         "module_stacking": bool(args.module_stacking),
         "strong_full_asl": bool(args.strong_full_asl),
+        "historical_feature_fusion": bool(args.historical_feature_fusion),
         "fixed_view_sampler_protocol": "seed_plus_1009_times_task" if (args.fixed_view_paired_audit or args.protected_parax_paired_audit or args.moe_paired_audit or args.strong_full_asl) else None,
         "frozen_visual_sha256_before": frozen_visual_before,
         "training_loss_mode": args.training_loss_mode,
@@ -4341,7 +4346,10 @@ def run(args: argparse.Namespace) -> None:
         recovery_state = {} if args.save_pre_evaluation_recovery else None
         if resuming_boundary:
             history = resume["provenance"]["training_history"][str(task_id)]
-            train_loader.generator.set_state(resume["sampler_generator"])
+            if resume["sampler_generator"] is not None:
+                if train_loader.generator is None:
+                    raise ValueError("Recovery sampler protocol differs")
+                train_loader.generator.set_state(resume["sampler_generator"])
             from .task_recovery import restore_rng
             restore_rng(resume["rng"])
             model.train(resume["model_training"])
@@ -4628,7 +4636,7 @@ def run(args: argparse.Namespace) -> None:
             flush=True,
         )
 
-    if paired_protocol_audit:
+    if paired_protocol_audit or args.historical_feature_fusion:
         model.assert_visual_frozen()
         frozen_visual_after = tensor_state_digest(model.visual_encoder.state_dict())
         if frozen_visual_after != frozen_visual_before:

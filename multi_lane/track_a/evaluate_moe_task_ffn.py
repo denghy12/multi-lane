@@ -51,6 +51,11 @@ def evaluate_split(source_run: Path, output: Path, split: str,
     if output.exists():
         raise FileExistsError(output)
     config = json.loads((source_run / "config.json").read_text())
+    if config.get("historical_feature_fusion"):
+        from .historical_feature_fusion import validate_config
+        validate_config(config)
+        if full_cohort:
+            raise ValueError("Historical feature fusion requires the archived seen-positive cohort")
     if config.get("legacy_full_reference"):
         from .strong_full_asl import LEGACY_COMMIT
         if (config["git"]["commit"] != LEGACY_COMMIT or config.get("view_fusion") != "disabled"
@@ -75,7 +80,7 @@ def evaluate_split(source_run: Path, output: Path, split: str,
     expected_tasks = 1 if allow_smoke else expected_tasks
     if (summary.get("status") != "complete" or summary.get("config") != config
         or config.get("git", {}).get("dirty") is not False
-        or config.get("adapter_mode") not in ({"disabled", "image_token"} if (config.get("module_stacking") or config.get("strong_full_asl") or config.get("legacy_full_reference")) else {"moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_frozen_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4", "disabled"})
+        or config.get("adapter_mode") not in ({"disabled", "image_token"} if (config.get("module_stacking") or config.get("strong_full_asl") or config.get("legacy_full_reference") or config.get("historical_feature_fusion")) else {"moe_task_ffn", "moe_task_ffn_activate_freeze", "moe_frozen_ffn_activate_freeze", "moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4", "disabled"})
         or (config.get("adapter_mode") == "disabled" and not config.get("moe_paired_audit"))
         or config.get("parax_mode") != "disabled"
         or not config.get("save_compact_checkpoints")
@@ -184,7 +189,7 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         torch.cuda.synchronize(device)
         started = time.monotonic()
         combined_views = None
-        if config.get("strong_full_asl") and model.view_fusion != "disabled":
+        if (config.get("strong_full_asl") or config.get("historical_feature_fusion")) and model.view_fusion != "disabled":
             from .strong_full_evaluation import evaluate_fused_and_views
             row, combined_views = evaluate_fused_and_views(model, loader, device, task_id, config["threshold"],
                 True, output / "scores" / f"task{task_id}.npz", output / "view_scores" / f"task{task_id}.npz")
@@ -245,7 +250,8 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         "disabled_stacking_modules": list(disable_stacking_modules),
         "module_stacking": config.get("module_stacking", False),
         "strong_full_asl": config.get("strong_full_asl", False),
-        "single_forward_fused_and_views": bool(config.get("strong_full_asl") and model.view_fusion != "disabled"),
+        "historical_feature_fusion": config.get("historical_feature_fusion", False),
+        "single_forward_fused_and_views": bool((config.get("strong_full_asl") or config.get("historical_feature_fusion")) and model.view_fusion != "disabled"),
         "inference_timings": timings,
         "peak_allocated_mib": torch.cuda.max_memory_allocated(device)/1024**2,
         "peak_reserved_mib": torch.cuda.max_memory_reserved(device)/1024**2,

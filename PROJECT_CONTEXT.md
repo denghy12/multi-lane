@@ -1,5 +1,13 @@
 # 项目上下文
 
+## 2026-10-24：按用户要求只验证原特征融合＋Adapter-ASL
+
+用户要求暂停Attention/位置，目标是强Full上的三视图融合。八组旧表是90%fit、aux0.1、BCE；后续三视图ASL用aux0，配方非仅替换Adapter目标。新建exp/feature-fusion-adapter-asl-20261024，从ab84674创建；计划FULL_ASL、THREE_BCE_AUX、THREE_ASL_NO_AUX、THREE_ASL_AUX四组，原固定feature融合不改，ASL只给Adapter，主要候选恢复0.1视图辅助BCE/ASL；全TRAIN/seed0/8task/30epoch/B64/13950更新/旧AMP65536-growth2000/workers2/global RNG/CPU72，仅GPU0。
+
+修改runner和评估器增加严格historical_feature_fusion入口及预报告恢复保存，原模型结构/融合公式不改；新增配方、四并发队列、梯度与Face屏蔽测试。先四组2task×2update smoke，原生f1ada Full所有方法张量等价通过才启动正式。正式/短跑输出output/feature_fusion_adapter_asl，日志对应logs。当前只本地实现，尚未远程测试或启动，不预称成功。方案docs/feature_fusion_adapter_asl_plan_20261024.md。
+
+刚只读确认上一轮三Full完整结束：seed0精确复现test32.536519/39.144491/cF132.575617/oF149.382716、val42.379911/49.265161；seed1 test32.134682/39.020979，seed2为31.797277/38.611898，均complete。完整产物待同步核验，旧“运行中”状态由本条覆盖。原主树/test-only不触碰。
+
 ## 2026-10-23：独立/共享端点全八阶段归因完成，Full是主要可观察损失来源
 
 旧概率融合规则及Face掩码固定，8阶段×3视图IDs/labels/classes核验通过。旧三套独立模型33.3392/40.2855的四指标复现；当前共享原特征融合32.1638/39.1273，单改概率融合31.9319/38.8677，故公式更换不能修复。保持当前P/Face，仅换旧独立Full后33.5724/40.2616；所有4种P/Face背景下换独立Full均增加1.3349–1.6406。此为只读预测重组归因，不是新训练模型的成绩，不能据test选组合。旧/新配置还不同；同期现代单Full32.2519对共享Full30.5910的1.6609差距也支持Full削弱，尚未分离哪个共享组件导致。
