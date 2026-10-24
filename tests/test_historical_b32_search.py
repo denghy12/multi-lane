@@ -1,11 +1,14 @@
 from pathlib import Path
 from types import SimpleNamespace
+import json
+import tempfile
 import unittest
+import numpy as np
 
 from multi_lane.track_a.runner import parse_args
 from multi_lane.track_a.historical_feature_fusion import validate_arguments, validate_config
 from multi_lane.track_a.historical_b32_search import experiment_cells, recipe, training_arguments
-from multi_lane.track_a.run_historical_b32_search import evaluation_job
+from multi_lane.track_a.run_historical_b32_search import evaluation_job, summarize
 
 
 class HistoricalB32SearchTest(unittest.TestCase):
@@ -70,6 +73,23 @@ class HistoricalB32SearchTest(unittest.TestCase):
             self.assertNotIn('--full-cohort', job['arguments'])
             self.assertEqual(job['arguments'][job['arguments'].index('--expected-tasks') + 1], '8')
             self.assertEqual(job['arguments'][job['arguments'].index('--workers') + 1], '2')
+
+    def test_smoke_rejects_drift_in_the_second_evaluation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); cell = root / 'seed1/THREE_BASE'
+            values = dict(sample_ids=np.array(['image#person=0']), targets=np.array([[1]]),
+                          class_indices=np.array([0]), logits=np.array([[0.]]), probabilities=np.array([[.5]]))
+            for folder in ('train/val_scores', 'historical_val/scores', 'replay_val/scores'):
+                path = cell / folder; path.mkdir(parents=True)
+                for t in range(2):
+                    np.savez(path / f'task{t}.npz', **values)
+            result = dict(full_cohort=False, task_metrics=[{}, {}],
+                summary={k: 0. for k in ('final_mAP', 'average_mAP', 'final_cF1', 'final_oF1')})
+            for folder in ('historical_val', 'replay_val'):
+                (cell / folder / 'result.json').write_text(json.dumps(result))
+            np.savez(cell / 'replay_val/scores/task1.npz', **dict(values, logits=np.array([[1.]])))
+            with self.assertRaises(AssertionError):
+                summarize(root, [(1, 'THREE_BASE')], smoke=True)
 
 
 if __name__ == '__main__':

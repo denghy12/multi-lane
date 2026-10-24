@@ -125,7 +125,7 @@ def summarize(root, cells, smoke):
             # Evaluating outside training must reproduce the native reporting score.
             for t in range(2 if smoke else 8):
                 with np.load(root / name / 'train' / ('val_scores' if smoke else 'test_scores') / f'task{t}.npz') as a:
-                    if split == ('val' if smoke else 'test'):
+                    if smoke or split == 'test':
                         with np.load(root / name / folder / 'scores' / f'task{t}.npz') as b:
                             assert all(np.array_equal(a[k], b[k]) for k in ('sample_ids', 'targets', 'class_indices', 'logits', 'probabilities'))
         rows.append(row)

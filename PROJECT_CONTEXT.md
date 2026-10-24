@@ -1,5 +1,17 @@
 # 项目上下文
 
+## 2026-10-24：历史b32新旧两基准短跑逐值等价，准备18组正式队列
+
+smoke_seed013_20261024_01 completion=complete。seed1 THREE_BASE/FULL_BASE相对不可修改36b7753的两任务四更新，所有方法张量、loss/LR/步数及全部阶段预测逐值等价。seed3 THREE_AUX_0正常；三组新训练0skip、旧参数与Frozen视觉不变、恢复model等于compact、同seed初始化和三视图采样RNG核验通过。12份常规重评估与训练预测一致，4对视图NPZ逐字段重放一致。454项完整回归通过（1skip）。
+
+修正队列summary对第二份smoke重评估也执行训练预测比较的校验条件，补故意损坏第二份logits即拒绝的回归；只改变验证，不改变训练或模型。将提交这批验证记录，通过Git ff-only同步后启动formal_seed013_20261024_01（18组/8task/完整val-test/GPU0四槽）。此条尚未确认正式PID；不能把短跑mAP当正式提升。方案和旧标准保持。
+
+## 2026-10-24：新历史b32分支已部署，454项回归通过，GPU0短跑进行中
+
+源码74b4c62已提交并push，远程Git-only创建multi-lane-main-historical-b32-seed03-20261024，两端branch/HEAD/upstream一致且clean。13项相关测试、454项完整回归通过（1skip）。短跑smoke_seed013_20261024_01、tmux historical_b32_smoke_seed013_20261024已启动，最多4作业GPU0；新入口seed1Full/三视图和seed3 aux0，旧36b7753 native seed1Full/三视图。已观察新旧三视图task0短跑loss .75824943／Adapter .02955740相同，Full两任务训练完成0skip并通过边界核验；尚未完成全部参数/预测等价及重复val，不称正式启动。
+
+运行日志logs/historical_b32_search/implementation_20261024_01/smoke_driver.log，队列对应logs/historical_b32_search/smoke_seed013_20261024_01/queue.json；产物output/historical_b32_search/smoke_seed013_20261024_01。保持旧源码和上轮工作树不变，当前不在远程运行中更新源代码；待完整smoke通过才正式18组。此前本地“未远程验证”由本条覆盖。
+
 ## 2026-10-24：启动历史b32 seed0/1/3复核与18组参数探索实现
 
 用户授权GPU0并行，随后明确允许根据Test调参；已在AGENTS.md记录此次探索例外，旧评估标准与强Full参照保持。新分支codex/historical-b32-seed03-search-20261024继承0073a2f及未提交分析，未覆盖原改动。计划seed0/1/3各三视图基准和匹配Full，共6组；seed0/3各scale.01/.05、Adapter LR.0002/.0008、aux0/.2单因素6组，共12组；合计18组完整8task val/test。历史基准scale.03、无Person颜色扰动、aux.1、Adapter-ASL、B64/30epoch/Adam-cosine/主LR.0125/Adapter LR.0004/CPU72/旧全局RNG/旧AMP，仅GPU0最多4并发，内存不足排队。Test参与选择如实标探索，不改旧强参照。
