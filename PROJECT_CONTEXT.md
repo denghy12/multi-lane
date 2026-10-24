@@ -1,5 +1,50 @@
 # 项目上下文
 
+## 2026-10-24：启动历史b32 seed0/1/3复核与18组参数探索实现
+
+用户授权GPU0并行，随后明确允许根据Test调参；已在AGENTS.md记录此次探索例外，旧评估标准与强Full参照保持。新分支codex/historical-b32-seed03-search-20261024继承0073a2f及未提交分析，未覆盖原改动。计划seed0/1/3各三视图基准和匹配Full，共6组；seed0/3各scale.01/.05、Adapter LR.0002/.0008、aux0/.2单因素6组，共12组；合计18组完整8task val/test。历史基准scale.03、无Person颜色扰动、aux.1、Adapter-ASL、B64/30epoch/Adam-cosine/主LR.0125/Adapter LR.0004/CPU72/旧全局RNG/旧AMP，仅GPU0最多4并发，内存不足排队。Test参与选择如实标探索，不改旧强参照。
+
+新增historical_b32_search配方、GPU0队列和不可修改旧36b7753 native短跑；训练入口支持seed3，并增加独立profile校验，不改模型结构。先2task×2update的新旧seed1Full/三视图逐值等价、seed3 aux0、完整重复val和冻结/恢复审计；通过才跑正式，正式seed1完整Test必须精确匹配历史，否则暂停发出新作业查因。方案docs/historical_b32_seed03_search_plan_20261024.md；当前本地实现、未远程验证或正式启动。
+
+只读确认GPU0约24GB空闲、其他卡忙；原主树153行及test-only5行和状态SHA不变，旧源36b7753/上轮0073a2f clean。训练输出output/historical_b32_search，日志对应logs，代码Git-only同步，旧工作树不修改。
+
+## 2026-10-24：追溯历史32.6800，纠正遗漏的共享三视图Adapter-ASL正面参照
+
+用户给出的Test32.6800／39.5292、task0 53.5004、Full31.2373／Person30.4315／Face25.5217来自2026-09-29 seed1 B32臂，源36b7753。它确为共享三视图、Adapter-ASL、aux.1、固定特征融合、ParaX关闭；融合对自身Full+1.4427。旧Adapter scale .03、Person颜色扰动0，与本轮seed0/scale.1/jitter.1概率.2不同。两者旧标准相同，8阶段ID/targets/classes逐值全等；独立复算8份Test三指标最大误差4.27e-14，240epoch/13950updates/0skip。历史跳过validation、不保存checkpoint，无法直接补原权重validation。
+
+上一轮分析遗漏这一正面共享ASL记录，现已补报告；只可说本轮seed0配方未超强Full，不可泛化成共享三视图ASL从未有提升。32.6800数值超seed0独立Full32.5365，但跨seed/配方非严格消融，也不能把差距单归因scale或seed。若以后执行复核应先完整恢复历史seed1/.03/无颜色扰动，再做匹配单Full；本次未授权启动、不运行新实验。追溯audit在output/feature_fusion_adapter_asl/historical_b32_seed1_trace_20261024_01/audit.json，详细补充在docs/feature_fusion_adapter_asl_results_20261024.md。
+
+## 2026-10-24：四组原特征融合／Adapter-ASL完整结束，结果已同步并完成只读分析
+
+本条覆盖下面历史“运行中／等待completion”状态。formal_seed0_20261024_01四组训练和8份完整validation／test均完成、全部exit0；每组8×30轮、13950成功更新、0跳步。源0073a2f856686cff8d8c764370b33209139cc00b不变，远程独立worktree clean。32份compact SHA与评估元数据一致，旧任务参数和Frozen Forward不变；32个任务Adapter up.weight均非零。Full八阶段预测精确匹配历史，四Test指标32.536519／39.144491／32.575617／49.382716；后续继续唯一历史samples_intersect_seen_classes标准。
+
+| 配置 | Val最终 | Val阶段均 | Test最终 | Test阶段均 |
+|---|---|---|---|---|
+| 单Full＋Adapter-ASL |42.3799|49.2652|32.5365|39.1445|
+| 三视图Adapter-BCE＋辅助0.1 |43.0455|49.7375|32.2818|38.9566|
+| 三视图Adapter-ASL无辅助 |43.1640|50.8093|32.2871|39.3312|
+| 三视图Adapter-ASL＋辅助0.1 |43.0185|49.7887|32.1929|38.9920|
+
+三视图validation正增益，但均未验证最终Test超强Full。无辅助ASL有部分价值：val 8/8阶段更高、Test阶段均+.1867、最终cF1=33.6608；不是全面失败。主要候选恢复辅助后val/test全部8阶段均低于无辅助；Person/Face Test端点29.4957/24.7122→30.4744/25.3926，融合反降32.2871→32.1929。共享模型Full端点约30.92低独立32.5365，局部互补未覆盖Full削弱。线性共享head下固定特征融合等价固定logit加权，无内容选择。辅助提高跨视图预测相关性；这与互补性受限相容，不是梯度冲突因果证明。
+
+Test可靠Face子集无辅助ASL+.1937、不可靠−1.0489；后者Face权重已0，不能归因坏Face直接混入。Val两子集均正，Face可靠率两集合几乎相同，不能按Test选回退规则。无辅助组最后三类贡献最终差值−.1897，其余23类净−.0597，不以累计mAP下跌推断遗忘。500次原图成组配对bootstrap关键最终差值区间均跨0，仅seed0，不宣称显著胜负。缺少BCE无辅助格，辅助同时作用主参数和Adapter，因果分解有限。
+
+195份正式非checkpoint产物同步本地并逐SHA核验，archive SHA d00484a0d8278c9ca32248bb35467e0b5becf16c2d089945021b107a627ba34e。独立NumPy复算64份常规阶段指标及48份视图mAP，常规指标最大误差5.69e-14；32份原生Test与重评估预测逐值全等。未下载权重，额外Adapter权重审计JSON SHA 2d835e69e7225fc000bef65e5d8b5b3424a01ec4522e8c5c7f37abd9aa79b2f4。主树153行／test-only5行及状态SHA不变。
+
+详细报告docs/feature_fusion_adapter_asl_results_20261024.md，分析脚本scripts/emotic/analyze_historical_feature_fusion.py，CSV/JSON在output/feature_fusion_adapter_asl/analysis_20261024_01。此轮仅同步、CPU审计和报告，无新训练／GPU前向，无提交推送合并。下一步候选是现有无辅助／辅助task0/2/7 validation关闭Adapter残差归因（尚未执行）；先保强Full并明确局部证据纠错机制，不重叠加Attention/位置，不将已失败方案换名重训。
+
+## 2026-10-24：正式四组GPU0并行启动，首轮84更新/0跳步，Full轨迹匹配历史
+
+formal_seed0_20261024_01已启动，tmux feature_asl_formal_seed0_20261024；远程独立工作树multi-lane-main-feature-fusion-asl-20261024锁定0073a2f856686cff8d8c764370b33209139cc00b，启动时两端branch/HEAD/upstream一致、工作树clean。训练PID FULL_ASL1301745、THREE_BCE_AUX1301828、THREE_ASL_NO_AUX1302304、THREE_ASL_AUX1302839，全部CUDA0/OMP72/MKL72，各首轮84updates/0skips并进入后续轮；Full首轮.61478711/Adapter.02839343与历史精确匹配。正式未完成，无新最终成绩；禁止重复启动或提前称提升。
+
+smoke03以只读链接复用02训练，8个workers2评估全部exit0；14份常规/视图NPZ重放字段逐值相同，8份训练阶段预测与评估重放的IDs/classes/labels/logits/probabilities亦逐值相同。原生f1ada与新入口Full两任务所有方法参数/训练loss/LR/步数全等；三个三视图组边界CPU RNG相同。447项完整回归通过(1skip)，最终14项相关检查通过。恢复状态model等于compact、旧任务参数与Frozen视觉不变、0跳步已查。
+
+正式四组全TRAIN/seed0/8×30epoch/B64/13950更新、原全局采样/旧AMP65536-growth2000/旧增强；原固定feature融合、共享Selectors/Prompt/head/Image Adapter，不启用Attention/位置/MoE/ParaX。主要候选主参数BCE(fused)+.1meanBCE(views)，Adapter ASL(fused)+.1meanASL(views)，Face仅可靠样本。训练后自动GPU0最多4并发旧标准val/test；显存准入6000MiB，workers2预计预取低于4GB。Full正式四指标必须精确重现32.5365/39.1445/32.5756/49.3827，否则守卫报错。
+
+日志logs/feature_fusion_adapter_asl/formal_seed0_20261024_01，输出对应output；入口日志logs/feature_fusion_adapter_asl/implementation_20261024_01/formal_driver.log。源代码锁定不随本地后续执行记录变化；本条实际启动状态仅本地上下文更新，不在运行中更改远程代码。原主树/test-only状态153/5行及SHA保持。正式与短跑共154份非checkpoint产物已同步本地并逐SHA核验，archive SHAb2c9a5831a640e5bc17055e3b4b433f98c0a274f678323d96eafa82ac314c88d；权重留服务器。
+
+下一步等待正式completion，核对四组预算/冻结/Full锚点及每阶段旧人群，再同步分析主候选对BCE辅助对照、ASL无辅助与强Full；同时检查Full端点是否保住。初步短跑不作性能筛选，test不用于改系数。
+
 ## 2026-10-24：Full新旧短跑全部方法参数等价，保留权重仅接续workers2评估
 
 smoke_seed0_20261024_02四组及原生f1ada Full均完成，Full两任务全部方法张量、loss/LR/步数逐值等价；四组初始化base SHA2fb4071185ac375fef174e18e066c3eca800db733aa8197f8a116f17350cc2b0一致，训练0skips、旧参数冻结、完整边界保存核验通过。13项相关回归通过；此前447项全回归通过(1skip)。

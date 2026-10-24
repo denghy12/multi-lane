@@ -2439,7 +2439,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--protected-parax-residual-ablation", action="store_true",
                         help="Evaluate each trained protected model with all post-task residuals disabled.")
     parser.add_argument("--supervised-loss-scale", type=float, default=1.0)
-    parser.add_argument("--seed", type=int, required=True, choices=(0, 1, 2))
+    parser.add_argument("--seed", type=int, required=True, choices=(0, 1, 2, 3))
     parser.add_argument("--data-root", type=Path, required=True)
     parser.add_argument("--clip-checkpoint", type=Path, required=True)
     parser.add_argument("--output-root", type=Path, required=True)
@@ -2708,6 +2708,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--save-pre-evaluation-recovery", action="store_true", help="Atomically save task-boundary model/optimizer/RNG state before reporting")
     parser.add_argument("--strong-full-asl", action="store_true", help="Locked seven-arm full-TRAIN Image-token Adapter BCE/ASL transfer")
     parser.add_argument("--historical-feature-fusion", action="store_true", help="Original feature fusion, historical RNG/AMP and auxiliary BCE/ASL controls")
+    parser.add_argument("--historical-b32-profile", default=None,
+                        help="Locked historical b32 reproduction or declared single-factor search profile")
     parser.add_argument("--module-stacking", action="store_true", help="Locked three-module factorial protocol with shared contraction and aux0.1")
     parser.add_argument("--resume-spatial-boundary", type=Path, help="Continue the locked spatial experiment from a complete pre-reporting task snapshot")
     parser.add_argument("--moe-num-experts", type=int, default=22)
@@ -2841,6 +2843,8 @@ def main() -> None:
 
 
 def run(args: argparse.Namespace) -> None:
+    if args.historical_b32_profile is not None and not args.historical_feature_fusion:
+        raise ValueError("Historical b32 profiles require --historical-feature-fusion")
     if args.historical_feature_fusion:
         from .historical_feature_fusion import validate_arguments
         validate_arguments(args)
@@ -3578,6 +3582,7 @@ def run(args: argparse.Namespace) -> None:
         "module_stacking": bool(args.module_stacking),
         "strong_full_asl": bool(args.strong_full_asl),
         "historical_feature_fusion": bool(args.historical_feature_fusion),
+        "historical_b32_profile": args.historical_b32_profile,
         "fixed_view_sampler_protocol": "seed_plus_1009_times_task" if (args.fixed_view_paired_audit or args.protected_parax_paired_audit or args.moe_paired_audit or args.strong_full_asl) else None,
         "frozen_visual_sha256_before": frozen_visual_before,
         "training_loss_mode": args.training_loss_mode,

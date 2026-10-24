@@ -48,6 +48,9 @@ def _check(values, expected):
 
 
 def validate_arguments(args):
+    if getattr(args, 'historical_b32_profile', None) is not None:
+        from .historical_b32_search import validate_arguments as validate_b32
+        return validate_b32(args)
     values = dict(vars(args))
     for key in ('train_crop_scale', 'adapter_layer_indices'):
         values[key] = list(values[key])
@@ -64,6 +67,9 @@ def validate_arguments(args):
 
 
 def validate_config(config):
+    if config.get('historical_b32_profile') is not None:
+        from .historical_b32_search import validate_config as validate_b32
+        return validate_b32(config)
     expected = dict(COMMON)
     expected['eval_workers'] = 2  # None in the CLI resolves to the training worker count.
     expected.pop('adapter_regularization')  # config stores its detailed policy separately
