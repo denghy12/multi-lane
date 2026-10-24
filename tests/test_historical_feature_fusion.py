@@ -9,10 +9,21 @@ import test_track_a_reproduction as fixtures
 from multi_lane.track_a.model import MultiLaneModel
 from multi_lane.track_a.runner import (parse_args, build_optimizer_groups, compute_training_loss,
     compute_asymmetric_training_loss, compute_view_objective_losses, train_task)
-from multi_lane.track_a.historical_feature_fusion import ARMS, modes, training_arguments, validate_arguments
+from multi_lane.track_a.historical_feature_fusion import ARMS, modes, training_arguments, validate_arguments, validate_config
 
 
 class HistoricalFeatureFusionTest(unittest.TestCase):
+    def test_serialized_worker_default_is_resolved(self):
+        inputs = SimpleNamespace(data_root=Path('data'), clip_checkpoint=Path('clip'), face_manifest_root=Path('face'), smoke=True)
+        args = parse_args(training_arguments(inputs, Path('output/demo'), 'THREE_ASL_AUX'))
+        self.assertIsNone(args.eval_workers)
+        config = dict(vars(args), eval_workers=args.workers, learning_rate=.0125, optimizer='Adam_reset_per_task',
+            adapter_task_initialization='independent', amp=True, tf32=True, fixed_view_sampler_protocol=None)
+        self.assertEqual(validate_config(config), 'THREE_ASL_AUX')
+        config['eval_workers'] = None
+        with self.assertRaises(ValueError):
+            validate_config(config)
+
     def test_locked_recipes_preserve_old_numerics_and_exclude_other_modules(self):
         for smoke in [True, False]:
             inputs = SimpleNamespace(data_root=Path('data'), clip_checkpoint=Path('clip'),

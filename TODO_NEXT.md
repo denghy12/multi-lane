@@ -1,5 +1,11 @@
 # 下一步任务
 
+## 2026-10-24：447项回归通过，短跑训练完成，修正评估workers审计后重验
+
+远程独立工作树multi-lane-main-feature-fusion-asl-20261024已Git-only部署d6f10aa，四组smoke_seed0_20261024_01训练均完成2task×2updates、0skips；调度器在Full结束后的配置检查因CLI eval_workers=None保存为resolved2而失败，尚未开始完整smoke评估及原生Full对照，不是训练失败。其余子进程独立session均正常完成，源产物保留；已修正validate_config预期2并补回归。将用新run-id完整验证后才正式启动，不把失败的控制器当正式成功。
+
+447项完整回归通过（1项skip），12项相关检查通过；梯度测试覆盖实际train_task参数组路由和Face掩码。上一轮三个seed完整Full已同步88份非checkpoint产物并逐SHA核验；8阶段三seed IDs/targets/classes/logits及完整test指标与各自历史全等，每组13950更新/240epoch/0skips。同步archive SHA0f44e23e2e9ed865fab83aa865288e7ef936c9b7cd381b121a73e92ec4bbf4b5。原主树/test-only状态153/5行及SHA保持。
+
 ## 2026-10-24：按用户要求只验证原特征融合＋Adapter-ASL
 
 用户要求暂停Attention/位置，目标是强Full上的三视图融合。八组旧表是90%fit、aux0.1、BCE；后续三视图ASL用aux0，配方非仅替换Adapter目标。新建exp/feature-fusion-adapter-asl-20261024，从ab84674创建；计划FULL_ASL、THREE_BCE_AUX、THREE_ASL_NO_AUX、THREE_ASL_AUX四组，原固定feature融合不改，ASL只给Adapter，主要候选恢复0.1视图辅助BCE/ASL；全TRAIN/seed0/8task/30epoch/B64/13950更新/旧AMP65536-growth2000/workers2/global RNG/CPU72，仅GPU0。

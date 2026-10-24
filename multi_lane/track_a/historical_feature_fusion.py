@@ -65,6 +65,7 @@ def validate_arguments(args):
 
 def validate_config(config):
     expected = dict(COMMON)
+    expected['eval_workers'] = 2  # None in the CLI resolves to the training worker count.
     expected.pop('adapter_regularization')  # config stores its detailed policy separately
     _check(config, expected)
     _check(config, dict(learning_rate=.0125, optimizer='Adam_reset_per_task',
