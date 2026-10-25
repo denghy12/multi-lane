@@ -1,5 +1,6 @@
 """Real CLIP/AMP zero-output and initialization audit, separate from training RNG."""
 import argparse
+import os
 from pathlib import Path
 import torch
 from .model import MultiLaneModel
@@ -9,7 +10,11 @@ from .run_module_stacking import write
 
 
 def run(args):
+    # This synthetic small-batch audit needs deterministic GEMM reductions.
+    # Keep this process-local: historical training retains its original settings.
+    os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
     set_seed(1, True)
+    torch.use_deterministic_algorithms(True)
     visual = load_openai_clip_visual(args.clip_checkpoint)
     state = torch.get_rng_state().clone()
     generator = torch.Generator().manual_seed(20261025)
@@ -42,8 +47,8 @@ def run(args):
             baseline, baseline_fp32, initial, rng = scores, fp32, digest, after
         else:
             assert digest == initial and torch.equal(after, rng), arm
-            assert torch.allclose(fp32, baseline_fp32, atol=1e-6, rtol=1e-6), (arm, 'FP32', float((fp32-baseline_fp32).abs().max()))
-            assert torch.allclose(scores, baseline, atol=1e-4, rtol=1e-3), (arm, 'AMP', float((scores-baseline).abs().max()))
+            assert torch.equal(fp32, baseline_fp32), (arm, 'FP32', float((fp32-baseline_fp32).abs().max()))
+            assert torch.equal(scores, baseline), (arm, 'AMP', float((scores-baseline).abs().max()))
         result[arm] = dict(common_state_sha256=digest, zero_output_numerically_equivalent=True,
             fp32_max_abs_error=float((fp32-baseline_fp32).abs().max()),
             amp_max_abs_error=float((scores-baseline).abs().max()),
@@ -52,6 +57,7 @@ def run(args):
         del model
         torch.cuda.empty_cache()
     write(args.output, dict(status='verified', real_clip_amp=True, synthetic_batch_only=True,
+        deterministic_algorithms_audit_only=True, cublas_workspace_config_audit_only=':4096:8',
         seed=1, arms=result, no_training=True))
 
 
