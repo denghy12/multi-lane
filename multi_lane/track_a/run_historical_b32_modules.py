@@ -25,7 +25,7 @@ def verify_modules(train, smoke):
         state = _torch_load(train/'compact_checkpoints'/f'task{t}.pth')['model']
         if previous is not None:
             for k, value in state.items():
-                if k.startswith(('cross_view_bank.tasks.', 'spatial_summary_bank.tasks.')) and int(k.split('.')[2]) < t:
+                if k.startswith(('cross_view_bank.tasks.', 'cross_view_bank.face_tasks.', 'spatial_summary_bank.tasks.')) and int(k.split('.')[2]) < t:
                     assert torch.equal(value, previous[k]), k
         previous = state
     result['old_summary_modules_unchanged'] = True

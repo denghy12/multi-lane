@@ -864,6 +864,7 @@ def backward_routed_training_losses(
     adapter_parameters: Sequence[torch.nn.Parameter],
     scaler: torch.cuda.amp.GradScaler,
     same_objective: bool,
+    allow_unused_model_parameters: bool = False,
 ) -> None:
     """Route distinct objectives to model and Adapter parameter groups.
 
@@ -883,7 +884,8 @@ def backward_routed_training_losses(
     if overlap:
         raise ValueError("Model and Adapter parameter groups must be disjoint")
     model_gradients = torch.autograd.grad(
-        scaler.scale(model_loss), model_parameters, retain_graph=True
+        scaler.scale(model_loss), model_parameters, retain_graph=True,
+        allow_unused=allow_unused_model_parameters,
     )
     adapter_gradients = torch.autograd.grad(
         scaler.scale(adapter_loss), adapter_parameters
@@ -2134,6 +2136,7 @@ def train_task(
                         and adapter_regularization == "none"
                         and ranking_loader is None
                     ),
+                    allow_unused_model_parameters=getattr(model, 'cross_view_face_attention', False),
                 )
             parax_gradients = model.parax_gradient_diagnostics(scale_before)
             if parax_gradients:
@@ -2714,6 +2717,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument('--historical-b32-modules', action='store_true')
     parser.add_argument('--historical-b32-module-profile', default=None)
     parser.add_argument('--cross-view-residual-cap', type=float, default=0.)
+    parser.add_argument('--cross-view-face-attention', action='store_true')
     parser.add_argument('--spatial-summary-bias-mode', choices=['raw', 'content_relative'], default='raw')
     parser.add_argument("--module-stacking", action="store_true", help="Locked three-module factorial protocol with shared contraction and aux0.1")
     parser.add_argument("--resume-spatial-boundary", type=Path, help="Continue the locked spatial experiment from a complete pre-reporting task snapshot")
@@ -2848,6 +2852,9 @@ def main() -> None:
 
 
 def run(args: argparse.Namespace) -> None:
+    if args.cross_view_face_attention and (
+            not args.historical_b32_modules or args.historical_b32_module_profile != 'ATTENTION_BOUND'):
+        raise ValueError('Reliable Face attention is restricted to the bounded historical b32 recipe')
     if args.historical_b32_modules != (args.historical_b32_module_profile is not None):
         raise ValueError('Historical b32 module flag and profile must be specified together')
     if args.historical_b32_modules and not args.historical_feature_fusion:
@@ -3330,6 +3337,7 @@ def run(args: argparse.Namespace) -> None:
         strong_full_asl=args.strong_full_asl,
         historical_b32_modules=args.historical_b32_modules,
         cross_view_residual_cap=args.cross_view_residual_cap,
+        cross_view_face_attention=args.cross_view_face_attention,
         spatial_summary_bias_mode=args.spatial_summary_bias_mode,
         cross_view_mode=args.cross_view_mode,
         cross_view_layer=args.cross_view_layer,
@@ -3743,6 +3751,11 @@ def run(args: argparse.Namespace) -> None:
         "spatial_summary_bias_bound": 1.0,
         "spatial_summary_binding_loss_weight": 0.0,
         "cross_view_mode": args.cross_view_mode,
+        "cross_view_face_attention": args.cross_view_face_attention,
+        "cross_view_face_endpoint": "full_conditioned_reliable_face" if args.cross_view_face_attention else "face_only",
+        "cross_view_face_parameters_per_task": (
+            sum(p.numel() for p in model.cross_view_bank.face_tasks[0].parameters())
+            if args.cross_view_face_attention else 0),
         "cross_view_layer": args.cross_view_layer,
         "cross_view_dim": args.cross_view_dim,
         "cross_view_heads": args.cross_view_heads,
@@ -4445,7 +4458,11 @@ def run(args: argparse.Namespace) -> None:
                     old_fusion_unchanged=True, before=cross_view_before, after=cross_view_after,
                     training_statistics=model.cross_view_bank.statistics(),
                     final_gradient_norms={n: float(p.grad.float().norm()) if p.grad is not None else None
-                                          for n, p in model.cross_view_bank.tasks[task_id].named_parameters()})
+                                          for n, p in model.cross_view_bank.tasks[task_id].named_parameters()},
+                    final_face_gradient_norms=(
+                        {n: float(p.grad.float().norm()) if p.grad is not None else None
+                         for n,p in model.cross_view_bank.face_tasks[task_id].named_parameters()}
+                        if args.cross_view_face_attention else None))
                 (output / "cross_view_audit.json").write_text(json.dumps(cross_view_audits, indent=2) + "\n")
             if model.spatial_summary_bank is not None:
                 spatial_after = tensor_state_digest({n: v for n, v in model.spatial_summary_bank.state_dict().items()

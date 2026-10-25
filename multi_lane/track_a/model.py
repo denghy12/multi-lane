@@ -112,6 +112,7 @@ class MultiLaneModel(nn.Module):
         historical_b32_modules: bool = False,
         cross_view_residual_cap: float = 0.,
         spatial_summary_bias_mode: str = 'raw',
+        cross_view_face_attention: bool = False,
     ) -> None:
         super().__init__()
         if not task_sizes or any(int(size) <= 0 for size in task_sizes):
@@ -267,6 +268,9 @@ class MultiLaneModel(nn.Module):
             raise ValueError("Invalid spatial summary mode")
         self.strong_full_asl = bool(strong_full_asl)
         self.historical_b32_modules = bool(historical_b32_modules)
+        if cross_view_face_attention and (not self.historical_b32_modules
+                or cross_view_mode != 'task_full' or cross_view_residual_cap <= 0):
+            raise ValueError('Reliable Face attention requires historical bounded task-query attention')
         self.module_stacking = bool(module_stacking or strong_full_asl)
         if self.historical_b32_modules and (adapter_mode != 'image_token' or view_fusion != 'fixed_three_view'):
             raise ValueError('Historical b32 modules require the shared image-token three-view model')
@@ -531,11 +535,13 @@ class MultiLaneModel(nn.Module):
                                      if spatial_summary_mode != "disabled" else None)
         self.cross_view_mode = cross_view_mode
         self.cross_view_runtime_enabled = cross_view_mode != "disabled"
+        self.cross_view_face_attention = bool(cross_view_face_attention)
         self.cross_view_bank = None
         if cross_view_mode != "disabled":
             self.cross_view_bank = TaskCrossViewAttentionBank(
                 self.num_tasks, self.width, cross_view_mode, cross_view_layer,
-                cross_view_dim, cross_view_heads, cross_view_scale, cross_view_residual_cap)
+                cross_view_dim, cross_view_heads, cross_view_scale, cross_view_residual_cap,
+                face_attention=cross_view_face_attention)
         self._last_fusion_weights: Optional[torch.Tensor] = None
         self._last_base_fused_logits: Optional[torch.Tensor] = None
 
@@ -1000,6 +1006,12 @@ class MultiLaneModel(nn.Module):
                     options = {} if override is None else {
                         "query_override": override, "query_mask": mask}
                     selected = self.cross_view_bank(selected, source, selectors, lane_ids, **options)
+            elif image_view == 'face' and self.cross_view_face_attention:
+                source_ids, source = summary_cache['full']
+                if source_ids != tuple(lane_ids):
+                    raise RuntimeError('Face attention source task order mismatch')
+                selected = self.cross_view_bank(selected, source, selectors, lane_ids,
+                    view_name='face', valid_mask=summary_cache['face_reliable'])
         return self._task_attention_ffn(block, lane_tokens, lane_ids, layer_id,
                                         task_cls, selectors, selected, image_view)
 
@@ -1371,6 +1383,8 @@ class MultiLaneModel(nn.Module):
                 for name in self.view_fusion_module.view_names}
         elif self.cross_view_bank is not None and self.cross_view_runtime_enabled:
             summary_cache = {}
+            if self.cross_view_face_attention:
+                summary_cache['face_reliable'] = face_reliable.to(dtype=torch.bool)
             donor_cache = {}
             try:
                 if "cross_view_query_donor" in images:

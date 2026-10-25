@@ -1,7 +1,8 @@
 """Task-local attention between summarized views, before task MSA.
 
-Full -> Person denotes information flow: Person supplies Q, Full supplies K/V.
-The two controls have identical parameters and write to the same residual.
+Full supplies K/V. Queries are task Selectors in task_full or Person summaries
+in the earlier controls. Optional Face attention has independent task-local
+weights and writes only to rows passing the existing fusion reliability mask.
 """
 from __future__ import annotations
 import math
@@ -58,7 +59,7 @@ class TaskCrossViewAttentionBank(nn.Module):
     MODES = ('disabled', 'person_self', 'task_full', 'person_full')
 
     def __init__(self, num_tasks, width, mode, layer_index=5, inner_dim=64,
-                 heads=4, scale=.1, residual_cap=0.):
+                 heads=4, scale=.1, residual_cap=0., face_attention=False):
         super().__init__()
         if (mode not in self.MODES[1:] or min(num_tasks, width, inner_dim, heads) <= 0
                 or inner_dim % heads or layer_index < 0
@@ -69,12 +70,22 @@ class TaskCrossViewAttentionBank(nn.Module):
             raise ValueError('Invalid summary residual bound')
         self.residual_cap = residual_cap
         self.current_task_id = -1
+        if face_attention and mode != 'task_full':
+            raise ValueError('Reliable Face attention uses task Selector queries')
+        self.face_runtime_enabled = bool(face_attention)
         self.tasks = nn.ModuleList()
         with torch.random.fork_rng(devices=[]):
             for task in range(num_tasks):
                 # Seed CPU weights only; torch.manual_seed would also reset CUDA RNG.
                 torch.default_generator.manual_seed(101_003 + task)
                 self.tasks.append(SummaryAttention(width, inner_dim, heads, scale))
+        self.face_tasks = None
+        if face_attention:
+            self.face_tasks = nn.ModuleList()
+            with torch.random.fork_rng(devices=[]):
+                for task in range(num_tasks):
+                    torch.default_generator.manual_seed(211_003 + task)
+                    self.face_tasks.append(SummaryAttention(width, inner_dim, heads, scale))
         self.requires_grad_(False)
         self.reset_statistics()
 
@@ -86,14 +97,19 @@ class TaskCrossViewAttentionBank(nn.Module):
             p.grad = None
         if task >= 0:
             self.tasks[task].requires_grad_(True)
+            if self.face_tasks is not None:
+                self.face_tasks[task].requires_grad_(True)
         self.current_task_id = task
 
     def active_parameters(self):
         if self.current_task_id >= 0:
             yield from self.tasks[self.current_task_id].parameters()
+            if self.face_tasks is not None:
+                yield from self.face_tasks[self.current_task_id].parameters()
 
     def parameter_count_per_task(self):
-        return sum(p.numel() for p in self.tasks[0].parameters())
+        return sum(p.numel() for p in self.tasks[0].parameters()) + (
+            sum(p.numel() for p in self.face_tasks[0].parameters()) if self.face_tasks is not None else 0)
 
     def reset_statistics(self):
         self._statistics = {}
@@ -113,10 +129,21 @@ class TaskCrossViewAttentionBank(nn.Module):
             out[key] = result
         return out
 
-    def forward(self, person, full, selectors, lane_ids, query_override=None, query_mask=None):
+    def forward(self, person, full, selectors, lane_ids, query_override=None, query_mask=None,
+                view_name='person', valid_mask=None):
         if (person.ndim != 4 or person.shape != full.shape or selectors.shape != person.shape
                 or len(lane_ids) != person.shape[0]):
             raise ValueError('Cross-view summary shapes/tasks do not match')
+        if view_name not in ('person', 'face'):
+            raise ValueError('Attention writes only to Person or reliable Face')
+        if view_name == 'face':
+            if self.face_tasks is None or not self.face_runtime_enabled:
+                return person
+            if (valid_mask is None or valid_mask.dtype != torch.bool
+                    or valid_mask.shape != (person.shape[1],)):
+                raise ValueError('Face attention requires the fusion reliability mask')
+            if not bool(valid_mask.any()):
+                return person
         if query_override is not None and (
             self.mode != 'person_full' or query_override.shape != person.shape
             or query_mask is None or query_mask.dtype != torch.bool
@@ -126,15 +153,24 @@ class TaskCrossViewAttentionBank(nn.Module):
         result = []
         for index, task in enumerate(lane_ids):
             p, f, s = person[index], full[index], selectors[index]
+            original = p
+            if view_name == 'face':
+                p, f, s = p[valid_mask], f[valid_mask], s[valid_mask]
             query = s if self.mode == 'task_full' else p
             source = p if self.mode == 'person_self' else f
             options = {} if query_override is None else dict(
                 query_override=query_override[index], query_mask=query_mask)
-            delta, weights, normalized_query = self.tasks[task](query, source, **options)
+            module = self.face_tasks[task] if view_name == 'face' else self.tasks[task]
+            delta, weights, normalized_query = module(query, source, **options)
             delta = delta.to(p.dtype)
             raw_delta = delta
             delta = bounded_summary_delta(delta, p, self.residual_cap)
-            result.append(p + delta)
+            if view_name == 'face':
+                updated = original.clone()
+                updated[valid_mask] = p + delta
+                result.append(updated)
+            else:
+                result.append(p + delta)
             with torch.no_grad():
                 bnorm = p.float().norm(dim=-1).mean(-1)
                 dnorm = delta.float().norm(dim=-1).mean(-1)
@@ -149,6 +185,7 @@ class TaskCrossViewAttentionBank(nn.Module):
                     query_sum=qmean.sum(0), query_square_sum=qmean.square().sum(0),
                     attention_sum=attention.sum(0), attention_square_sum=attention.square().sum(0))
                 key = f'task{task}/layer{self.layer_index}'
+                if view_name == 'face': key += '/face'
                 if key not in self._statistics:
                     self._statistics[key] = row
                 else:

@@ -88,6 +88,7 @@ def build(config, clip):
         adapter_activation=config['adapter_activation'], adapter_task_initialization=config['adapter_task_initialization'],
         view_fusion=config['view_fusion'], view_classifier_mode=config['view_classifier_mode'],
         historical_b32_modules=True, cross_view_layer=5, cross_view_dim=64, cross_view_heads=4,
+        cross_view_face_attention=config.get('cross_view_face_attention', False),
         cross_view_scale=.1, **modes(arm)).float().cuda()
     return model
 

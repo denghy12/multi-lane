@@ -1,6 +1,18 @@
 # 工作日志
 
+## 2026-10-25：用户授权续完8任务Val/Test，并新增可靠Face摘要Attention
+
+新分支codex/head-anchored-eight-task-face-attention-20261025。原466ce26的seed1三任务pilot已全部完成：task2 Val/三阶段均值，B0 44.7316/54.0934，固定头无M43.9498/52.7115，固定头有M43.9420/52.6928，完整B0固定只训M44.7462/54.1164，允许头更新44.0892/52.9801。用户要求不据此停止，保留task0–2原checkpoint逐值不变，四组只新增task3–7各5epoch/LR.0004，并评估8阶段Val/Test（ON与适用的OFF）。不重复前3任务，不以3阶段均值代替8阶段。
+
+新增Face版本沿用原ATTENTION_BOUND的30epoch共训配方，并非5epoch学生方案：Person与可靠Face各有任务专属、独立同规格Full摘要Attention；Task Selector Query、layer5/inner64/heads4/scale.1/cap.1，Face不可靠时残差严格为0、该batch无Face样本时Face参数无梯度并跳过Adam动量更新。旧Person参数及初始化随机流不变，Face用独立CPU fork RNG。原任务冻结机制覆盖Person/Face两套模块。训练保留共享头共训，推理内存换回对应阶段B0 H，ASP/两Attention均保留；另补Face单独OFF/全部OFF及原共训头ON。43.0741/32.8864是原Person-only换头的task7结果，追加完整8阶段旧Person-only换头Val/Test对照。
+
+GPU0统一最多4并行，显存≥6000MiB/shm≥1024MiB及12秒放行；B64/workers2/OMP-MKL72/AMP-TF32/旧seen-positive，Test参与探索如实记录。新runner入口run_head_anchored_eight_face，输出output/head_anchored_eight_face，日志logs/head_anchored_eight_face。代码已实现待远程单测/smoke及正式启动；保持原pilot及主树/test-only不修改。详细计划docs/head_anchored_eight_face_plan_20261025.md。
+
 ## 2026-10-25：分类头锚定的额外适配pilot实现中
+
+执行状态更新：最终运行源码466ce2666479f941a5ad6473cafb761b761516cb（本地/远程branch、HEAD、upstream一致）。最终4项专项通过，smoke_seed1_20261025_02五作业/24完整Val ON-OFF结果全部完成，四组各task0–2两更新均0跳步，batch完全一致，B0及MOnly OFF三个阶段逐值重放；此前482项完整回归通过。最终104份smoke产物已同步本地smoke_snapshot_20261025_02并逐SHA核验，归档SHA b81e5cc2d7024c72df35fc53a904f4900c89487265d6752f80511da8efb00bb8。
+
+正式formal_seed1_tasks012_20261025_01已在GPU0四并行启动（tmux head_anchored_pilot_seed1_20261025，worker PID1841374/1841954/1842714/1843477）。四组task0首epoch各84成功更新/0跳步，无M组已完成2epoch，GPU约12475MiB/100%。原B0三个阶段重放为第5作业自动排队。正式当前运行中，尚无最终结果，不新跑Test。源码运行中保持远程树clean/466ce26不更新；当前本地仅追加执行记录。原40份checkpoint SHA全部保持，主树/test-only的HEAD/status SHA与既有记录一致。
 
 482项远程回归、smoke_seed1_20261025_01五作业全部完成：四学生各task0–2两更新0跳步，实际batch跨组逐值一致，B0及MOnly OFF的三个阶段融合预测精确重放。正式前完善学生实际架构/参数量、AMP及适配RNG元数据，需在最终源码重新通过smoke后才启动5epoch；不改变损失或训练数据流。
 

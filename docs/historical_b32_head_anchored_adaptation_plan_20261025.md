@@ -1,5 +1,9 @@
 # 下一阶段：以B0分类头为锚点的任务表征适配
 
+执行状态更新：最终运行源码466ce2666479f941a5ad6473cafb761b761516cb（本地/远程branch、HEAD、upstream一致）。最终4项专项通过，smoke_seed1_20261025_02五作业/24完整Val ON-OFF结果全部完成，四组各task0–2两更新均0跳步，batch完全一致，B0及MOnly OFF三个阶段逐值重放；此前482项完整回归通过。最终104份smoke产物已同步本地smoke_snapshot_20261025_02并逐SHA核验，归档SHA b81e5cc2d7024c72df35fc53a904f4900c89487265d6752f80511da8efb00bb8。
+
+正式formal_seed1_tasks012_20261025_01已在GPU0四并行启动（tmux head_anchored_pilot_seed1_20261025，worker PID1841374/1841954/1842714/1843477）。四组task0首epoch各84成功更新/0跳步，无M组已完成2epoch，GPU约12475MiB/100%。原B0三个阶段重放为第5作业自动排队。正式当前运行中，尚无最终结果，不新跑Test。源码运行中保持远程树clean/466ce26不更新；当前本地仅追加执行记录。原40份checkpoint SHA全部保持，主树/test-only的HEAD/status SHA与既有记录一致。
+
 2026-10-25用户已授权执行，新入口`multi_lane.track_a.head_anchored_pilot`、GPU0队列`multi_lane.track_a.run_head_anchored_pilot`。当前实现中，待远程测试及smoke。正式范围仅seed1/task0–2/5epoch/Val。复用当时阶段B0 checkpoint，省去重复30epoch Teacher训练；总训练成本仍包含原B0训练和新增适配。
 
 输出`output/historical_b32_head_anchored_pilot/<run_id>`、日志`logs/historical_b32_head_anchored_pilot/<run_id>`。源B0 `../multi-lane-main-historical-b32-modules-seed1-20261025/output/historical_b32_modules/formal_seed1_20261025_01/BASE/train`；数据`../multi-lane-main/datasets/EMOTIC`；预训练`../CODE_DDP/pretrained/clip/ViT-B-16.pt`；Face清单`../emotic_benchmark_runs/multi_lane_face_test_manifest_v0.1/face_manifest_train_val_test_v1_20260909`。
