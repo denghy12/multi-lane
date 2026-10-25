@@ -14,11 +14,15 @@ def modes(arm):
         spatial_summary_bias_mode='content_relative' if arm == 'POSITION_CALIBRATED' else 'raw')
 
 
-def expected(arm):
+def expected(arm, private_selectors=False):
     result = expected_common(1, 'THREE_BASE')
     result.update(historical_b32_profile=None, historical_b32_modules=True,
         historical_b32_module_profile=arm, cross_view_layer=5, cross_view_dim=64,
         cross_view_heads=4, cross_view_scale=.1, **modes(arm))
+    if private_selectors:
+        if arm != 'ATTENTION_BOUND':
+            raise ValueError('Independent view Selectors require bounded dual-view attention')
+        result['selector_mode'] = 'view_specific'
     return result
 
 
@@ -26,7 +30,10 @@ def validate_arguments(args):
     values = vars(args).copy()
     for k in ('adapter_layer_indices', 'train_crop_scale'):
         values[k] = list(values[k])
-    _check(values, dict(expected(args.historical_b32_module_profile),
+    private = getattr(args, 'historical_b32_private_selectors', False)
+    if private and not args.cross_view_face_attention:
+        raise ValueError('Independent Selectors are declared only for the dual attention control')
+    _check(values, dict(expected(args.historical_b32_module_profile, private),
         epochs=30, source_learning_rate=.05, source_reference_batch_size=256,
         adapter_learning_rate=.0004, view_fusion_learning_rate=.0004,
         adapter_task_init='independent', scheduler_mode='cosine',
@@ -40,7 +47,11 @@ def validate_arguments(args):
 
 
 def validate_config(config):
-    arm = config['historical_b32_module_profile']; values = expected(arm)
+    arm = config['historical_b32_module_profile']
+    private = config.get('historical_b32_private_selectors', False)
+    if private and not config.get('cross_view_face_attention', False):
+        raise ValueError('Independent Selector provenance lacks reliable Face attention')
+    values = expected(arm, private)
     values.pop('adapter_regularization'); values['eval_workers'] = 2
     if modes(arm)['cross_view_mode'] == 'disabled':
         for k in ('cross_view_layer', 'cross_view_dim', 'cross_view_heads', 'cross_view_scale'):

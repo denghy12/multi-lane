@@ -1,6 +1,6 @@
 """Continue the unchanged three-task pilot and export eight-stage Val/Test."""
 import argparse
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from dataclasses import asdict
 import os
 from pathlib import Path
@@ -35,6 +35,48 @@ def runtime():
 def require_test_ready(split, smoke, files):
     if split=='test' and (smoke or set(map(int,files))!=set(range(8))):
         raise ValueError('Test requires complete eight-task training')
+
+
+def copy_classifier_head(model, reference):
+    """Head-only copying permits different Selector layouts in the host."""
+    state=model.head.state_dict()
+    with torch.no_grad():
+        for key,value in state.items():
+            target=reference['head.'+key]
+            if target.shape!=value.shape:raise ValueError('B0 classifier shape mismatch')
+            value.copy_(target)
+
+
+@contextmanager
+def replace_classifier_head(model, reference):
+    before=tensor_state_digest(method_state(model))
+    unselected={k:v for k,v in method_state(model).items() if not k.startswith('head.')}
+    protected=tensor_state_digest(unselected)
+    backup={k:v.detach().clone() for k,v in model.head.state_dict().items()}
+    try:
+        copy_classifier_head(model,reference)
+        patched=tensor_state_digest(method_state(model))
+        yield dict(condition='H',before_sha256=before,patched_sha256=patched)
+        assert tensor_state_digest(method_state(model))==patched
+        assert tensor_state_digest(unselected)==protected
+    finally:
+        model.head.load_state_dict(backup)
+        assert tensor_state_digest(method_state(model))==before
+
+
+def verify_frozen_face_predictions(actual, reference, mode):
+    for key in ('sample_ids','targets','class_indices','face_reliable'):
+        assert np.array_equal(actual[key],reference[key]),key
+    for view in ('full','person'):
+        for suffix in ('_logits','_probabilities'):
+            assert np.array_equal(actual[view+suffix],reference[view+suffix]),view+suffix
+    invalid=~actual['face_reliable'].astype(bool)
+    for view in ('face','fused'):
+        for suffix in ('_logits','_probabilities'):
+            key=view+suffix
+            assert np.array_equal(actual[key][invalid],reference[key][invalid]),key+' invalid'
+            if mode=='face_off':
+                assert np.array_equal(actual[key],reference[key]),key+' baseline replay'
 
 
 def validate_prefix(root, arm, source):
@@ -159,9 +201,10 @@ def continuation(args):
 
 def evaluate(args):
     start=time.time();git=runtime();set_seed(1,True)
-    if args.kind=='student':
+    if args.kind in ('student','frozen_face'):
         training=read(args.trained_run/'training_complete.json');cfg=training['config']
-        assert training['status']=='complete' and training['prefix_preserved_exact']
+        assert training['status']=='complete'
+        assert (training['prefix_preserved_exact'] if args.kind=='student' else training['protected_base_preserved'])
         template=cfg['model_template'];files=training['checkpoints'];smoke=cfg['smoke']
     else:
         template=read(args.trained_run/'config.json');validate_config(template)
@@ -187,7 +230,7 @@ def evaluate(args):
         model.restore_task(task);model.requires_grad_(False).eval()
         original=tensor_state_digest(method_state(model))
         teacher=source_checkpoint(args,baseline,task)
-        context=restore_components(model,teacher,'H') if args.head=='b0' else nullcontext(dict(condition='native'))
+        context=replace_classifier_head(model,teacher) if args.head=='b0' else nullcontext(dict(condition='native'))
         with context as head_audit:
             for mode in args.conditions:
                 if mode=='face_off' and (model.cross_view_bank is None or model.cross_view_bank.face_tasks is None):
@@ -206,6 +249,10 @@ def evaluate(args):
                 if args.kind=='student' and cfg['arm']=='BASE_FIXED_ATTENTION' and mode=='off':
                     assert_scores_equal(args.output/mode/'scores'/f'task{task}.npz',
                         args.source_run.parent/('historical_'+args.split)/'scores'/f'task{task}.npz')
+                if args.kind=='frozen_face':
+                    with np.load(args.output/mode/'view_scores'/f'task{task}.npz') as actual, np.load(
+                            Path(cfg['reference_root'])/('b0_'+args.split)/'on/view_scores'/f'task{task}.npz') as reference:
+                        verify_frozen_face_predictions(actual,reference,mode)
                 print(f'EVALUATE split={args.split} task={task} mode={mode} head={args.head} mAP={metric.mAP:.6f}',flush=True)
         assert tensor_state_digest(method_state(model))==original
         audits.append(dict(task=task,checkpoint_sha256=record['sha256'],head=head_audit,
@@ -225,6 +272,7 @@ def evaluate(args):
         b0_source_run=str(args.source_run),b0_git=baseline['git'],
         split=args.split,head=args.head,checkpoint_tasks=tasks,evaluation_scope='samples_intersect_seen_classes',
         test_used_for_parameter_search=True,full_eight_stage_average=tasks==list(range(8)),
+        frozen_face_prediction_invariants=args.kind=='frozen_face',
         task_metrics={mode:[asdict(m) for m in rows] for mode,rows in metrics.items()},summaries=summaries,
         audits=audits,elapsed_seconds=time.time()-start))
 
@@ -240,7 +288,7 @@ def parser():
             q.add_argument('--smoke',action='store_true')
         else:
             q.add_argument('--trained-run',type=Path,required=True)
-            q.add_argument('--kind',choices=('student','joint','person_reference'),required=True)
+            q.add_argument('--kind',choices=('student','joint','person_reference','frozen_face'),required=True)
             q.add_argument('--head',choices=('native','b0'),required=True)
             q.add_argument('--split',choices=('val','test'),required=True)
             q.add_argument('--conditions',nargs='+',choices=('on','off','face_off'),default=['on'])

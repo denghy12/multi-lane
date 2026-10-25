@@ -268,6 +268,9 @@ class MultiLaneModel(nn.Module):
             raise ValueError("Invalid spatial summary mode")
         self.strong_full_asl = bool(strong_full_asl)
         self.historical_b32_modules = bool(historical_b32_modules)
+        private_summary_selectors = (
+            self.historical_b32_modules and cross_view_face_attention
+            and selector_mode == 'view_specific' and spatial_summary_mode == 'disabled')
         if cross_view_face_attention and (not self.historical_b32_modules
                 or cross_view_mode != 'task_full' or cross_view_residual_cap <= 0):
             raise ValueError('Reliable Face attention requires historical bounded task-query attention')
@@ -290,7 +293,7 @@ class MultiLaneModel(nn.Module):
             or parax_mode != "disabled" or joint_summary_mode != "disabled"
             or selector_conditioning != "disabled" or (view_fusion != "fixed_three_view"
                 and not (self.strong_full_asl and view_fusion == "disabled"))
-            or selector_mode != "shared" or prompt_mode != "shared"
+            or (selector_mode != "shared" and not private_summary_selectors) or prompt_mode != "shared"
             or view_classifier_mode != "shared_post_fusion" or detach_view_fusion_features
             or adapter_view_bottleneck_dim != 0 or adapter_view_mode != "shared"
             or (cross_view_mode != "disabled" and not 0 <= cross_view_layer < len(blocks))

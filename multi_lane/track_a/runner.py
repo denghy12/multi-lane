@@ -854,6 +854,10 @@ def strong_full_gradient_diagnostics(model, gradient_scale):
     for name, parameters in groups.items():
         values = [p.grad.detach().float().square().sum() for p in parameters if p.grad is not None]
         result["strong_grad_"+name+"_norm"] = float(torch.stack(values).sum().sqrt().cpu()) / gradient_scale if values else 0.
+    if model.selector_mode=='view_specific' and model.selectors.grad is not None:
+        for index,name in enumerate(model.selector_view_names):
+            value=model.selectors.grad[model.current_task_id,index].detach().float()
+            result['strong_grad_selector_'+name+'_norm']=float(value.norm().cpu())/gradient_scale
     return result
 
 
@@ -2715,6 +2719,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--historical-b32-profile", default=None,
                         help="Locked historical b32 reproduction or declared single-factor search profile")
     parser.add_argument('--historical-b32-modules', action='store_true')
+    parser.add_argument('--historical-b32-private-selectors', action='store_true')
     parser.add_argument('--historical-b32-module-profile', default=None)
     parser.add_argument('--cross-view-residual-cap', type=float, default=0.)
     parser.add_argument('--cross-view-face-attention', action='store_true')
@@ -2852,6 +2857,10 @@ def main() -> None:
 
 
 def run(args: argparse.Namespace) -> None:
+    if args.historical_b32_private_selectors and (
+            not args.historical_b32_modules or args.historical_b32_module_profile != 'ATTENTION_BOUND'
+            or not args.cross_view_face_attention or args.selector_mode != 'view_specific'):
+        raise ValueError('Private Selector control requires the bounded dual-attention historical recipe')
     if args.cross_view_face_attention and (
             not args.historical_b32_modules or args.historical_b32_module_profile != 'ATTENTION_BOUND'):
         raise ValueError('Reliable Face attention is restricted to the bounded historical b32 recipe')
@@ -3604,6 +3613,7 @@ def run(args: argparse.Namespace) -> None:
         "historical_feature_fusion": bool(args.historical_feature_fusion),
         "historical_b32_profile": args.historical_b32_profile,
         "historical_b32_modules": args.historical_b32_modules,
+        "historical_b32_private_selectors": args.historical_b32_private_selectors,
         "historical_b32_module_profile": args.historical_b32_module_profile,
         "cross_view_residual_cap": args.cross_view_residual_cap,
         "spatial_summary_bias_mode": args.spatial_summary_bias_mode,

@@ -1,6 +1,36 @@
 # 工作日志
 
+## 2026-10-26：用户授权独立Selector与冻结强Person只训Face两组8任务
+
+新分支codex/private-selectors-frozen-face-20261026。PRIVATE_SELECTORS：基于双Attention共训+B0头方案，三视图每任务各10个独立Selector，共30个；从同一共享初值克隆，保持全局RNG与其余初始参数不变，训练30epoch/任务、主LR.0125、A/M LR.0004，仍共享Image-token Adapter与Prefix Prompts，保留Face/Person Attention读取Full K/V的反传，不额外detach。该组只检验Selector共享，不宣称完整视图梯度隔离。增加Selector122880参数。
+
+FROZEN_PERSON_FACE：按任务装载原Person-only共训ASP/M及对应阶段B0 H（32.8864/39.8687强候选），全冻结，只训练当前新增可靠Face M，额外5epoch/LR.0004；Adapter保留ASL学得参数但无更新，M用融合BCE+原aux.1。旧Face模块保留冻结，下一任务不继承学生ASP。无可靠Face整批不进backward/Adam并单独计数，与AMP跳步区分。所有源checkpoint只读；评估逐值检查Full/Person和无可靠Face预测不变，Face OFF精确回到强候选。
+
+全部seed1/GPU0/B64/workers2/OMP-MKL72/AMP-TF32/旧seen-positive，跑完整8阶段Val/Test。两新训练作业并行，最多4作业含原Person/双Attention参考重放；不足显存6000MiB/shm1024MiB自动排队，间隔12秒。同源码smoke通过后自动正式启动。新增selector_face_controls和run_selector_face_controls、独立Selector profile限定、不同Selector形状的纯head替换与冻结预测验收；新增真实梯度/冻结/初始等价/Face无信号测试。当前实现完成待远程测试，计划docs/selector_face_controls_plan_20261026.md。原d1322ab/ab15571及主树/test-only保持不改，前轮结果分析文件一并保留在新实验分支。
+
+## 2026-10-26：八任务续跑与Face Attention完成，CPU复核和分析完成
+
+远程执行源码d1322ab保持clean。正式19作业全部exit0，四适配组各40额外epoch/2325更新（前3任务保留，新增1490），Face共训240epoch/13950更新，全0跳步。55源checkpoint SHA保持；694份完整产物回传并逐SHA核验，归档SHA7c9fd4a795f5e224333ca78874b6887bcc5d777552934be13821ab822144a0dc。CPU重算240融合/960视图指标，最大误差7.82e-14；12 prefix、16 MOnly OFF=B0、8 Face原头Test、16 Face mask逐值检查通过。新增结果分支codex/eight-task-face-results-20261025，仅本地CPU脚本/文档，不改远程执行树。
+
+seed1 Val最终/平均、Test最终/平均：B0 42.4628/49.4763、32.6800/39.5292；固定头无M41.8698/48.4461、32.3631/39.1494；固定头有M41.8739/48.4413、32.3625/39.1555；全B0固定只训Person M42.4763/49.4915、32.6829/39.5283；头可训42.0249/48.6800、32.4597/39.2871。额外5epoch固定头路线未达标，mAP下降并非Attention独有，task0已发生，不能归为旧任务遗忘。Test oF1改善来自召回增加，不能代替mAP收益。
+
+原Person-only共训表征+B0 H：Val43.0741/50.2828，Test32.8864/39.8687，为当前seed1最好探索候选。新Person+可靠Face+B0 H：Val43.3394/50.5522，Test32.7573/39.7004；Val8/8更高、Test8/8更低于旧候选。仅Face OFF为Val43.2889/50.4403、Test32.7194/39.6213；全部OFF为43.2304/50.3430、32.6920/39.5698。新Face原共训头为Val43.1264/50.3256、Test31.9459/39.1951，换头收益不可算Face模块收益。
+
+Test新Face相比旧Person：两模型全OFF表征/固定H组合−0.1730最终/−0.2615平均，Person条件作用变化+0.0061/+0.0141，Face条件作用+0.0378/+0.0790，合计−0.1292/−0.1683。新模型Person和可靠Face AP升，Full31.4947→31.3667，融合32.8864→32.7573；融合减自身Full几乎不变1.3917→1.3906。Face写入只在Face，但共同训练改变共享A/S/P，Frozen Forward不动不等于Full任务表征不动。Face分支非死分支，主要损失表现为共同训练后的表示/读出泛化，不将梯度冲突当已证实。
+
+Test可靠Face子集新旧−0.1963、同图多人−0.4294，单人+0.0732、不可靠Face+0.2785；Val可靠Face/多人反而改善。可靠Face比例Val60.91%/Test60.75%近似，平均正标签6.266/4.445，标准一致而分布不同。任务Selector Query不显式读取Face内容、同Full/同任务原始修正缺少人物区分；Full→Face可能强化共有上下文，不能把单路提升等同互补改善。这是结构风险与结果相符，不声称已完成目标错配归因。
+
+500次成对原图bootstrap、8阶段耦合：Test Face ON−Face OFF最终CI[0.0108,0.0630]、平均[0.0297,0.1265]，有条件贡献；旧Person−B0、新Face−旧Person总差CI均含0，未估计seed方差/未修正Test筛选，不称稳定多seed收益。报告docs/head_anchored_eight_face_results_20261025.md含8阶段、分组、机制分解、统计及后续建议；CPU脚本scripts/emotic/analyze_head_anchored_eight_face.py，产物output/head_anchored_eight_face/analysis_20261025_01。
+
+下一步仅建议：保留旧Person+B0头强候选与正式B0；不继续额外ASP固定头适配。若用户授权，可冻结旧Person强候选全部ASP/原Person M/B0 H，只训练新增可靠Face M，强制Full/Person及无可靠Face预测不变；区别于已跑的B0固定只训Person M。此控制未启动；若无收益则停止本版Full→Face路线，不重启已有负结果的后置残差等。不自动扩seed/新训练/合并main。
+
 ## 2026-10-25：用户授权续完8任务Val/Test，并新增可靠Face摘要Attention
+
+执行更新：运行源码d1322ab91e3ebbcf7c4c6c03d856a8bfbb065b16，本地/远程独立树branch、HEAD、upstream一致。488项回归通过（19.002秒），新增6项专项通过。smoke_seed1_20261025_01完成13作业（5训练＋8评估），验证四组采样一致/原prefix保留、MOnly OFF=B0、Face OFF不改Full/Person/无可靠Face logits，原Person-only换头task7精确重放Val43.07406218346569/Test32.886421356337166。smoke完成门槛后正式队列已自动启动。
+
+正式output/head_anchored_eight_face/formal_seed1_20261025_01，tmux head_anchored_eight_face_seed1_20261025。GPU0当前Face共训PID1873009、固定头无M1873585、固定头有M1874348、B0全固定只训M1875111四并行；允许头更新的第四学生组排队。三学生task3首2epoch各156更新/0跳步，Face task0前4epoch各84更新/0跳步，GPU约12413MiB/100%，尚无正式最终指标。队列自动排完整Val/Test及OFF/换头对照，最多4并行，不需再次启动。不更新运行中源码，不修改原pilot/worktree。
+
+原40历史＋15 pilot checkpoint共55份SHA已登记并核验；主树/test-only HEAD与状态SHA未变。256份完成的pilot/smoke/单测产物已同步本地output/head_anchored_eight_face/startup_snapshot_20261025_01并逐SHA核验，归档SHA100949809c3a8def6cee7fe065e69dc0173379ac059f47681bdd6b5827d57a08。当前追加执行记录仅本地未提交，运行源码保持d1322ab clean。完成后核验8阶段最终/阶段平均、逐视图/Face可靠性与关闭模块贡献，明确30epoch共训与额外5epoch适配属于两条不同训练路线。
 
 新分支codex/head-anchored-eight-task-face-attention-20261025。原466ce26的seed1三任务pilot已全部完成：task2 Val/三阶段均值，B0 44.7316/54.0934，固定头无M43.9498/52.7115，固定头有M43.9420/52.6928，完整B0固定只训M44.7462/54.1164，允许头更新44.0892/52.9801。用户要求不据此停止，保留task0–2原checkpoint逐值不变，四组只新增task3–7各5epoch/LR.0004，并评估8阶段Val/Test（ON与适用的OFF）。不重复前3任务，不以3阶段均值代替8阶段。
 
