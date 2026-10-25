@@ -1,5 +1,43 @@
 # 下一步任务
 
+## 2026-10-25：用户授权补Test关闭模块，独立评估分支实现中
+
+新建codex/historical-b32-test-bypass-20261025，保留前轮分析报告/脚本及上下文未提交记录。仅增加historical_b32_test_attribution限定开关，允许四个完整seed1历史b32模型的Test task0/2/7开启重放及只关闭各自B或C，拒绝关闭Adapter、改变人群、smoke或其他模型。原默认validation限制不变，不修改训练/model代码。新增GPU0四并行只读调度与ON逐值重放、未受影响视图、40份checkpoint SHA校验；8评估作业、24阶段，三边界均值不作为8阶段平均。
+
+输入为旧独立模型工作树formal_seed1_20261025_01，模型源码ab15571；EMOTIC Test/CLIP ViT-B16/原Face manifest，seed1/B64/workers2/OMP-MKL72/AMP-TF32，Adapter b32[1]/scale.03保持启用；不设优化器不训练。结果output/historical_b32_test_attribution/seed1_tasks027_20261025_01，日志对应logs。GPU0空闲约24GB，GPU1-7忙不使用，/dev/shm4GB空闲；门槛GPU6000MiB/SHM1024MiB，启动间隔12秒。
+
+本地python无Torch，新增5项单元测试因package初始化导入Torch尚不能执行，待独立远程树ddp环境运行；尚未称测试通过或正式启动。持续授权已覆盖Git-only提交推送/独立worktree部署及此次非破坏性评估，无需重复确认。不修改旧源码树、主树或test-only，不合并main。
+
+
+## 2026-10-25：历史b32底座叠加摘要模块五组完整结束，本轮未超过32.6800
+
+formal_seed1_20261025_01 completion=complete、failure不存在，19作业exit0/无待执行/无错误；5组240epoch/13950更新/0skip。基线历史四指标与8阶段完整预测逐值复现；40compact重算SHA均与训练/评估一致，旧任务参数、新模块、Frozen Forward冻结及恢复一致通过。源码ab1557142c95d0d8574ea172a968c55d78466a25仍clean；原主树153行/test-only5行及SHA保持。本次只读CPU分析，无新GPU前向/训练/权重改写/提交推送合并。
+
+Val最终/Val平均/Test最终/Test平均：BASE42.4628/49.4763/32.6800/39.5292；ATTENTION42.7411/49.9141/32.4091/39.1801；受限ATTENTION42.5177/50.2792/32.2423/39.3917；POSITION42.5951/49.6903/32.4352/39.5144；尺度校准POSITION42.8344/50.0303/32.2928/39.5217。四组val mAP均提高，Test最终/平均均未超过基线。位置校准Test cF1+0.3672，但mAP−0.3872，不混淆指标。原Attention Test八阶段全负；原位置前5阶段正、校准位置前4正，后期转负。旧人群旧类重放mAP变动≤0.0042，不将后期下降称灾难性遗忘；AMP logits并非逐值恒定（最大差0.0831以内，最大平均差0.00094）。
+
+结构证据：原Attention写回范数比0.180–2.161，受限版实际0.066–0.089，幅度机制生效仍未提升。Query来自任务Selector，跨图std约1e-7，权重仍随Full图片变化，但同图不同人物没有额外Query身份信息。Full/Person Test秩相关0.6883降到0.6387却精度下降，多样性不等于互补。原Attention Test Full31.2373→30.6947、Person30.4315→29.8938，融合相对自身Full补偿虽更大，净效果仍下降；受限版Adapter能量比更大，限新分支不等于保护整个底座。未测梯度方向，不宣称冲突已证实。
+
+Val关模块task0/2/7：原Attention开−关+0.4252/+0.2297/+0.0835；受限+0.1416/+0.0427/+0.0452；原位置+0.0041/+0.0095/+0.0065；校准位置−0.0127/+0.0009/+0.0016。校准位置最终关后42.8327，几乎保留其相对B0的val增益；不能将表面提升直接归为推理位置作用。位置确让同图Full端点产生差异，Test跨度中位数0→0.0115/0.0303，非坐标未接入。位置KL小且无饱和记录。关模块保留共训参数，不是重新训练基线。Test关模块尚未执行，不外推Val开关结论。
+
+304份正式非checkpoint产物已同步本地并逐SHA核验，归档SHAed1690345cc0b62e6e037e8a7e09c0f71ea7ad1f6402896de8bf958c8268a5fd。独立复算80常规/80视图/12关闭预测，最大误差5.69e-14，40原生Test重放逐值一致。500次原图bootstrap全部最终相对B0区间跨0；受限Attention最终Val开−关区间[0.0076,0.0890]为小正信号，非整方案优于B0。Test曾获授权参与搜索，不当作独立未选择验证。
+
+报告docs/historical_b32_modules_seed1_results_20261025.md，CPU脚本scripts/emotic/analyze_historical_b32_modules.py，分析CSV/审计/bootstrap位于output/historical_b32_modules/analysis_20261025_01。下一步仅建议：保留强B0，不立即叠加/扩网格；先现有checkpoint补Test task0/2/7关闭模块，若继续设计则先冻结对应阶段B0的Adapter/Selectors/Prompt/head，只训新增模块，在TRAIN按原图分组holdout和少量任务检验独立贡献。未启动额外实验。新增报告/脚本/执行上下文仅本地未提交，结束实验源码保持ab15571。
+
+
+## 2026-10-25约13:20：五组训练更新结束，正在收尾报告与完整评估，预计再20–30分钟
+
+只读核查formal_seed1_20261025_01：五组均240轮训练日志已齐；BASE/ATTENTION/ATTENTION_BOUND训练与验收完成，POSITION两组已完成task7第30轮，尚在原生task7 Test报告。BASE历史八阶段预测及四项指标已精确匹配（baseline_reproduction.status=exact）；BASE和ATTENTION完整val已完成，test及其余评估/四组关闭模块val继续自动排队，queue.failed=false，仍仅GPU0。实测完整8阶段val约4.2–4.4分钟，test每阶段约45–80秒，最多4评估并行。据此估计从13:20再20–30分钟，保守预留40分钟；这只是进度估计，未开展本轮精度/结构归因分析，无代码或调度变更。执行记录仅本地更新。
+
+
+## 2026-10-25：五组摘要模块smoke全部通过，正式seed1八任务已在GPU0启动
+
+模型源码ab1557142c95d0d8574ea172a968c55d78466a25，两端branch/HEAD/upstream在启动时一致且clean。独立远程工作树multi-lane-main-historical-b32-modules-seed1-20261025。smoke_seed1_20261025_04 completion=complete：五组真实CLIP FP32/AMP确定性初始化与LEGACY逐值相同，五组初始主参数SHA及CPU采样RNG一致；2task×2update均0skip，旧参数和新增模块冻结/Frozen Forward/恢复与compact一致；BASE与原36b7753的全部方法参数、loss、原生val预测逐值相同；10份常规val重放逐值匹配，4份关闭新增模块val成功。最新完整468项回归全部通过。
+
+正式formal_seed1_20261025_01已自动启动，tmux historical_b32_modules_formal_seed1_20261025；五组已全部在GPU0并行，PID BASE1646912/ATTENTION1647479/ATTENTION_BOUND1648259/POSITION1649021/POSITION_CALIBRATED1649784，首轮均84更新/0skip；BASE主loss.67947638及Adapter loss.03236856与历史首轮精确匹配。训练进程均未设置额外CUBLAS_WORKSPACE_CONFIG，保持原历史CUDA设置。五组为BASE、ATTENTION、ATTENTION_BOUND、POSITION、POSITION_CALIBRATED，seed1/8task/30epoch/B64/旧标准完整val+test；Adapter b32[1]/scale.03/LR.0004/ASL9.8/0/.05/aux.1，主LR.0125，新增模块BCE、LR.0004。前轮两路线不相互叠加。正式BASE最终仍必须精确匹配历史32.6800/39.5292和八阶段score；当前不预称已完整复现或精度提升。新增组另外自动val task0/2/7关闭模块归因，保留共同训练的其余参数，不视为独立基线。
+
+输出output/historical_b32_modules/formal_seed1_20261025_01，日志同名logs目录，driver位于logs/historical_b32_modules/implementation_20261025_01/formal_driver.log。startup_audit.json已核验五组config/source/进程/GPU及受保护工作树；238份非checkpoint启动/短程记录已同步本地output/historical_b32_modules/startup_snapshot_20261025_01并逐SHA验证，归档SHAb39591161f2c96f2d96b9aaaed7e2a5fd71ccc1f82440ef055807d91a9fd0ec1。运行源码保持ab15571不再更新，最新执行记录仅本地上下文更新。smoke01/02为仅初始化审计拦停，03的五训练成功但验收profile误用被拦停；均保留而非冒充成功。04为最终通过门槛。原主树153行/test-only5行及SHA保持，旧00fbf90/a30120c工作树clean；仅新增独立工作树，无main合并。
+
+
 ## 2026-10-25：五组摘要模块远程检查，GPU初始化审计定位为旧小批量GEMM非确定性
 
 新分支已Git-only部署独立工作树multi-lane-main-historical-b32-modules-seed1-20261025。新增5项真实梯度/配置/初始化/适配检查通过；完整468项回归两次通过，1项跳过。smoke01/02在初始化检查阶段拦停，没有发生正式训练。保留原BASE执行路径后仍出现约1e-5 FP32/约6e-5 AMP差异；单独原始LEGACY重复前向也出现同量级，关闭AMP cache不能消除。设置仅审计进程的CUBLAS_WORKSPACE_CONFIG=:4096:8与torch.use_deterministic_algorithms(True)后，原模型FP32/AMP三次重复逐值一致，故恢复全部零输出跨组逐值检查，不以容差替代。此设置不传给历史训练子进程。

@@ -38,7 +38,8 @@ def evaluate_split(source_run: Path, output: Path, split: str,
                    disable_specialist_runtime: bool = False,
                    expected_tasks: int = 8, workers: int = None,
                    checkpoint_tasks=None, disable_joint_residual: bool = False,
-                   disable_stacking_modules=()) -> dict:
+                   disable_stacking_modules=(),
+                   historical_b32_test_attribution: bool = False) -> dict:
     if split not in {"val", "test"}:
         raise ValueError("Split must be val or test")
     expected_tasks = 1 if allow_smoke else expected_tasks
@@ -46,11 +47,15 @@ def evaluate_split(source_run: Path, output: Path, split: str,
     if (not task_ids or len(set(task_ids)) != len(task_ids)
             or any(t < 0 or t >= expected_tasks for t in task_ids)):
         raise ValueError("Invalid checkpoint selection")
-    if (checkpoint_tasks is not None or disable_joint_residual) and split != "val":
+    if (checkpoint_tasks is not None or disable_joint_residual) and split != "val" and not historical_b32_test_attribution:
         raise ValueError("Joint residual attribution is validation-only")
     if output.exists():
         raise FileExistsError(output)
     config = json.loads((source_run / "config.json").read_text())
+    if historical_b32_test_attribution:
+        from .historical_b32_test_attribution import validate_request
+        validate_request(config, split, checkpoint_tasks, disable_stacking_modules, expected_tasks,
+            allow_smoke, full_cohort, disable_moe_runtime, disable_specialist_runtime, disable_joint_residual)
     if config.get("historical_feature_fusion"):
         from .historical_feature_fusion import validate_config
         validate_config(config)
@@ -68,7 +73,7 @@ def evaluate_split(source_run: Path, output: Path, split: str,
     if config.get("module_stacking"):
         from .module_stacking import validate_config
         validate_config(config)
-    if disable_stacking_modules and (not (config.get("module_stacking") or config.get("strong_full_asl") or config.get('historical_b32_modules')) or split != "val"):
+    if disable_stacking_modules and (not (config.get("module_stacking") or config.get("strong_full_asl") or config.get('historical_b32_modules')) or (split != "val" and not historical_b32_test_attribution)):
         raise ValueError("Stacking bypass is validation-only and requires the factorial protocol")
     if set(disable_stacking_modules) - {"A", "B", "C"}:
         raise ValueError("Unknown stacking runtime module")
@@ -245,7 +250,8 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         "checkpoint_tasks": task_ids,
         "joint_residual_runtime_enabled": not disable_joint_residual,
         "summary_is_selected_boundaries_only": checkpoint_tasks is not None,
-        "test_used_for_selection": False,
+        "historical_b32_test_attribution": bool(historical_b32_test_attribution),
+        "test_used_for_selection": bool(historical_b32_test_attribution),
         "smoke_validation_replay": bool(allow_smoke),
         "full_cohort": bool(full_cohort),
         "cohort_samples": len(source) if full_cohort else None,
@@ -286,7 +292,9 @@ def main() -> None:
     parser.add_argument("--disable-specialist-runtime", action="store_true",
                         help="V3 validation ablation: retain half-weight shared expert only.")
     parser.add_argument("--checkpoint-tasks", type=int, nargs="+", default=None,
-                        help="Validation-only selected checkpoint boundaries.")
+                        help="Selected validation boundaries, or explicitly scoped historical b32 Test attribution.")
+    parser.add_argument("--historical-b32-test-attribution", action="store_true",
+                        help="Explicit seed1 b32 Test on/off attribution at tasks 0/2/7; no training.")
     parser.add_argument("--disable-joint-residual", action="store_true",
                         help="Zero every task-local joint residual scale in memory only.")
     parser.add_argument("--disable-stacking-modules", nargs="+", choices=("A", "B", "C"), default=[])
@@ -304,7 +312,8 @@ def main() -> None:
                    expected_tasks=args.expected_tasks, workers=args.workers,
                    checkpoint_tasks=args.checkpoint_tasks,
                    disable_joint_residual=args.disable_joint_residual,
-                   disable_stacking_modules=args.disable_stacking_modules)
+                   disable_stacking_modules=args.disable_stacking_modules,
+                   historical_b32_test_attribution=args.historical_b32_test_attribution)
 
 
 if __name__ == "__main__":

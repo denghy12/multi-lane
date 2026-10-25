@@ -39,3 +39,17 @@ python -m multi_lane.track_a.run_historical_b32_modules。输入沿../multi-lane
 输出output/historical_b32_modules/<run-id>，日志logs/historical_b32_modules/<run-id>；包含compact与恢复状态、三路/融合预测、Attention原始及受限残差比、几何偏置与内容标准差/KL、冻结和SHA审计、summary/contrasts/completion/failure。统一旧samples_intersect_seen_classes评估，完整Val/Test，不改固定全人群。
 
 当前新分支codex/historical-b32-summary-modules-seed1-20261025，独立远程工作树已部署，5项针对性测试和468项完整回归通过（1skip）。smoke01/02在初始化检查阶段中止，无正式训练。已确认原始LEGACY小批量FP32/AMP重复前向亦有约1e-5/6e-5数值差异；仅审计进程启用确定性算法后重复逐值一致，保留所有跨组零输出严格检查，待smoke03。原主树153行/test-only5行及SHA保持，历史00fbf90和a30120c工作树clean，旧产物不覆盖。
+
+## 实际验收与启动
+
+最终源码ab1557142c95d0d8574ea172a968c55d78466a25，独立远程树multi-lane-main-historical-b32-modules-seed1-20261025。最终smoke_seed1_20261025_04全部完成：原CLIP/AMP零输出逐值相同，5组主参数初始化和CPU采样RNG一致，旧任务冻结和完整恢复均通过，native36b7753短跑全部方法张量/loss/预测相同；10份常规val重放逐值一致，4份运行时关闭模块val成功。完整468项回归通过。初始化审计单独启用确定性GEMM/算法，正式训练未启用此额外设置。
+
+smoke01/02停在初始化审计；03的训练成功，但复用验收函数只识别旧profile，已修复为显式传入新profile验证器，04完整通过。所有失败启动记录保留，无正式实验产物覆盖。
+
+formal_seed1_20261025_01已自动启动，tmux historical_b32_modules_formal_seed1_20261025。五组完整8任务各30epoch，完整validation/test以及新增组task0/2/7关闭模块val均自动调度；最多5GPU0作业，最多4并行评估，显存/共享内存余量门槛维持。BASE最终八阶段预测仍必须精确复现32.6800，当前无新最终成绩。
+
+五组均已在GPU0实际并行，首轮各84更新/0skip。BASE首轮主loss.67947638、Adapter loss.03236856精确匹配历史；最终指标及八阶段预测尚待完成。startup_audit.json核验所有组的seed/B64/branch/HEAD/clean配置、进程目录/CUDA_VISIBLE_DEVICES=0，以及原主树/test-only状态SHA；训练进程没有设置额外确定性GEMM变量。238份非checkpoint启动与smoke产物已同步本地并逐SHA核验，归档SHAb39591161f2c96f2d96b9aaaed7e2a5fd71ccc1f82440ef055807d91a9fd0ec1；正式源码保持ab15571，执行记录仅本地文档更新。
+
+## 完成状态（2026-10-25）
+
+五组及完整validation/test、四组关闭模块validation均结束，19作业成功。历史B0精确复现32.6800/39.5292及八阶段全部预测；新增四组虽val mAP提高，Test最终分别32.4091/32.2423/32.4352/32.2928，均未超过底座。最终分析见`docs/historical_b32_modules_seed1_results_20261025.md`，不再将本计划中的“待运行”历史条目作为当前状态。304份正式非checkpoint产物已同步并逐SHA核验，本次CPU只读分析，无新训练或GPU前向。
