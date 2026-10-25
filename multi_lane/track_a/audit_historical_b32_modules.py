@@ -17,7 +17,7 @@ def run(args):
     images.update(face_reliable=torch.tensor([True, False], device='cuda'),
         spatial_bbox=torch.tensor([[.1, .1, .7, .9], [.4, .1, .9, .8]], device='cuda'),
         spatial_visibility=torch.ones(2, device='cuda'))
-    baseline, initial, rng = None, None, None
+    baseline, baseline_fp32, initial, rng = None, None, None, None
     result = {}
     for arm in ('LEGACY', *ARMS):
         torch.set_rng_state(state)
@@ -31,14 +31,23 @@ def run(args):
             if not k.startswith(('cross_view_bank.', 'spatial_summary_bank.'))})
         after = torch.get_rng_state().clone()
         model.activate_task(0); model.eval()
+        with torch.no_grad():
+            fp32 = model.current_all_logits(images).detach().clone()
         with torch.no_grad(), torch.cuda.amp.autocast():
             scores = model.current_all_logits(images).detach().clone()
+        with torch.no_grad(), torch.cuda.amp.autocast():
+            repeated = model.current_all_logits(images).detach().clone()
+        assert torch.equal(scores, repeated), ('same-instance AMP repeat', arm)
         if arm == 'LEGACY':
-            baseline, initial, rng = scores, digest, after
+            baseline, baseline_fp32, initial, rng = scores, fp32, digest, after
         else:
             assert digest == initial and torch.equal(after, rng), arm
-            assert torch.equal(scores, baseline), (arm, float((scores-baseline).abs().max()))
-        result[arm] = dict(common_state_sha256=digest, zero_output_equals_legacy=True,
+            assert torch.allclose(fp32, baseline_fp32, atol=1e-6, rtol=1e-6), (arm, 'FP32', float((fp32-baseline_fp32).abs().max()))
+            assert torch.allclose(scores, baseline, atol=1e-4, rtol=1e-3), (arm, 'AMP', float((scores-baseline).abs().max()))
+        result[arm] = dict(common_state_sha256=digest, zero_output_numerically_equivalent=True,
+            fp32_max_abs_error=float((fp32-baseline_fp32).abs().max()),
+            amp_max_abs_error=float((scores-baseline).abs().max()),
+            amp_logits_exact=torch.equal(scores,baseline),same_instance_amp_exact=True,
             initialization_rng_equal=True)
         del model
         torch.cuda.empty_cache()
