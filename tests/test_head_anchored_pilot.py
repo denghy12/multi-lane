@@ -114,5 +114,25 @@ class HeadAnchoredPilotTest(unittest.TestCase):
                 torch.rand(3); raise RuntimeError('interrupted')
         self.assertEqual(before, rng_digest(rng_state()))
 
+    def test_task1_training_does_not_change_old_lane_or_classifier_rows(self):
+        for arm in ARMS:
+            with self.subTest(arm=arm):
+                model = self.model(arm != 'HEAD_FIXED_NO_ATTENTION')
+                model.activate_task(0)
+                # Represent an already adapted old lane, not an empty slice.
+                with torch.no_grad():
+                    model.selectors[0].add_(.7)
+                    if model.cross_view_bank is not None:
+                        model.cross_view_bank.tasks[0].out.weight.normal_(0,.1)
+                model.restore_task(1); configure_student(model,arm,1)
+                old = tensor_state_digest(task_slices(method_state(model),1,(2,1),False))
+                with patch('multi_lane.track_a.runner.TASK_SIZES',(2,1)):
+                    train_task(model,[(self.images(),torch.ones(3,1))],None,torch.device('cpu'),1,1,.0004,0.,1.,False,
+                        adapter_learning_rate=.0004,view_fusion_learning_rate=.0004,
+                        view_auxiliary_loss_weight=.1,
+                        loss_routing='joint_bce' if arm=='BASE_FIXED_ATTENTION' else 'adapter_asl',
+                        optimizer_group_builder=student_optimizer_groups)
+                self.assertEqual(old,tensor_state_digest(task_slices(method_state(model),1,(2,1),False)))
+
 
 if __name__ == '__main__': unittest.main()
