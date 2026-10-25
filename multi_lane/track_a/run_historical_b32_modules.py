@@ -9,7 +9,7 @@ import subprocess
 import sys
 import time
 
-from .historical_b32_modules import ARMS, training_arguments
+from .historical_b32_modules import ARMS, training_arguments, validate_config
 from .historical_b32_search import training_arguments as historical_arguments
 from .run_historical_b32_search import verify_train, compare_archive
 from .run_module_stacking import write
@@ -18,7 +18,7 @@ from .run_module_stacking import write
 def verify_modules(train, smoke):
     import torch
     from .export_compact_test_scores import _torch_load
-    result = verify_train(train, smoke)
+    result = verify_train(train, smoke, config_validator=validate_config)
     c = json.loads((train/'config.json').read_text())
     previous = None
     for t in range(2 if smoke else 8):

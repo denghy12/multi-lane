@@ -4,7 +4,7 @@
 
 新分支已Git-only部署独立工作树multi-lane-main-historical-b32-modules-seed1-20261025。新增5项真实梯度/配置/初始化/适配检查通过；完整468项回归两次通过，1项跳过。smoke01/02在初始化检查阶段拦停，没有发生正式训练。保留原BASE执行路径后仍出现约1e-5 FP32/约6e-5 AMP差异；单独原始LEGACY重复前向也出现同量级，关闭AMP cache不能消除。设置仅审计进程的CUBLAS_WORKSPACE_CONFIG=:4096:8与torch.use_deterministic_algorithms(True)后，原模型FP32/AMP三次重复逐值一致，故恢复全部零输出跨组逐值检查，不以容差替代。此设置不传给历史训练子进程。
 
-接下来smoke03独立确定性初始化审计，再5组及旧36b7753原生BASE两任务各2更新，严格比较训练loss/全部方法张量/原生预测；全部检查通过后才运行正式5组seed1/8task/完整val+test/GPU0。本条不宣称已训练或有提升。
+smoke03的五组真实CLIP初始化FP32/AMP输出与原始模型逐值相同，现已开始GPU0短程训练，尚无正式实验。实际五组config均通过严格新profile检查。代码复核发现复用的训练验收函数默认只接受旧profile，改为显式传入新profile验证器，旧调用默认行为不变；待本轮子进程退出后再Git-only更新工作树并重跑最终smoke。全部训练loss/方法张量/原生预测及评估重放通过后才正式5组seed1/8task/完整val+test。
 
 
 ## 2026-10-25：用户授权在32.6800底座分别加Attention/目标人物位置，五组实现中

@@ -14,14 +14,14 @@ from .historical_b32_search import experiment_cells, recipe, training_arguments,
 from .run_module_stacking import write
 
 
-def verify_train(train, smoke):
+def verify_train(train, smoke, config_validator=None):
     import torch
     from .export_compact_test_scores import _torch_load, _sha256
     from .verify_spatial_summary import load_boundary
     c = json.loads((train / 'config.json').read_text())
     s = json.loads((train / 'seed_summary.json').read_text())
     h = json.loads((train / 'training_history.json').read_text())
-    profile = validate_config(c)
+    profile = (config_validator or validate_config)(c)
     assert s['config'] == c and s['status'] == 'complete' and not c['git']['dirty']
     tasks = 2 if smoke else 8
     assert c['max_tasks'] == tasks and len(h) == tasks
