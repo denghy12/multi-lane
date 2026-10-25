@@ -109,6 +109,9 @@ class MultiLaneModel(nn.Module):
         spatial_summary_mode: str = "disabled",
         module_stacking: bool = False,
         strong_full_asl: bool = False,
+        historical_b32_modules: bool = False,
+        cross_view_residual_cap: float = 0.,
+        spatial_summary_bias_mode: str = 'raw',
     ) -> None:
         super().__init__()
         if not task_sizes or any(int(size) <= 0 for size in task_sizes):
@@ -263,7 +266,16 @@ class MultiLaneModel(nn.Module):
         if spatial_summary_mode not in TaskSpatialSummary.MODES:
             raise ValueError("Invalid spatial summary mode")
         self.strong_full_asl = bool(strong_full_asl)
-        self.module_stacking = bool(module_stacking or strong_full_asl)
+        self.historical_b32_modules = bool(historical_b32_modules)
+        self.module_stacking = bool(module_stacking or strong_full_asl or historical_b32_modules)
+        if self.historical_b32_modules and (adapter_mode != 'image_token' or view_fusion != 'fixed_three_view'):
+            raise ValueError('Historical b32 modules require the shared image-token three-view model')
+        if (cross_view_residual_cap != 0 or spatial_summary_bias_mode != 'raw') and not self.historical_b32_modules:
+            raise ValueError('Summary calibration requires the historical b32 module protocol')
+        if cross_view_mode == 'disabled' and cross_view_residual_cap != 0:
+            raise ValueError('Residual bounds require enabled attention')
+        if spatial_summary_mode == 'disabled' and spatial_summary_bias_mode != 'raw':
+            raise ValueError('Bias calibration requires enabled position summaries')
         if self.strong_full_asl and (adapter_mode != "image_token" or (
                 view_fusion == "disabled" and (cross_view_mode != "disabled" or spatial_summary_mode != "disabled"))):
             raise ValueError("Strong Full requires Image-token Adapter and single-view modules disabled")
@@ -515,7 +527,7 @@ class MultiLaneModel(nn.Module):
             )
         self.spatial_summary_mode = spatial_summary_mode
         self.spatial_summary_runtime_enabled = spatial_summary_mode != "disabled"
-        self.spatial_summary_bank = (TaskSpatialSummary(self.num_tasks, self.num_selectors, spatial_summary_mode)
+        self.spatial_summary_bank = (TaskSpatialSummary(self.num_tasks, self.num_selectors, spatial_summary_mode, spatial_summary_bias_mode)
                                      if spatial_summary_mode != "disabled" else None)
         self.cross_view_mode = cross_view_mode
         self.cross_view_runtime_enabled = cross_view_mode != "disabled"
@@ -523,7 +535,7 @@ class MultiLaneModel(nn.Module):
         if cross_view_mode != "disabled":
             self.cross_view_bank = TaskCrossViewAttentionBank(
                 self.num_tasks, self.width, cross_view_mode, cross_view_layer,
-                cross_view_dim, cross_view_heads, cross_view_scale)
+                cross_view_dim, cross_view_heads, cross_view_scale, cross_view_residual_cap)
         self._last_fusion_weights: Optional[torch.Tensor] = None
         self._last_base_fused_logits: Optional[torch.Tensor] = None
 
@@ -931,7 +943,7 @@ class MultiLaneModel(nn.Module):
                 attention = torch.softmax(similarity, dim=-1)
             else:
                 bias, overlap, visibility = spatial_summary
-                attention = torch.softmax(similarity + bias.to(similarity.dtype), dim=-1)
+                attention, bias = self.spatial_summary_bank.attention(similarity, bias)
                 self.spatial_summary_bank.observe(layer_id, lane_ids, bias, overlap,
                                                   visibility, similarity, attention)
             selected = torch.einsum("tbnc,tbsn->tbsc", selector_image_tokens, attention)
@@ -957,7 +969,7 @@ class MultiLaneModel(nn.Module):
                 attention = torch.softmax(similarity, dim=-1)
             else:
                 bias, overlap, visibility = spatial_summary
-                attention = torch.softmax(similarity + bias.to(similarity.dtype), dim=-1)
+                attention, bias = self.spatial_summary_bank.attention(similarity, bias)
                 self.spatial_summary_bank.observe(layer_id, lane_ids, bias, overlap,
                                                   visibility, similarity, attention)
             selected = torch.einsum("bnc,tbsn->tbsc", selector_image_tokens, attention)

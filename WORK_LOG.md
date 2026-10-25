@@ -1,5 +1,41 @@
 # 工作日志
 
+## 2026-10-25：用户授权在32.6800底座分别加Attention/目标人物位置，五组实现中
+
+新建codex/historical-b32-summary-modules-seed1-20261025，保留前轮分析未提交改动。计划seed1 BASE、原Attention、RMS受限Attention、原位置偏置、内容尺度校准位置偏置，共5组完整8task val/test，另自动task0/2/7 val关闭新增模块。保留历史b32[1]/scale.03/Adapter-ASL/aux.1/Person jitter0、全TRAIN/B64/30epoch/主LR.0125/模块与Adapter LR.0004/旧AMP65536-growth2000/全局采样/CPU72；仅GPU0最多5作业/4评估，显存不足自动排队。
+
+新模块仍BCE更新，仅Adapter走ASL，原版和适配版独立比较不同时叠加。受限Attention平滑RMS界.1且零点梯度不截断；位置偏置乘detach内容std截断[.25,4]并FP32softmax。独立historical_b32_modules profile避免启用旧strongFull标志改变AMP/随机流；模型内部兼容原三路执行路径。新增真实CLIP/AMP初始化审计、native36b7753短跑、实际辅助梯度测试、冻结/恢复/旧预测锚点守卫。尚仅本地实现和语法检查，无新正式成绩，待远程回归/smoke后运行。
+
+方案docs/historical_b32_modules_seed1_plan_20261025.md，入口multi_lane.track_a.run_historical_b32_modules，输出output/historical_b32_modules，日志对应logs。原主树153行/test-only5行及SHA保持，旧00fbf90/a30120c工作树clean。用户已授权执行，提交推送与Git-only部署不再重复确认。
+
+## 2026-10-25：18组历史b32实验完整结束，精确复现但最终收益未跨seed稳定
+
+formal_seed013_20261024_01 completion=complete、failure不存在，18训练和36份8阶段val/test均成功，队列54作业无待执行/活动/错误。18组均240epoch/13950更新/0skip；144份compact SHA重算与训练及评估记录一致，冻结旧参数/Frozen Forward/恢复model等于compact审计通过。模型00fbf90、调度器a30120c工作树clean，原主树153行/test-only5行及状态SHA保持。原4接管作业依成功日志和完整产物核验，其他新子进程保留实际退出码。此次仅CPU分析，无GPU前向/训练/权重更改/提交推送合并。
+
+历史seed1精确复现32.6800218743/39.5291640411/cF132.8226918781/oF149.5458931279及8阶段全部预测。三视图基准/同seed Full四项val最终/val平均/test最终/test平均：seed0三视图42.0575/48.8372/32.2177/39.2517，Full42.4351/48.8234/32.3836/38.8570；seed1三视图42.4628/49.4763/32.6800/39.5292，Full42.1535/49.0777/32.1389/38.6729；seed3三视图42.4591/49.4636/31.8730/38.7950，Full41.7897/48.0306/31.8920/38.4180。最终Test差−.1659/+.5411/−.0190，阶段平均三个seed均正+.3948/+.8562/+.3770；平均最终+.1187但1/3为正，非稳定最终提升。
+
+参数结果：seed0最终Test最好aux.2=32.2935，仍低匹配Full32.3836与强Full32.5365；seed3最终最好LR.0002=32.2026，但缺同LR Full，不能把全部差值归给融合。scale.01的seed0 val43.1869/50.6019大增，Test32.1519/39.1674却低基准。scale.05两seed四项均低。aux0两seed四项均低；aux.2两seed最终val/test均提高，但seed0阶段均下降，Test仅末阶段高基准。过去scale.1/带颜色扰动时辅助监督不优，不能推广为本配方aux无益。Test按授权参与选择，完整报告全部结果。
+
+结构归因：共享模型Full Test30.5997/31.2373/30.6061，融合补回1.6180/1.4427/1.2669；seed1成功并非补回最多，而是Full损失较少。同图多人Test1237图中1185图标签不同，Full几乎给所有人物相同logits，局部视图提供主体区分；Test多人/单人子集差：seed0−.0189/−.7763，seed1+.7091/+.3993，seed3+.6800/−.8931。可靠Face子集三个seed val/test均正，不可靠回退更不稳；Face已屏蔽不能归为坏Face直接混入。
+
+必须准确解释Adapter日志：ratio为E[||delta||²/||x||²]的能量比，不是L2范数比或百分比。LR.0008的task7 Full能量比9.2928/7.4832，scale.05为3.4795/3.6748；小名义系数不能保证弱适配，但能量不直接证明失败。固定旧人群旧类36项重放中，三视图mAP差在−.0030到+.0028，不能把阶段累计下降称灾难性遗忘。500次原图bootstrap全部关键最终Test差值区间跨0，不含训练seed方差或搜索校正。
+
+906份正式非checkpoint结果和日志已同步到output/historical_b32_search/complete_snapshot_20261025_01并逐SHA核验，归档SHA775f5b54b3d7893212bd4c42cde3ed8246021067dc4311a16dadbe04829b4995。独立复算288常规/240视图预测，最大误差1.21e-13，144原生Test重放全等。报告docs/historical_b32_seed03_results_20261025.md，脚本scripts/emotic/analyze_historical_b32_search.py，CSV/审计/bootstrap位于output/historical_b32_search/analysis_20261025_01。
+
+下一步仅建议未执行：本轮checkpoint在val task0/2/7关闭Adapter归因，不能以上轮scale.1关闭结果替代；若保留LR.0002或scale.01候选，补对应参数Full后再称融合收益。暂不扩大网格、叠加Attention/位置或把旧失败Full锚定方案换名。保留强Full32.5365/39.1445；未经新授权不启动训练/额外GPU推理。
+
+## 2026-10-24：GPU0已成功6组并行，原4进程和训练进度完整保留
+
+新控制器a30120c19c0181a0c95f9e883e93d9ba11ee8312已Git-only部署并接管formal_seed013_20261024_01，tmux historical_b32_six_slots_20261024_02、控制器PID1442482。先核实四训练SID=PGID=各自PID、TTY=0，再仅SIGTERM旧调度器1430541；没有给训练发信号或重启。原四PID1430615/1430769/1431304/1431843及start ticks均保持；新增seed1 Full PID1442557、seed3 Full PID1443124，二者前5epoch均0skip；原三视图已到task1 epoch13、seed0 Full到task3 epoch16，0skip。当前6训练/其余12训练自动排队，后续完整36份8阶段val/test仍自动执行。
+
+B64、原训练CLI、模型源码00fbf90和所有seed/epoch/优化器/AMP/RNG保持，6组config均核验。GPU0约17056MiB使用/7026MiB空闲、计算100%，/dev/shm约38MiB。原seed1 task0完整score的IDs/labels/classes/logits/probabilities与历史逐值一致。新增8项本地调度测试、远程22项相关检查及实际Linux zombie退出码预检/dry-run通过。第一次暂停式接管失败的driver.log保留，不当作训练失败；成功driver02.log为当前入口。
+
+模型工作树multi-lane-main-historical-b32-seed03-20261024仍clean在00fbf90；独立控制工作树multi-lane-main-b32-gpu0-controller-20261024在a30120c。队列继续原logs/historical_b32_search/formal_seed013_20261024_01/queue.json，带controller=six_slot_handoff；控制日志在控制树logs/historical_b32_search/concurrency_20261024_01/driver02.log。原run的runtime_scheduling_policy.json可动态设训练上限（当前6）、评估上限4、GPU余量6000MiB/共享内存余量1024MiB、启动间隔12秒；变更历史jsonl保存。
+
+资源空闲不等于计算空闲，4组时计算已100%；此次增加同时训练组数，不承诺线性提速，也不在历史复现中改batch。接管审计concurrency_after_audit.json和concurrency_handoff.json保留原PID身份及训练未重启证据。待全部完成再分析精度；禁止重复启动或更新活动模型/控制源码。最新执行记录仅本地上下文更新。
+
+调度接管26份非checkpoint审计/日志已同步本地并逐SHA核验，归档SHA ea80ee565ebf0e2ec33cab00bd610b02fdbb3ce7b93611a5cb87792ddd62d394。模型00fbf90与控制器a30120c工作树均clean；原主树153行/test-only5行及状态SHA保持。
+
 ## 2026-10-24：6槽首次暂停式接管中止，改用独立会话验证后退出旧调度器
 
 控制器7fa561d已Git-only部署multi-lane-main-b32-gpu0-controller-20261024，远程21项相关测试和dry-run通过。但首次SIGSTOP后原调度器未保持T状态，接管在写handoff/启动新训练之前中止；原4组继续、队列仍正常，已SIGCONT回滚。日志concurrency_20261024_01/driver.log保留，原训练从未重启。不能把首次尝试说成成功，也不猜测外部SIGCONT原因。

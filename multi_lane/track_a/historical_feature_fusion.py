@@ -48,6 +48,9 @@ def _check(values, expected):
 
 
 def validate_arguments(args):
+    if getattr(args, 'historical_b32_modules', False):
+        from .historical_b32_modules import validate_arguments as validate_modules
+        return validate_modules(args)
     if getattr(args, 'historical_b32_profile', None) is not None:
         from .historical_b32_search import validate_arguments as validate_b32
         return validate_b32(args)
@@ -67,6 +70,9 @@ def validate_arguments(args):
 
 
 def validate_config(config):
+    if config.get('historical_b32_modules'):
+        from .historical_b32_modules import validate_config as validate_modules
+        return validate_modules(config)
     if config.get('historical_b32_profile') is not None:
         from .historical_b32_search import validate_config as validate_b32
         return validate_b32(config)

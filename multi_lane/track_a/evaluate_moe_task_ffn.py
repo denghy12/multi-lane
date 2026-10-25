@@ -68,7 +68,7 @@ def evaluate_split(source_run: Path, output: Path, split: str,
     if config.get("module_stacking"):
         from .module_stacking import validate_config
         validate_config(config)
-    if disable_stacking_modules and (not (config.get("module_stacking") or config.get("strong_full_asl")) or split != "val"):
+    if disable_stacking_modules and (not (config.get("module_stacking") or config.get("strong_full_asl") or config.get('historical_b32_modules')) or split != "val"):
         raise ValueError("Stacking bypass is validation-only and requires the factorial protocol")
     if set(disable_stacking_modules) - {"A", "B", "C"}:
         raise ValueError("Unknown stacking runtime module")
@@ -126,6 +126,9 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         spatial_summary_mode=config.get("spatial_summary_mode", "disabled"),
         module_stacking=config.get("module_stacking", False),
         strong_full_asl=config.get("strong_full_asl", False),
+        historical_b32_modules=config.get('historical_b32_modules', False),
+        cross_view_residual_cap=config.get('cross_view_residual_cap', 0.),
+        spatial_summary_bias_mode=config.get('spatial_summary_bias_mode', 'raw'),
         cross_view_mode=config.get("cross_view_mode", "disabled"),
         cross_view_layer=config.get("cross_view_layer", 5),
         cross_view_dim=config.get("cross_view_dim", 64),

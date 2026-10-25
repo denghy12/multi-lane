@@ -10,11 +10,14 @@ from torch.nn import functional as F
 class TaskSpatialSummary(nn.Module):
     MODES = ("disabled", "absolute", "target")
 
-    def __init__(self, num_tasks: int, num_selectors: int, mode: str):
+    def __init__(self, num_tasks: int, num_selectors: int, mode: str, bias_mode: str = 'raw'):
         super().__init__()
         if mode not in self.MODES[1:] or min(num_tasks, num_selectors) <= 0:
             raise ValueError("Invalid spatial summary configuration")
         self.mode = mode
+        if bias_mode not in {'raw', 'content_relative'}:
+            raise ValueError('Invalid spatial bias calibration')
+        self.bias_mode = bias_mode
         self.tasks = nn.ParameterList([
             nn.Parameter(torch.zeros(num_selectors, 6)) for _ in range(num_tasks)
         ])
@@ -86,6 +89,17 @@ class TaskSpatialSummary(nn.Module):
             bias = torch.einsum("tmf,bnf->tbmn", weights.float(), phi).tanh() * v[None, :, None, None]
         return bias, actual_overlap, v
 
+    def attention(self, similarity, bias):
+        if self.bias_mode == 'raw':
+            return (similarity + bias.to(similarity.dtype)).softmax(-1), bias
+        # Match each layer/selector's evidence scale without changing the
+        # zero-bias model or backpropagating through the calibration statistic.
+        with torch.autocast(device_type=similarity.device.type, enabled=False):
+            scale = similarity.detach().float()[..., 1:].std(-1, keepdim=True, unbiased=False).clamp(.25, 4.)
+            effective = bias.float() * scale
+            attention = (similarity.float() + effective).softmax(-1)
+        return attention.to(similarity.dtype), effective
+
     def reset_statistics(self):
         self._statistics = {}
 
@@ -103,6 +117,9 @@ class TaskSpatialSummary(nn.Module):
                        cls_mass_sum=a[..., 0].mean(-1).sum(),
                        target_overlap_mass_sum=(a * overlap[:, None]).sum(-1).mean(-1).sum(),
                        attention_kl_sum=(a * (a.clamp_min(1e-30).log() - p.clamp_min(1e-30).log())).sum(-1).mean(-1).sum())
+            content_std = similarity[index].detach().float()[..., 1:].std(-1, unbiased=False).clamp_min(1e-8)
+            row['content_logit_std_sum'] = content_std.mean(-1).sum()
+            row['bias_to_content_std_sum'] = (b.abs().mean(-1) / content_std).mean(-1).sum()
             key = f"task{task}/layer{layer}"
             if key not in self._statistics:
                 self._statistics[key] = row

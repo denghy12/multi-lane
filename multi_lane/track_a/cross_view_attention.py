@@ -10,6 +10,18 @@ from torch import nn
 from torch.nn import functional as F
 
 
+def bounded_summary_delta(delta, reference, cap):
+    """Smooth RMS bound, with identity derivative at zero residual."""
+    if cap == 0:
+        return delta
+    with torch.autocast(device_type=delta.device.type, enabled=False):
+        base_sq = reference.detach().float().square().mean(-1, keepdim=True)
+        delta_sq = delta.float().square().mean(-1, keepdim=True)
+        factor = (1 + delta_sq / (cap ** 2 * base_sq).clamp_min(1e-12)).rsqrt()
+        value = torch.where(base_sq > 0, delta.float() * factor, torch.zeros_like(delta.float()))
+    return value.to(delta.dtype)
+
+
 class SummaryAttention(nn.Module):
     def __init__(self, width, inner_dim, heads, scale):
         super().__init__()
@@ -46,13 +58,16 @@ class TaskCrossViewAttentionBank(nn.Module):
     MODES = ('disabled', 'person_self', 'task_full', 'person_full')
 
     def __init__(self, num_tasks, width, mode, layer_index=5, inner_dim=64,
-                 heads=4, scale=.1):
+                 heads=4, scale=.1, residual_cap=0.):
         super().__init__()
         if (mode not in self.MODES[1:] or min(num_tasks, width, inner_dim, heads) <= 0
                 or inner_dim % heads or layer_index < 0
                 or not math.isfinite(scale) or not 0 < scale <= 1):
             raise ValueError('Invalid cross-view attention configuration')
         self.mode, self.layer_index = mode, layer_index
+        if not math.isfinite(residual_cap) or not 0 <= residual_cap <= 1:
+            raise ValueError('Invalid summary residual bound')
+        self.residual_cap = residual_cap
         self.current_task_id = -1
         self.tasks = nn.ModuleList()
         with torch.random.fork_rng(devices=[]):
@@ -88,7 +103,7 @@ class TaskCrossViewAttentionBank(nn.Module):
         for key, row in self._statistics.items():
             n = row['samples']
             result = {k: v.cpu().tolist() for k, v in row.items()}
-            for name in ('base_norm', 'residual_norm', 'ratio', 'cosine', 'entropy'):
+            for name in ('base_norm', 'residual_norm', 'ratio', 'raw_ratio', 'cosine', 'entropy'):
                 result[name+'_mean'] = float((row[name+'_sum']/n).cpu())
             result['query_std_across_images'] = (
                 row['query_square_sum']/n-(row['query_sum']/n).square()).clamp_min(0).sqrt().cpu().tolist()
@@ -117,6 +132,8 @@ class TaskCrossViewAttentionBank(nn.Module):
                 query_override=query_override[index], query_mask=query_mask)
             delta, weights, normalized_query = self.tasks[task](query, source, **options)
             delta = delta.to(p.dtype)
+            raw_delta = delta
+            delta = bounded_summary_delta(delta, p, self.residual_cap)
             result.append(p + delta)
             with torch.no_grad():
                 bnorm = p.float().norm(dim=-1).mean(-1)
@@ -126,6 +143,7 @@ class TaskCrossViewAttentionBank(nn.Module):
                 row = dict(samples=bnorm.new_tensor(len(p), dtype=torch.float64),
                     base_norm_sum=bnorm.double().sum(), residual_norm_sum=dnorm.double().sum(),
                     ratio_sum=(dnorm/bnorm.clamp_min(1e-12)).double().sum(),
+                    raw_ratio_sum=(raw_delta.float().norm(dim=-1).mean(-1)/bnorm.clamp_min(1e-12)).double().sum(),
                     cosine_sum=F.cosine_similarity(p.float(), delta.float(), dim=-1).mean(-1).double().sum(),
                     entropy_sum=(-(weights.double()*weights.double().clamp_min(1e-30).log()).sum(-1)).mean((1,2)).sum(),
                     query_sum=qmean.sum(0), query_square_sum=qmean.square().sum(0),

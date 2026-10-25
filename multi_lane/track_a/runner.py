@@ -2148,7 +2148,7 @@ def train_task(
                         adapter_gradient_totals.get(key, 0.0) + float(value)
                     )
                 adapter_gradient_batches += 1
-            if getattr(model, "strong_full_asl", False) and batch_index == 0:
+            if (getattr(model, "strong_full_asl", False) or getattr(model, "historical_b32_modules", False)) and batch_index == 0:
                 epoch_parameter_gradients = strong_full_gradient_diagnostics(model, scale_before)
             if gradient_clip_norm > 0:
                 # GradScaler keeps gradients scaled until unscale_. Clip the
@@ -2710,6 +2710,10 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--historical-feature-fusion", action="store_true", help="Original feature fusion, historical RNG/AMP and auxiliary BCE/ASL controls")
     parser.add_argument("--historical-b32-profile", default=None,
                         help="Locked historical b32 reproduction or declared single-factor search profile")
+    parser.add_argument('--historical-b32-modules', action='store_true')
+    parser.add_argument('--historical-b32-module-profile', default=None)
+    parser.add_argument('--cross-view-residual-cap', type=float, default=0.)
+    parser.add_argument('--spatial-summary-bias-mode', choices=['raw', 'content_relative'], default='raw')
     parser.add_argument("--module-stacking", action="store_true", help="Locked three-module factorial protocol with shared contraction and aux0.1")
     parser.add_argument("--resume-spatial-boundary", type=Path, help="Continue the locked spatial experiment from a complete pre-reporting task snapshot")
     parser.add_argument("--moe-num-experts", type=int, default=22)
@@ -2843,6 +2847,10 @@ def main() -> None:
 
 
 def run(args: argparse.Namespace) -> None:
+    if args.historical_b32_modules != (args.historical_b32_module_profile is not None):
+        raise ValueError('Historical b32 module flag and profile must be specified together')
+    if args.historical_b32_modules and not args.historical_feature_fusion:
+        raise ValueError('Historical summary modules require historical feature-fusion numerics')
     if args.historical_b32_profile is not None and not args.historical_feature_fusion:
         raise ValueError("Historical b32 profiles require --historical-feature-fusion")
     if args.historical_feature_fusion:
@@ -2854,14 +2862,14 @@ def run(args: argparse.Namespace) -> None:
     if args.module_stacking:
         from .module_stacking import validate_arguments
         validate_arguments(args)
-    if args.spatial_summary_mode != "disabled" and not (args.module_stacking or args.strong_full_asl) and (
+    if args.spatial_summary_mode != "disabled" and not (args.module_stacking or args.strong_full_asl or args.historical_b32_modules) and (
         not args.moe_paired_audit or args.loss_routing != "joint_bce"
         or args.view_gradient_routing != "joint" or args.adapter_mode != "disabled"
         or args.parax_mode != "disabled" or args.cross_view_mode != "disabled"
         or args.joint_summary_mode != "disabled" or args.selector_conditioning != "disabled"
     ):
         raise ValueError("Spatial summaries require paired original three-view joint BCE")
-    if args.cross_view_mode != "disabled" and not args.strong_full_asl and (
+    if args.cross_view_mode != "disabled" and not (args.strong_full_asl or args.historical_b32_modules) and (
         not args.moe_paired_audit or (args.view_auxiliary_loss_weight != 0 and not args.module_stacking)
         or args.view_gradient_routing != "joint" or args.view_gradient_audit
         or args.view_path_gradient_audit_batches or args.loss_routing != "joint_bce"
@@ -3319,6 +3327,9 @@ def run(args: argparse.Namespace) -> None:
         spatial_summary_mode=args.spatial_summary_mode,
         module_stacking=args.module_stacking,
         strong_full_asl=args.strong_full_asl,
+        historical_b32_modules=args.historical_b32_modules,
+        cross_view_residual_cap=args.cross_view_residual_cap,
+        spatial_summary_bias_mode=args.spatial_summary_bias_mode,
         cross_view_mode=args.cross_view_mode,
         cross_view_layer=args.cross_view_layer,
         cross_view_dim=args.cross_view_dim,
@@ -3399,7 +3410,7 @@ def run(args: argparse.Namespace) -> None:
         fusion_parameters_per_task += model.joint_summary_bank.parameter_count_per_task()
     if model.cross_view_bank is not None:
         fusion_parameters_per_task += model.cross_view_bank.parameter_count_per_task()
-    if (args.module_stacking or args.strong_full_asl) and model.spatial_summary_bank is not None:
+    if (args.module_stacking or args.strong_full_asl or args.historical_b32_modules) and model.spatial_summary_bank is not None:
         fusion_parameters_per_task += model.spatial_summary_bank.parameter_count_per_task()
     print(
         f"trainable_parameters={lane_parameters + classifier_parameters + adapter_parameters_per_task + parax_parameters + condition_parameters_per_task + fusion_parameters_per_task} "
@@ -3583,6 +3594,10 @@ def run(args: argparse.Namespace) -> None:
         "strong_full_asl": bool(args.strong_full_asl),
         "historical_feature_fusion": bool(args.historical_feature_fusion),
         "historical_b32_profile": args.historical_b32_profile,
+        "historical_b32_modules": args.historical_b32_modules,
+        "historical_b32_module_profile": args.historical_b32_module_profile,
+        "cross_view_residual_cap": args.cross_view_residual_cap,
+        "spatial_summary_bias_mode": args.spatial_summary_bias_mode,
         "fixed_view_sampler_protocol": "seed_plus_1009_times_task" if (args.fixed_view_paired_audit or args.protected_parax_paired_audit or args.moe_paired_audit or args.strong_full_asl) else None,
         "frozen_visual_sha256_before": frozen_visual_before,
         "training_loss_mode": args.training_loss_mode,
