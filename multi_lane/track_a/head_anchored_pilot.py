@@ -199,13 +199,31 @@ def worker(args):
             view_fusion_learning_rate=.0004, **modes('ATTENTION_BOUND'))
     model = build(architecture, args.clip_checkpoint)
     load_initial_teacher(model, source_checkpoint(args, baseline_config, 0))
+    # Store actual construction arguments, not B0's derived inactive-M counts
+    # or its 30-epoch optimizer metadata as if they described the student.
+    architecture_keys = ('num_selectors', 'num_prompts', 'num_prompt_layers',
+        'selector_mode', 'prompt_mode', 'normalize', 'adapter_mode',
+        'adapter_bottleneck_dim', 'adapter_layer_indices', 'adapter_residual_scale',
+        'adapter_activation', 'adapter_task_initialization', 'view_fusion',
+        'view_classifier_mode', 'cross_view_mode', 'cross_view_layer',
+        'cross_view_dim', 'cross_view_heads', 'cross_view_scale', 'cross_view_residual_cap')
+    actual_architecture = {k:architecture[k] for k in architecture_keys}
+    actual_architecture.update(task_sizes=list(model._task_sizes), spatial_summary_mode='disabled',
+        parax_mode='disabled', attention_parameters_per_task=(
+            model.cross_view_bank.parameter_count_per_task() if model.cross_view_bank is not None else 0))
     config = dict(schema_version=1, experiment='head_anchored_extra_adaptation', arm=args.arm,
         git=git, teacher_git=baseline_config['git'], teacher_source=str(args.source_run),
-        teacher_architecture=baseline_config, student_architecture=architecture,
+        teacher_architecture=baseline_config, student_architecture=actual_architecture,
         seed=1, tasks=list(TASKS), split='val', test_loaded=False, historical_test_exploration=True,
         epochs=5, learning_rate=.0004, batch_size=64, workers=2, amp=True, tf32=True,
         optimizer='Adam_reset_per_task', scheduler='cosine', weight_decay=0.,
         view_auxiliary_loss_weight=.1, evaluation_scope='samples_intersect_seen_classes',
+        adaptation_rng_seeds={str(t):20261025+1009*t for t in TASKS},
+        train_sampler_seeds={str(t):317001+t for t in TASKS},
+        amp_initial_scale=65536., amp_growth_interval=2000, training_loss_mode='legacy_full_zero',
+        runtime=dict(torch=str(torch.__version__), cuda=torch.version.cuda,
+                     cudnn=torch.backends.cudnn.version(), threads=torch.get_num_threads(),
+                     omp_threads=os.environ.get('OMP_NUM_THREADS'), mkl_threads=os.environ.get('MKL_NUM_THREADS')),
         smoke=args.smoke, smoke_updates=2 if args.smoke else None,
         teacher_checkpoint_sha256={str(t):_sha256(args.source_run/'compact_checkpoints'/f'task{t}.pth') for t in TASKS},
         data_root=str(args.data_root), clip_checkpoint=str(args.clip_checkpoint),

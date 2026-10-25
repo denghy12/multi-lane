@@ -2,6 +2,10 @@
 
 ## 2026-10-25：分类头锚定的额外适配pilot实现中
 
+482项远程回归、smoke_seed1_20261025_01五作业全部完成：四学生各task0–2两更新0跳步，实际batch跨组逐值一致，B0及MOnly OFF的三个阶段融合预测精确重放。正式前完善学生实际架构/参数量、AMP及适配RNG元数据，需在最终源码重新通过smoke后才启动5epoch；不改变损失或训练数据流。
+
+远程Git-only独立树已建立，源码34a13e37174b33cc919aac391f498f9fb4785c27与本地分支一致；482项unittest通过（20.52秒）。GPU0的smoke_seed1_20261025_01已通过tmux启动：四组各task0–2两更新和完整Val、Attention OFF及B0重放，当前运行中，正式5epoch尚未启动。主树/test-only HEAD及status SHA与既有记录一致，未修改。
+
 用户授权执行，分支codex/historical-b32-head-anchored-pilot-20261025。四学生组：固定头无Attention、固定头加限幅Attention、完整B0冻结只训Attention、允许头一起更新。seed1 task0–2，仅Val，额外5epoch、全部可训练参数LR.0004、Adam/reset/cosine/WD0、B64/workers2/72线程/AMP/TF32。GPU0最多4并行，空闲显存≥6000MiB、shm≥1024MiB放行，间隔12秒。先同源码smoke gate再正式。
 
 复用ab15571的BASE各当时阶段checkpoint，禁止未来阶段权重；只覆盖学生当前ASP及H当前类别行，保留旧学生任务冻结，不调用activate_task继承学生S/P。额外随机流隔离并恢复，实际batch跨四组核对。Adapter ASL，其余可训练参数融合BCE+aux.1；MOnly只优化M的BCE。每阶段评估前先存compact及optimizer/scheduler/scaler/RNG恢复状态。原B0三阶段重放、MOnly OFF必须精确匹配既有预测。原Attention OFF仍保留学生ASP/H，不是B0。仅3阶段均值，不新跑Test/扩8任务/扩seed。

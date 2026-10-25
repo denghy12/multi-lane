@@ -71,4 +71,16 @@
 
 本方案增加额外训练阶段；需把B0训练和学生适配成本都计入，匹配控制也获得同样额外预算。训练/审计需保留Teacher和Student当前/旧任务参数，不需要复制预训练视觉骨干权重。完整ASP为每任务134432参数、8任务1075456；限幅Attention每任务196608、8任务1572864。保留双ASP与Attention时，相对B0约多2648320参数，若另存学生head再加13338；实际部署可按回退需求决定是否常驻Teacher参数，显存/吞吐实测后再汇报。
 
-这是一套优化与参数传递约束的候选，不是已经成立的模块创新。若不加Attention的固定头控制同样好，应如实把改进归为表征/读出训练策略。当前尚未修改或启动这套训练流程；现有完成工作仅为只读归因。
+这是一套优化与参数传递约束的候选，不是已经成立的模块创新。若不加Attention的固定头控制同样好，应如实把改进归为表征/读出训练策略。本节方案已经用户授权进入实现；当前执行状态见文首及上下文文档，不能把先前只读换头结果写成这次训练的结果。
+
+## 8. 当前三路分类的数据流
+
+三视图是同一目标人物的Full整图、Person裁剪、Face裁剪。三路图像分别通过Frozen Forward，但共享同一组冻结CLIP视觉骨干权重，并非三套独立训练的backbone。同一任务的A/S/P也由三视图共享，输入内容不同。
+
+在各层，Task Selectors通过Summarize读取当前视图图像证据；Image-token Adapter位于第2层的Selector证据分支，只改读取的图像token，不写回Frozen Forward。Task Forward结合摘要和Prefix Prompt做任务注意力、Drop & Replace及FFN。新增限幅Attention位于第6层摘要入口：任务Selector Query读取Full摘要K/V，残差写入Person摘要，然后继续原Person Task Forward；Full与Face分支结构保留。
+
+三路任务CLS经ln_post与CLIP projection，得到512维特征，各自L2归一化。可靠Face时融合0.64Full+0.16Person+0.20Face；不可靠Face时0.80Full+0.20Person，Face为0。代码在加权和后不再次L2归一化。
+
+融合特征送入一个共享线性分类头H，得到多标签logits，独立sigmoid为各情绪概率。训练还把每路特征各自送入同一个H以提供aux监督；不是三个独立head，也不是从三路里挑效果最好的一路。主目标为融合BCE，加0.1乘有效视图BCE的均值；Face可靠性掩码用于Face辅助监督。Adapter对应路径接受融合ASL+0.1视图ASL，其余可训练参数接受BCE。冻结H只禁止H更新，不阻断梯度流向前面的可训练参数。
+
+增量推理对全部已见Task Forward计算各任务对应类别logits，按task_class_mask取出各自拥有的类别并拼成累计类别预测，不挑一个最优任务。pilot到task2只含11个已见类别，不能和task7的26类别结果直接比大小。
