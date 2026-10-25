@@ -74,7 +74,7 @@ def validate_config(config):
 
 def runtime_bypass(model, disabled):
     disabled = set(disabled)
-    if not model.module_stacking or disabled - {'A', 'B', 'C'}:
+    if not (model.module_stacking or getattr(model, 'historical_b32_modules', False)) or disabled - {'A', 'B', 'C'}:
         raise ValueError('Invalid factorial runtime bypass')
     if model.adapter_bank is not None:
         model.set_adapter_runtime_enabled('A' not in disabled)

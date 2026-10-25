@@ -267,7 +267,7 @@ class MultiLaneModel(nn.Module):
             raise ValueError("Invalid spatial summary mode")
         self.strong_full_asl = bool(strong_full_asl)
         self.historical_b32_modules = bool(historical_b32_modules)
-        self.module_stacking = bool(module_stacking or strong_full_asl or historical_b32_modules)
+        self.module_stacking = bool(module_stacking or strong_full_asl)
         if self.historical_b32_modules and (adapter_mode != 'image_token' or view_fusion != 'fixed_three_view'):
             raise ValueError('Historical b32 modules require the shared image-token three-view model')
         if (cross_view_residual_cap != 0 or spatial_summary_bias_mode != 'raw') and not self.historical_b32_modules:
@@ -279,7 +279,7 @@ class MultiLaneModel(nn.Module):
         if self.strong_full_asl and (adapter_mode != "image_token" or (
                 view_fusion == "disabled" and (cross_view_mode != "disabled" or spatial_summary_mode != "disabled"))):
             raise ValueError("Strong Full requires Image-token Adapter and single-view modules disabled")
-        if self.module_stacking and (
+        if (self.module_stacking or self.historical_b32_modules) and (
             adapter_mode not in {"disabled", "image_token"}
             or cross_view_mode not in {"disabled", "task_full"}
             or spatial_summary_mode not in {"disabled", "target"}
@@ -292,7 +292,7 @@ class MultiLaneModel(nn.Module):
             or (cross_view_mode != "disabled" and not 0 <= cross_view_layer < len(blocks))
         ):
             raise ValueError("Module stacking permits only shared image-token, task Query and target geometry")
-        if spatial_summary_mode != "disabled" and not self.module_stacking and (
+        if spatial_summary_mode != "disabled" and not (self.module_stacking or self.historical_b32_modules) and (
             adapter_mode != "disabled" or parax_mode != "disabled"
             or selector_conditioning != "disabled" or joint_summary_mode != "disabled"
             or cross_view_mode != "disabled" or view_fusion != "fixed_three_view"
@@ -308,7 +308,7 @@ class MultiLaneModel(nn.Module):
             or view_fusion != "fixed_three_view" or selector_mode != "shared"
             or prompt_mode != "shared" or view_classifier_mode != "shared_post_fusion"
             or detach_view_fusion_features or not 0 <= cross_view_layer < len(blocks)
-        ) and not self.module_stacking:
+        ) and not (self.module_stacking or self.historical_b32_modules):
             raise ValueError("Cross-view attention requires original shared three-view paths without other adapters")
         self.visual_encoder = visual_encoder
         self.visual_encoder.requires_grad_(False)
@@ -954,11 +954,18 @@ class MultiLaneModel(nn.Module):
             similarity = torch.einsum(
                 "tbsc,tbnc->tbsn", queries, selector_image_tokens
             ) * (self.width**-0.5)
-            selected = torch.einsum(
-                "tbnc,tbsn->tbsc",
-                selector_image_tokens,
-                torch.softmax(similarity, dim=-1),
-            )
+            if spatial_summary is None:
+                # Preserve the historical b32 contraction and AMP path verbatim.
+                selected = torch.einsum(
+                    "tbnc,tbsn->tbsc", selector_image_tokens,
+                    torch.softmax(similarity, dim=-1),
+                )
+            else:
+                bias, overlap, visibility = spatial_summary
+                attention, bias = self.spatial_summary_bank.attention(similarity, bias)
+                self.spatial_summary_bank.observe(layer_id, lane_ids, bias, overlap,
+                                                  visibility, similarity, attention)
+                selected = torch.einsum('tbnc,tbsn->tbsc', selector_image_tokens, attention)
         else:
             # Preserve the historical contraction path exactly for disabled
             # and task-lane modes.

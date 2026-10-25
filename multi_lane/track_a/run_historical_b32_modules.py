@@ -108,7 +108,11 @@ def run(args):
         command=[sys.executable,'-u','-m','multi_lane.track_a.audit_historical_b32_modules',
             '--clip-checkpoint',str(args.clip_checkpoint),'--output',str(root/'initialization_audit.json')]
         with (logs/'initialization.log').open('x') as f:
-            subprocess.run(command,env=env,stdout=f,stderr=subprocess.STDOUT,check=True)
+            try:
+                subprocess.run(command,env=env,stdout=f,stderr=subprocess.STDOUT,check=True)
+            except BaseException as error:
+                write(root/'failure.json',dict(stage='initialization_audit',error=repr(error)))
+                raise
     pending=[dict(name=a+'/train',kind='train',arm=a,module='multi_lane.track_a.runner',arguments=protocol['training_arguments'][a]) for a in ARMS]
     if args.smoke:
         path=root/'native_arguments.json';write(path,historical_arguments(args,root/'NATIVE_BASE',1,'THREE_BASE',native=True))
