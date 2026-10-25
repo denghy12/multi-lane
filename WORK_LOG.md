@@ -1,12 +1,34 @@
 # 工作日志
 
+## 2026-10-25：用户授权继续追查共同训练，参数/特征/受控恢复诊断实现中
+
+新分支codex/historical-b32-backbone-attribution-20261025，仅只读checkpoint与内存恢复，不训练。初步代码核对：activate_task(t)会把上个任务的Selectors及Prompts复制到新任务，Adapter为独立初始化；因此全局初始SHA/随机流相同不意味着后续任务的S/P起点相同，需量化继承差异。单部件换回B0可能造成配对失配，不能据此单独判定坏部件。
+
+预声明：CPU比较4模型×8阶段各A(Adapter)/S(Selector)/P(Prompt)/H(head)参数，按当前/已见分片测量norm/方向；重建下一任务S/P复制初始化差异，检查未来A/H起点。GPU固定TRAIN task0/2/7各两批、cap64、原图分组固定种子，16组参数组合，确定性FP32观察三视图/融合特征和logits，不作为正式泛化成绩。最终task7完整旧人群Val/Test做none/A/S/P/H/ASP/ASPH七状态×4模型×2split，共56结果；none匹配既有OFF、ASPH匹配B0全预测为端点门槛，通过后才派发5种中间恢复。
+
+新增模块B/C全关，Image-token Adapter开启，恢复至对应阶段B0，仅内存替换全套相应部件（包括bias），后自动复原。仅GPU0最多4作业，B64/workers2/OMP-MKL72/AMP-TF32，显存6000MiB/SHM1024MiB余量、12秒启动间隔；TRAIN探针workers0和单独确定性FP32。输入仍原formal_seed1_20261025_01与已完成seed1_tasks027_20261025_01，CLIP/Data/Face manifest不变。输出output/historical_b32_backbone_attribution/seed1_20261025_01，日志对应logs。没有新增8任务训练或新checkpoint。下一步适配仅在结果明确后提出，不在此时假设某模块必然有害。
+
+已本地语法检查，新增5项恢复正确性/异常复原/状态覆盖/Head不改表征测试待远程Torch环境执行。尚未远程部署、正式运行或有新归因结论。旧模型ab15571、旧评估54af61b都不更新；主树/test-only不修改。
+
+
+## 2026-10-25：Test关闭模块归因完成，关闭不能恢复32.6800
+
+独立评估树multi-lane-main-historical-b32-test-attribution-20261025、源码54af61bf5d1df6993cfd0f0ce9425501aac5888a，seed1_tasks027_20261025_01 completion=complete、8作业exit0/24阶段成功、无failure。四组ON task0/2/7的融合及分视图预测与原Test逐值一致；OFF后Attention的Full/Face、位置的Person/Face逐值不变；40份源compact SHA全程相同。原模型树仍clean于ab15571，原主树153行/test-only5行及状态SHA保持。新增5项单测、473项完整回归通过，无训练/optimizer/权重改写/main合并，GPU0评估已结束。
+
+Test task0/2/7开−关：原Attention+0.2882/+0.1380/+0.1033；受限+0.0946/+0.0394/+0.0271；原位置+0.0018/+0.0142/+0.0032；校准位置+0.0193/+0.0183/+0.0022。task7开启/关闭依次32.4091/32.3058、32.2423/32.2152、32.4352/32.4321、32.2928/32.2906；关闭后相对B0仍−0.3743/−0.4648/−0.2480/−0.3894。两个Attention当前checkpoint有小正向补偿；当前Test劣势并非仅由推理新增残差直接造成，更应检查共同训练后的底座。位置即时贡献很小。原Attention开使Person单路Test下降0.5092而融合增加0.1033，不能将融合改善叫作Person增强。
+
+83份产物已同步本地并逐SHA核验，归档SHA2b3ab30e01cbea91be2eef5ba65c1fb3dacc2a56a13daab28bb7fa29697918d3。独立CPU复算24融合/24分视图文件，最大误差6.40e-14。500次原图bootstrap最终Test开−关CI：原Attention[0.0075,0.2014]、受限[0.0018,0.0533]、原位置[−0.0075,0.0140]、校准位置[−0.0106,0.0191]；不含seed方差或选择修正，非整方案优于B0的证明。只三个边界，未计算或冒充完整八阶段平均。
+
+报告docs/historical_b32_test_attribution_results_20261025.md；原结果报告已补充完成状态，产物output/historical_b32_test_attribution/complete_snapshot_20261025_01/snapshot，CPU复算output/historical_b32_test_attribution/analysis_20261025_01。后续仅建议冻结对应阶段B0原参数、只训新模块做独立贡献控制，先TRAIN原图holdout和少量任务；此项未启动。最新执行上下文/补充报告仅本地未提交，实际评估源码保持54af61b。
+
+
 ## 2026-10-25：用户授权补Test关闭模块，独立评估分支实现中
 
 新建codex/historical-b32-test-bypass-20261025，保留前轮分析报告/脚本及上下文未提交记录。仅增加historical_b32_test_attribution限定开关，允许四个完整seed1历史b32模型的Test task0/2/7开启重放及只关闭各自B或C，拒绝关闭Adapter、改变人群、smoke或其他模型。原默认validation限制不变，不修改训练/model代码。新增GPU0四并行只读调度与ON逐值重放、未受影响视图、40份checkpoint SHA校验；8评估作业、24阶段，三边界均值不作为8阶段平均。
 
 输入为旧独立模型工作树formal_seed1_20261025_01，模型源码ab15571；EMOTIC Test/CLIP ViT-B16/原Face manifest，seed1/B64/workers2/OMP-MKL72/AMP-TF32，Adapter b32[1]/scale.03保持启用；不设优化器不训练。结果output/historical_b32_test_attribution/seed1_tasks027_20261025_01，日志对应logs。GPU0空闲约24GB，GPU1-7忙不使用，/dev/shm4GB空闲；门槛GPU6000MiB/SHM1024MiB，启动间隔12秒。
 
-本地python无Torch，新增5项单元测试因package初始化导入Torch尚不能执行，待独立远程树ddp环境运行；尚未称测试通过或正式启动。持续授权已覆盖Git-only提交推送/独立worktree部署及此次非破坏性评估，无需重复确认。不修改旧源码树、主树或test-only，不合并main。
+本地python无Torch，测试移到独立远程ddp环境执行；新增5项检查及473项完整回归全部通过。评估源码54af61bf5d1df6993cfd0f0ce9425501aac5888a已Git-only部署独立树multi-lane-main-historical-b32-test-attribution-20261025，两端branch/HEAD/upstream启动时一致且clean。tmux historical_b32_test_attribution_seed1_20261025已启动；先ON逐值重放，匹配后才自动派发该组OFF。模型源码仍ab15571、旧模型树clean，原主树153行/test-only5行及SHA保持。最新执行记录仅本地更新，尚无关闭Test结果。持续授权已覆盖Git-only提交推送/独立worktree部署及此次非破坏性评估，无需重复确认。不修改旧源码树、主树或test-only，不合并main。
 
 
 ## 2026-10-25：历史b32底座叠加摘要模块五组完整结束，本轮未超过32.6800

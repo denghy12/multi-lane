@@ -22,4 +22,8 @@
 
 产出各边界基线/开启/关闭mAP、F1、分视图与逐类别AP变化。开启−关闭描述当前checkpoint的推理边际；关闭−独立基线描述剩余性能差，不把其视为新训练无模块模型。仅三个边界，不能把其平均与完整八阶段平均比较。Test已被用户授权用于探索，保留相关标记，不冒充未参与选择的独立Test验证。
 
-源码Git-only部署到新独立评估worktree；原模型树、primary和test-only保留。当前尚未远程验收和启动。
+源码Git-only部署到新独立评估worktree；原模型树、primary和test-only保留。评估源码54af61bf5d1df6993cfd0f0ce9425501aac5888a已Git-only部署到独立树multi-lane-main-historical-b32-test-attribution-20261025；新增5项检查与473项完整回归通过。tmux historical_b32_test_attribution_seed1_20261025已启动，先开启重放再自动关闭，各组结果尚待完成。
+
+## 完成状态
+
+8作业/24阶段全部成功，开启12阶段预测与原Test逐值一致，未干预视图相同，40份compact SHA前后相同。task7开−关：原Attention+0.1033、受限+0.0271、原位置+0.0032、校准位置+0.0022；四组关闭后均未恢复32.6800。结果见`docs/historical_b32_test_attribution_results_20261025.md`。83份非checkpoint产物已同步本地并逐SHA核验，独立CPU复算通过，无新训练。
