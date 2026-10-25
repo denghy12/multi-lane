@@ -105,3 +105,7 @@
 本次没有新训练、没有改变原八阶段结果，没有合并main。GPU0归因评估已结束。
 
 产物：`output/historical_b32_test_attribution/complete_snapshot_20261025_01/snapshot/run`；独立复算与bootstrap：`output/historical_b32_test_attribution/analysis_20261025_01`。完整summary.csv含各边界F1和分视图变化，class_effects.csv含逐类别AP变化。
+
+## 后续共同训练归因（已完成）
+
+2026-10-25，进一步的参数/表示/分类头恢复诊断显示：受限Attention的共训表征配B0分类头能改善Val/Test，开模块为43.0741/32.8864，关模块43.0278/32.8651。它改变了后续优先级：重点比较B0分类头约束下的表征适配，完整冻结B0只训模块作为控制，而非唯一候选。位置路线没有同样换头收益。结果仍是当前checkpoint的条件混合，不是新训练方法或八阶段提升，详见`docs/historical_b32_backbone_attribution_results_20261025.md`及下一阶段计划。

@@ -1657,6 +1657,7 @@ def train_task(
     amp_growth_interval: int = 2000,
     moe_balance_weight: float = 0.0,
     recovery_state: Optional[Dict[str, object]] = None,
+    optimizer_group_builder=None,
 ) -> List[Dict[str, float]]:
     if not math.isfinite(supervised_loss_scale) or supervised_loss_scale <= 0:
         raise ValueError("Supervised loss scale must be finite and positive")
@@ -1738,7 +1739,7 @@ def train_task(
         raise ValueError("Ranking loader and positive ranking loss weight must be enabled together")
     if ranking_loader is not None and len(ranking_loader) < epochs * len(loader):
         raise ValueError("Ranking loader does not cover every epoch/update batch")
-    model_parameters, adapter_parameters, optimizer_groups = build_optimizer_groups(
+    model_parameters, adapter_parameters, optimizer_groups = (optimizer_group_builder or build_optimizer_groups)(
         model=model,
         weight_decay=weight_decay,
         adapter_learning_rate=adapter_learning_rate,

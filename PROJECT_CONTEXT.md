@@ -1,12 +1,35 @@
 # 项目上下文
 
+## 2026-10-25：分类头锚定的额外适配pilot实现中
+
+用户授权执行，分支codex/historical-b32-head-anchored-pilot-20261025。四学生组：固定头无Attention、固定头加限幅Attention、完整B0冻结只训Attention、允许头一起更新。seed1 task0–2，仅Val，额外5epoch、全部可训练参数LR.0004、Adam/reset/cosine/WD0、B64/workers2/72线程/AMP/TF32。GPU0最多4并行，空闲显存≥6000MiB、shm≥1024MiB放行，间隔12秒。先同源码smoke gate再正式。
+
+复用ab15571的BASE各当时阶段checkpoint，禁止未来阶段权重；只覆盖学生当前ASP及H当前类别行，保留旧学生任务冻结，不调用activate_task继承学生S/P。额外随机流隔离并恢复，实际batch跨四组核对。Adapter ASL，其余可训练参数融合BCE+aux.1；MOnly只优化M的BCE。每阶段评估前先存compact及optimizer/scheduler/scaler/RNG恢复状态。原B0三阶段重放、MOnly OFF必须精确匹配既有预测。原Attention OFF仍保留学生ASP/H，不是B0。仅3阶段均值，不新跑Test/扩8任务/扩seed。
+
+新增head_anchored_pilot、run_head_anchored_pilot及真实梯度/冻结/Teacher切片/RNG测试；runner仅加可选optimizer分组注入，旧默认不变。当前本地语法/diff检查通过，待远程单测、GPU smoke和正式启动。待完成后同步结果核验。此前归因报告/分析脚本和上下文改动一起保留在新分支，以下为历史时点记录。
+
+## 2026-10-25：共同训练归因及兼容性检查全部完成，下一方向为B0分类头约束的表示适配
+
+主诊断4289fc3（独立backbone-attribution树）20 GPU作业/56份task7完整Val/Test成功；补充131cca7（独立head-transfer树）4作业/12份task7结果成功。无failure/无训练/无新checkpoint/main合并。原40份compact SHA全程不变；主树153行/test-only5行及状态SHA保持；原ab15571模型树、54af61b评估树、4289fc3诊断树、131cca7补充树均clean。主5单测+478完整回归、补充10针对性回归/导入通过。294份产物已同步本地逐SHA核验，归档SHA176ca05dd3f300e3b4e3cf77b8fb1f809d1cbde2f96645d08a2e0fb49c0bef95。
+
+CPU参数审计256项、初始化继承112项：后续A/H起点28/28相同，S/P复制来源各28/28不同；差异通过新任务初始化传递，非旧任务解冻。固定TRAIN16组合×task0/2/7×2批×4模型384记录，像素/IDs跨组相同，Head不改特征768项检查通过。raw参数距离及feature cosine不等于损害。独立复算68融合/68视图结果、20端点逐值重放，最大误差4.27e-14。
+
+关键受限Attention结果（Val/Test）：原版42.5177/32.2423；关闭模块共训ASP/H42.4725/32.2152；保留共训ASP换B0 H、关模块43.0278/32.8651；同样换头并开模块43.0741/32.8864；完整B0+共训模块42.4881/32.6870；B0本身42.4628/32.6800。主要恢复信号在表示/读出配对，新模块直接只+0.0462/+0.0213。原Attention换头同样改善但Test32.6167仍未过B0；位置两组换头反而变差，不泛化为所有方法head坏。候选Test三路Full31.4947/Person30.9738/Face25.7673均高B0，但oF1降至48.8001，cF1升至33.3119。
+
+混合候选相对B0+0.2064 Test的500原图bootstrap CI[−0.2711,0.6437]，Val CI[−0.4011,1.6101]；非稳定跨seed证明。只task7，无混合模型八阶段平均，既有Test已参与探索。候选Test可靠Face+0.3126、不可靠Face−0.4911；用保存预测做两种固定可靠性切换：仅可靠用候选Val42.0142/Test32.2616，反向42.5459/32.2282，均未形成可靠整体收益；分组AP不保证全体排序、不可据此直接做Face开关。
+
+报告docs/historical_b32_backbone_attribution_results_20261025.md；下一阶段建议docs/historical_b32_head_anchored_adaptation_plan_20261025.md。建议每任务先按B0学习当前类别H，再在额外学生阶段冻结H；当前ASP从B0复制，比较无M/有限幅M，配全Base固定只训M及同预算头可训练控制。建议先seed1 task0–2 Val、额外5epoch/LR.0004，保持b32[1]/scale.03/aux.1/ASL及原数据/人群。B0 S/P继承和RNG不受学生阶段影响，旧学生任务保留冻结。关闭M不等于B0，完整回退Teacher才精确B0。四学生组匹配额外预算，未来通过后再完整8任务/seed0、3。本轮仅制定，未修改或执行新训练。
+
+CPU脚本scripts/emotic/analyze_historical_b32_backbone_attribution.py，最终分析output/historical_b32_backbone_attribution/analysis_20261025_02（01为加可靠性回退前版本，公共数值相同），合并snapshot在complete_snapshot_20261025_01/snapshot。最新分析脚本、报告、执行上下文仅本地未提交，远程实际执行源码保持4289fc3/131cca7不变。
+
+
 ## 2026-10-25：共同训练诊断已有中间证据，追加Attention/分类头兼容性只读检查
 
 主诊断继续运行于独立树源码4289fc3，原始20作业/56结果配置不改变。CPU审计完成256参数比较、112初始化继承比较：未来Adapter/head28/28起点逐值相同，S/P复制来源28/28不同；固定TRAIN16组合×3边界×2批×4模型共384记录完成。task7未恢复的融合特征与B0平均cos约0.57–0.62，但原始参数/特征距离不等同于性能损害。所有已完成恢复端点均匹配既有OFF/B0。
 
 中间完整Val结果：只恢复H时原Attention42.8981（OFF原42.6576）、受限43.0278（OFF原42.4725），位置两组反降；原Attention H恢复Test32.5703比OFF32.3058回升但低B0。依据两组Attention的Val H恢复改善，新增独立分支codex/historical-b32-head-transfer-20261025：继续只读task7，保留新Attention开启，比较none/H/ASPH三状态，两组×Val/Test共12结果；none必须逐值匹配原ON。该筛选规则使用Val，但Test此前已被查看，保持探索性标记。不训练，不保存混合权重。
 
-补充12结果放到独立树、等待原主诊断completion通过后才启动，避免超过GPU0四并行总资源。新增实现仅调用已测试的模型构造、内存恢复及评估工具；语法通过，待远程回归和原ON数值门槛。不得更新或干扰正在运行的4289fc3源码树。最终分析区分表征/分类头配对、初始化传递和新分支直接作用；后续训练方案尚未启动。
+补充12结果放到独立树、等待原主诊断completion通过后才启动，避免超过GPU0四并行总资源。补充源码131cca7c2ef47a927cc45a71950ddbd4b635b19d已Git-only部署独立树multi-lane-main-historical-b32-head-transfer-20261025，10项针对性回归及导入检查通过。tmux historical_b32_head_transfer_seed1_20261025已设置完成门槛，等待主诊断成功后自动执行；当前只等待、不与主诊断抢占额外GPU作业。原ON逐值数值门槛仍保留。不得更新或干扰正在运行的4289fc3源码树。最终分析区分表征/分类头配对、初始化传递和新分支直接作用；后续训练方案尚未启动。
 
 
 ## 2026-10-25：用户授权继续追查共同训练，参数/特征/受控恢复诊断实现中

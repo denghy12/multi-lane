@@ -43,3 +43,9 @@ MULTI-LANE的activate_task还会复制上个任务的Selector/Prompt初始化新
 两组Attention的H恢复提高Val，位置两组H恢复反降。补充仅两组Attention、task7、Val/Test：新Attention开启，none/H/ASPH三状态，共12份评估。none重放原ON为数值门槛；H检验B0分类头能否保留新分支贡献；ASPH检验共训Attention能否直接接到完整B0。它们是内存混合模型，不作为新训练方法。规则使用Val H恢复改善，但此前Test已被查看，继续标记探索。
 
 独立补充分支codex/historical-b32-head-transfer-20261025，入口multi_lane.track_a.historical_b32_head_transfer，输出output/historical_b32_head_transfer/seed1_20261025_01，日志对应logs。新独立worktree等待主诊断完成才启动，GPU0总并行保持最多4，原4289fc3源码不变。仍B64/workers2/OMP-MKL72/AMP-TF32、相同原数据/CLIP/Face、无optimizer无训练。新增GPU作业4个、12结果；加原诊断共68个task7完整评估。补充真实原ON重放为实际数值验收，原恢复工具5单测/478完整回归已有通过记录。
+
+补充源码131cca7c2ef47a927cc45a71950ddbd4b635b19d已Git-only部署到独立树multi-lane-main-historical-b32-head-transfer-20261025，10项针对性回归及导入通过。tmux historical_b32_head_transfer_seed1_20261025等待主诊断成功后自动运行，原4289fc3诊断源码保持不动。当前没有新训练。
+
+## 完成状态
+
+主20作业/56结果和补充4作业/12结果全部成功。294文件已同步并逐SHA验证，源40checkpoint、受保护工作树及四个执行源码树保持。最佳受限Attention混合状态为共训ASP+B0 H+M，Val43.0741/Test32.8864；关闭M仍43.0278/32.8651，不能把全部恢复归为模块。该状态仅task7探索性混合，非新训练方法，无8阶段平均，改进对B0的bootstrap区间跨0。两种固定Face可靠性切换也未形成稳定收益。详见结果报告及head_anchored_adaptation计划；新的五组训练控制尚未启动。
