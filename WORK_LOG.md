@@ -1,5 +1,14 @@
 # 工作日志
 
+## 2026-10-25：共同训练诊断已有中间证据，追加Attention/分类头兼容性只读检查
+
+主诊断继续运行于独立树源码4289fc3，原始20作业/56结果配置不改变。CPU审计完成256参数比较、112初始化继承比较：未来Adapter/head28/28起点逐值相同，S/P复制来源28/28不同；固定TRAIN16组合×3边界×2批×4模型共384记录完成。task7未恢复的融合特征与B0平均cos约0.57–0.62，但原始参数/特征距离不等同于性能损害。所有已完成恢复端点均匹配既有OFF/B0。
+
+中间完整Val结果：只恢复H时原Attention42.8981（OFF原42.6576）、受限43.0278（OFF原42.4725），位置两组反降；原Attention H恢复Test32.5703比OFF32.3058回升但低B0。依据两组Attention的Val H恢复改善，新增独立分支codex/historical-b32-head-transfer-20261025：继续只读task7，保留新Attention开启，比较none/H/ASPH三状态，两组×Val/Test共12结果；none必须逐值匹配原ON。该筛选规则使用Val，但Test此前已被查看，保持探索性标记。不训练，不保存混合权重。
+
+补充12结果放到独立树、等待原主诊断completion通过后才启动，避免超过GPU0四并行总资源。新增实现仅调用已测试的模型构造、内存恢复及评估工具；语法通过，待远程回归和原ON数值门槛。不得更新或干扰正在运行的4289fc3源码树。最终分析区分表征/分类头配对、初始化传递和新分支直接作用；后续训练方案尚未启动。
+
+
 ## 2026-10-25：用户授权继续追查共同训练，参数/特征/受控恢复诊断实现中
 
 新分支codex/historical-b32-backbone-attribution-20261025，仅只读checkpoint与内存恢复，不训练。初步代码核对：activate_task(t)会把上个任务的Selectors及Prompts复制到新任务，Adapter为独立初始化；因此全局初始SHA/随机流相同不意味着后续任务的S/P起点相同，需量化继承差异。单部件换回B0可能造成配对失配，不能据此单独判定坏部件。
@@ -8,7 +17,7 @@
 
 新增模块B/C全关，Image-token Adapter开启，恢复至对应阶段B0，仅内存替换全套相应部件（包括bias），后自动复原。仅GPU0最多4作业，B64/workers2/OMP-MKL72/AMP-TF32，显存6000MiB/SHM1024MiB余量、12秒启动间隔；TRAIN探针workers0和单独确定性FP32。输入仍原formal_seed1_20261025_01与已完成seed1_tasks027_20261025_01，CLIP/Data/Face manifest不变。输出output/historical_b32_backbone_attribution/seed1_20261025_01，日志对应logs。没有新增8任务训练或新checkpoint。下一步适配仅在结果明确后提出，不在此时假设某模块必然有害。
 
-已本地语法检查，新增5项恢复正确性/异常复原/状态覆盖/Head不改表征测试待远程Torch环境执行。尚未远程部署、正式运行或有新归因结论。旧模型ab15571、旧评估54af61b都不更新；主树/test-only不修改。
+本地语法检查通过，新增5项恢复正确性/异常复原/状态覆盖/Head不改表征检查及远程478项完整回归全部通过。诊断源码4289fc3f51186da5e5886dc300970bf8bcd2b09c已Git-only部署到独立树multi-lane-main-historical-b32-backbone-attribution-20261025；两端branch/HEAD/upstream启动时一致且clean，tmux historical_b32_backbone_attribution_seed1_20261025已启动，先CPU审计和固定TRAIN探针、再端点与混合恢复。尚无完整归因结论。原主树153行/test-only5行及SHA保持，旧模型ab15571与旧评估54af61b工作树clean，执行记录仅本地更新。旧模型ab15571、旧评估54af61b都不更新；主树/test-only不修改。
 
 
 ## 2026-10-25：Test关闭模块归因完成，关闭不能恢复32.6800

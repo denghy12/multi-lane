@@ -33,3 +33,13 @@ MULTI-LANE的activate_task还会复制上个任务的Selector/Prompt初始化新
 结果优先回答：原表征是否与分类头错配？Adapter/Selectors/Prompt各自在当前共同适配中有什么条件作用？上个任务的初始化改变是否传播？据此再规划保护B0、局部解冻、监督适配或初始化隔离的训练控制，不提前选择方案。
 
 独立诊断分支`codex/historical-b32-backbone-attribution-20261025`。当前本地实现/语法检查完成，待远程验收与运行。
+
+## 启动验收
+
+诊断源码4289fc3f51186da5e5886dc300970bf8bcd2b09c已部署独立树multi-lane-main-historical-b32-backbone-attribution-20261025；新增5项检查及478项完整回归通过。tmux historical_b32_backbone_attribution_seed1_20261025已启动，执行seed1_20261025_01。启动时新分支两端HEAD/upstream一致且clean；原模型ab15571/旧评估54af61b保持clean，主树153行/test-only5行及状态SHA不变。当前源码锁定不再改动，执行记录仅本地文档更新。
+
+## 根据中间Val证据追加的兼容性检查
+
+两组Attention的H恢复提高Val，位置两组H恢复反降。补充仅两组Attention、task7、Val/Test：新Attention开启，none/H/ASPH三状态，共12份评估。none重放原ON为数值门槛；H检验B0分类头能否保留新分支贡献；ASPH检验共训Attention能否直接接到完整B0。它们是内存混合模型，不作为新训练方法。规则使用Val H恢复改善，但此前Test已被查看，继续标记探索。
+
+独立补充分支codex/historical-b32-head-transfer-20261025，入口multi_lane.track_a.historical_b32_head_transfer，输出output/historical_b32_head_transfer/seed1_20261025_01，日志对应logs。新独立worktree等待主诊断完成才启动，GPU0总并行保持最多4，原4289fc3源码不变。仍B64/workers2/OMP-MKL72/AMP-TF32、相同原数据/CLIP/Face、无optimizer无训练。新增GPU作业4个、12结果；加原诊断共68个task7完整评估。补充真实原ON重放为实际数值验收，原恢复工具5单测/478完整回归已有通过记录。
