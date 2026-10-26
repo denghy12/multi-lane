@@ -1,5 +1,32 @@
 # 项目上下文
 
+## 2026-10-27：固定整模型均值的真实前向验证（已授权，执行中）
+
+新分支 `codex/fixed-model-mean-forward-20261027`，保留所有既有未提交分析。新增 fixed_model_mean_forward 与队列入口，复用来源装载、历史逐 batch sigmoid 导出；旧导出函数仅增加可选来源标签，原 R0–R4 行为不变。A/B 分别保留完整三视图、各自 Full 摘要依赖与任务参数，先各自固定三视图融合，再将融合特征 0.5/0.5 平均后接同阶段共同 B0 线性头，不做额外归一化、门控或训练。并导出 A、B 与当批 logits 固定均值，不能把离线控制当作真实 R5。
+
+seed1 / GPU0 / EMOTIC / 8任务 Val-Test / 历史 samples_intersect_seen_classes / B64 / workers2 / 72线程 / AMP-TF32；先单测及 task0/2/7 Val 首64重放，两个隔离资源测试，然后 Val/Test 并发2。所有来源输出（含序列化概率）逐值一致、24源 checkpoint SHA 及参数不变为验收；R5 与 logits 均值的 AMP 差记录，预声明最大绝对 logits 容差 .03125，不按结果搜索系数。无优化器/LR/epoch/新训练 checkpoint。
+
+输出 `output/fixed_model_mean_forward/formal_seed1_20261027_01`，日志同前缀 `logs/`；远程独立 worktree 拟为 multi-lane-main-fixed-model-mean-forward-20261027。完整配方和相对来源路径见 docs/fixed_model_mean_execution_20261027.md。预检/正式尚未完成，无新正式指标。后续研究单模型时必须保留同预算无蒸馏控制，不能复提已失败的冻结底座只训新 Attention 或弱辅助教师蒸馏 Full；当前不启动新的训练路线。
+
+
+
+## 2026-10-26：R0–R4进一步机制分析与更强的简单均值控制
+
+本地新分析分支codex/protected-view-mechanism-analysis-20261026，保留既有未提交报告；仅读取预测，未训练/运行新GPU前向/改远程模型源码。R2 Val/Test均8/8阶段优于R0；R1 Test均值增益约71.4%来自task0，其他7阶段平均仅+.0179。R3相对R2 Val8/8升、Test6/8降，最终+.0073/均值−.0060；其Test边际CI最终[-.0966,.1841]、均值[-.1346,.2016]均含0。R2单人Test+.2936、多人仅+.0462，可靠Face多人交集略降，不证明人物对应已解决。R3对R2虽16类提高，Pleasure/Disconnection−1.156/−1.072抵消多类小收益。
+
+新增固定0.5整模型logit均值（离线CPU控制、非新增真实模型前向）：Val44.1558/51.2957，Test33.6258/40.5125，比R2+.5727/+.4653；两split均8/8阶段升、各22/26类最终AP升。服务器原Torch/历史batch sigmoid独立CPU复核相同，IDs/labels/classes/masks核验，源预测SHA不变。500原图配对，均值对R2 Test最终CI[.3588,.8744]、平均[.2379,.8114]，不含seed方差/不校正Test选择。固定均值中B全部Attention关闭仍Val44.0965/51.1880、Test33.5854/40.4390；全部开启再+.0404/+.0735 Test，Face自身条件+.0284/+.0530。大部分组合差值在B OFF时仍保留，不能将全部收益归于推理残差；OFF共训参数仍保留，不是重训无模块基线。
+
+下一步优先建议固定0.5均值的真实特征融合/B0头8任务Val/Test，尚未启动；然后比较同预算两个Person-only模型平均、缓存/裁剪，再谈复杂门控/单库蒸馏/人物绑定。R2仍是R0–R4实测平均最强，但视图硬选择未优于新离线均值，不再优先继续扩大R2结构。报告docs/protected_view_forward_mechanism_analysis_20261026.md，原结果报告加链接并修订后续优先级；CPU脚本scripts/emotic/analyze_protected_view_mechanisms.py，产物output/protected_view_forward/mechanism_analysis_20261026_02，日志同名。成本与单seed局限仍保持。
+
+
+
+完成更新（2026-10-26）：R0–R4完整8阶段Val/Test及隔离资源测速均结束。前向780732e、CPU导出修复0c66113；503项回归通过。formal_02正确导出保持原GPU logits，按历史batch sigmoid，R0全部16阶段精确重放；R1无可靠Face融合保持。CPU独立复算80融合/240来源分路逐值检查，最大误差7.11e-14，16 R1保护通过。24源checkpoint及80原始前向NPZ SHA保持；415产物已回传并逐SHA核验，归档7d96d1228840b4a663d7fe8f03d5fc8f2814cdfa2d2ea0689551e5e359871256。远程0c66113 clean，主树/test-only的原HEAD/status SHA未变，无训练/新checkpoint。
+
+Val最终/平均、Test最终/平均：R0 43.0741/50.2828、32.8864/39.8687；R1 43.1793/50.4647、32.9426/39.9234；R2 43.4216/50.5635、33.0530/40.0471；R3 43.4727/50.7186、33.0603/40.0411；R4 43.4768/50.5177、33.0489/39.9378。R2相对R0 Test+.1666/+.1785，R3+.1739/+.1724；R2平均最高、R3最终最高，不称Face稳定叠加。500原图配对阶段耦合bootstrap：R2 Test最终CI[.0381,.2955]、平均[.0330,.3080]，R3平均[-.0339,.4165]，R1两区间均含0，未估seed方差/未校正Test筛选。
+
+当前参考实现非视觉参数2,661,658→6,882,842（+4,221,184）、训练参数0，峰值allocated925.71→946.22MiB，B64/task7 CUDA耗时R0 241.91ms、其他489–508ms；共享冻结权重但两套来源各三视图前向，算力约2倍，尚未裁剪/缓存。保留R2和R3，先考虑预测保持的缓存/裁剪或更多seed，不自动新训练。完整报告docs/protected_view_forward_results_20261026.md；分析output/protected_view_forward/analysis_20261026_01；正确快照formal_02，formal_01原GPU/bench保留。以下启动/待完成均为历史记录。
+
+
 
 前向完成与导出修复：780732e预检、5组隔离测速及Val/Test完整8任务均exit0，A/B每batch来源及R0/R1保护通过。后验发现将CPU logits拼接后整体sigmoid与历史逐batch sigmoid在Test R0最终仅3个概率位置相差ULP，logits全部相同、mAP约差1e-6；已确认按原batch_lengths分批sigmoid可精确重放。现修复仅CPU导出，新增第8项专项测试，不重训、不重复GPU前向，不改来源checkpoint。将保留formal_01原始产物，生成formal_seed1_20261026_02修正导出及概率逐值审计；bench资源记录仍来自原真实前向源码780732e，export Git单独记录。
 

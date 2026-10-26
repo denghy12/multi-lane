@@ -142,7 +142,7 @@ def batch_probabilities(z,batches):
     return torch.cat(rows)
 
 
-def write_scores(root,task,ids,y,reliable,rows,weights,batches):
+def write_scores(root,task,ids,y,reliable,rows,weights,batches,view_sources=None):
     arrays=dict(schema_version=np.asarray(1,dtype=np.int64),task_id=np.asarray(task,dtype=np.int64),
         sample_ids=np.asarray(ids,dtype=np.str_),class_indices=np.arange(y.shape[1],dtype=np.int64),targets=y.numpy(),
         batch_lengths=np.asarray(batches,dtype=np.int64),probability_device=np.asarray('cpu'),
@@ -162,7 +162,7 @@ def write_scores(root,task,ids,y,reliable,rows,weights,batches):
     score.update(logits=arrays['fused_logits'],probabilities=arrays['fused_probabilities'])
     (root/'scores').mkdir(exist_ok=True);np.savez_compressed(root/'scores'/f'task{task}.npz',**score)
     write(root/f'task{task}.json',dict(metrics=metrics['fused'],views=metrics,
-        sources=dict(zip(VIEWS,ARMS[root.name]))))
+        sources=dict(zip(VIEWS,ARMS[root.name])) if view_sources is None else view_sources))
     return metrics['fused']
 
 
