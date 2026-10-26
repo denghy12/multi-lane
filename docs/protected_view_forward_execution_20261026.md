@@ -1,5 +1,13 @@
 # 完整模型的视图来源组合：执行配置
 
+
+前向完成与导出修复：780732e预检、5组隔离测速及Val/Test完整8任务均exit0，A/B每batch来源及R0/R1保护通过。后验发现将CPU logits拼接后整体sigmoid与历史逐batch sigmoid在Test R0最终仅3个概率位置相差ULP，logits全部相同、mAP约差1e-6；已确认按原batch_lengths分批sigmoid可精确重放。现修复仅CPU导出，新增第8项专项测试，不重训、不重复GPU前向，不改来源checkpoint。将保留formal_01原始产物，生成formal_seed1_20261026_02修正导出及概率逐值审计；bench资源记录仍来自原真实前向源码780732e，export Git单独记录。
+
+
+
+执行更新：780732e已Git-only部署remote独立worktree multi-lane-main-protected-view-forward-20261026，branch/HEAD/upstream一致且clean；主树153行及test-only5行dirty状态SHA、HEAD均保持。完整502测试通过（50.496s）。formal_seed1_20261026_01已在tmux protected_view_forward_seed1_20261026运行，真实CLIP task0/2/7各Val首64人预检22.77s成功，A/B全部来源预测、所选分路、R0融合和R1无可靠Face融合均逐值一致，零训练更新。隔离R0–R4测速正在自动执行，随后Val/Test两进程并发完成8阶段。来源24checkpoint SHA预检保持；本地仅追加执行记录，不改变remote 780732e运行源码。首64人mAP不代表完整指标，不用于方案选择。
+
+
 用户2026-10-26要求落实R0–R3完整模型无训练验证，并保留Full替换控制。实验分支`codex/protected-view-forward-20261026`。仅GPU0，seed1，EMOTIC旧`samples_intersect_seen_classes`标准，完整8阶段Val/Test。无训练、优化器、学习率或参数更新；不生成新的训练checkpoint。
 
 ## 目标及结构

@@ -8,7 +8,7 @@ import test_track_a_reproduction as fixtures
 from multi_lane.track_a.historical_b32_backbone_attribution import method_state
 from multi_lane.track_a.historical_b32_modules import modes
 from multi_lane.track_a.model import MultiLaneModel
-from multi_lane.track_a.protected_view_forward import ARMS,ProtectedViewFusion,verify_batch
+from multi_lane.track_a.protected_view_forward import ARMS,ProtectedViewFusion,batch_probabilities,verify_batch
 from multi_lane.track_a.runner import tensor_state_digest
 
 
@@ -98,6 +98,17 @@ class ProtectedViewForwardTest(unittest.TestCase):
         with self.assertRaises(AssertionError):verify_batch(ref,0,ids[::-1],y,x['face_reliable'],sources,outputs)
         ref['B']['face_logits'][0,0]+=1
         with self.assertRaises(AssertionError):verify_batch(ref,0,ids,y,x['face_reliable'],sources,outputs)
+
+    def test_probability_export_keeps_historical_batch_boundaries(self):
+        from unittest.mock import patch
+        z=torch.randn(131,26);calls=[];original=torch.sigmoid
+        def measured(x):
+            calls.append(len(x));return original(x)
+        with patch('multi_lane.track_a.protected_view_forward.torch.sigmoid',measured):
+            actual=batch_probabilities(z,[64,64,3])
+        self.assertEqual(calls,[64,64,3])
+        self.assertTrue(torch.equal(actual,torch.cat([original(x.clone()) for x in z.split([64,64,3])])) )
+        with self.assertRaises(ValueError):batch_probabilities(z,[64,64])
 
 
 if __name__=='__main__':unittest.main()

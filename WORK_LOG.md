@@ -1,6 +1,14 @@
 # 工作日志
 
 
+前向完成与导出修复：780732e预检、5组隔离测速及Val/Test完整8任务均exit0，A/B每batch来源及R0/R1保护通过。后验发现将CPU logits拼接后整体sigmoid与历史逐batch sigmoid在Test R0最终仅3个概率位置相差ULP，logits全部相同、mAP约差1e-6；已确认按原batch_lengths分批sigmoid可精确重放。现修复仅CPU导出，新增第8项专项测试，不重训、不重复GPU前向，不改来源checkpoint。将保留formal_01原始产物，生成formal_seed1_20261026_02修正导出及概率逐值审计；bench资源记录仍来自原真实前向源码780732e，export Git单独记录。
+
+
+
+执行更新：780732e已Git-only部署remote独立worktree multi-lane-main-protected-view-forward-20261026，branch/HEAD/upstream一致且clean；主树153行及test-only5行dirty状态SHA、HEAD均保持。完整502测试通过（50.496s）。formal_seed1_20261026_01已在tmux protected_view_forward_seed1_20261026运行，真实CLIP task0/2/7各Val首64人预检22.77s成功，A/B全部来源预测、所选分路、R0融合和R1无可靠Face融合均逐值一致，零训练更新。隔离R0–R4测速正在自动执行，随后Val/Test两进程并发完成8阶段。来源24checkpoint SHA预检保持；本地仅追加执行记录，不改变remote 780732e运行源码。首64人mAP不代表完整指标，不用于方案选择。
+
+
+
 ## 2026-10-26：用户授权完整模型视图来源组合验证
 
 新实验分支codex/protected-view-forward-20261026，新增protected_view_forward/run_protected_view_forward及7项专项测试，保留此前未提交分析文档。R0 AAA、R1 AAB、R2 ABA、R3 ABB、R4 BAA，真实特征融合后接同阶段B0头，A/B各自Full摘要来源保留，冻结ViT权重/头共享但不缓存tokens。无训练/更新，seed1/GPU0/B64/workers2/72线程/AMP-TF32/旧seen-positive。先远程单测及task0/2/7 Val首64精确重放，再隔离5组资源测速，之后Val/Test并发每批复用来源计算并导出5组8任务全部预测。源24checkpoint SHA、参数/来源预测、R0及R1无Face保护均验收。配置和相对输入/输出/日志详见docs/protected_view_forward_execution_20261026.md；当前本地实现完成，待远程测试和执行，尚无正式模型结果。主树/test-only及旧实验不修改。

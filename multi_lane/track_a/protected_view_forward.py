@@ -1,5 +1,6 @@
 """Preserve complete source functions and fuse selected view FEATURES before the B0 head."""
 import argparse
+import csv
 from dataclasses import asdict
 from pathlib import Path
 import time
@@ -16,7 +17,7 @@ from .historical_b32_backbone_attribution import build, method_state
 from .historical_b32_modules import validate_config
 from .paired_transforms import move_model_inputs
 from .run_historical_b32_test_attribution import read, write
-from .runner import TaskMetrics, compute_metrics, dataset_view, seen_indices, set_seed, summarize_tasks, tensor_state_digest
+from .runner import TaskMetrics, compute_metrics, dataset_view, git_metadata, seen_indices, set_seed, summarize_tasks, tensor_state_digest
 
 VIEWS=('full','person','face')
 ARMS={'R0':('A','A','A'),'R1':('A','A','B'),'R2':('A','B','A'),
@@ -132,6 +133,15 @@ def verify_batch(ref,start,ids,targets,reliable,sources,composed):
             assert torch.equal(outputs['fused'][invalid],sources['A']['fused'][invalid]),'R1 invalid Face changed'
 
 
+def batch_probabilities(z,batches):
+    """Match historical CPU sigmoid BEFORE concatenation, including thread chunks."""
+    if sum(batches)!=len(z) or any(n<=0 for n in batches):raise ValueError('Invalid batch lengths')
+    rows=[];start=0
+    for n in batches:
+        rows.append(torch.sigmoid(z[start:start+n].clone()));start+=n
+    return torch.cat(rows)
+
+
 def write_scores(root,task,ids,y,reliable,rows,weights,batches):
     arrays=dict(schema_version=np.asarray(1,dtype=np.int64),task_id=np.asarray(task,dtype=np.int64),
         sample_ids=np.asarray(ids,dtype=np.str_),class_indices=np.arange(y.shape[1],dtype=np.int64),targets=y.numpy(),
@@ -140,10 +150,12 @@ def write_scores(root,task,ids,y,reliable,rows,weights,batches):
         torch_version=np.asarray(str(torch.__version__)),face_reliable=reliable.numpy(),lane_weights=weights.numpy())
     metrics={}
     for view,z in rows.items():
-        p=torch.sigmoid(z);assert torch.isfinite(z).all() and torch.isfinite(p).all()
+        p=batch_probabilities(z,batches);assert torch.isfinite(z).all() and torch.isfinite(p).all()
         arrays[view+'_logits']=z.numpy();arrays[view+'_probabilities']=p.numpy()
         metrics[view]=asdict(compute_metrics(task,p,y,.5))
-    if reliable.any():metrics['face_reliable']=asdict(compute_metrics(task,torch.sigmoid(rows['face'][reliable]),y[reliable],.5))
+    if reliable.any():
+        face_p=torch.from_numpy(arrays['face_probabilities'])
+        metrics['face_reliable']=asdict(compute_metrics(task,face_p[reliable],y[reliable],.5))
     folder=root/'view_scores';folder.mkdir(parents=True,exist_ok=True)
     path=folder/f'task{task}.npz';np.savez_compressed(path,**arrays)
     score={k:v for k,v in arrays.items() if k not in ('face_reliable','lane_weights') and not k.endswith(('_logits','_probabilities'))}
@@ -152,6 +164,57 @@ def write_scores(root,task,ids,y,reliable,rows,weights,batches):
     write(root/f'task{task}.json',dict(metrics=metrics['fused'],views=metrics,
         sources=dict(zip(VIEWS,ARMS[root.name]))))
     return metrics['fused']
+
+
+def reexport(args):
+    """Repair only CPU probability export; never repeat or modify GPU forwards."""
+    git=git_metadata(Path(__file__).resolve().parents[2]);assert not git['dirty']
+    assert torch.get_num_threads()==72
+    original=read(args.input_root/'completion.json');assert original['status']=='complete'
+    args.output.mkdir(parents=True,exist_ok=False);audit=[];summaries={}
+    for split in ('val','test'):
+        prior=read(args.input_root/'evaluation'/split/'result.json');results={arm:[] for arm in ARMS}
+        for task in range(8):
+            ref=references(args,split,task)
+            for arm,choices in ARMS.items():
+                path=args.input_root/'evaluation'/split/arm/'view_scores'/f'task{task}.npz'
+                with np.load(path,allow_pickle=False) as saved:z={k:saved[k].copy() for k in saved.files}
+                rows={v:torch.from_numpy(z[v+'_logits']) for v in ('fused',*VIEWS)}
+                parent=args.output/'evaluation'/split/arm
+                result=write_scores(parent,task,z['sample_ids'].tolist(),torch.from_numpy(z['targets']),
+                    torch.from_numpy(z['face_reliable']),rows,torch.from_numpy(z['lane_weights']),z['batch_lengths'].tolist())
+                with np.load(parent/'view_scores'/f'task{task}.npz') as actual:
+                    assert all(np.array_equal(actual[v+'_logits'],z[v+'_logits']) for v in ('fused',*VIEWS))
+                    for view,source in zip(VIEWS,choices):
+                        for suffix in ('_logits','_probabilities'):
+                            assert np.array_equal(actual[view+suffix],ref[source][view+suffix]),(split,task,arm,view+suffix)
+                    if arm=='R0':
+                        assert np.array_equal(actual['fused_probabilities'],ref['A']['fused_probabilities'])
+                    if arm=='R1':
+                        invalid=~actual['face_reliable']
+                        assert np.array_equal(actual['fused_probabilities'][invalid],ref['A']['fused_probabilities'][invalid])
+                results[arm].append(result)
+                audit.append(dict(split=split,task=task,arm=arm,source_forward_npz=str(path),sha256=_sha256(path),
+                    logits_unchanged=True,selected_source_probabilities_exact=True))
+        summaries[split]={arm:summarize_tasks([TaskMetrics(**r) for r in rows]) for arm,rows in results.items()}
+        write(args.output/'evaluation'/split/'result.json',dict(prior,metrics=results,summaries=summaries[split],
+            forward_git=prior['git'],export_git=git,batch_sigmoid_export=True))
+    rows=[]
+    for arm in ARMS:
+        row=dict(arm=arm,Full=ARMS[arm][0],Person=ARMS[arm][1],Face=ARMS[arm][2])
+        for split,values in summaries.items():
+            row.update({split+'_'+k:v for k,v in values[arm].items() if k in ('final_mAP','average_mAP','final_cF1','final_oF1')})
+        rows.append(row)
+    with (args.output/'summary.csv').open('w') as f:
+        writer=csv.DictWriter(f,list(rows[0]));writer.writeheader();writer.writerows(rows)
+    write(args.output/'resource_summary.json',read(args.input_root/'resource_summary.json'))
+    assert all(_sha256(Path(p))==sha for p,sha in original['source_checkpoint_sha256'].items())
+    assert all(_sha256(Path(r['source_forward_npz']))==r['sha256'] for r in audit)
+    write(args.output/'export_audit.json',dict(status='verified',forward_files=audit,
+        original_forward_files_unchanged=True,model_execution=False,training_updates=0,R0_probability_exact=True,R1_invalid_exact=True))
+    write(args.output/'completion.json',dict(original,export_head=git['commit'],source_forward_root=str(args.input_root),
+        export_only=True,batch_sigmoid_export=True,original_model_forward_preserved=True))
+    print('BATCH_EXPORT_REPAIRED',args.output,flush=True)
 
 
 def evaluate(args):
@@ -232,8 +295,9 @@ def benchmark(args):
 
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('action',choices=('preflight','eval','benchmark'))
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('action',choices=('preflight','eval','benchmark','reexport'))
     for name in ('source-run','person-run','dual-run','reference-root','data-root','clip-checkpoint','face-manifest-root','output'):
         p.add_argument('--'+name,type=Path,required=True)
     p.add_argument('--split',choices=('val','test'),default='val');p.add_argument('--arm',choices=tuple(ARMS),default='R0')
-    args=p.parse_args();(benchmark if args.action=='benchmark' else evaluate)(args)
+    p.add_argument('--input-root',type=Path)
+    args=p.parse_args();(reexport if args.action=='reexport' else benchmark if args.action=='benchmark' else evaluate)(args)
