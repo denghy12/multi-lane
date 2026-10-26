@@ -1,6 +1,41 @@
 # 工作日志
 
+
+## 2026-10-26：用户授权完整模型视图来源组合验证
+
+新实验分支codex/protected-view-forward-20261026，新增protected_view_forward/run_protected_view_forward及7项专项测试，保留此前未提交分析文档。R0 AAA、R1 AAB、R2 ABA、R3 ABB、R4 BAA，真实特征融合后接同阶段B0头，A/B各自Full摘要来源保留，冻结ViT权重/头共享但不缓存tokens。无训练/更新，seed1/GPU0/B64/workers2/72线程/AMP-TF32/旧seen-positive。先远程单测及task0/2/7 Val首64精确重放，再隔离5组资源测速，之后Val/Test并发每批复用来源计算并导出5组8任务全部预测。源24checkpoint SHA、参数/来源预测、R0及R1无Face保护均验收。配置和相对输入/输出/日志详见docs/protected_view_forward_execution_20261026.md；当前本地实现完成，待远程测试和执行，尚无正式模型结果。主树/test-only及旧实验不修改。
+
+
+## 2026-10-26：针对Face共训代价的研究方案与只读分路组合
+
+03补齐500次原图配对结果：Person替换Test最终[.0446,.2994]、平均[.0369,.3115]均正，双换最终[.0088,.3810]、平均[-.0345,.4124]。修订优先级为真实验证R2且保留R1/R3，避免只按最终最高选择；明确正式来源需B0头/Person/Dual共90epoch/任务，推理成本另测。本轮仍无真实模型执行或新训练。
+
+用户仅要求研究解决方案。本地创建codex/face-protected-fusion-plan-20261026保留全部既有未提交文档。读取旧失败的Face残差及OOF跨视图蒸馏结果，查阅MULTI-LANE、Learning without Forgetting、Gradient-Blending等原论文。没有训练或真实模型前向、没有GPU作业/远程修改。
+
+新增scripts/emotic/analyze_protected_face_swap.py；对强Person和双Attention同阶段B0头下48个原NPZ做完整8阶段CPUlogit组合，固定旧融合权重，Face lambda1为预先主比较并报告0/.25/.5/.75/1全网格，原IDs/标签/mask/SHA保持。首轮逐值断言拦截NumPy/torch sigmoid一ULP差，修正零扰动人群直接保留原概率，保留失败日志；02完成Face区间，03补Person/双换配对区间。无权重更新。
+
+Face替换Val43.1784/50.4692、Test32.9419/39.9239（相对强Person+.0554/+.0552）；Person替换43.4224/50.5673、33.0549/40.0482（+.1685/+.1795）；双换43.4681/50.7165、33.0608/40.0413。Full替换控制33.0472/39.9369说明低单路AP不等于负融合贡献。Face原始条件delta移植32.9117/39.9297。Face替换bootstrap最终[-.0676,.1918]、平均[-.0809,.2360]均含0；全换B的AP重构差.0036且sigmoid最大.000368，均明确是离线信号，非新模型成绩。
+
+保存docs/face_protected_fusion_research_plan_20261026.md，包含全网格/所有控制、机制修正、完整来源任务路径复用方案、B Full摘要依赖、R0–R4无训练验证矩阵、成本/预测保护边界、后续双教师软约束及门控，均未启动。output/face_protected_fusion/readonly_20261026_03和logs/face_protected_fusion记录完整产物，三个上下文同步更新。
+
+## 2026-10-26：两组8任务结果回传、CPU复算及机制分析
+
+用户要求检查已完成实验，未要求新训练。本地创建codex/selector-face-analysis-20261026并保留4份既有未提交文档。远程12作业exit0、240epoch/13950更新和额外40epoch/2325更新均无AMP跳步；归档576个非权重文件、SHA cadada4716c97a241e298326d6e1f01eb611e7690d2769c60899ad852022fb12并回传逐项验证。24源和16新checkpoint SHA复查，远程f6ef130 clean，主树/test-only原HEAD和dirty状态SHA一致。
+
+新增CPU分析脚本analyze_selector_face_controls.py及docs/selector_face_controls_results_20261026.md。208阶段融合/832视图独立复算最大误差7.11e-14；80旧参考NPZ全字段逐值、32完整保护与16Face mask检查通过。补入旧双Attention原共训头作为匹配控制，避免将独立S原头与旧B0头混合比较；500原图配对阶段耦合bootstrap，数据/源权重零修改，无GPU新计算/训练。
+
+主结果（Val最终/平均；Test最终/平均）：独立S+B0 38.6066/46.9717；29.2649/37.7092；独立S原头40.9621/48.1452；30.7724/38.2750。旧共享双M原头43.1264/50.3256；31.9459/39.1951，B0头43.3394/50.5522；32.7573/39.7004。新S全OFF Test29.2269，较旧全OFF−3.4651，解释大部分总差−3.4924；三路均退步而训练目标降低，取消共同查询约束/读出兼容性是合理解释但不当作已证实唯一因果。A/P与Full K/V梯度仍共享，task0已下降，不称完整梯度隔离或灾难遗忘。
+
+冻结强Person新Face Val43.0787/50.2760；Test32.8792/39.8493，旧强Person43.0741/50.2828；32.8864/39.8687。完整预测保护和OFF恢复精确通过；Face确实更新，可靠子集Face AP+.0261、融合+.0129，但跨人群排序使全体−.0072，八阶段Test均微降。新增Face的Query不含当前Face内容，Full K/V上下文并不自动提供人物对应和错误互补。Test最终bootstrapCI[-.0333,.0185]不支持正收益。保留强Person及B0，停止扩本轮两结构，后续需新授权再启动研究实验。
+
+
 ## 2026-10-26：用户授权独立Selector与冻结强Person只训Face两组8任务
+
+执行更新：源码f6ef130已Git-only部署独立remote worktree multi-lane-main-selector-face-controls-20261026，branch/HEAD/upstream一致，旧主树/test-only的HEAD/status SHA不变。7新增专项及495项完整回归通过（21.979秒）。GPU初始化审计确认三套Selector精确克隆、其余初值/CPU-CUDA RNG/初始预测等价，新增122880参数；smoke_seed1_20261026_01全部成功，冻结组更新后Full/Person/无可靠Face预测逐值保持，Face OFF回到强Person，原Person/双Attention参考逐值重放。
+
+正式formal_seed1_20261026_01已自动启动于GPU0，tmux selector_face_controls_seed1_20261026。PRIVATE_SELECTORS训练PID1972432，FROZEN_PERSON_FACE训练PID1972995，参考Val/Test也排入同一4并行队列。两组task0前4epoch各84成功更新/0跳步；前者30epoch/任务，后者额外5epoch/任务。GPU约8537MiB/100%。正式8任务及所有Val/Test/OFF评估将自动接续，当前尚无最终成绩。源24份checkpoint SHA保持，旧实验/主树/test-only未修改。
+
+106份smoke/单测/预测文件已回传本地output/selector_face_controls/smoke_snapshot_20261026_01并逐SHA核验，归档SHA5b3a5a3761a67eba3397c3c1f7b361f00eced32b92be3dcf9d0063569c0e3c65。运行源码保持remote f6ef130 clean；当前仅本地追加执行记录。完成后分析独立Selector的共享/跨K-V通路差别，以及冻结强Person后Face条件收益能否保留，不预先宣称提升。
 
 新分支codex/private-selectors-frozen-face-20261026。PRIVATE_SELECTORS：基于双Attention共训+B0头方案，三视图每任务各10个独立Selector，共30个；从同一共享初值克隆，保持全局RNG与其余初始参数不变，训练30epoch/任务、主LR.0125、A/M LR.0004，仍共享Image-token Adapter与Prefix Prompts，保留Face/Person Attention读取Full K/V的反传，不额外detach。该组只检验Selector共享，不宣称完整视图梯度隔离。增加Selector122880参数。
 

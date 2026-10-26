@@ -1,6 +1,37 @@
 # 下一步任务
 
+
+## 2026-10-26：用户授权完整模型视图来源组合验证
+
+新实验分支codex/protected-view-forward-20261026，新增protected_view_forward/run_protected_view_forward及7项专项测试，保留此前未提交分析文档。R0 AAA、R1 AAB、R2 ABA、R3 ABB、R4 BAA，真实特征融合后接同阶段B0头，A/B各自Full摘要来源保留，冻结ViT权重/头共享但不缓存tokens。无训练/更新，seed1/GPU0/B64/workers2/72线程/AMP-TF32/旧seen-positive。先远程单测及task0/2/7 Val首64精确重放，再隔离5组资源测速，之后Val/Test并发每批复用来源计算并导出5组8任务全部预测。源24checkpoint SHA、参数/来源预测、R0及R1无Face保护均验收。配置和相对输入/输出/日志详见docs/protected_view_forward_execution_20261026.md；当前本地实现完成，待远程测试和执行，尚无正式模型结果。主树/test-only及旧实验不修改。
+
+
+## 2026-10-26：下一研究候选——复用已经学好的整条辅助任务路径
+
+- 只换Person的Test最终/平均配对CI[.0446,.2994]/[.0369,.3115]均正，优先真实前向R2并保留R1/R3控制；双换平均CI仍跨0，不能只追最终最高。来源组合正式成本含B0头+Person+Dual三次30epoch训练，不能声称与单次基线等预算。没有seed方差/选择校正，尚未执行完整模型。
+
+- 本次只读组合完成，无新训练或模型前向。A强Person为32.8864/39.8687，A底换B双Attention Face的离线Val43.1784/50.4692、Test32.9419/39.9239；换Person为43.4224/50.5673、33.0549/40.0482；双换43.4681/50.7165、33.0608/40.0413。Face有正信号，Person来源替换更强，双换未同时胜过单Person。单独换Full也升，避免仅凭Full单路AP归因融合损失。
+- 下一步如用户授权，优先完整模型无训练R0来源重放、R1 Face替换、R2 Person替换、R3双替换，保留R4 Full替换控制；同seed1/8任务/旧标准Val/Test，报告成本。先task0/2/7逐值来源功能核验；B辅助Attention必须读取B来源Full摘要。R3 Person/Face保留原B共享库，非从随机三独立S重新训练。
+- 不把离线结果升级为真实模型提升：AMP融合/head舍入有.0036最终AP重构差，Face替换bootstrap最终/平均CI均跨0，未估seed方差。当前正式参照不变；后续须真实前向和更多seed证据。
+- 完整路径复用成立后，再考虑单库的双教师Full/Person保护+Face能力保持，或受限融合门控；这些尚未改代码/训练，不复提旧弱辅助教师蒸馏Full。若拟用TRAIN holdout/OOF，教师也须匹配划分，不虚称事后holdout未见。
+- 方案docs/face_protected_fusion_research_plan_20261026.md；CPU脚本scripts/emotic/analyze_protected_face_swap.py；产物output/face_protected_fusion/readonly_20261026_03，源48NPZ SHA不变。以下原失败两组的停止结论仍有效，本次整路复用是不同候选。
+
+## 2026-10-26：当前状态——两组完整结束，均不作为新提升版本
+
+- 已完成：独立三路Selectors与冻结强Person只训Face的seed1/GPU0/8任务Val/Test/OFF；12作业全部exit0，576产物回传校验，24源及16新checkpoint SHA一致，208融合/832视图CPU复算及逐值保护通过。
+- 独立S+B0头Val38.6066/46.9717、Test29.2649/37.7092；原共训头40.9621/48.1452、30.7724/38.2750，按匹配原头对照仍输旧共享双Attention。不要把换头恢复误算模块收益；不要把此组视为完全视图隔离，Adapter/Prompts与Full K/V反传仍存在。暂不进一步拆共享参数或扩此版。
+- 冻结强Person只训FaceVal43.0787/50.2760、Test32.8792/39.8493，对比强Person43.0741/50.2828、32.8864/39.8687无净增益；Full/Person和无可靠Face预测全阶段精确保持，Face OFF回到强候选。保护机制保留为工具，本版Full→Face模块不作为有效增强。
+- 当前保留原Person-only共训ASP/Person Attention＋B0头，以及正式B0 32.6800/39.5292；均seed1历史seen-positive，不与其他seed/Full指标混合。现有Test已参与探索，未估计多seed稳定性。
+- 若用户继续授权研究Face，先用现有预测检查Face是否存在Val/Test一致的错误互补以及目标人物对应；新结构必须解决此接口缺口，不直接延长5epoch、增scale、拆所有共享参数或重跑已失败后置残差。当前不启动新训练、不合并main。
+- 详细结果docs/selector_face_controls_results_20261026.md；分析output/selector_face_controls/analysis_20261026_01，脚本scripts/emotic/analyze_selector_face_controls.py；本地分析分支codex/selector-face-analysis-20261026，远程执行f6ef130保持clean。下文所有“待完成/启动中”为历史记录，以本节为准。
+
 ## 2026-10-26：用户授权独立Selector与冻结强Person只训Face两组8任务
+
+执行更新：源码f6ef130已Git-only部署独立remote worktree multi-lane-main-selector-face-controls-20261026，branch/HEAD/upstream一致，旧主树/test-only的HEAD/status SHA不变。7新增专项及495项完整回归通过（21.979秒）。GPU初始化审计确认三套Selector精确克隆、其余初值/CPU-CUDA RNG/初始预测等价，新增122880参数；smoke_seed1_20261026_01全部成功，冻结组更新后Full/Person/无可靠Face预测逐值保持，Face OFF回到强Person，原Person/双Attention参考逐值重放。
+
+正式formal_seed1_20261026_01已自动启动于GPU0，tmux selector_face_controls_seed1_20261026。PRIVATE_SELECTORS训练PID1972432，FROZEN_PERSON_FACE训练PID1972995，参考Val/Test也排入同一4并行队列。两组task0前4epoch各84成功更新/0跳步；前者30epoch/任务，后者额外5epoch/任务。GPU约8537MiB/100%。正式8任务及所有Val/Test/OFF评估将自动接续，当前尚无最终成绩。源24份checkpoint SHA保持，旧实验/主树/test-only未修改。
+
+106份smoke/单测/预测文件已回传本地output/selector_face_controls/smoke_snapshot_20261026_01并逐SHA核验，归档SHA5b3a5a3761a67eba3397c3c1f7b361f00eced32b92be3dcf9d0063569c0e3c65。运行源码保持remote f6ef130 clean；当前仅本地追加执行记录。完成后分析独立Selector的共享/跨K-V通路差别，以及冻结强Person后Face条件收益能否保留，不预先宣称提升。
 
 新分支codex/private-selectors-frozen-face-20261026。PRIVATE_SELECTORS：基于双Attention共训+B0头方案，三视图每任务各10个独立Selector，共30个；从同一共享初值克隆，保持全局RNG与其余初始参数不变，训练30epoch/任务、主LR.0125、A/M LR.0004，仍共享Image-token Adapter与Prefix Prompts，保留Face/Person Attention读取Full K/V的反传，不额外detach。该组只检验Selector共享，不宣称完整视图梯度隔离。增加Selector122880参数。
 

@@ -1,5 +1,15 @@
 # 独立Selector与冻结强Person模型的Face适配实验
 
+完成更新（2026-10-26）：formal_seed1_20261026_01的12作业全部exit0，两组8任务Val/Test/OFF及参考重放已结束。576非权重产物回传并逐SHA验证，24源与16新checkpoint SHA一致。CPU复算208阶段融合/832视图最大误差7.11e-14，80旧参照重放、32完整保护及16Face mask逐值核验通过。新分析分支codex/selector-face-analysis-20261026，远程执行f6ef130保持clean。
+
+独立S+B0头：Val38.6066/46.9717，Test29.2649/37.7092；原共训头40.9621/48.1452，30.7724/38.2750，按匹配原头也退步。全Attention OFF Test29.2269/37.5399，主要损失是共同训练后的表征/读出；A/P和Full K/V梯度仍共享，不是完整隔离。冻结强Person只训Face：Val43.0787/50.2760、Test32.8792/39.8493，原强Person43.0741/50.2828、32.8864/39.8687。保护与OFF恢复全部精确通过，Face非零更新，但无整体净收益。保留强Person和B0，不继续扩本次两结构。完整八阶段/分路/机制/局限见selector_face_controls_results_20261026.md；以下为启动时计划及历史执行记录。
+
+执行更新：源码f6ef130已Git-only部署独立remote worktree multi-lane-main-selector-face-controls-20261026，branch/HEAD/upstream一致，旧主树/test-only的HEAD/status SHA不变。7新增专项及495项完整回归通过（21.979秒）。GPU初始化审计确认三套Selector精确克隆、其余初值/CPU-CUDA RNG/初始预测等价，新增122880参数；smoke_seed1_20261026_01全部成功，冻结组更新后Full/Person/无可靠Face预测逐值保持，Face OFF回到强Person，原Person/双Attention参考逐值重放。
+
+正式formal_seed1_20261026_01已自动启动于GPU0，tmux selector_face_controls_seed1_20261026。PRIVATE_SELECTORS训练PID1972432，FROZEN_PERSON_FACE训练PID1972995，参考Val/Test也排入同一4并行队列。两组task0前4epoch各84成功更新/0跳步；前者30epoch/任务，后者额外5epoch/任务。GPU约8537MiB/100%。正式8任务及所有Val/Test/OFF评估将自动接续，当前尚无最终成绩。源24份checkpoint SHA保持，旧实验/主树/test-only未修改。
+
+106份smoke/单测/预测文件已回传本地output/selector_face_controls/smoke_snapshot_20261026_01并逐SHA核验，归档SHA5b3a5a3761a67eba3397c3c1f7b361f00eced32b92be3dcf9d0063569c0e3c65。运行源码保持remote f6ef130 clean；当前仅本地追加执行记录。完成后分析独立Selector的共享/跨K-V通路差别，以及冻结强Person后Face条件收益能否保留，不预先宣称提升。
+
 2026-10-26用户授权，两组均seed1、GPU0、完整8任务validation/test。实验分支codex/private-selectors-frozen-face-20261026，当前实现完成，待远程测试/smoke。
 
 ## 第一组：三个分路各10个独立Task Selector
@@ -39,3 +49,11 @@ Image-token Adapter及Prefix Prompts仍共享。Attention仍以接收视图的�
 只用GPU0，最多4个训练/评估作业，空闲显存6000MiB/shm1024MiB才放行，启动间隔12秒；两个新训练并行，原Person/双Attention参考重放也入同一队列。先单测及GPU smoke（两任务各两更新、新模型只Val；已完成旧参考允许Val/Test重放），同源码gate通过后自动完整训练/Val/Test。
 
 首要结果是独立Selector是否优于旧双Attention，以及固定强底座的Face-only是否超过32.8864/39.8687并维持逐值保护。所有控制与完整指标都报告，不依据最好单点省略不利结果。
+
+## 文件改动
+
+- `multi_lane/track_a/model.py`：限定开放历史双Attention的独立Selector组合。
+- `multi_lane/track_a/historical_b32_modules.py`、`runner.py`：显式配置/校验开关、实际记录及分视图Selector梯度日志。
+- `multi_lane/track_a/head_anchored_eight.py`：不同Selector形状时只替换分类头，新增冻结Face组的逐值预测验收。
+- `multi_lane/track_a/selector_face_controls.py`、`run_selector_face_controls.py`：初始等价审计、仅Face训练、原参考重放及GPU0自动队列。
+- `tests/test_selector_face_controls.py`：新增7项真实梯度、冻结、初值、无信号及预测保护检查；完整495项回归通过。
