@@ -16,4 +16,3 @@ exec "${ML_PYTHON:-/opt/conda/envs/ddp/bin/python}" -u -m multi_lane.track_a.run
   --logs "logs/teacher_free_shared_learning/${run_id}" \
   --maximum-jobs 3 --minimum-train-free-mib 6000 --minimum-eval-free-mib 4000 \
   --auto-promote-task012 "$@"
-

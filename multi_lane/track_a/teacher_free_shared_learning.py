@@ -182,7 +182,9 @@ def evaluation_loader(view, task, workers=2):
 
 
 def load_own(model, path, cfg):
-    saved = _torch_load(path)
+    # Our atomic recovery contains Python/NumPy RNG and Adam, not just tensors.
+    # Only paths produced by this own-run recovery protocol are accepted here.
+    saved = torch.load(path, map_location='cpu', weights_only=False)
     if saved['config'] != cfg:
         raise ValueError('Own recovery configuration changed')
     missing = model.load_state_dict(saved['model'], strict=False)
@@ -490,4 +492,3 @@ if __name__ == '__main__':
         if args.training_root is None:
             raise ValueError('Evaluation needs --training-root')
         evaluate(args)
-

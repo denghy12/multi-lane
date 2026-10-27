@@ -1,5 +1,7 @@
 # 项目上下文
 
+预检补记：e750818首轮502项发现Torch2.0 any(tuple)兼容、完整own恢复读取weights_only、集成测试task属性及stdin驱动spawn测试问题；仅在预检，未正式训练。已改用逐维any、仅own恢复显式完整加载、正确current_task_id，并以python -m unittest标准入口重跑；新增文件EOF空行同步清理。不改目标/配方/旧权重。
+
 ## 2026-10-27：执行无教师三视图互补学习（实现完成，预检中）
 
 用户授权按方案修改并GPU0高效运行。新分支codex/teacher-free-shared-learning-20261027，基于28a1cbb，保留旧dirty分析。新增自然正负对互补排序、Full/融合实际Adam候选步保护、同批TRAIN反事实probe、runner可选接入/完整epoch恢复、无教师训练评估与GPU0显存队列；原model.py/B0前向不改，head原30轮全程学习，原BCE/ASL保留。初始U0/U2/U4 seed1task0×30轮、B64、主LR.0125/Adapter.0004、b32/index1/scale.03、72线程、历史报告RNG；Test/Val完整评估。符合门槛才自动续0–2并补U1/U3，不自动8任务。无A/B任务参数或输出导入。

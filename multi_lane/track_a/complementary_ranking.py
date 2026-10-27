@@ -142,7 +142,7 @@ def complementary_ranking_objective(
     values = torch.stack((
         pair_count_tensor.to(dtype=person_scores.dtype),
         face_pair_count_tensor.to(dtype=person_scores.dtype),
-        pairs.any(dim=(0, 1)).sum().to(dtype=person_scores.dtype),
+        pairs.any(dim=0).any(dim=0).sum().to(dtype=person_scores.dtype),
         face_reliable.sum().to(dtype=person_scores.dtype),
         person_loss.detach(), face_loss.detach(), loss.detach(),
         (difficulty * pairs).sum().detach() / denominator,

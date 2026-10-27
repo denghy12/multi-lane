@@ -52,4 +52,3 @@ def measure_candidate_effect(*, model, optimizer, baseline_parameters, images,
         for module, training in flags:
             module.training = training
         restore_rng(rng)
-

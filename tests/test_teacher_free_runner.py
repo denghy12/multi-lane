@@ -36,7 +36,7 @@ class TeacherFreeRunnerTests(unittest.TestCase):
             loss_routing="adapter_asl", view_auxiliary_loss_weight=.1,
             optimizer_group_builder=optimizer_groups)
         cfg.update(options)
-        return train_task(model, [batch], None, torch.device("cpu"), model.current_task, **cfg)
+        return train_task(model, [batch], None, torch.device("cpu"), model.current_task_id, **cfg)
 
     def test_ramp_zero_replays_entire_original_update_and_rng(self):
         base, batch = self.pair()
@@ -137,4 +137,3 @@ class TeacherFreeRunnerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -39,4 +39,3 @@
 本地py_compile/bash-n/git diff --check；指定排序/候选Adam/runner集成/队列恢复机制测试，以及全部tests/test_track_a*.py回归和相关独立tests；再真实CLIP三组2任务×24更新smoke/Val首64。Smoke强制λ1以实际覆盖新增机制，明确不改变正式渐入；只读来源比较，不报告smoke精度为效果。核对原主树153条/test-only5条dirty的HEAD和status SHA保持，任何源码仅Git提交推送/fetch到新worktree。
 
 实际GPU0 4090约24GB空闲，其余1–7忙，禁止使用或中断。正式最大3并发，每新增训练需至少6GB余量，评估至少4GB，/dev/shm至少768MB；预检如显存不足按实测降低并发并记录，不改batch或原初始化线程。源码提交固定后才正式运行。
-
