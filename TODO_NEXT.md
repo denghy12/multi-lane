@@ -1,5 +1,22 @@
 # 下一步任务
 
+## 2026-10-27：评估CPU争用优化（仅评估，预检中）
+
+四组8任务训练已结束。原4评估workers0各72线程、合计约130核而GPU0空闲，旧吞吐预计剩余10–13小时。新分支codex/self-trained-evaluation-throughput-20261027仅新增独立fast评估入口，已有multi_lane源码与训练Git字节一致。B64/模型72线程/AMP-TF32/旧seen-positive不变，图像预处理移至2个单线程spawn worker、prefetch1。先task0/7 Val各128人核对像素/标签/ID/mask及四路logits逐值一致，再接续32个原学生checkpoint的完整Val/Test和ON/OFF，0训练。已完成pass经JSON+两NPZ、人群及指标验证后按SHA复制复用，原输出保留。新输出output/self_trained_fast_evaluation/seed1_20261027_01，配置docs/self_trained_fast_evaluation_20261027.md。当前预检准备，尚无实测加速比。
+
+
+时间估算更新（2026-10-27）：恢复run resumed_seed1_20261027_03的四组8任务训练现已全部结束、8份最终checkpoint各组齐全、无Traceback。当前在只读评估：BASE Val/Test及NO_CONSTRAINT Val/Test四进程运行，MAIN两组四评估待队列。已完成19个阶段/开关pass，约56231/406854前向人次，评估已运行111.1分钟；按已完成pass吞吐外推剩余约11.55小时，考虑当前未完成pass建议报10–13小时（未优化吞吐）。4评估各72线程、workers0，单进程约30余CPU核占用而GPU0大部分空闲，存在明显CPU预处理/线程争用瓶颈；本次仅只读查询和估算，未改线程、加载配置、权重或重启进程。正式完整Val/Test仍未完成。
+
+
+## 2026-10-27：数值审计修复并继承自身进度，正式Val/Test仍待完成
+
+运行源码fb5f6cc745ae6c103990876e7bc0e8370a1d155f，fix/self-trained-audit-recovery-20261027，本地/服务器HEAD/upstream一致；远程新独立worktree multi-lane-main-self-trained-audit-recovery-20261027 clean。11项专项与518项完整测试（1跳过）通过。四组真实已完整训练task0及task1warmup的A/A/B/A审计全部在数学SDP下四视图重复/更新后旧路径/回放差0，旧参数SHA一致；smoke_seed1_20261027_04全部成功。
+
+已恢复运行output/self_trained_view_transfer/resumed_seed1_20261027_03，tmux self_trained_recovery_seed1_20261027，GPU0并行4组PID BASE2880903/NO2881441/MAIN2882175/MAIN_ADAPTER2882919。每组6份完整本组自身状态导入，模型Tensor SHA与CPU/CUDA RNG不变；超参数相同、核心训练代码逐字节及训练调用/初始化AST相同，未从其他模型拼装分路/head。task0及task1前30epoch跳过不重训，后三组task1遗失5epoch从自身warmup重放；NoD重放前2epoch日志值与原日志一致（不声称找回丢失权重）。现在四组均跨过task1原故障点：BASE/NO已保存task2并到task3 epoch5/2，MAIN在task2第30epoch，MAIN_ADAPTER第29，均0跳步/无Traceback。task1实际数学SDP保护审计四组所有差值0。全8阶段Val/Test与ON/OFF仍将在完整训练后自动执行，当前尚无正式mAP。
+
+103份原失败日志/进度/完整回归/真实checkpoint审计/smoke产物已回传output/self_trained_view_transfer/failure_snapshot_20261027_01并逐SHA核验；归档03e4bce424550644d31e4f84cd42dd10d2871ed8586b3a6335d10c1aa37ff534，24份原学生checkpoint SHA未变、pth保留服务器。主树/test-only原HEAD/status SHA保持。运行源码固定fb5f6cc，不在运行中同步本地执行记录。不能用原实验进程结束或训练loss判断三视图方法精度；现只确认工程审计原因并恢复，待完整Val/Test。
+
+
 ## 2026-10-27：正式四组实际task1审计误停，尚无8任务Val/Test
 
 用户要求完整结果复核。remote6613c56 formal_seed1_20261027_02四组均只有task0最终/完整恢复和task1前30epoch完整恢复；后三组task1额外5epoch在日志中完成但因审计前未保存而丢失RAM权重。task2–7未运行，Val/Test未启动，不能判断方法成功/失败。错误均uncontrolled_probe_noise，未更新模型重复前向最大1.14e-5–1.37e-5超过旧1e-5阈值。只读完整已训练BASE的A/A/B/A诊断：优化SDP重复约1.34e-5，FP32禁TF32且强制数学SDP后四视图重复/更新后旧路径/回放差均0，旧参数SHA相同，定位为审计计算核非确定性，不是已证明的遗忘或Face冲突。
