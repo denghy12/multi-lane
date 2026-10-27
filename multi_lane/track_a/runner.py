@@ -1665,6 +1665,9 @@ def train_task(
     recovery_state: Optional[Dict[str, object]] = None,
     optimizer_group_builder=None,
     functional_constraint=None,
+    complementary_learning: Optional[Dict[str, object]] = None,
+    epoch_callback=None,
+    resume_training_state: Optional[Dict[str, object]] = None,
 ) -> List[Dict[str, float]]:
     if not math.isfinite(supervised_loss_scale) or supervised_loss_scale <= 0:
         raise ValueError("Supervised loss scale must be finite and positive")
@@ -1678,6 +1681,23 @@ def train_task(
         raise ValueError("Unknown model/Adapter loss routing")
     if functional_constraint is not None and loss_routing != "adapter_asl":
         raise ValueError("Functional constraints require explicit BCE/Adapter-ASL routing")
+    if complementary_learning is not None:
+        if (loss_routing != "adapter_asl" or view_gradient_routing != "joint"
+                or functional_constraint is not None or gradient_clip_norm != 0
+                or ranking_loader is not None or parax_distillation_weight != 0
+                or adapter_regularization != "none"
+                or model.view_fusion != "fixed_three_view"
+                or model.view_classifier_mode != "shared_post_fusion"
+                or model.detach_view_fusion_features):
+            raise ValueError("Complementary learning requires the unchanged three-view BCE/Adapter-ASL baseline")
+        if complementary_learning.get("mode") not in {"none", "full", "full_fusion"}:
+            raise ValueError("Unknown complementary protection mode")
+        if int(complementary_learning.get("ramp_epochs", 5)) < 2:
+            raise ValueError("Complementary ramp must span at least two epochs")
+        force_ramp = complementary_learning.get("diagnostic_force_ramp")
+        if force_ramp is not None and (optimizer_updates_per_task is None
+                                      or not 0 <= float(force_ramp) <= 1):
+            raise ValueError("A forced ramp is permitted only for bounded diagnostic updates")
     if optimizer_updates_per_task is not None and optimizer_updates_per_task <= 0:
         raise ValueError("Optimizer updates per task must be positive")
     if adapter_regularization not in {
@@ -1805,6 +1825,20 @@ def train_task(
     ranking_iterator = iter(ranking_loader) if ranking_loader is not None else None
     epoch = 0
     task_gradient_audit: Optional[Dict[str, float]] = None
+    if resume_training_state is not None:
+        from .task_recovery import optimizer_snapshot
+        expected_names = optimizer_snapshot(model, optimizer, scheduler, scaler)["optimizer_parameter_names"]
+        if expected_names != resume_training_state["optimizer_parameter_names"]:
+            raise ValueError("Resume optimizer parameter names differ")
+        optimizer.load_state_dict(resume_training_state["optimizer"])
+        scheduler.load_state_dict(resume_training_state["scheduler"])
+        scaler.load_state_dict(resume_training_state["scaler"])
+        epoch = int(resume_training_state["next_epoch"])
+        history = copy.deepcopy(resume_training_state["history"])
+        completed_task_updates = int(resume_training_state["completed_task_updates"])
+        if (len(history) != epoch or not 0 < epoch <= epochs or optimizer_updates_per_task is not None
+                or adapter_regularization != "none" or ranking_loader is not None):
+            raise ValueError("Resume supports complete epoch boundaries of the declared baseline")
     while (
         completed_task_updates < optimizer_updates_per_task
         if optimizer_updates_per_task is not None
@@ -1844,6 +1878,14 @@ def train_task(
         epoch_path_gradient_audits: List[Dict[str, float]] = []
         epoch_parameter_gradients = {}
         functional_totals = {}
+        complementary_totals = {}
+        complementary_status_counts = {}
+        complementary_ramp = 0.0
+        if complementary_learning is not None:
+            complementary_ramp = float(complementary_learning.get(
+                "diagnostic_force_ramp",
+                min(1.0, epoch / (int(complementary_learning.get("ramp_epochs", 5)) - 1)),
+            ))
         condition_samples = 0
         condition_valid_total = 0.0
         condition_visible_total = 0.0
@@ -2111,7 +2153,41 @@ def train_task(
                         representation_parameters,
                         adapter_parameters,
                     ))
+                complementary_loss = None
+                complementary_metrics = {}
+                if complementary_learning is not None and complementary_ramp > 0:
+                    from .complementary_ranking import complementary_ranking_objective
+                    complementary_loss, complementary_metrics = complementary_ranking_objective(
+                        view_features=view_features, head=model.head,
+                        fusion_weights=model.last_fusion_weights(),
+                        view_logits=view_logits, targets=current_targets,
+                        current_class_indices=current, face_reliable=images["face_reliable"],
+                        full_conditioned=bool(complementary_learning.get("full_conditioned", True)),
+                        temperature=float(complementary_learning.get("temperature", 1.0)),
+                    )
             scale_before = float(scaler.get_scale())
+            complementary_baseline_probe = None
+            complementary_groups = None
+            complementary_auxiliary = None
+            complementary_guards = {}
+            if complementary_loss is not None:
+                complementary_groups = {
+                    "representation": tuple(p for p in representation_parameters if p.requires_grad),
+                    "adapter": tuple(p for p in adapter_parameters if p.requires_grad),
+                }
+                flat_parameters = tuple(p for group in complementary_groups.values() for p in group)
+                def complementary_gradients(objective):
+                    values = _scaled_gradients(objective, flat_parameters, scaler, retain_graph=True)
+                    values = tuple(None if g is None else g.detach().float() / scale_before
+                                   for g in values)
+                    count = len(complementary_groups["representation"])
+                    return {"representation": values[:count], "adapter": values[count:]}
+                complementary_auxiliary = complementary_gradients(complementary_loss)
+                mode = complementary_learning["mode"]
+                if mode in {"full", "full_fusion"}:
+                    complementary_guards["full"] = complementary_gradients(view_bce_losses["full"])
+                if mode == "full_fusion":
+                    complementary_guards["fused"] = complementary_gradients(fused_bce_loss)
             if model.view_fusion_module.logit_residual:
                 backward_logit_residual_training_losses(
                     base_loss=model_loss,
@@ -2172,6 +2248,47 @@ def train_task(
                 adapter_gradient_batches += 1
             if (getattr(model, "strong_full_asl", False) or getattr(model, "historical_b32_modules", False)) and batch_index == 0:
                 epoch_parameter_gradients = strong_full_gradient_diagnostics(model, scale_before)
+            if complementary_loss is not None:
+                from .complementary_update import select_auxiliary_gradients
+                # Register GradScaler's original-base overflow state once. Candidate
+                # selection sees real unscaled gradients and never advances Adam.
+                scaler.unscale_(optimizer)
+                all_base_parameters = tuple(p for group in optimizer.param_groups for p in group["params"])
+                base_finite = all(p.grad is None or bool(torch.isfinite(p.grad).all())
+                                  for p in all_base_parameters)
+                extra_finite = all(g is None or bool(torch.isfinite(g).all())
+                    for objective in (complementary_auxiliary, *complementary_guards.values())
+                    for gradients in objective.values() for g in gradients)
+                if base_finite and extra_finite:
+                    probe_interval = int(complementary_learning.get("probe_interval", 100))
+                    if probe_interval > 0 and (completed_task_updates + 1) % probe_interval == 0:
+                        from .complementary_update import adam_candidate_parameters
+                        complementary_baseline_probe = adam_candidate_parameters(optimizer=optimizer)
+                    update_metrics = select_auxiliary_gradients(
+                        optimizer=optimizer, groups=complementary_groups,
+                        auxiliary=complementary_auxiliary, guards=complementary_guards,
+                        ramp=complementary_ramp, mode=complementary_learning["mode"],
+                        gradient_ratio=float(complementary_learning.get("gradient_ratio", .25)),
+                        update_ratio=float(complementary_learning.get("update_ratio", .1)),
+                    )
+                else:
+                    update_metrics = {"alpha": 0.0, "nonfinite_base": float(not base_finite),
+                                      "nonfinite_auxiliary_or_guard": float(not extra_finite),
+                                      "status": "nonfinite_fallback"}
+                values = {**complementary_metrics, **update_metrics,
+                          "loss": float(complementary_loss.detach())}
+                def add_complementary_metric(prefix, value):
+                    if isinstance(value, dict):
+                        for key, item in value.items():
+                            add_complementary_metric(prefix + "_" + str(key), item)
+                    elif isinstance(value, (float, int)):
+                        complementary_totals[prefix] = complementary_totals.get(prefix, 0.0) + value
+                for key, value in values.items():
+                    add_complementary_metric(str(key), value)
+                status = str(update_metrics.get("status", "selected"))
+                complementary_status_counts[status] = complementary_status_counts.get(status, 0) + 1
+                complementary_totals["active_batches"] = complementary_totals.get("active_batches", 0) + 1
+                complementary_totals["accepted_batches"] = complementary_totals.get("accepted_batches", 0) + float(update_metrics.get("alpha", 0) > 0)
             if gradient_clip_norm > 0:
                 # GradScaler keeps gradients scaled until unscale_. Clip the
                 # complete optimizer parameter set after unscaling so the
@@ -2267,6 +2384,18 @@ def train_task(
                         adapter_diagnostic_totals.get(key, 0.0) + float(value)
                     )
                 adapter_diagnostic_batches += 1
+            if complementary_baseline_probe is not None and float(scaler.get_scale()) >= scale_before:
+                from .complementary_training_probe import measure_candidate_effect
+                probe = measure_candidate_effect(
+                    model=model, optimizer=optimizer,
+                    baseline_parameters=complementary_baseline_probe,
+                    images=images, targets=current_targets, current=current,
+                    temperature=temperature, loss_mode=loss_mode, amp=amp,
+                )
+                for key, value in probe.items():
+                    metric = "probe_" + key
+                    complementary_totals[metric] = complementary_totals.get(metric, 0.0) + value
+                complementary_totals["probe_batches"] = complementary_totals.get("probe_batches", 0) + 1
         if not batches:
             raise RuntimeError("Training loader produced no batches")
         if optimizer_steps and optimizer_updates_per_task is None:
@@ -2327,6 +2456,10 @@ def train_task(
             )
         if functional_constraint is not None:
             row.update({"functional_" + k: v / batches for k, v in functional_totals.items()})
+        if complementary_learning is not None:
+            row.update({"complementary_" + k: v / batches for k, v in complementary_totals.items()})
+            row["complementary_ramp"] = complementary_ramp
+            row["complementary_status_counts"] = complementary_status_counts
         if condition_samples:
             row["selector_condition_valid_fraction"] = condition_valid_total / condition_samples
             row["selector_condition_visible_fraction"] = condition_visible_total / condition_samples
@@ -2382,6 +2515,13 @@ def train_task(
             flush=True,
         )
         epoch += 1
+        if epoch_callback is not None:
+            from .task_recovery import optimizer_snapshot
+            epoch_callback(epoch, history, dict(
+                optimizer_snapshot(model, optimizer, scheduler, scaler),
+                next_epoch=epoch, completed_task_updates=completed_task_updates,
+                history=copy.deepcopy(history),
+            ))
     if recovery_state is not None:
         from .task_recovery import optimizer_snapshot
         recovery_state.update(optimizer_snapshot(model, optimizer, scheduler, scaler))

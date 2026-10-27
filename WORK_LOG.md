@@ -1,5 +1,43 @@
 # 工作日志
 
+## 2026-10-27：执行无教师三视图互补学习（实现完成，预检中）
+
+用户授权按方案修改并GPU0高效运行。新分支codex/teacher-free-shared-learning-20261027，基于28a1cbb，保留旧dirty分析。新增自然正负对互补排序、Full/融合实际Adam候选步保护、同批TRAIN反事实probe、runner可选接入/完整epoch恢复、无教师训练评估与GPU0显存队列；原model.py/B0前向不改，head原30轮全程学习，原BCE/ASL保留。初始U0/U2/U4 seed1task0×30轮、B64、主LR.0125/Adapter.0004、b32/index1/scale.03、72线程、历史报告RNG；Test/Val完整评估。符合门槛才自动续0–2并补U1/U3，不自动8任务。无A/B任务参数或输出导入。
+
+GPU0空闲24GB，其余忙，仅0；上限3并发、训练余量6GB/评估4GB、共享内存保护。正式前指定机制/回归测试及真实三组2任务×24更新smoke，关闭机制与U0历史精确重放必须核验。执行协议docs/teacher_free_shared_learning_execution_20261027.md，设计/细节docs/teacher_free_shared_view_learning_plan_20261027.md。当前本地编译检查通过，远程预检/正式待启动，不声称方法有效。主树HEADa322419/status SHA ea2e261e…153条，test-only0b59138/e9d1479f…5条均保留；不合并main，不删除checkpoint。
+
+
+2026-10-27说明补充：再次核对原论文§3.3与当前runner/model，明确三路辅助监督是扩展而非原论文机制；原B0已监督融合和各路，.1作用于有效视图均值，Face子集先平均。新机制只增互补排序/额外反向分配和新增Adam步保护，不切断原融合梯度、不冻结原head、不保证完整Full功能不变。详见方案第12节；本轮仅说明/文档，无模型训练或新实验。
+
+## 2026-10-27：无外部教师的共享三视图方案研究
+
+用户收紧最终目标：自己训练的单模型，在原30轮内保Full并学Person/Face互补；不能依赖A/B输出或参数拼装。检查最新随机流精确恢复、30→35归因、DGL/梯度审计、独立Selector、旧OOF排序失败与当前runner损失/参数路由，阅读辅助梯度相似性、PCGrad、ReconBoost、Gradient Blending原始论文。
+
+新建规划分支codex/teacher-free-shared-view-plan-20261027（HEAD28a1cbb），保留既有未提交结果分析。新增`docs/teacher_free_shared_view_learning_plan_20261027.md`，提出保留原B0前向/共享参数与BCE-ASL；新增Full条件真实标签排序，通过Person/可靠Face路径反传，同时对新增共享更新做分组与实际Adam候选步限制。当前头全30轮学习，单一CLIP预训练+fresh任务参数；无教师、旧头交换、新Attention、额外5轮。明确保护只是本batch一阶相对步约束，不保证泛化/最终AP。U0–U4与阶段门槛、旧失败区别、互补证据/剂量控制已列。
+
+远程在历史RNG独立worktree仅做TRAIN标签/Face元数据统计，无GPU/图像前向/训练更新；B64独立模拟shuffle，task0/2/7可靠Face正负对每批均有，同图人物自然同批稀少。计数JSON回传output/teacher_free_shared_plan/train_pair_feasibility_20261027.json，SHA256 ceea9e58fd7c54b25e74360f498f121dfd7a3b6a10561812d67ecdf319232071。它仅支持采样可行性，不证明优化有效。
+
+本轮没有训练业务代码修改/模型实验/提交推送合并；仅文档与既有context更新，后续用户要求执行后再实施和GPU0验证。此前dirty分析文件原样保留。
+
+
+## 2026-10-27：历史底座精确恢复，warmup/final归因完整结束
+
+运行28a1cbb87052ecce8d95114153a736882bb70119全部完成，GPU作业已退出。fresh SELF_BASE 8任务×30epoch、0跳步，每阶段权重/30轮loss/Python-NumPy-CPU-CUDA RNG精确匹配历史；独立CPU再比8×41非视觉Tensor原始字节SHA均相同。Val42.4627720833/49.4762827230、Test32.6800218743/39.5291640411，cF1/oF132.8226918781/49.5458931279，历史配方已准确恢复；先前32.1748来自报告RNG遗漏，不是评估标准变化。原72源checkpoint SHA保持。基线同模型Full单路Test31.2373→融合32.6800，融合收益仍在，不能代替独立训练单Full消融。
+
+原四组task0/2/7四条件完整Val/Test归因全部完成，不重训适配组，不把修复基线混入旧匹配差分。联合约束组当前5轮Val task0/2/7变化−1.743021/+.017516/+.012691，Test−.427226/+.007488/+.019311。task0损失主要来自ASP变化Val−1.740831/Test−.397587，当前Attention−.002190/−.029638；Face全人群AP升但可靠Face降，不能当有效面部证据提高。旧类别各视图logits和概率在warmup/final间精确不变，当前head不变，初始当前Attention恒等，BASE阴性控制通过。
+
+联合约束task7相对原匹配BASE：Val适配前−.486082、当前ASP+.012794/Attention−.000102、最终−.473390；Test适配前+.082832、当前ASP+.019638/Attention−.000327、最终+.102143。约81%的Test最终优势早于当前5轮。当前新3类Test AP+.167362，但仅3/26类能改变，整体+.019311；Val旧23类贡献warmup差−.426227，当前5轮无法修复已冻结旧类。失败模式是首任务排序受损后封存、后续起点已变，不是每阶段5轮都持续损害或已证明单一S/P梯度冲突。
+
+523份非pth产物已回传逐SHA核验，归档290e0d89c9e470283751457e688b2e74b5ea554c588a817979b5fda9b95b1861；另回传独立Tensor比对JSON。CPU独立复算112融合/560视图含可靠Face，最大误差6.394884621840902e-14，分析output/historical_rng_replay/analysis_20261027_02，日志同前缀，脚本scripts/emotic/analyze_historical_rng_warmup.py。报告docs/historical_rng_warmup_results_20261027.md。
+
+当前分析分支codex/historical-rng-attribution-results-20261027，未提交本次分析/文档，remote运行源码保持clean。下一步保留恢复的历史强底座，暂不把3适配组全重跑/扩seed/beta/Attention，先围绕首任务原排序保护与原30轮共同学习设计同预算小控制。本次仅分析、同步产物和文档，没有另起训练/前向或合并；三个上下文均更新，旧主树/test-only保留。
+
+
+执行更新：28a1cbb87052ecce8d95114153a736882bb70119已Git-only部署独立remote multi-lane-main-historical-rng-warmup-20261027，本地/remote HEAD/upstream一致，remote clean。4 RNG专项+2边界归因专项、528全回归通过（46.186秒）；两任务各2更新BASE smoke、Val首64，以及四来源task0/2/7 Val首64四条件smoke全部完成，来源final前缀四路logits精确重放。165份smoke/测试/协议已回传output/historical_rng_replay/preflight_snapshot_20261027_01逐SHA核验，归档5ff6553ae437ac823523cd3701250878d12280343f0916a895a5eaee8685cc55。
+
+正式tmux historical_rng_warmup_seed1_20261027运行中；BASE训练PID3123323、归因Val3123850、Test3124588，仅GPU0。BASE task0前8epoch正常、每轮84更新/0跳步；Val归因已完成BASE/NO/MAIN三来源并进入最后来源，Test已完成BASE/NO、进入MAIN。无故障。BASE仍须30轮权重/loss/所有RNG逐值验历史后进入下一任务，全部8任务完毕才自动Val/Test，不预称32.6800已恢复。旧源权重72份SHA协议锁定，原主树/test-only保留。运行源码28a1cbb固定，执行记录仅本地追加。
+
+
 ## 2026-10-27：执行历史随机流修复与现有warmup/final归因
 
 用户授权执行两项：修复并验证历史随机流；只读比较现有四组task0/2/7 warmup30与final35及ON/OFF。新分支codex/historical-rng-warmup-attribution-20261027，保留前轮未提交报告。仅添加两次CPU int64取种子、任务边界验证和独立归因/队列；不改模型/目标/超参数，不增加Attention容量/beta/seed。将只重跑SELF_BASE完整8任务×30epoch，标准CLIP+任务参数fresh初始化，不复制教师任务参数；每阶段逐值比对历史全部权重、30轮loss和Python/NumPy/CPU-CUDA RNG，失败立即停。额外3学生不重训。源72 checkpoint SHA前后检查。
