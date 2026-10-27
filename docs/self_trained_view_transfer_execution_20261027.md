@@ -1,5 +1,20 @@
 # 自训练单一三视图模型：执行配置
 
+完成状态更正（2026-10-27）：本轮formal02实际在task1数值审计处误停，没有完整8任务或正式Val/Test。详见[self_trained_view_transfer_failure_recovery_20261027.md](self_trained_view_transfer_failure_recovery_20261027.md)。下方启动核验仅描述当时首轮训练状态，不能当作实验完成。
+
+
+正式启动核验补充：四组均已完成task0首个epoch，各84成功更新/0跳步，四组loss .67947638和Adapter loss .03236856完全一致并匹配历史B0首轮；BASE已到第3epoch，NO/MAIN到第2，MAIN_ADAPTER第1。GPU0约14243MiB/100%，无Traceback。此时尚无正式8任务Val/Test结果。所有运行源码继续保持remote6613c56 clean；本地仅追加执行记录，避免运行中变更评估Git。
+
+
+## 2026-10-27：自训练四组正式8任务已在GPU0并行启动
+
+最终运行源码6613c5610deccda09102f606b02fe6791485823c，本地/服务器branch、HEAD、upstream一致；独立远程worktree multi-lane-main-self-trained-view-transfer-20261027 clean，运行期间不更新其源码。8新增专项、515完整测试（1跳过）通过。smoke_seed1_20261027_03四组两任务/每阶段2更新和Val首64全部成功，自己head与无外部学生参数加载、旧参数SHA、FP32重复控制、跨组实际batch像素/标签/ID均通过；MAIN_ADAPTER两任务beta_A约.00013736/.00025232，真实约束非零，教师未更新。
+
+正式formal_seed1_20261027_02已自动启动，tmux self_trained_view_transfer_seed1_20261027，GPU0四并行PID BASE2778683/NO_CONSTRAINT2779210/MAIN2779933/MAIN_ADAPTER2780656；当前约14175MiB/100%。BASE和NO_CONSTRAINT首epoch各84更新/0跳步，loss .67947638/Adapter .03236856精确匹配历史B0首轮，尚不代表8任务完整复现。其他组正在进入训练，尚无正式Val/Test成绩。四组训练结束后自动完整8阶段Val/Test及Attention ON/OFF，eval仅加载自己学生，所有源24checkpoint只读。
+
+179份三轮smoke/初始化审计/批次和数值诊断/完整测试日志已回传output/self_trained_view_transfer/smoke_snapshot_20261027_03并逐SHA核验，归档ad30756b8688f782234c295868fcccc1ab73e4ab37da8e01ee10ae84e5f0959d；模型pth保留服务器，不在轻量快照内。旧主树/test-only的原HEAD/status SHA保持。smoke01与formal01预启动中断记录完整保留，正式不复用它们。以下失败/等待条目为历史记录，以本节为准。
+
+
 2026-10-27用户授权执行，并明确最终模型须由事先定义的流程自己训练得到，不接受把别的模型参数组装成最终模型。该要求取代旧方案的“A已训练参数初始化＋B0头复制”。新分支 `codex/self-trained-three-view-transfer-20261027`。
 
 ## 1. 哪些参数来自哪里

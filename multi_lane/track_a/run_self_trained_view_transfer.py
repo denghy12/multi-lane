@@ -39,7 +39,7 @@ def verify_training(root,smoke):
     write(root/'training_verification.json',dict(status='verified',
         matched_consumed_warmup_and_adaptation_pixels_targets_ids=True,
         external_student_parameter_loads=0,old_task_parameters_exact=True,
-        old_prediction_audit='FP32_TF32_disabled_atol_1e-5_with_unchanged_repeat',checkpoints=checkpoints))
+        old_prediction_audit='FP32_TF32_disabled_math_SDPA_atol_1e-5_with_unchanged_repeat',checkpoints=checkpoints))
 
 
 def run(args):
@@ -57,6 +57,7 @@ def run(args):
         source_checkpoint_sha256=source,student_external_parameter_loads=0,
         evaluation_scope='samples_intersect_seen_classes',test_used_for_parameter_search=True,
         students_trained_from_fresh_initialization=True,teacher_only_used_during_training=True)
+    if args.resume_root is not None:protocol['resume_root']=str(args.resume_root)
     if (root/'protocol.json').exists():assert read(root/'protocol.json')==protocol
     else:write(root/'protocol.json',protocol)
     env=dict(os.environ,CUDA_VISIBLE_DEVICES='0',OMP_NUM_THREADS='72',MKL_NUM_THREADS='72',PYTHONUNBUFFERED='1')
@@ -80,7 +81,9 @@ def run(args):
             assert code==0,'Initialization audit failed'
         assert read(audit)['status']=='verified'
         pending=[(arm+'/train',module+['train',*common(args),'--arm',arm,'--output',str(root/arm/'train')]
-                  +(['--smoke'] if args.smoke else [])) for arm in ARMS]
+                  +(['--smoke'] if args.smoke else [])
+                  +(['--resume-training-root',str(args.resume_root/arm/'train')]
+                    if args.resume_root is not None else [])) for arm in ARMS]
         def complete_path(name):
             return root/name/('training_complete.json' if name.endswith('/train') else 'result.json')
         while pending or active:
@@ -138,4 +141,5 @@ if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--run-id',required=True)
     for name in ('source-run','person-run','dual-run','reference-root','data-root','clip-checkpoint','face-manifest-root'):
         parser.add_argument('--'+name,type=Path,required=True)
-    parser.add_argument('--smoke',action='store_true');run(parser.parse_args())
+    parser.add_argument('--smoke',action='store_true');parser.add_argument('--resume-root',type=Path)
+    run(parser.parse_args())

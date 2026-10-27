@@ -1,6 +1,8 @@
 import copy
 import unittest
 from unittest.mock import patch
+from pathlib import Path
+import tempfile
 
 import torch
 from torch.utils.data import DataLoader, TensorDataset
@@ -11,6 +13,8 @@ from multi_lane.track_a.head_anchored_pilot import student_optimizer_groups, tas
 from multi_lane.track_a.historical_b32_backbone_attribution import method_state
 from multi_lane.track_a.runner import tensor_state_digest, train_task
 from multi_lane.track_a.self_trained_view_transfer import compare_probes,configure_phase,initial_core
+from multi_lane.track_a.self_trained_view_transfer import prediction_probe
+from multi_lane.track_a.self_trained_recovery import compatible_config,import_own_recovery,training_ast
 
 
 class SelfTrainedViewTransferTest(unittest.TestCase):
@@ -124,3 +128,51 @@ class SelfTrainedViewTransferTest(unittest.TestCase):
         norm,scale=gradient_norm(loss,[p])
         self.assertEqual(scale,1.)
         self.assertAlmostEqual(norm,10000.)
+
+    def test_probe_uses_math_attention_and_restores_backend_flags(self):
+        model,_=self.pair();x=fixtures.ProtectedViewForwardTest.images(self)
+        original=model.seen_logits_with_views;calls=[]
+        before=(torch.backends.cuda.flash_sdp_enabled(),torch.backends.cuda.math_sdp_enabled(),
+            torch.backends.cuda.mem_efficient_sdp_enabled(),torch.backends.cuda.matmul.allow_tf32)
+        def checked(images):
+            calls.append((torch.backends.cuda.flash_sdp_enabled(),torch.backends.cuda.math_sdp_enabled(),
+                torch.backends.cuda.mem_efficient_sdp_enabled(),torch.backends.cuda.matmul.allow_tf32))
+            return original(images)
+        with patch.object(model,'seen_logits_with_views',checked):prediction_probe(model,(x,None),1)
+        self.assertEqual(calls,[(False,True,False,False)])
+        self.assertEqual(before,(torch.backends.cuda.flash_sdp_enabled(),torch.backends.cuda.math_sdp_enabled(),
+            torch.backends.cuda.mem_efficient_sdp_enabled(),torch.backends.cuda.matmul.allow_tf32))
+
+    def test_recovery_rejects_training_changes_and_different_arm(self):
+        old=dict(git={'commit':'old'},arm='SELF_MAIN_CONSTRAINT',batch_size=64)
+        compatible_config(old,dict(old,git={'commit':'new'},resume_origin={}))
+        with self.assertRaises(ValueError):compatible_config(old,dict(old,batch_size=128))
+        with self.assertRaises(ValueError):compatible_config(old,dict(old,arm='SELF_BASE'))
+        self.assertNotEqual(training_ast('def train():\n train_task(lr=1)\n'),
+                            training_ast('def train():\n train_task(lr=2)\n'))
+
+    def test_own_complete_state_import_preserves_weights_rng_and_original_files(self):
+        from multi_lane.track_a.run_historical_b32_test_attribution import write
+        from multi_lane.track_a.export_compact_test_scores import _sha256
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);source=root/'source';output=root/'output'
+            old=dict(git={'commit':'old'},arm='SELF_BASE',seed=1)
+            cfg=dict(old,git={'commit':'new'},resume_origin={'training_root':str(source)})
+            write(source/'config.json',old)
+            state={'selectors':torch.randn(2,3),'head.weight':torch.randn(3,4)}
+            compact=source/'compact_checkpoints/task0.pth';compact.parent.mkdir(parents=True)
+            torch.save(dict(model=state,source_git=old['git'],task_id=0),compact)
+            recovery=source/'recovery_checkpoints/task0.pth';recovery.parent.mkdir(parents=True)
+            rng=dict(torch_cpu=torch.get_rng_state(),torch_cuda=[])
+            torch.save(dict(model=state,source_git=old['git'],config=old,task_id=0,rng=rng,
+                provenance={'history':{},'audits':{}}),recovery)
+            sha=_sha256(recovery)
+            with patch('multi_lane.track_a.self_trained_recovery.verify_training_code',return_value={'exact':True}):
+                audit=import_own_recovery(source,output,cfg)
+            saved=torch.load(output/'recovery_checkpoints/task0.pth',weights_only=False)
+            self.assertTrue(audit['full_same_student_states_only'])
+            self.assertEqual(sha,_sha256(recovery))
+            self.assertEqual(saved['config'],cfg)
+            self.assertEqual(saved['recovery_origin']['weight_training_git'],old['git'])
+            self.assertEqual(tensor_state_digest(saved['model']),tensor_state_digest(state))
+            self.assertTrue(torch.equal(saved['rng']['torch_cpu'],rng['torch_cpu']))

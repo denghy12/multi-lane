@@ -1,5 +1,6 @@
 """A predefined training flow; students never import trained teacher parameters."""
 import argparse
+from contextlib import nullcontext
 from dataclasses import asdict
 from pathlib import Path
 import time
@@ -23,6 +24,7 @@ from .runner import (TaskMetrics, compact_model_state_dict, dataset_view, seen_i
     set_seed, summarize_tasks, tensor_state_digest, train_task)
 from .strong_full_evaluation import evaluate_fused_and_views
 from .task_recovery import atomic_save, restore_rng, save_boundary
+from .self_trained_recovery import import_own_recovery
 
 ARMS=('SELF_BASE','SELF_NO_CONSTRAINT','SELF_MAIN_CONSTRAINT','SELF_MAIN_ADAPTER_CONSTRAINT')
 
@@ -56,7 +58,7 @@ def configure_phase(model,task,adapt):
     model.assert_visual_frozen()
 
 
-def prediction_probe(model,probe,task):
+def prediction_probe(model,probe,task,use_math_sdpa=True):
     if probe is None:
         return None
     images,_=probe
@@ -64,7 +66,9 @@ def prediction_probe(model,probe,task):
     model.cross_view_runtime_enabled=model.cross_view_bank is not None
     model.eval()
     try:
-        with audit_precision(),torch.no_grad(),torch.cuda.amp.autocast(enabled=False):
+        attention=(torch.backends.cuda.sdp_kernel(enable_flash=False,enable_math=True,
+            enable_mem_efficient=False) if use_math_sdpa else nullcontext())
+        with audit_precision(),attention,torch.no_grad(),torch.cuda.amp.autocast(enabled=False):
             z,views=model.seen_logits_with_views(images)
     finally:
         model.cross_view_runtime_enabled=was
@@ -85,7 +89,7 @@ def compare_probes(before,repeat,after,absolute_tolerance=1e-5):
     difference={k:float((v-after[k]).abs().max()) for k,v in before.items()}
     assert all(v<=absolute_tolerance for v in jitter.values()),('uncontrolled_probe_noise',jitter)
     assert all(v<=absolute_tolerance for v in difference.values()),('old_prediction_drift',difference)
-    return dict(checked=True,precision='FP32_TF32_disabled',absolute_tolerance=absolute_tolerance,
+    return dict(checked=True,precision='FP32_TF32_disabled_math_SDPA',absolute_tolerance=absolute_tolerance,
         unchanged_model_repeat_max_abs=jitter,old_prediction_max_abs_difference=difference,
         within_tolerance=True,bitwise_prediction_equality_required=False)
 
@@ -142,8 +146,13 @@ def train(args):
         teacher_sources=dict(b0=str(args.source_run),person=str(args.person_run),dual=str(args.dual_run)),
         data_root=str(args.data_root),clip_checkpoint=str(args.clip_checkpoint),face_manifest_root=str(args.face_manifest_root),
         evaluation_scope='samples_intersect_seen_classes',test_used_for_parameter_search=True)
+    if args.resume_training_root is not None:
+        cfg['resume_origin']=dict(training_root=str(args.resume_training_root),
+            config_sha256=_sha256(args.resume_training_root/'config.json'))
     if (args.output/'config.json').exists(): assert read(args.output/'config.json')==cfg
     else: write(args.output/'config.json',cfg)
+    if args.resume_training_root is not None:
+        import_own_recovery(args.resume_training_root,args.output,cfg)
     training=source_train(base,args)
     # This is TRAIN with deterministic evaluation transforms, never Val/Test supervision.
     probe_source=make_source(base,args.data_root,args.face_manifest_root,'train')
@@ -153,16 +162,21 @@ def train(args):
     for task in tasks:
         final=args.output/'recovery_checkpoints'/f'task{task}.pth'
         warm=args.output/'warmup_recovery'/f'task{task}.pth'
+        trained=args.output/'trained_recovery'/f'task{task}.pth'
         if final.exists():
             history,audits=load_own_boundary(student,final,cfg)
             print('RESUME_OWN_COMPLETED_TASK',args.arm,task,flush=True); continue
-        if warm.exists():
+        if trained.exists():
+            history,audits=load_own_boundary(student,trained,cfg)
+            print('RESUME_OWN_TRAINED_BEFORE_AUDIT',args.arm,task,flush=True)
+        elif warm.exists():
             history,audits=load_own_boundary(student,warm,cfg)
             print('RESUME_OWN_WARMUP',args.arm,task,flush=True)
         else:
             student.activate_task(task)
         current=range(sum(student._task_sizes[:task]),sum(student._task_sizes[:task+1]))
-        old_before=tensor_state_digest(task_slices(method_state(student),task,student._task_sizes,False))
+        old_before=(audits[str(task)]['old_task_parameter_sha256'] if trained.exists()
+            else tensor_state_digest(task_slices(method_state(student),task,student._task_sizes,False)))
         probe=None
         with adaptation_rng(881001+task):
             if task:
@@ -170,8 +184,13 @@ def train(args):
                 images,y,_=next(iter(DataLoader(probe_data,batch_size=32,num_workers=0,
                     generator=torch.Generator().manual_seed(881001+task))))
                 probe=(move_model_inputs(images,torch.device('cuda')),y)
-            old_prediction=prediction_probe(student,probe,task)
-            repeated_prediction=prediction_probe(student,probe,task)
+            if trained.exists():
+                saved=torch.load(trained,map_location='cpu',weights_only=False)
+                old_prediction=saved['provenance']['probe_before']
+                repeated_prediction=saved['provenance']['probe_repeat']
+            else:
+                old_prediction=prediction_probe(student,probe,task)
+                repeated_prediction=prediction_probe(student,probe,task)
         if not warm.exists():
             configure_phase(student,task,False)
             loader=AuditedLoader(DataLoader(dataset_view(training,current,True),batch_size=64,
@@ -198,7 +217,7 @@ def train(args):
             print('OWN_WARMUP_SAVED',args.arm,task,flush=True)
         fixed_head=tensor_state_digest(student.head.state_dict())
         constraint=None; phase_state={}; phase_generator=None
-        if args.arm!='SELF_BASE':
+        if args.arm!='SELF_BASE' and not trained.exists():
             with adaptation_rng(20261027+1009*task):
                 configure_phase(student,task,True)
                 if teachers is not None:
@@ -238,6 +257,21 @@ def train(args):
                     assert teacher_digest==[tensor_state_digest(method_state(m)) for m in teachers]
                     assert all(p.grad is None for m in teachers for p in m.parameters())
                     audits[str(task)]['teacher_parameters_and_gradients_unchanged']=True
+        if trained.exists():
+            saved=torch.load(trained,map_location='cpu',weights_only=False)
+            phase_state=saved['training_state']
+            if saved['sampler_generator'] is not None:
+                phase_generator=torch.Generator();phase_generator.set_state(saved['sampler_generator'])
+        else:
+            # Preserve all completed optimization BEFORE any reporting/protection guard.
+            compact=compact_model_state_dict(student)
+            atomic_save(dict(task_id=task,source_git=git,model=compact,audit_pending=True),
+                args.output/'trained_checkpoints'/f'task{task}.pth')
+            save_boundary(student,compact,task,cfg,phase_state,phase_generator,
+                dict(history=history,audits=audits,probe_before=old_prediction,
+                     probe_repeat=repeated_prediction),trained)
+            write(args.output/'training_history.json',history);write(args.output/'audits.json',audits)
+            print('OWN_TRAINING_SAVED_BEFORE_AUDIT',args.arm,task,flush=True)
         # Re-enable the trained old attention paths for the same-shaped protection probe.
         with adaptation_rng(881001+task):
             after_prediction=prediction_probe(student,probe,task)
@@ -327,12 +361,45 @@ def audit_initialization(args):
         own_head_random_initialization_verified=True))
 
 
+def audit_recovery(args):
+    """Full-trained own checkpoints, TRAIN only, no optimization or Test."""
+    git=runtime();records=[]
+    for arm in ARMS:
+        set_seed(1,True);root=args.training_root/arm/'train';cfg=read(root/'config.json')
+        model=build(cfg['model_template'],args.clip_checkpoint)
+        p0=_torch_load(root/'compact_checkpoints/task0.pth')['model']
+        p1=_torch_load(root/'warmup_checkpoints/task1.pth')['model']
+        assert tensor_state_digest(task_slices(p0,1,model._task_sizes,False))==tensor_state_digest(
+            task_slices(p1,1,model._task_sizes,False))
+        model.load_state_dict(p0,strict=False);model.restore_task(0);model.activate_task(1)
+        before=compact_model_state_dict(model)
+        data=make_source(cfg['model_template'],args.data_root,args.face_manifest_root,'train')
+        x,y,_=next(iter(DataLoader(Subset(dataset_view(data,seen_indices(0),True),range(32)),
+            batch_size=32,num_workers=0,generator=torch.Generator().manual_seed(881002))))
+        probe=(move_model_inputs(x,torch.device('cuda')),y);modes={}
+        for math_only in (False,True):
+            values=[]
+            for state in (before,before,p1,before):
+                model.load_state_dict(state,strict=False);model.restore_task(1)
+                values.append(prediction_probe(model,probe,1,use_math_sdpa=math_only))
+            row={k:dict(repeat=float((values[0][k]-values[1][k]).abs().max()),
+                after=float((values[0][k]-values[2][k]).abs().max()),
+                replay=float((values[0][k]-values[3][k]).abs().max())) for k in values[0]}
+            if math_only:assert all(v==0. for d in row.values() for v in d.values()),row
+            modes['math' if math_only else 'optimized']=row
+        records.append(dict(arm=arm,old_parameters_exact=True,TRAIN_only=True,
+            math_probe_all_views_bitwise_exact=True,modes=modes))
+        print('RECOVERY_AUDIT',arm,'math_old_predictions_exact=1',flush=True)
+    write(args.output,dict(status='verified',git=git,training_updates=0,records=records,
+        test_loaded=False,training_precision_unchanged=True,evaluation_precision_unchanged=True))
+
+
 if __name__=='__main__':
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('action',choices=('train','eval','audit'))
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('action',choices=('train','eval','audit','audit-recovery'))
     for name in ('data-root','clip-checkpoint','face-manifest-root','output'):
         parser.add_argument('--'+name,type=Path,required=True)
-    for name in ('source-run','person-run','dual-run','reference-root','training-root'):
+    for name in ('source-run','person-run','dual-run','reference-root','training-root','resume-training-root'):
         parser.add_argument('--'+name,type=Path)
     parser.add_argument('--arm',choices=ARMS);parser.add_argument('--split',choices=('val','test'),default='val')
     parser.add_argument('--smoke',action='store_true');args=parser.parse_args()
-    {'train':train,'eval':evaluate,'audit':audit_initialization}[args.action](args)
+    {'train':train,'eval':evaluate,'audit':audit_initialization,'audit-recovery':audit_recovery}[args.action](args)

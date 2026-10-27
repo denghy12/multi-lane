@@ -1,5 +1,24 @@
 # 工作日志
 
+## 2026-10-27：正式四组实际task1审计误停，尚无8任务Val/Test
+
+用户要求完整结果复核。remote6613c56 formal_seed1_20261027_02四组均只有task0最终/完整恢复和task1前30epoch完整恢复；后三组task1额外5epoch在日志中完成但因审计前未保存而丢失RAM权重。task2–7未运行，Val/Test未启动，不能判断方法成功/失败。错误均uncontrolled_probe_noise，未更新模型重复前向最大1.14e-5–1.37e-5超过旧1e-5阈值。只读完整已训练BASE的A/A/B/A诊断：优化SDP重复约1.34e-5，FP32禁TF32且强制数学SDP后四视图重复/更新后旧路径/回放差均0，旧参数SHA相同，定位为审计计算核非确定性，不是已证明的遗忘或Face冲突。
+
+新修复分支fix/self-trained-audit-recovery-20261027，保留本地未提交运行记录。只改TRAIN审计使用数学SDP、增加同一学生完整恢复导入与审计前保存，不改训练/评估AMP、目标或超参数；恢复源原formal02，目标resumed_seed1_20261027_03，GPU0四组。task0及task1前30epoch不重训，后三组task1丢失5epoch需从自己的warmup重放，明确记录Git/SHA，不声称找回丢失权重。将先专项/全测、四组真实checkpoint审计及smoke再自动接续；当前实现中，尚无完整mAP。报告docs/self_trained_view_transfer_failure_recovery_20261027.md。
+
+
+正式启动核验补充：四组均已完成task0首个epoch，各84成功更新/0跳步，四组loss .67947638和Adapter loss .03236856完全一致并匹配历史B0首轮；BASE已到第3epoch，NO/MAIN到第2，MAIN_ADAPTER第1。GPU0约14243MiB/100%，无Traceback。此时尚无正式8任务Val/Test结果。所有运行源码继续保持remote6613c56 clean；本地仅追加执行记录，避免运行中变更评估Git。
+
+
+## 2026-10-27：自训练四组正式8任务已在GPU0并行启动
+
+最终运行源码6613c5610deccda09102f606b02fe6791485823c，本地/服务器branch、HEAD、upstream一致；独立远程worktree multi-lane-main-self-trained-view-transfer-20261027 clean，运行期间不更新其源码。8新增专项、515完整测试（1跳过）通过。smoke_seed1_20261027_03四组两任务/每阶段2更新和Val首64全部成功，自己head与无外部学生参数加载、旧参数SHA、FP32重复控制、跨组实际batch像素/标签/ID均通过；MAIN_ADAPTER两任务beta_A约.00013736/.00025232，真实约束非零，教师未更新。
+
+正式formal_seed1_20261027_02已自动启动，tmux self_trained_view_transfer_seed1_20261027，GPU0四并行PID BASE2778683/NO_CONSTRAINT2779210/MAIN2779933/MAIN_ADAPTER2780656；当前约14175MiB/100%。BASE和NO_CONSTRAINT首epoch各84更新/0跳步，loss .67947638/Adapter .03236856精确匹配历史B0首轮，尚不代表8任务完整复现。其他组正在进入训练，尚无正式Val/Test成绩。四组训练结束后自动完整8阶段Val/Test及Attention ON/OFF，eval仅加载自己学生，所有源24checkpoint只读。
+
+179份三轮smoke/初始化审计/批次和数值诊断/完整测试日志已回传output/self_trained_view_transfer/smoke_snapshot_20261027_03并逐SHA核验，归档ad30756b8688f782234c295868fcccc1ab73e4ab37da8e01ee10ae84e5f0959d；模型pth保留服务器，不在轻量快照内。旧主树/test-only的原HEAD/status SHA保持。smoke01与formal01预启动中断记录完整保留，正式不复用它们。以下失败/等待条目为历史记录，以本节为准。
+
+
 正式接续门控已加强：smoke必须同时实际启用主参数和Adapter功能项（beta>0），并验证教师参数/梯度未改变；不再仅依据进程exit0就启动正式。真实正式任务若ASL确实无梯度仍按预声明零信号策略记录，不用Test改系数。
 
 
