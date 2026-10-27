@@ -25,6 +25,7 @@ from .runner import (TaskMetrics, compact_model_state_dict, dataset_view, seen_i
 from .strong_full_evaluation import evaluate_fused_and_views
 from .task_recovery import atomic_save, restore_rng, save_boundary
 from .self_trained_recovery import import_own_recovery
+from .historical_reporting_rng import replay_reporting_rng, verify_historical_boundary
 
 ARMS=('SELF_BASE','SELF_NO_CONSTRAINT','SELF_MAIN_CONSTRAINT','SELF_MAIN_ADAPTER_CONSTRAINT')
 
@@ -146,6 +147,11 @@ def train(args):
         teacher_sources=dict(b0=str(args.source_run),person=str(args.person_run),dual=str(args.dual_run)),
         data_root=str(args.data_root),clip_checkpoint=str(args.clip_checkpoint),face_manifest_root=str(args.face_manifest_root),
         evaluation_scope='samples_intersect_seen_classes',test_used_for_parameter_search=True)
+    if getattr(args,'historical_reporting_rng',False):
+        cfg['historical_reporting_rng']='two_CPU_int64_draws_after_each_task_before_final_recovery'
+    if getattr(args,'historical_reference_root',None) is not None:
+        assert args.arm=='SELF_BASE' and not args.smoke and args.historical_reporting_rng
+        cfg['historical_reference_root']=str(args.historical_reference_root)
     if args.resume_training_root is not None:
         cfg['resume_origin']=dict(training_root=str(args.resume_training_root),
             config_sha256=_sha256(args.resume_training_root/'config.json'))
@@ -215,6 +221,11 @@ def train(args):
             save_boundary(student,compact,task,cfg,state,None,dict(history=history,audits=audits),warm)
             write(args.output/'training_history.json',history); write(args.output/'audits.json',audits)
             print('OWN_WARMUP_SAVED',args.arm,task,flush=True)
+        if getattr(args,'historical_reference_root',None) is not None:
+            # Comparison only. Never install historical model parameters in this student.
+            audits[str(task)]['historical_reference_verification']=verify_historical_boundary(
+                student,history[str(task)]['warmup'],args.historical_reference_root,task)
+            print('HISTORICAL_BOUNDARY_EXACT',task,'all_weights_losses_RNG=1',flush=True)
         fixed_head=tensor_state_digest(student.head.state_dict())
         constraint=None; phase_state={}; phase_generator=None
         if args.arm!='SELF_BASE' and not trained.exists():
@@ -286,6 +297,8 @@ def train(args):
         compact=compact_model_state_dict(student)
         atomic_save(dict(schema_version=1,task_id=task,source_git=git,model=compact),
                     args.output/'compact_checkpoints'/f'task{task}.pth')
+        if getattr(args,'historical_reporting_rng',False):
+            audits[str(task)]['historical_reporting_rng']=replay_reporting_rng(task)
         save_boundary(student,compact,task,cfg,phase_state,phase_generator,
             dict(history=history,audits=audits),final)
         write(args.output/'training_history.json',history); write(args.output/'audits.json',audits)
@@ -320,8 +333,12 @@ def evaluate(args):
             model.cross_view_runtime_enabled=mode=='on' and model.cross_view_bank is not None
             view=dataset_view(data,seen_indices(task),True)
             if cfg['smoke']:view=Subset(view,range(64))
-            loader=DataLoader(view,batch_size=64,shuffle=False,num_workers=0,
-                generator=torch.Generator().manual_seed(87001+task))
+            if getattr(args,'evaluation_workers',0):
+                from .self_trained_fast_evaluation import loader_for
+                loader=loader_for(view,task,args.evaluation_workers)
+            else:
+                loader=DataLoader(view,batch_size=64,shuffle=False,num_workers=0,
+                    generator=torch.Generator().manual_seed(87001+task))
             with torch.no_grad():
                 value,views=evaluate_fused_and_views(model,loader,torch.device('cuda'),task,.5,True,
                     args.output/mode/'scores'/f'task{task}.npz',args.output/mode/'view_scores'/f'task{task}.npz')
@@ -335,6 +352,7 @@ def evaluate(args):
         summary=summarize_tasks([TaskMetrics(**v) for v in results]) if not cfg['smoke'] else {},
         off_summary=summarize_tasks([TaskMetrics(**v) for v in off]) if off and not cfg['smoke'] else {},
         teacher_loaded_for_inference=False,external_parameter_assembly=False,audits=audits,
+        evaluation_workers=getattr(args,'evaluation_workers',0),
         elapsed_seconds=time.time()-start,peak_allocated_mib=torch.cuda.max_memory_allocated()/1024**2))
 
 
@@ -401,5 +419,8 @@ if __name__=='__main__':
     for name in ('source-run','person-run','dual-run','reference-root','training-root','resume-training-root'):
         parser.add_argument('--'+name,type=Path)
     parser.add_argument('--arm',choices=ARMS);parser.add_argument('--split',choices=('val','test'),default='val')
+    parser.add_argument('--historical-reporting-rng',action='store_true')
+    parser.add_argument('--historical-reference-root',type=Path)
+    parser.add_argument('--evaluation-workers',type=int,choices=(0,2),default=0)
     parser.add_argument('--smoke',action='store_true');args=parser.parse_args()
     {'train':train,'eval':evaluate,'audit':audit_initialization,'audit-recovery':audit_recovery}[args.action](args)

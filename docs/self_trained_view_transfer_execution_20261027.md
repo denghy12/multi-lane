@@ -1,5 +1,7 @@
 # 自训练单一三视图模型：执行配置
 
+完整结果更新：恢复run已完成四组8任务训练，fast评估全部Val/Test及ON/OFF已完成。最新结论与基线RNG复现疏漏见[self_trained_view_transfer_results_20261027.md](self_trained_view_transfer_results_20261027.md)。下方未完成/启动/故障为历史记录。
+
 完成状态更正（2026-10-27）：本轮formal02实际在task1数值审计处误停，没有完整8任务或正式Val/Test。详见[self_trained_view_transfer_failure_recovery_20261027.md](self_trained_view_transfer_failure_recovery_20261027.md)。下方启动核验仅描述当时首轮训练状态，不能当作实验完成。
 
 

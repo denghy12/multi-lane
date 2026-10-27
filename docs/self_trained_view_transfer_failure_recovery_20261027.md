@@ -1,5 +1,7 @@
 # 自训练四组：本轮未完成的原因与恢复方案
 
+完整结果更新：恢复run已完成四组8任务训练，fast评估全部Val/Test及ON/OFF已完成。最新结论与基线RNG复现疏漏见[self_trained_view_transfer_results_20261027.md](self_trained_view_transfer_results_20261027.md)。下方未完成/启动/故障为历史记录。
+
 ## 2026-10-27：数值审计修复并继承自身进度，正式Val/Test仍待完成
 
 运行源码fb5f6cc745ae6c103990876e7bc0e8370a1d155f，fix/self-trained-audit-recovery-20261027，本地/服务器HEAD/upstream一致；远程新独立worktree multi-lane-main-self-trained-audit-recovery-20261027 clean。11项专项与518项完整测试（1跳过）通过。四组真实已完整训练task0及task1warmup的A/A/B/A审计全部在数学SDP下四视图重复/更新后旧路径/回放差0，旧参数SHA一致；smoke_seed1_20261027_04全部成功。

@@ -1,5 +1,31 @@
 # 项目上下文
 
+## 2026-10-27：执行历史随机流修复与现有warmup/final归因
+
+用户授权执行两项：修复并验证历史随机流；只读比较现有四组task0/2/7 warmup30与final35及ON/OFF。新分支codex/historical-rng-warmup-attribution-20261027，保留前轮未提交报告。仅添加两次CPU int64取种子、任务边界验证和独立归因/队列；不改模型/目标/超参数，不增加Attention容量/beta/seed。将只重跑SELF_BASE完整8任务×30epoch，标准CLIP+任务参数fresh初始化，不复制教师任务参数；每阶段逐值比对历史全部权重、30轮loss和Python/NumPy/CPU-CUDA RNG，失败立即停。额外3学生不重训。源72 checkpoint SHA前后检查。
+
+原四组checkpoint只读任务0/2/7 Val/Test，WARMUP_ON/OFF与FINAL_ON/OFF；检查本学生head和旧参数相同，完整final来源前64 logits精确重放，已完成final预测验证复用。ON指旧Attention路径也开启，不能简单把所有ON-OFF都叫当前新增残差；记录当前类AP和成对差分隔离。原四组归因仍用原匹配32.1748控制，不混入修复后历史32.6800轨迹。
+
+GPU0、B64、72线程、AMP/TF32、训练workers2/prefetch1；评估2单线程spawn workers。BASE主LR.0125、Adapter.0004、Adam/reset/cosine/WD0、原ASL-BCE/aux.1、b32/index1/scale.03、关闭Person颜色扰动。先专项/全测、2任务2更新BASE smoke及完整来源Val首64归因smoke，再并发BASE训练与只读Val/Test，BASE结束自动8任务Val/Test。输出output/historical_rng_replay/seed1_20261027_01与output/self_trained_warmup_attribution/seed1_20261027_01，日志同前缀；配置docs/historical_rng_warmup_execution_20261027.md。当前实现/检查中，尚未正式启动。
+
+
+## 2026-10-27：自训练四组完整8任务结果已核验，联合约束未达成目标
+
+fast评估seed1_20261027_01全部完成，a61ffc2 clean；训练/恢复fb5f6cc。加速后20.01分钟结束；112完整阶段/开关pass，32源compact SHA不变。435份非pth产物已回传逐SHA核验，归档1732162b225e56c1cefcaa63d9a793ad8040a51364c6a7b350473c85e727c0c8。独立CPU重算112融合/560视图含可靠Face，最大误差6.3949e-14；批次/旧参数/教师保护与0跳步均通过。报告docs/self_trained_view_transfer_results_20261027.md；独立分析output/self_trained_fast_evaluation/analysis_20261027_01。
+
+Val最终/均值、Test最终/均值：SELF_BASE42.5058/49.5676、32.1748/39.2752；无约束41.6845/48.4685、31.9945/39.0460；主参数约束41.9213/48.5290、32.0159/38.8470；主参数+Adapter42.0324/48.7930、32.2770/39.1375。最后一组比等预算无约束Val+.3479/+.3245、Test+.2825/+.0916，但比BASE Val−.4734/−.7747、Test+.1021/−.1377；Val8/8低、Test仅task6/7高。关闭Attention后最后组Test32.2808/39.1470，8/8阶段反而更高；Full/Face开关logits全部精确不变，Person输出有变化但无稳定排序收益。不能归为新Attention成功；自训练单推理模型/无外部参数拼装工程要求满足，精度目标不满足。
+
+基线复现疏漏已定位：历史每任务报告预测+视图诊断两次DataLoader迭代器各消耗全局CPU RNG int64一次；新入口全部后评估且未补取种子。task0全部权重/CPU-CUDA RNG/30轮loss与历史精确一致，task1起分叉；八任务新warmup CPU RNG补2*t次int64后都等于历史对应before_reporting状态，CUDA RNG仍相同；本轮task1实际64人IDs已用无报告种子轨迹精确重放。评估标准未变，加速发生训练后不改变权重。32.1748不能取代历史强B0 32.6800/39.5292；四组内部实际增强批次仍匹配，保留其内部比较。随机流只读诊断已回传，不声称已修复/重训。
+
+下一步优先修复并验历史随机流重放，再考虑训练；若继续归因，可只读比较本学生task0/2/7已保存warmup30与最终35及ON/OFF，拆本任务适配与前任务S/P传递。当前未自动启动新训练/前向、未扩seed/调beta/合并main。本地新分析分支codex/self-trained-transfer-results-20261027，分析脚本和报告未提交；原主树/test-only保留。
+
+
+实测加速（2026-10-27）：GPU0连续10秒均100%利用率、约6–7GB显存；各评估主进程CPU约1–2核（另有2个单线程加载worker），替代此前每进程30余核。切换339.96秒已新增29个完整pass/95004前向人次，另23旧pass/68654人次核验并SHA复用；BASE Val/Test和NO_CONSTRAINT Val已完成，其他自动接续，无报错。实际总量406854人次，剩243196；当前279.46人/秒线性约14.5分钟，考虑后段任务/尾部并发建议估剩余15–25分钟，不再沿用10–13小时。输入与四路logits精确重放、4专项/522回归通过。8份预检日志/协议/吞吐与handoff已回传output/self_trained_fast_evaluation/preflight_snapshot_20261027_01逐SHA核验，归档6e46021af5e6e6ac50f1236a76baa25e70e0466afe9249ec1fb5be4339175e42。正式结果仍在运行，以fast新队列为准，不误读原已停止queue的running快照；remote a61ffc2 clean固定，执行笔记仅本地追加。
+
+
+评估接续更新：新入口a61ffc2已Git-only部署并启动tmux self_trained_fast_eval_seed1_20261027；4新增/522全回归通过。task0/7 Val共256人，workers0/2/4的输入及四路logits精确一致。2worker稳定加载128人1.135/1.495秒，原2.514/2.758秒；4worker无收益，采用2worker。原controller及4评估已按PID/cwd核对后有序停止，已完成完整pass均验证并SHA复用，原权重/结果保留；新4评估3002571/3003123/3003989/3004732在GPU0继续。尚无整网实测倍数或新完整mAP。
+
+
 ## 2026-10-27：评估CPU争用优化（仅评估，预检中）
 
 四组8任务训练已结束。原4评估workers0各72线程、合计约130核而GPU0空闲，旧吞吐预计剩余10–13小时。新分支codex/self-trained-evaluation-throughput-20261027仅新增独立fast评估入口，已有multi_lane源码与训练Git字节一致。B64/模型72线程/AMP-TF32/旧seen-positive不变，图像预处理移至2个单线程spawn worker、prefetch1。先task0/7 Val各128人核对像素/标签/ID/mask及四路logits逐值一致，再接续32个原学生checkpoint的完整Val/Test和ON/OFF，0训练。已完成pass经JSON+两NPZ、人群及指标验证后按SHA复制复用，原输出保留。新输出output/self_trained_fast_evaluation/seed1_20261027_01，配置docs/self_trained_fast_evaluation_20261027.md。当前预检准备，尚无实测加速比。
