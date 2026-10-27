@@ -17,6 +17,7 @@ from .historical_b32_backbone_attribution import build, method_state
 from .historical_b32_modules import modes, validate_config
 from .paired_transforms import move_model_inputs
 from .protected_view_forward import install, models
+from .protected_parax_audit import audit_precision
 from .run_historical_b32_test_attribution import read, write
 from .runner import (TaskMetrics, compact_model_state_dict, dataset_view, seen_indices,
     set_seed, summarize_tasks, tensor_state_digest, train_task)
@@ -62,11 +63,31 @@ def prediction_probe(model,probe,task):
     was=model.cross_view_runtime_enabled
     model.cross_view_runtime_enabled=model.cross_view_bank is not None
     model.eval()
-    with torch.no_grad(),torch.cuda.amp.autocast(enabled=False):
-        z,views=model.seen_logits_with_views(images)
-    model.cross_view_runtime_enabled=was
+    try:
+        with audit_precision(),torch.no_grad(),torch.cuda.amp.autocast(enabled=False):
+            z,views=model.seen_logits_with_views(images)
+    finally:
+        model.cross_view_runtime_enabled=was
     stop=sum(model._task_sizes[:task])
     return {k:v[:,:stop].float().cpu() for k,v in dict(fused=z,**views).items()}
+
+
+def compare_probes(before,repeat,after,absolute_tolerance=1e-5):
+    """FP32 CUDA reductions are not necessarily bitwise reproducible.
+
+    Parameter equality remains strict. Measure an unchanged-model repeat as
+    a negative control, reject either repeat noise or drift above this bound.
+    """
+    if before is None:
+        return dict(checked=False,reason='first_task_has_no_old_classes')
+    assert set(before)==set(repeat)==set(after)
+    jitter={k:float((v-repeat[k]).abs().max()) for k,v in before.items()}
+    difference={k:float((v-after[k]).abs().max()) for k,v in before.items()}
+    assert all(v<=absolute_tolerance for v in jitter.values()),('uncontrolled_probe_noise',jitter)
+    assert all(v<=absolute_tolerance for v in difference.values()),('old_prediction_drift',difference)
+    return dict(checked=True,precision='FP32_TF32_disabled',absolute_tolerance=absolute_tolerance,
+        unchanged_model_repeat_max_abs=jitter,old_prediction_max_abs_difference=difference,
+        within_tolerance=True,bitwise_prediction_equality_required=False)
 
 
 def load_own_boundary(model,path,config):
@@ -150,6 +171,7 @@ def train(args):
                     generator=torch.Generator().manual_seed(881001+task))))
                 probe=(move_model_inputs(images,torch.device('cuda')),y)
             old_prediction=prediction_probe(student,probe,task)
+            repeated_prediction=prediction_probe(student,probe,task)
         if not warm.exists():
             configure_phase(student,task,False)
             loader=AuditedLoader(DataLoader(dataset_view(training,current,True),batch_size=64,
@@ -219,12 +241,12 @@ def train(args):
         # Re-enable the trained old attention paths for the same-shaped protection probe.
         with adaptation_rng(881001+task):
             after_prediction=prediction_probe(student,probe,task)
-            if probe is not None:
-                assert all(torch.equal(v,after_prediction[k]) for k,v in old_prediction.items())
+            probe_audit=compare_probes(old_prediction,repeated_prediction,after_prediction)
         assert old_before==tensor_state_digest(task_slices(method_state(student),task,student._task_sizes,False))
         assert visual_before==tensor_state_digest(student.visual_encoder.state_dict())
         student.cross_view_runtime_enabled=student.cross_view_bank is not None
-        audits[str(task)].update(old_task_parameters_exact=True,old_TRAIN_probe_predictions_exact=True,
+        audits[str(task)].update(old_task_parameters_exact=True,old_TRAIN_probe_within_fp32_tolerance=True,
+            old_TRAIN_probe=probe_audit,
             frozen_visual_exact=True,final_head_source='this_student_own_supervised_warmup',
             inference_teacher_dependencies=False)
         compact=compact_model_state_dict(student)

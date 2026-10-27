@@ -10,7 +10,7 @@ from multi_lane.track_a.fusion_function_constraint import FusionFunctionConstrai
 from multi_lane.track_a.head_anchored_pilot import student_optimizer_groups, task_slices
 from multi_lane.track_a.historical_b32_backbone_attribution import method_state
 from multi_lane.track_a.runner import tensor_state_digest, train_task
-from multi_lane.track_a.self_trained_view_transfer import configure_phase, initial_core
+from multi_lane.track_a.self_trained_view_transfer import compare_probes,configure_phase,initial_core
 
 
 class SelfTrainedViewTransferTest(unittest.TestCase):
@@ -98,3 +98,13 @@ class SelfTrainedViewTransferTest(unittest.TestCase):
                 adapter_learning_rate=.001,loss_routing='adapter_asl',optimizer_updates_per_task=1,
                 optimizer_group_builder=student_optimizer_groups,functional_constraint=constraint)
         self.assertEqual(calls,[0]);self.assertEqual(history[0]['functional_test_marker'],7.)
+
+    def test_probe_distinguishes_roundoff_from_drift_and_checks_negative_control(self):
+        before={'fused':torch.tensor([[.1,.2]])}
+        repeat={'fused':before['fused']+1e-7}
+        after={'fused':before['fused']+2e-7}
+        audit=compare_probes(before,repeat,after)
+        self.assertTrue(audit['within_tolerance'])
+        self.assertFalse(audit['bitwise_prediction_equality_required'])
+        with self.assertRaises(AssertionError):compare_probes(before,repeat,{'fused':before['fused']+.001})
+        with self.assertRaises(AssertionError):compare_probes(before,{'fused':before['fused']+.001},after)

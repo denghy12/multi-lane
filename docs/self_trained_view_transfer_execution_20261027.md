@@ -20,7 +20,7 @@ A/B/B0已存checkpoint只用于构建冻结教师的输出目标。教师head仍
 
 前30epoch的DataLoader使用历史global RNG流；额外5epoch、教师构造和TRAIN探针在独立RNG上下文中运行，退出后恢复前30epoch的随机流。四组实际消费的前两批IDs、targets、增强像素逐epoch跨组核验，避免“同seed却数据不同”。参数经过不同适配后，从task1起可以不同，这是方法作用，不虚称各任务参数初值完全相同。
 
-保留Full学习阶段并不数学保证后续Full能力不变。Full/Person/可靠Face与融合全部输出，专门判断新增约束是否保住Full并利用辅助信息。旧任务参数哈希和固定TRAIN探针预测则逐值保护。
+保留Full学习阶段并不数学保证后续Full能力不变。Full/Person/可靠Face与融合全部输出，专门判断新增约束是否保住Full并利用辅助信息。旧任务参数哈希要求逐值保持；固定TRAIN预测在关闭TF32的FP32下与不更新参数的重复前向控制比较，固定绝对容差1e-5，逐视图记录，不声称CUDA预测位级一致。
 
 ## 3. 训练组与目标
 
@@ -61,7 +61,7 @@ beta在每任务后5epoch的首个实际增强TRAIN batch按梯度范数定标�
 
 先执行专项和完整回归、fresh初始化/CPU-CUDA RNG/初始TRAIN预测审计，再做2任务、每阶段2更新smoke，只评Val首64人，不打开Test。smoke验收旧参数/旧预测保护、自己的head冻结、教师不更新、跨组增强像素和标签逐值一致、无外部学生参数加载；通过后才自动启动正式8任务。
 
-smoke输出 `output/self_trained_view_transfer/smoke_seed1_20261027_01`，正式输出 `output/self_trained_view_transfer/formal_seed1_20261027_01`，日志用对应`logs/`前缀。服务器独立worktree `multi-lane-main-self-trained-view-transfer-20261027`，Git-only同步。主树/test-only及所有旧实验产物不修改。
+smoke输出 `output/self_trained_view_transfer/smoke_seed1_20261027_02`，正式输出 `output/self_trained_view_transfer/formal_seed1_20261027_01`，日志用对应`logs/`前缀。服务器独立worktree `multi-lane-main-self-trained-view-transfer-20261027`，Git-only同步。主树/test-only及所有旧实验产物不修改。
 
 每任务先保存自己前30epoch的compact和可恢复边界，再保存后5epoch完成的compact/optimizer/scheduler/scaler/RNG边界；完整训练后自动排队各组Val/Test。各组有Person Attention时，同时保存完整8阶段Attention ON/OFF，OFF仍保留共同训练后的其他参数，不当作独立重训基线。所有数据流检查通过前不打开正式Test。
 
@@ -72,3 +72,7 @@ smoke输出 `output/self_trained_view_transfer/smoke_seed1_20261027_01`，正式
 这是强教师辅助的一套自训练流程，不是已证实的新Attention机制，也不保证比32.8864或R5更高。此前固定头后5epoch和OOF多视图→Full蒸馏都失败过；本轮的可检验差异是学生保留三视图、使用同增强、目标为完整双来源融合功能、显式区分ASL梯度路径，且学生不装配任何外部已训练任务参数。
 
 首要成功条件：功能约束组同时优于相同35epoch无约束组和自训练30epoch组的两个Test mAP，并能解释Full/辅助/可靠性人群变化。只拟合TRAIN的D或提高Face单路不算成功。Test已参与过研究探索，完整报告全部固定组；不扩新seed或额外参数网格，不合并main。
+
+## 7. 首次smoke的审计问题与修正
+
+第一轮smoke01（源码ac4b5a5）保留。旧参数SHA完全一致，但预测torch.equal失败；只读A→B→A控制中，同一模型A重复A本身有TF32最大8.1e-5、严格FP32约1.94e-7的差异，更新当前任务后旧路径FP32最大约1.49e-7。因此将探针限制为关闭TF32的FP32并加入重复阴性控制，固定atol1e-5；不是放宽旧参数冻结要求，也不改变训练AMP/TF32。正式尚未因首轮失败启动。

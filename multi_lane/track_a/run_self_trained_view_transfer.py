@@ -25,12 +25,13 @@ def verify_training(root,smoke):
         assert all(r['warmup_batches']==rows[0]['warmup_batches'] for r in rows)
         adaptation=[values[a][str(task)]['adaptation_batches'] for a in ARMS[1:]]
         assert all(v==adaptation[0] for v in adaptation)
-        assert all(r['old_task_parameters_exact'] and r['old_TRAIN_probe_predictions_exact']
+        assert all(r['old_task_parameters_exact'] and r['old_TRAIN_probe_within_fp32_tolerance']
                    and r['student_external_parameter_loads']==0 for r in rows)
     checkpoints={arm:read(root/arm/'train/training_complete.json')['checkpoints'] for arm in ARMS}
     write(root/'training_verification.json',dict(status='verified',
         matched_consumed_warmup_and_adaptation_pixels_targets_ids=True,
-        external_student_parameter_loads=0,old_tasks_exact=True,checkpoints=checkpoints))
+        external_student_parameter_loads=0,old_task_parameters_exact=True,
+        old_prediction_audit='FP32_TF32_disabled_atol_1e-5_with_unchanged_repeat',checkpoints=checkpoints))
 
 
 def run(args):

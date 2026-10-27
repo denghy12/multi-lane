@@ -1,5 +1,8 @@
 # 工作日志
 
+smoke审计修正：ac4b5a5的smoke_seed1_20261027_01在BASE/NO_CONSTRAINT task1旧预测逐值断言失败，正式未启动，旧产物保留。只读ABA诊断发现旧参数SHA完全一致，连同一模型A重复A也有TF32约8.1e-5的最大差；关闭TF32后AA/AB均约2e-7，属于CUDA舍入而非参数漂移。改为现有audit_precision关闭TF32的FP32探针、增加未更新模型重复控制，预测固定atol1e-5且逐项记录，参数SHA仍严格；新增审计单测，不改变训练/评估标准。下一smoke run_id改为smoke_seed1_20261027_02，formal01尚未创建。
+
+
 远程测试更新：30df39b已Git-only部署独立worktree，5新增专项及512完整测试（1跳过）通过。正式前额外清理阶段切换时残留grad，避免冻结head的旧梯度污染诊断；待最终源码再验证后启动smoke/正式。原主树/test-only状态SHA与HEAD保持。教师总预算90epoch/任务加本轮学生35epoch，约125epoch/任务，须与单模型30epoch的训练成本区分。
 
 
