@@ -1664,6 +1664,7 @@ def train_task(
     moe_balance_weight: float = 0.0,
     recovery_state: Optional[Dict[str, object]] = None,
     optimizer_group_builder=None,
+    functional_constraint=None,
 ) -> List[Dict[str, float]]:
     if not math.isfinite(supervised_loss_scale) or supervised_loss_scale <= 0:
         raise ValueError("Supervised loss scale must be finite and positive")
@@ -1675,6 +1676,8 @@ def train_task(
         "joint_bce", "model_asl", "adapter_asl", "both_asl"
     }:
         raise ValueError("Unknown model/Adapter loss routing")
+    if functional_constraint is not None and loss_routing != "adapter_asl":
+        raise ValueError("Functional constraints require explicit BCE/Adapter-ASL routing")
     if optimizer_updates_per_task is not None and optimizer_updates_per_task <= 0:
         raise ValueError("Optimizer updates per task must be positive")
     if adapter_regularization not in {
@@ -1840,6 +1843,7 @@ def train_task(
         epoch_start = time.time()
         epoch_path_gradient_audits: List[Dict[str, float]] = []
         epoch_parameter_gradients = {}
+        functional_totals = {}
         condition_samples = 0
         condition_valid_total = 0.0
         condition_visible_total = 0.0
@@ -2073,6 +2077,16 @@ def train_task(
                 moe_balance_penalty = float(moe_balance_weight) * moe_balance_metric
                 model_loss = model_loss + moe_balance_penalty
                 adapter_loss = adapter_loss + moe_balance_penalty
+                if functional_constraint is not None:
+                    extra = functional_constraint(
+                        images=images, logits=logits, task_id=task_id,
+                        model_loss=model_loss, adapter_loss=adapter_loss,
+                        model_parameters=model_parameters, adapter_parameters=adapter_parameters,
+                    )
+                    model_loss = model_loss + extra['model_penalty']
+                    adapter_loss = adapter_loss + extra['adapter_penalty']
+                    for key, value in extra['metrics'].items():
+                        functional_totals[key] = functional_totals.get(key, 0.) + float(value)
                 if view_gradient_audit_enabled and task_gradient_audit is None:
                     task_gradient_audit = view_gradient_audit(
                         fused_bce_loss,
@@ -2311,6 +2325,8 @@ def train_task(
             row["next_adapter_learning_rate"] = float(
                 optimizer.param_groups[-1]["lr"]
             )
+        if functional_constraint is not None:
+            row.update({"functional_" + k: v / batches for k, v in functional_totals.items()})
         if condition_samples:
             row["selector_condition_valid_fraction"] = condition_valid_total / condition_samples
             row["selector_condition_visible_fraction"] = condition_visible_total / condition_samples

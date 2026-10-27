@@ -1,5 +1,14 @@
 # 工作日志
 
+## 2026-10-27：用户要求自训练成型，取消学生外部参数装配（实现中）
+
+用户授权执行单模型路线，并明确最终模型必须自己训练，不能组装其他已训练模型参数。新分支codex/self-trained-three-view-transfer-20261027。旧计划的A参数初始化/B0头复制不再采用：学生仅加载标准预训练CLIP，任务参数和head全新初始化；每任务先原三视图硬监督30epoch，再冻结自己学得head、启用自己的Person Attention训练5epoch；下一任务继承自身适配后的S/P。A/B/B0只用于冻结教师目标，训练约束组三视图同增强读入，推理仅学生，不复制教师任务参数或head。
+
+四组SELF_BASE（30epoch）、SELF_NO_CONSTRAINT（30+5）、SELF_MAIN_CONSTRAINT、SELF_MAIN_ADAPTER_CONSTRAINT（后两者同35epoch）。B64/训练workers2/prefetch1/evalworkers0/72线程/AMP-TF32/GPU0，前30epoch主LR.0125、Adapter.0004，后5epoch均.0004，Adam/reset/cosine/WD0/原BCE-ASL+aux.1。beta由首个实际TRAIN batch分组梯度定标，ratio.25/max1，不按Test搜索。独立额外阶段RNG恢复历史warmup流，实际ID/标签/像素跨组核验。旧参数/固定TRAIN旧预测、自己的head、教师无更新和24源SHA均验收。先单测/GPU初始化/两任务两更新smoke，再自动完整8任务Val/Test/Attention ON-OFF。
+
+配置docs/self_trained_view_transfer_execution_20261027.md；输出output/self_trained_view_transfer/{smoke,formal}_seed1_20261027_01，日志logs/同前缀。当前实现和语法检查完成，尚未跑远程测试/训练。旧32.8864换头候选与R5仍保留为不同来源参照，不声称新学生天然等于其指标。PROJECT_CONTEXT/WORK_LOG/TODO_NEXT已同步，本次不改AGENTS。
+
+
 完成更新（2026-10-27）：R5已用b017389源码完成GPU0/seed1/旧标准完整8任务Val/Test与隔离测速，无训练。Val44.1550/51.2964，Test33.6248/40.5129；对A Test+.7384/+.6442，两个split均8/8阶段升。对既有R2 Test+.5718/+.4658。与当批logits均值Test最终差−.000934/均值+.000461，最大logits差.0078125。全部来源预测精确、24源SHA及参数保持；507测试（1跳过）通过。A/R5隔离B64耗时241.06/492.98ms，约2.045倍，非视觉参数2661658/6882842，峰值925.71/946.22MiB。266产物已回传并逐SHA核验，归档f330a43266eadd7b08d4bb1250796e5d415f82cb8174d3bff73372d2158b9f1e；本地64融合指标/128来源视图/64logit均值关系通过，误差7.11e-14，日志已入logs/。主树/test-only状态保持，GPU作业已结束。
 
 固定均值完整函数组合现可作为更强实测参照，但仍为双来源，未证明新Attention因果收益或单模型训练成功。后续单模型方案docs/single_model_function_transfer_plan_20261027.md，保留三视图输入、同增强教师、融合功能约束、ASL/BCE分组及同预算U0–U3；仅为研究方案，未新增训练。报告docs/fixed_model_mean_results_20261027.md。以下启动/等待描述均为历史记录。
