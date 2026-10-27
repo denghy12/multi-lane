@@ -44,6 +44,7 @@ def initial_core(model):
 def configure_phase(model,task,adapt):
     """Current task only. Phase II freezes the head learned by THIS student."""
     model.restore_task(task); model.requires_grad_(False)
+    for p in model.parameters(): p.grad=None
     model.selectors.requires_grad_(True)
     for p in model.prompts: p.requires_grad_(True)
     model.adapter_bank.task_adapters[task].requires_grad_(True)

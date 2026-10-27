@@ -65,7 +65,7 @@ smoke输出 `output/self_trained_view_transfer/smoke_seed1_20261027_01`，正式
 
 每任务先保存自己前30epoch的compact和可恢复边界，再保存后5epoch完成的compact/optimizer/scheduler/scaler/RNG边界；完整训练后自动排队各组Val/Test。各组有Person Attention时，同时保存完整8阶段Attention ON/OFF，OFF仍保留共同训练后的其他参数，不当作独立重训基线。所有数据流检查通过前不打开正式Test。
 
-最终产物包括各任务compact/recovery、两阶段history、beta与梯度定标、批次追踪、旧任务保护审计、全部视图与融合NPZ/指标、ON/OFF、最终与阶段平均mAP/cF1/oF1、来源SHA及完成标记。仅使用学生进行正式评估。教师源码/参数依赖只存在训练阶段，其训练成本须单列；完整来源包含B0/A/B各30epoch，不能声称和无教师30epoch基线等总训练预算。
+最终产物包括各任务compact/recovery、两阶段history、beta与梯度定标、批次追踪、旧任务保护审计、全部视图与融合NPZ/指标、ON/OFF、最终与阶段平均mAP/cF1/oF1、来源SHA及完成标记。仅使用学生进行正式评估。教师源码/参数依赖只存在训练阶段，其训练成本须单列；完整来源包含B0/A/B各30epoch，再加学生35epoch约125epoch/任务，不能声称和无教师30epoch基线等总训练预算。
 
 ## 6. 结论边界
 
