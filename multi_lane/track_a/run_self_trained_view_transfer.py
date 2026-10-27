@@ -27,6 +27,14 @@ def verify_training(root,smoke):
         assert all(v==adaptation[0] for v in adaptation)
         assert all(r['old_task_parameters_exact'] and r['old_TRAIN_probe_within_fp32_tolerance']
                    and r['student_external_parameter_loads']==0 for r in rows)
+        for arm in ARMS[2:]:
+            audit=values[arm][str(task)]; calibration=audit['functional_calibration']
+            assert calibration is not None and audit['teacher_parameters_and_gradients_unchanged']
+            if smoke:
+                assert calibration['beta_model']>0,'Smoke must exercise the main constraint'
+                if arm=='SELF_MAIN_ADAPTER_CONSTRAINT':
+                    assert calibration['adapter_base_norm']>0 and calibration['beta_adapter']>0, \
+                        'Smoke must exercise the Adapter constraint, not a numerical zero'
     checkpoints={arm:read(root/arm/'train/training_complete.json')['checkpoints'] for arm in ARMS}
     write(root/'training_verification.json',dict(status='verified',
         matched_consumed_warmup_and_adaptation_pixels_targets_ids=True,
