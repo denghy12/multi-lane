@@ -6,7 +6,7 @@ import torch
 from torch.utils.data import DataLoader, TensorDataset
 
 import test_protected_view_forward as fixtures
-from multi_lane.track_a.fusion_function_constraint import FusionFunctionConstraint
+from multi_lane.track_a.fusion_function_constraint import FusionFunctionConstraint,gradient_norm
 from multi_lane.track_a.head_anchored_pilot import student_optimizer_groups, task_slices
 from multi_lane.track_a.historical_b32_backbone_attribution import method_state
 from multi_lane.track_a.runner import tensor_state_digest, train_task
@@ -108,3 +108,19 @@ class SelfTrainedViewTransferTest(unittest.TestCase):
         self.assertFalse(audit['bitwise_prediction_equality_required'])
         with self.assertRaises(AssertionError):compare_probes(before,repeat,{'fused':before['fused']+.001})
         with self.assertRaises(AssertionError):compare_probes(before,{'fused':before['fused']+.001},after)
+
+    def test_small_half_precision_gradients_use_actual_training_scale(self):
+        p=torch.nn.Parameter(torch.tensor(1.))
+        loss=(p.half()*1e-5).float()*1e-6
+        small=torch.autograd.grad(loss*1024,p,retain_graph=True)[0]
+        norm,scale=gradient_norm(loss,[p])
+        self.assertEqual(float(small),0.)
+        self.assertEqual(scale,65536.)
+        self.assertGreater(norm,1e-12)
+
+    def test_calibration_overflow_falls_back_without_changing_training_scaler(self):
+        p=torch.nn.Parameter(torch.tensor(1.))
+        loss=(p.half()*1000).float()*10
+        norm,scale=gradient_norm(loss,[p])
+        self.assertEqual(scale,1.)
+        self.assertAlmostEqual(norm,10000.)

@@ -5,18 +5,22 @@ import torch
 
 
 def gradient_norm(loss, parameters):
-    """A fixed scale avoids most AMP intermediate underflow during calibration."""
+    """Match the initial training scaler; fall back only on actual overflow.
+
+    Adapter-ASL has many very small components. A scale of 1024 can falsely
+    measure a zero norm even when the actual scale-65536 update is nonzero.
+    """
     parameters=tuple(p for p in parameters if p.requires_grad)
     if not parameters:
-        return 0.
-    scale=1024.
-    gradients=torch.autograd.grad(loss*scale, parameters, retain_graph=True, allow_unused=True)
-    square=sum(float((g.detach().float()/scale).square().sum().cpu())
-               for g in gradients if g is not None)
-    value=math.sqrt(square)
-    if not math.isfinite(value):
-        raise FloatingPointError('Non-finite functional calibration gradient')
-    return value
+        return 0.,0.
+    for scale in (65536.,8192.,1024.,128.,1.):
+        gradients=torch.autograd.grad(loss*scale, parameters, retain_graph=True, allow_unused=True)
+        square=sum(float((g.detach().float()/scale).square().sum().cpu())
+                   for g in gradients if g is not None)
+        value=math.sqrt(square)
+        if math.isfinite(value):
+            return value,scale
+    raise FloatingPointError('Non-finite functional calibration gradient at every scale')
 
 
 class FusionFunctionConstraint:
@@ -50,13 +54,15 @@ class FusionFunctionConstraint:
         if not torch.isfinite(distance):
             raise FloatingPointError('Non-finite functional distance')
         if self.calibration is None:
-            bm=gradient_norm(model_loss,model_parameters)
-            dm=gradient_norm(distance,model_parameters)
-            ba=gradient_norm(adapter_loss,adapter_parameters) if self.include_adapter else 0.
-            da=gradient_norm(distance,adapter_parameters) if self.include_adapter else 0.
+            bm,sm=gradient_norm(model_loss,model_parameters)
+            dm,sdm=gradient_norm(distance,model_parameters)
+            ba,sa=gradient_norm(adapter_loss,adapter_parameters) if self.include_adapter else (0.,0.)
+            da,sda=gradient_norm(distance,adapter_parameters) if self.include_adapter else (0.,0.)
             self.calibration=dict(task_id=task_id,source='first_actual_augmented_TRAIN_batch',
                 people=len(logits),current_classes=list(self.current),ratio=self.ratio,
-                maximum_beta=self.maximum_beta,calibration_gradient_scale=1024.,
+                maximum_beta=self.maximum_beta,calibration_gradient_scales=dict(
+                    model_base=sm,model_functional=sdm,adapter_base=sa,adapter_functional=sda),
+                overflow_fallback_scales=[65536.,8192.,1024.,128.,1.],
                 model_base_norm=bm,model_functional_norm=dm,adapter_base_norm=ba,adapter_functional_norm=da,
                 beta_model=self.coefficient(bm,dm),beta_adapter=self.coefficient(ba,da),
                 zero_signal_model=bm<=1e-12 or dm<=1e-12,

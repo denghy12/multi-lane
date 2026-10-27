@@ -1,5 +1,8 @@
 # 工作日志
 
+smoke02数值检查与再次门控：513测试（1跳过）、smoke02初始化/四组两任务训练/Val/像素标签流/旧参数与FP32重复探针全部通过。但Adapter-ASL实际训练范数约1.6e-7，而1024校准尺度在task1误读为0，令MAIN_ADAPTER的beta_A=0。正式自动接续只预启动BASE（PID2689011），已在核对cmdline后SIGINT中断；其他正式训练未启动，formal01产物保留不复用。修复校准为匹配初始训练scaler的65536，只在梯度实际溢出时依次降至8192/1024/128/1，逐组记录尺度；不改变训练scaler或ratio.25/maxbeta1，新增半精度下溢和溢出单测。将运行smoke_seed1_20261027_03，通过后正式使用formal_seed1_20261027_02全新统一启动。
+
+
 smoke审计修正：ac4b5a5的smoke_seed1_20261027_01在BASE/NO_CONSTRAINT task1旧预测逐值断言失败，正式未启动，旧产物保留。只读ABA诊断发现旧参数SHA完全一致，连同一模型A重复A也有TF32约8.1e-5的最大差；关闭TF32后AA/AB均约2e-7，属于CUDA舍入而非参数漂移。改为现有audit_precision关闭TF32的FP32探针、增加未更新模型重复控制，预测固定atol1e-5且逐项记录，参数SHA仍严格；新增审计单测，不改变训练/评估标准。下一smoke run_id改为smoke_seed1_20261027_02，formal01尚未创建。
 
 

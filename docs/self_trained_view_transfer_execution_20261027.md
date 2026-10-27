@@ -39,7 +39,7 @@ A/B/B0已存checkpoint只用于构建冻结教师的输出目标。教师head仍
 
 D只约束当前任务类别；不对不同教师Selector槽位强行逐元素对齐，也不额外规定三个学生分路分别等于三个不同来源。主参数（Selectors/Prompts/Person Attention）目标为原融合BCE＋0.1有效视图辅助BCE＋beta_M D；Adapter目标为原融合ASL＋0.1辅助ASL，最后一组再加beta_A D。原硬标签目标权重始终为1，不使用互斥类别softmax或稀释硬标签的概率混合。
 
-beta在每任务后5epoch的首个实际增强TRAIN batch按梯度范数定标一次：`min(1, 0.25*原目标梯度范数/D梯度范数)`。主参数和Adapter分别定标，零信号组beta=0并记录；校准梯度使用固定1024尺度减少AMP中间下溢。所有值随后固定，不根据Val/Test搜索。目标非有限值立即失败，不静默跳过。
+beta在每任务后5epoch的首个实际增强TRAIN batch按梯度范数定标一次：`min(1, 0.25*原目标梯度范数/D梯度范数)`。主参数和Adapter分别定标，零信号组beta=0并记录；校准优先使用训练初始scaler相同的65536；仅实际梯度溢出时按预声明的8192/1024/128/1回退，逐参数组记录实际尺度，避免把微小ASL梯度错误测为零。所有值随后固定，不根据Val/Test搜索。目标非有限值立即失败，不静默跳过。
 
 ## 4. 数据和超参数
 
@@ -61,7 +61,7 @@ beta在每任务后5epoch的首个实际增强TRAIN batch按梯度范数定标�
 
 先执行专项和完整回归、fresh初始化/CPU-CUDA RNG/初始TRAIN预测审计，再做2任务、每阶段2更新smoke，只评Val首64人，不打开Test。smoke验收旧参数/旧预测保护、自己的head冻结、教师不更新、跨组增强像素和标签逐值一致、无外部学生参数加载；通过后才自动启动正式8任务。
 
-smoke输出 `output/self_trained_view_transfer/smoke_seed1_20261027_02`，正式输出 `output/self_trained_view_transfer/formal_seed1_20261027_01`，日志用对应`logs/`前缀。服务器独立worktree `multi-lane-main-self-trained-view-transfer-20261027`，Git-only同步。主树/test-only及所有旧实验产物不修改。
+smoke输出 `output/self_trained_view_transfer/smoke_seed1_20261027_03`，正式输出 `output/self_trained_view_transfer/formal_seed1_20261027_02`，日志用对应`logs/`前缀。服务器独立worktree `multi-lane-main-self-trained-view-transfer-20261027`，Git-only同步。主树/test-only及所有旧实验产物不修改。
 
 每任务先保存自己前30epoch的compact和可恢复边界，再保存后5epoch完成的compact/optimizer/scheduler/scaler/RNG边界；完整训练后自动排队各组Val/Test。各组有Person Attention时，同时保存完整8阶段Attention ON/OFF，OFF仍保留共同训练后的其他参数，不当作独立重训基线。所有数据流检查通过前不打开正式Test。
 
@@ -76,3 +76,7 @@ smoke输出 `output/self_trained_view_transfer/smoke_seed1_20261027_02`，正式
 ## 7. 首次smoke的审计问题与修正
 
 第一轮smoke01（源码ac4b5a5）保留。旧参数SHA完全一致，但预测torch.equal失败；只读A→B→A控制中，同一模型A重复A本身有TF32最大8.1e-5、严格FP32约1.94e-7的差异，更新当前任务后旧路径FP32最大约1.49e-7。因此将探针限制为关闭TF32的FP32并加入重复阴性控制，固定atol1e-5；不是放宽旧参数冻结要求，也不改变训练AMP/TF32。正式尚未因首轮失败启动。
+
+## 8. 第二轮smoke发现的ASL定标下溢
+
+smoke02的模型/数据流/旧任务保护及Val全部通过，但固定1024尺度在一个任务上将实际约1.6e-7范数的Adapter-ASL梯度测成0，导致该组beta_A为0。正式01只预启动BASE后即中断（PID2689011，先核对命令行，只中断本轮自己的进程）；保留全部文件，不把它当完整正式结果。校准改为优先65536并只在实际溢出时回退，配半精度下溢/溢出单测；smoke03通过后才全新启动formal02。此修正不来自Val/Test指标选择。
