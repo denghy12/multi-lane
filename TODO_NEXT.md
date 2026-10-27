@@ -1,5 +1,7 @@
 # 下一步任务
 
+二轮预检：排序/Adam24项已通过，恢复/关闭机制精确更新已通过；集成暴露原move_model_inputs将可靠mask转float，新增目标接入现按原辅助监督语义显式转bool，不改原输入流。新增记录额外图与原融合logits差异，便于真实AMP重放核验。继续标准模块入口回归，未正式训练。
+
 预检补记：e750818首轮502项发现Torch2.0 any(tuple)兼容、完整own恢复读取weights_only、集成测试task属性及stdin驱动spawn测试问题；仅在预检，未正式训练。已改用逐维any、仅own恢复显式完整加载、正确current_task_id，并以python -m unittest标准入口重跑；新增文件EOF空行同步清理。不改目标/配方/旧权重。
 
 ## 2026-10-27：执行无教师三视图互补学习（实现完成，预检中）

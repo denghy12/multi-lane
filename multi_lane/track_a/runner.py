@@ -2161,9 +2161,11 @@ def train_task(
                         view_features=view_features, head=model.head,
                         fusion_weights=model.last_fusion_weights(),
                         view_logits=view_logits, targets=current_targets,
-                        current_class_indices=current, face_reliable=images["face_reliable"],
+                        current_class_indices=current,
+                        face_reliable=images["face_reliable"].to(dtype=torch.bool),
                         full_conditioned=bool(complementary_learning.get("full_conditioned", True)),
                         temperature=float(complementary_learning.get("temperature", 1.0)),
+                        fused_logits=logits,
                     )
             scale_before = float(scaler.get_scale())
             complementary_baseline_probe = None

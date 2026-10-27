@@ -67,6 +67,7 @@ def complementary_ranking_objective(
     face_reliable: torch.Tensor,
     full_conditioned: bool = True,
     temperature: float = 1.0,
+    fused_logits: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, dict]:
     """Rank natural positive/negative people for each current emotion class.
 
@@ -160,6 +161,11 @@ def complementary_ranking_objective(
         full_conditioned=bool(full_conditioned), temperature=float(temperature),
         face_denominator="all_natural_class_pairs",
     )
+    if fused_logits is not None:
+        if fused_logits.shape != person_logits.shape:
+            raise ValueError("Main fused prediction shape changed")
+        metrics["main_fused_logits_max_abs_difference"] = float(
+            (fused_logits.detach().float() - person_logits.detach().float()).abs().max())
     if not math.isfinite(metrics["complementary_ranking_loss"]):
         raise FloatingPointError("Non-finite complementary ranking loss")
     return loss, metrics
