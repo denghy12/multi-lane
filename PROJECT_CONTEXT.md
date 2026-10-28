@@ -1,5 +1,28 @@
 # 项目上下文
 
+## 2026-10-28：执行现有epoch轨迹与表征×head只读归因（预检中）
+
+用户授权两项归因。新分支codex/teacher-free-epoch-head-attribution-20261028从701e8df，保留此前dirty分析。仅新增teacher_free_epoch_head_attribution/run_teacher_free_epoch_head、GPU0shell和机制测试；原model/runner/训练源码不改，无optimizer/0训练。读取U0/U2/U4各epoch1/5/10/20/30，共15份；7个同epoch条件覆盖两套2×2，三份表征各编码一次复用head读出，Val/Test两进程GPU0。B64/72线程/AMP-TF32/2单线程spawnworkers/原CPU分batch sigmoid/历史人群不变；当前5类BCE/逐类AP/可靠Face/Full融合轨迹与交互完整保留，不按Test选epoch。
+
+预检核心：epoch1全部条件恒等、原生缓存读出重放、epoch30对已有四路logits/概率逐值一致、源SHA/参数/无梯度保护；先专项/既有回归，再前64人smoke后完整双split。source原worktree701clean、15checkpoint均存在、GPU0空闲；原主树153/test-only5条状态SHA保持。配置/输入/输出/完整命令见docs/teacher_free_epoch_head_execution_20261028.md，输出output/teacher_free_epoch_head/seed1_20261028_01，日志同前缀。当前未正式启动，无新结论。三个上下文同步更新。
+
+## 2026-10-28：无教师三视图互补学习止于task0，完整Val/Test核验结束
+
+701e8df三组各30epoch/2520更新/0skip，队列正常complete但门槛stop_after_task0；未运行0–2控制或8任务。U0历史task0模型/30轮loss/RNG精确一致，Val59.5117/Test53.5004；U2 Val59.7144(+.2028)/Test52.9827(−.5177)；U4 Val59.5352(+.0236)/Test52.5870(−.9134)。本轮是5类task0，不能充当最终26类/8阶段平均。Test U4 Full51.1206/Person50.4471/可靠Face47.2882，均低原52.0252/51.3258/47.8107，不支持Face变强拖累Full的旧解释。Val小涨由类别/人群补偿，bootstrap融合差均含0。
+
+U4实际额外步2124/2436生效、312拒绝(87.192%)；TRAIN25probe Full17负/3零/5正、融合21负/3零/1正，平均额外BCE负。训练BCE/ASL/rank更低但Test BCE/AP更差；局部一阶相对步约束不等于长期Full函数或AP保护，head/Adam轨迹仍可变，不能认定稳定梯度冲突或单一实现bug。无新增前向/训练。本版不自动8task/扩seed/收紧guard；下一候选先已有epoch轨迹与表征×head只读2×2归因，仅诊断而非部署拼装，尚未执行。
+
+61份非pth已回传逐SHA，归档03da750b50c15d007311e10145d63ee7379d362563d0a5580f1856df83421811。CPU独立6融合/30视图指标最大误差2.55795e−13，人物/标签/mask/记录的30轮前2批一致，原8参考checkpoint及主树/test-only状态保持。输出output/teacher_free_shared_learning/analysis_20261028_01，报告docs/teacher_free_shared_learning_results_20261028.md，脚本scripts/emotic/analyze_teacher_free_shared_learning.py。分析分支codex/teacher-free-shared-results-20261028/HEAD701e8df；运行源码不改，报告未提交，不合并main。所有三个上下文更新，GPU0已空闲。
+
+启动后核验：U0/U2已完成task0前3轮、U4前2轮，均0跳步；三组正式第1轮全部模型张量、实际增强batch和Python/NumPy/CPU/CUDA RNG逐值一致，证明λ0不改变原路径。第2轮起实际新增更新和每100步同批TRAIN反事实检查运行正常，GPU0瞬时100%/10684MiB。正式epoch1_identity_audit.json已生成；当前仅运行健康检查，没有正式Val/Test结论。
+
+## 2026-10-27：无教师互补学习预检通过，GPU0正式三组运行
+
+源码701e8dfa已Git-only同步clean远程multi-lane-main-teacher-free-shared-learning-20261027，local/remote HEAD/upstream一致。502项机制/Track-A/RNG/相关回归通过；U0/U2/U4真实2任务各24更新共48步/组、0skip，初始与实际增强batch相同，额外图与原融合logits差0，旧参数/CLIP/参考8checkpoint SHA保持，Val首64两阶段完成。单组峰值分配约2.82GB；U4实际非零更新率task0/1为37.5%/50%，仅验证机制，不代表收益。
+
+正式tmux teacher_free_shared_seed1_20261027，U0/U2/U4训练PID3185093/3185652/3186398在GPU0并行；初始GPU99%/7.8GB瞬时。seed1task0×30轮，之后自动完整Val/Test，符合既定门槛才续0–2并补U1/U3，不自动8任务。不要重复启动；完整配置/输出/日志见docs/teacher_free_shared_learning_execution_20261027.md。53份预检产物已回传output/teacher_free_shared_learning/preflight_snapshot_20261027_03逐SHA，归档a5eb0203a625ab3fcaef2d79a2d6541dd36f06350532726d22f848a856591ea4。主树153/test-only5 dirty状态SHA保持；执行笔记仅本地追加，运行源码固定，不合并main。
+
+
 二轮预检：排序/Adam24项已通过，恢复/关闭机制精确更新已通过；集成暴露原move_model_inputs将可靠mask转float，新增目标接入现按原辅助监督语义显式转bool，不改原输入流。新增记录额外图与原融合logits差异，便于真实AMP重放核验。继续标准模块入口回归，未正式训练。
 
 预检补记：e750818首轮502项发现Torch2.0 any(tuple)兼容、完整own恢复读取weights_only、集成测试task属性及stdin驱动spawn测试问题；仅在预检，未正式训练。已改用逐维any、仅own恢复显式完整加载、正确current_task_id，并以python -m unittest标准入口重跑；新增文件EOF空行同步清理。不改目标/配方/旧权重。
