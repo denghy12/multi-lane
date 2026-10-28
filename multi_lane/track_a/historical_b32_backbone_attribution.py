@@ -77,9 +77,9 @@ def restore_components(model, reference, condition):
         assert tensor_state_digest(method_state(model)) == before, 'Memory restoration failed'
 
 
-def build(config, clip):
+def build(config, clip, model_class=MultiLaneModel):
     arm = validate_config(config)
-    model = MultiLaneModel(load_openai_clip_visual(clip), TASK_SIZES,
+    model = model_class(load_openai_clip_visual(clip), TASK_SIZES,
         num_selectors=config['num_selectors'], num_prompts=config['num_prompts'],
         num_prompt_layers=config['num_prompt_layers'], selector_mode=config['selector_mode'],
         prompt_mode=config['prompt_mode'], normalize=config['normalize'],

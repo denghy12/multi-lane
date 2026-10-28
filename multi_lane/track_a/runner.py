@@ -1668,7 +1668,13 @@ def train_task(
     complementary_learning: Optional[Dict[str, object]] = None,
     epoch_callback=None,
     resume_training_state: Optional[Dict[str, object]] = None,
+    private_interaction=None,
 ) -> List[Dict[str, float]]:
+    if private_interaction is not None and (
+        loss_routing != "adapter_asl" or complementary_learning is not None
+        or functional_constraint is not None or gradient_clip_norm != 0
+    ):
+        raise ValueError("Private interaction requires the unchanged BCE/Adapter-ASL objective")
     if not math.isfinite(supervised_loss_scale) or supervised_loss_scale <= 0:
         raise ValueError("Supervised loss scale must be finite and positive")
     if supervised_loss_scale != 1.0 and loss_routing != "joint_bce":
@@ -1836,6 +1842,8 @@ def train_task(
         epoch = int(resume_training_state["next_epoch"])
         history = copy.deepcopy(resume_training_state["history"])
         completed_task_updates = int(resume_training_state["completed_task_updates"])
+        if private_interaction is not None:
+            private_interaction.load_state_dict(resume_training_state["private_interaction"])
         if (len(history) != epoch or not 0 < epoch <= epochs or optimizer_updates_per_task is not None
                 or adapter_regularization != "none" or ranking_loader is not None):
             raise ValueError("Resume supports complete epoch boundaries of the declared baseline")
@@ -1845,6 +1853,8 @@ def train_task(
         else epoch < epochs
     ):
         model.train()
+        if private_interaction is not None:
+            private_interaction.begin_epoch()
         if model.adapter_mode in {"moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"}:
             model.adapter_bank.set_training_progress(
                 min(1.0, epoch / max(1, epochs - 1))
@@ -2234,6 +2244,8 @@ def train_task(
                     ),
                     allow_unused_model_parameters=getattr(model, 'cross_view_face_attention', False),
                 )
+            if private_interaction is not None:
+                private_interaction.backward(current_targets, current)
             parax_gradients = model.parax_gradient_diagnostics(scale_before)
             if parax_gradients:
                 for key, value in parax_gradients.items():
@@ -2307,6 +2319,8 @@ def train_task(
                 )
             scaler.step(optimizer)
             scaler.update()
+            if private_interaction is not None:
+                private_interaction.step()
             if float(scaler.get_scale()) >= scale_before:
                 optimizer_steps += 1
                 completed_task_updates += 1
@@ -2503,6 +2517,8 @@ def train_task(
                     audit[key] for audit in epoch_path_gradient_audits
                 ) / len(epoch_path_gradient_audits)
         row.update(epoch_parameter_gradients)
+        if private_interaction is not None:
+            row.update(private_interaction.end_epoch())
         history.append(row)
         print(
             f"task={task_id} cycle={epoch + 1} "
@@ -2523,10 +2539,14 @@ def train_task(
                 optimizer_snapshot(model, optimizer, scheduler, scaler),
                 next_epoch=epoch, completed_task_updates=completed_task_updates,
                 history=copy.deepcopy(history),
+                **({"private_interaction": private_interaction.state_dict()}
+                   if private_interaction is not None else {}),
             ))
     if recovery_state is not None:
         from .task_recovery import optimizer_snapshot
         recovery_state.update(optimizer_snapshot(model, optimizer, scheduler, scaler))
+        if private_interaction is not None:
+            recovery_state["private_interaction"] = private_interaction.state_dict()
     history[-1]["validation_current_mAP"] = (
         current_validation_map(model, validation_loader, device, amp)
         if validation_loader is not None else None

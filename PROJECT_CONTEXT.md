@@ -1,5 +1,29 @@
 # 项目上下文
 
+## 2026-10-28：执行受保护联合摘要Attention六组8任务（实现预检中）
+
+用户授权按方案修改并完整跑8task Val/Test，明确本轮不使用旧task0效果晋级门槛。新分支codex/protected-joint-attention-20261028，起点09a6729；保留此前dirty分析及其他工作树。新增protected_joint_attention/experiment/evaluation/run入口、GPU0队列与机制测试；原model.py不改，runner仅默认关闭的私有优化接口，历史build增加可选模型类型。
+
+C0原B0、C1 CLS-MLP、C2联合摘要、C3目标区域、C4内容门控、FULL_ONLY新增分支仅Full；各seed1/8task/30epoch/B64，原主LR.0125/Adapter .0004/b32/index1/scale.03/aux.1/BCE-ASL，72线程/历史报告RNG，私有Adam-AMP/RNG隔离。第6层摘要，宽64/4头，固定门控.1/上界.1；新门控初值.1。真实标签自训、无A/B参数/答案、同一学习分类头。全部正式臂每任务要求原参数/loss/RNG精确匹配历史边界，否则报机制错误；新增分支不以效果决定是否继续8task。
+
+GPU0空闲约24GB，GPU1–7忙且不使用；最多4作业、最多2评估、最低余量6GB/共享内存1GB自动排队。一次图像前向同时得到ON/OFF/移除新增Face和Person证据，评估2个单线程spawn workers，原CPU每batch sigmoid。epoch恢复包含两个优化器/调度器/scaler与完整RNG，验证前保存。输出output/protected_joint_attention、日志logs同前缀。当前编译/bash/diff检查通过，尚未远程测试/smoke/正式训练；不声称有效。
+
+## 2026-10-28：规划受保护的三视图交互摘要Attention（未实现/未训练）
+
+用户要求沿Attention寻找事先定义、自行训练的单模型方案，不使用A/B参数或答案拼装。重新核对完整均值33.6248/40.5129、旧OFF控制、独立Selector/只训Attention、近期epoch与2×2结果及早期B0保真logit校准；完整均值证明函数互补，不能独归Attention或Face。保护原B0与后置残差已有先例，本身不包装成新贡献。
+
+候选保留32.6800历史配方的原三路Task Forward与原BCE/Adapter-ASL，从初始即共同30轮学习；另设私有交互读出，读取三视图Summarized Patches，目标框限定的并行Full Summarize、Person/任务条件Query、可靠Face softmax前mask、内容门控及有界末端特征残差，同一个原头分类。新增真实标签目标仅训练私有模块；原θ/head依原固定融合目标更新，独立RNG/optimizer/GradScaler，需逐步审计原函数重放。不是冻结随机头、额外5轮、外部教师或两模型；也不保证最终融合泛化或原Face AP再提升。
+
+方案docs/protected_joint_attention_plan_20261028.md列C0强B0/C1 CLS-MLP/C2联合摘要/C3人物区域/C4门控及Full-only source控制；先task0再0–2后8任务，GPU后续仅0。本轮只研究/新增方案和更新三上下文，当前分支仍codex/teacher-free-epoch-head-attribution-20261028，HEAD09a6729；不修改模型/训练入口、不启动GPU、不提交推送，保留原dirty分析和其他工作树。
+
+## 2026-10-28：epoch轨迹与表征×head两项只读归因完整完成
+
+运行09a6729源码clean，510新机制/相关回归通过；前64人全部5epoch×7条件smoke通过。GPU0并行完整Val/Test（157.52/194.44秒），共70完整读出条件/350视图含可靠Face指标，无optimizer/0训练。epoch1七条件恒等、epoch30原生完整四路logits/概率及mask/batch/人群精确重放，源权重/预测SHA与主树153/test-only5条状态不变。160产物已回传逐SHA，归档e8636acf7e65aab047394a8ae054cf97de60a3e570367d0a500909f5e47cde1c；独立指标误差3.41061e−13、BCE2.15383e−14。
+
+结果：Test融合e5原48.8319/U2 49.1840/U4 49.5933短暂正差；U4在5–10轮间转负，U2在10–20轮间转负，e30为53.5004/52.9827/52.5870。不能按Test选e5替代完整30轮基线。e30 Test固定原头H0时R2融合52.9161、R4 52.7418仍大部下降；固定原表征R0换H2/H4为53.5274/53.5162近乎不变，差异不能仅归head。U4 Val原生59.5352掩盖R4H0 58.5729的表示损失与head/交互补偿；2×2是条件读出干预，不是唯一训练因果分解或部署组装。
+
+报告docs/teacher_free_epoch_head_results_20261028.md，完整配置execution同前缀；分析output/teacher_free_epoch_head/analysis_20261028_01含轨迹、全交叉、逐类AP/BCE、漂移与核验。原模型/训练源码不改，无新训练、不扩8任务、不Test挑epoch；三个上下文已更新，执行记录和报告只在本地追加，源运行HEAD保持09a6729。
+
 归因预检补充：8项新机制测试已通过；新增显式Face可靠mask、历史batch边界及完整人群长度的重放检查，不改变任何前向数值。完整既有回归进行中，随后Git-only同步该审计增强，执行GPU0前64人smoke后双split并行。
 
 ## 2026-10-28：执行现有epoch轨迹与表征×head只读归因（预检中）
