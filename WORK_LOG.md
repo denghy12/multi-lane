@@ -1,5 +1,25 @@
 # 工作日志
 
+## 2026-10-28：执行统一1%上限的四组Attention训练控制（预检中）
+
+用户授权第一件事完整执行，第二件事仅要求MULTI-LANE术语解释。新分支codex/protected-attention-dose-controls-20261028，保留全部原dirty分析。四组DOSE_MLP/DOSE_FIXED/DOSE_TASK/DOSE_CONTENT，seed1/8task/30epoch/B64，强B0配方与同一学习分类头不变；最终delta=Bound_.01(alpha·raw)，固定alpha1、另两门控2sigmoid初值1，三Attention每task QKV初始化相同。无区域/新查询/教师/A-B安装；新增目标独立优化，只原目标更新原参数。增加独立dose模块/入口/测试，原readout仅提取可覆盖的gate/correction方法、保留默认原运算；通用audit/queue支持四组锚点，评估增加真实gain/范数profile。
+
+GPU0空闲约24GB、shm4GB；上限4作业/2评估，余量6GB/1GB自动排队。单测/真实两任务×4更新smoke及OFF/原参数/loss/RNG审计通过后才启动完整训练，训练后自动Val/Test及OFF/入口开关。输出output/protected_attention_dose、日志logs同前缀；完整路径/命令/协议docs/protected_attention_dose_execution_20261028.md。原主/test-only状态SHA仍ea2e261e…/e9d1479f…，保留。当前尚未远程测试或启动正式，不声称提升。
+
+并行Summarize查询候选仅说明：保护原Selectors/原三路Task Forward，新增任务私有查询从sg(image tokens)可导取证，再交互修正；如用原查询初始化/偏移也要sg原查询，不能detach新摘要输出。原模型在同一30轮自己训练，新目标只更新私有取证与交互；不是拆分原Selectors、教师或组装。候选本轮未实现，效果未知。
+
+
+## 2026-10-28：Attention幅度/内容门控真实前向归因完成
+
+最终源码bd9ca07，run seed1_task027_20261028_02；24项相关测试、三阶段首64/真实尾batch smoke通过，GPU0完整Val/Test task0/2/7十条件全部完成（76.74/125.63秒，各峰值allocated952.08MiB）。01尾batch中间分量检查失败已保留，02恢复原每lane二维计算后完整重跑，未放宽native/OFF逐值检查。无训练更新，原model/runner/readout实现3950b35不变。
+
+真实TRAIN缩放task7 Val42.4741/Test32.7131，原C4为41.8629/32.1570、OFF精确B0为42.4628/32.6800；真实Test对旧离线32.713263差−.000150。统一1%上限后，动态/常量/全开/错配门控Test最终32.7108/32.7113/32.7138/32.7125，所选三个Test阶段动态均未优于其余门控；Val动态微弱正差未转化为Test优势。控制仅检验最终gamma，不是否定Attention内部内容权重。实际task7 Test平均RMS动态/常量.824355%/.828841%，错配门控值集合逐batch相同。保留gamma只移除新增Face，Test贡献task0−.0216/task2−.0081/task7+.0043、Val三阶段均负；没有稳定Face互补证据。相对B0及动态−常量/错配的task7聚类bootstrap区间均跨0，不宣称稳定增益。
+
+153份产物已同步逐SHA，归档98b79592883c69e54f386f0dbe8cd50086eb8b56169d8645269916b555e39878；NumPy1920指标误差≤4.27e−13、12源预测精确、320门控集合/12无效Face阴性控制通过。3源checkpoint SHA与前后模型摘要不变，主/test-only状态仍ea2e261e…/e9d1479f…；模型worktree clean。全部仅0/2/7，不能称8任务阶段平均。报告docs/protected_attention_gate_results_20261028.md，回传/分析output/protected_attention_gate/{complete_snapshot_20261028_02,analysis_20261028_02}。
+
+本轮不自动启动更大门控/Attention训练。若重训，先将最终Bound放在写入末端统一1%上界，比较MLP/固定/任务标量/内容门控及同初始化，不自动叠区域；后续证据提取候选是保护原Selectors、另设仅供新增交互学习的并行Summarize查询，不是重新拆分原三路Selectors。上述均未实现/训练。所有分析仅本地追加，无main合并或删除。
+
+
 2026-10-28归因预检补充：925d357相关24项通过、首64三阶段smoke通过、完整Test已结束；完整Val在尾batch函数式中间分量重算逐值检查停止，尚无完整双split结论。保留01失败/已成产物，不训练/改权重。改为严格保持原逐任务[batch,feature]的sigmoid/RMS形状，新增三个真实Val尾batch smoke；使用新run_id02完整重跑双split，原native/OFF预测仍必须逐值一致，不放宽其门槛。
 
 2026-10-28门控归因预检：9a4e6d6已Git-only部署独立multi-lane-main-protected-attention-gate-20261028，6项新机制测试通过。增加多任务系数/类别所有权重放测试及reference NPZ/CLIP SHA核验。新增模式为临时hooks＋函数式特征读出，不改既有模型；继续相关测试后首64 smoke与正式双split。尚无新指标或训练。

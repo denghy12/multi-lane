@@ -115,17 +115,24 @@ class InteractionReadout(nn.Module):
                 raw = self.out((weights @ v).reshape(b, self.dim))
                 start = sum(m.shape[1] for m in memories[:2])
                 face_mass = weights[..., start:-1].sum(-1).mean((1, 2))
-            gate = base.new_full((len(base), 1), .1)
-            if self.gate is not None:
-                inputs = torch.cat([gate_base, p, face, use_face[:, None].float(),
-                                    full_visible[:, None].float()], -1)
-                gate = self.gate(inputs).sigmoid()
-            delta = gate * bounded_delta(raw, base)
+            gate = self._gate_value(base, gate_base, p, face, use_face, full_visible)
+            delta = self._correction(raw, base, gate)
             self.last_metrics = dict(gate_mean=float(gate.detach().mean()),
                 delta_to_base_rms=float((delta.detach().square().mean(-1).sqrt()
                     / base.square().mean(-1).sqrt().clamp_min(1e-12)).mean()),
                 face_attention_mass=float(face_mass.detach().mean()))
             return delta
+
+    def _gate_value(self, base, gate_base, person, face, use_face, full_visible):
+        gate = base.new_full((len(base), 1), .1)
+        if self.gate is not None:
+            inputs = torch.cat([gate_base, person, face, use_face[:, None].float(),
+                                full_visible[:, None].float()], -1)
+            gate = self.gate(inputs).sigmoid()
+        return gate
+
+    def _correction(self, raw, base, gate):
+        return gate * bounded_delta(raw, base)
 
 
 class ProtectedJointModel(MultiLaneModel):

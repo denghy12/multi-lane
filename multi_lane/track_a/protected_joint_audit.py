@@ -9,16 +9,16 @@ from .run_historical_b32_test_attribution import read, write
 from .runner import tensor_state_digest
 
 
-def verify_outputs(root, tasks, smoke):
+def verify_outputs(root, tasks, smoke, arms=ARMS, anchor='C0'):
     root = Path(root)
     records = []
     for task in tasks:
-        baseline_path = root/'C0/train/compact_checkpoints'/f'task{task}.pth'
+        baseline_path = root/anchor/'train/compact_checkpoints'/f'task{task}.pth'
         baseline = _torch_load(baseline_path)['model']
         baseline = {k:v for k,v in baseline.items() if not k.startswith('interaction_bank.')}
-        history = read(root/'C0/train/training_history.json')[str(task)]
-        audit = read(root/'C0/train/audits.json')[str(task)]
-        for arm in ARMS:
+        history = read(root/anchor/'train/training_history.json')[str(task)]
+        audit = read(root/anchor/'train/audits.json')[str(task)]
+        for arm in arms:
             path = root/arm/'train/compact_checkpoints'/f'task{task}.pth'
             actual = _torch_load(path)['model']
             base = {k:v for k,v in actual.items() if not k.startswith('interaction_bank.')}
@@ -38,7 +38,7 @@ def verify_outputs(root, tasks, smoke):
                 augmented_training_batches_exact=True,base_sha256=tensor_state_digest(base),
                 checkpoint_sha256=_sha256(path))
             for split in ('val',) if smoke else ('val','test'):
-                with np.load(root/'C0'/split/'off/view_scores'/f'task{task}.npz') as expected, \
+                with np.load(root/anchor/split/'off/view_scores'/f'task{task}.npz') as expected, \
                      np.load(root/arm/split/'off/view_scores'/f'task{task}.npz') as actual:
                     for key in ('sample_ids','targets','face_reliable','class_indices','batch_lengths',
                         'fused_logits','fused_probabilities','full_logits','full_probabilities',
@@ -48,5 +48,6 @@ def verify_outputs(root, tasks, smoke):
                 record[split+'_off_all_person_predictions_exact'] = True
             records.append(record)
     write(root/'cross_arm_audit.json',dict(status='verified',tasks=list(tasks),records=records,
+        anchor=anchor,arms=list(arms),
         base_parameters_losses_batches_and_complete_off_predictions_exact=True))
     return records

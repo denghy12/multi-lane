@@ -24,7 +24,9 @@ from .runner import (TaskMetrics, build_optimizer_groups, build_transforms,
 from .task_recovery import atomic_save, restore_rng, rng_state, save_boundary
 
 def build(config, clip, arm):
-    model = historical_build(config, clip, model_class=ProtectedJointModel)
+    from .protected_attention_dose import DOSE_ARMS, DoseMatchedModel
+    model = historical_build(config, clip,
+        model_class=DoseMatchedModel if arm in DOSE_ARMS else ProtectedJointModel)
     model.initialize_interaction(arm)
     return model
 
@@ -222,6 +224,10 @@ def training_config(args, git, base, initial):
         evaluation_scope='samples_intersect_seen_classes', test_used_for_development=True)
     if args.smoke:
         config['smoke_updates'] = smoke_update_budget(args)
+    from .protected_attention_dose import DOSE_ARMS, dose_configuration
+    if args.arm in DOSE_ARMS:
+        config['kind'] = 'protected_attention_dose_matched_controls'
+        config['interaction'] = dose_configuration(args.arm)
     return config
 
 
@@ -279,6 +285,11 @@ def train(args):
     if initial != base['initial_selector_prompt_classifier_sha256']:
         raise AssertionError('Fresh initialization did not reproduce the historical recipe')
     cfg = training_config(args, git, base, initial)
+    if cfg['kind'] == 'protected_attention_dose_matched_controls':
+        cfg['interaction']['parameters_per_task'] = [sum(p.numel() for p in m.parameters())
+                                                   for m in model.interaction_bank]
+        cfg['method_parameter_count'] = sum(p.numel() for n,p in model.named_parameters()
+                                            if not n.startswith('visual_encoder.'))
     if (args.output/'training_complete.json').exists():
         previous=read(args.output/'training_complete.json')
         if len(previous['tasks']) > len(targets):
@@ -470,7 +481,8 @@ def parser():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('action', choices=('train','eval'))
     p.add_argument('--output', type=Path, required=True)
-    p.add_argument('--arm', choices=ARMS)
+    from .protected_attention_dose import DOSE_ARMS
+    p.add_argument('--arm', choices=ARMS+DOSE_ARMS)
     p.add_argument('--source-run', type=Path)
     p.add_argument('--historical-reference-root', type=Path)
     p.add_argument('--data-root', type=Path)

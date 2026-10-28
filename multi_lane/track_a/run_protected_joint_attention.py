@@ -24,14 +24,14 @@ def memory_available():
     return free, shm.f_bavail*shm.f_frsize/1024**2
 
 
-def run(args):
+def run(args, arms=ARMS, anchor='C0'):
     from .protected_joint_experiment import runtime
     git = runtime()
     args.output.mkdir(parents=True, exist_ok=True); args.logs.mkdir(parents=True, exist_ok=True)
     lock = (args.output/'queue.lock').open('a')
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     tasks = [0,1] if args.smoke else list(range(8))
-    protocol = dict(git=git,seed=1,gpu=0,arms=list(ARMS),tasks=tasks,smoke=args.smoke,
+    protocol = dict(git=git,seed=1,gpu=0,arms=list(arms),tasks=tasks,smoke=args.smoke,
         epochs_per_task=30,batch_size=64,threads=72,train_workers=2,eval_workers=2,
         prefetch_factor=1,maximum_jobs=args.maximum_jobs,maximum_eval_jobs=2,
         minimum_free_gpu_mib=6000,minimum_free_shm_mib=1024,
@@ -46,7 +46,7 @@ def run(args):
         write(args.output/'protocol.json',protocol)
     module = [sys.executable,'-u','-m','multi_lane.track_a.protected_joint_experiment']
     pending, active, records, failures = [], [], [], []
-    for arm in ARMS:
+    for arm in arms:
         root = args.output/arm/'train'
         command = module+['train',*common(args),'--arm',arm,'--tasks','8','--output',str(root)]
         if args.smoke:
@@ -115,18 +115,18 @@ def run(args):
         if failures:
             raise RuntimeError('Job failure: '+repr(failures))
         from .protected_joint_audit import verify_outputs
-        verify_outputs(args.output, tasks, args.smoke)
+        verify_outputs(args.output, tasks, args.smoke, arms=arms, anchor=anchor)
         rows = []
-        for arm in ARMS:
+        for arm in arms:
             row = dict(arm=arm)
             for split in ('val',) if args.smoke else ('val','test'):
                 result = read(args.output/arm/split/'result.json')
                 for key in ('final_mAP','average_mAP'):
                     row[split+'_'+key] = result['summary'][key]
                     row[split+'_off_'+key] = result['off_summary'][key]
-                base = read(args.output/'C0'/split/'result.json')
+                base = read(args.output/anchor/split/'result.json')
                 for key in ('final_mAP','average_mAP'):
-                    if result['off_summary'][key] != base['summary'][key]:
+                    if result['off_summary'][key] != base['off_summary'][key]:
                         raise AssertionError(('OFF did not replay paired B0',arm,split,key))
             rows.append(row)
         with (args.output/'summary.csv').open('w') as handle:
