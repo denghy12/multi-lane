@@ -129,11 +129,14 @@ def probability_rows(values):
     return logits, {name:torch.sigmoid(value) for name,value in logits.items()}
 
 
-def verify_replay(actual, reference, ids, targets, offset=0):
+def verify_replay(actual, reference, ids, targets, offset=0, face_reliable=None):
     n = len(ids)
     if (not np.array_equal(reference["sample_ids"][offset:offset+n],np.asarray(ids))
             or not np.array_equal(reference["targets"][offset:offset+n],targets.numpy())):
         raise ValueError("Reference replay population or labels changed")
+    if face_reliable is not None and not np.array_equal(
+            reference["face_reliable"][offset:offset+n],face_reliable.bool().cpu().numpy()):
+        raise ValueError("Reference replay Face reliability changed")
     differences = {}
     for name in VIEWS:
         for suffix in ("_logits","_probabilities"):
@@ -288,7 +291,7 @@ def evaluate(args):
                     own=label(representation,representation)
                     replay={name+suffix:(buffers[own][name][-1] if suffix=="_logits" else probabilities[own][name][-1]).numpy()
                             for name in VIEWS for suffix in ("_logits","_probabilities")}
-                    verify_replay(replay,references[representation],ids,targets,offset)
+                    verify_replay(replay,references[representation],ids,targets,offset,reliable)
             if epoch==1:
                 ref=label("U0","U0")
                 for name in buffers:
@@ -297,6 +300,12 @@ def evaluate(args):
                             raise AssertionError("Epoch1 cross-readout identity failed")
             offset+=len(ids)
         y=torch.cat(ys);reliable=torch.cat(reliable_all)
+        if epoch==30:
+            for reference in references.values():
+                if not np.array_equal(reference["batch_lengths"][:len(lengths)],np.asarray(lengths)):
+                    raise AssertionError("Historical evaluation batch boundaries changed")
+                if not args.smoke and len(ids_all)!=len(reference["sample_ids"]):
+                    raise AssertionError("Full evaluation population is incomplete")
         cohort=(tuple(ids_all),tensor_state_digest({"targets":y,"face_reliable":reliable}))
         if cohorts is not None and cohorts!=cohort:raise AssertionError("Epoch cohort changed")
         cohorts=cohort

@@ -1,5 +1,7 @@
 # 项目上下文
 
+归因预检补充：8项新机制测试已通过；新增显式Face可靠mask、历史batch边界及完整人群长度的重放检查，不改变任何前向数值。完整既有回归进行中，随后Git-only同步该审计增强，执行GPU0前64人smoke后双split并行。
+
 ## 2026-10-28：执行现有epoch轨迹与表征×head只读归因（预检中）
 
 用户授权两项归因。新分支codex/teacher-free-epoch-head-attribution-20261028从701e8df，保留此前dirty分析。仅新增teacher_free_epoch_head_attribution/run_teacher_free_epoch_head、GPU0shell和机制测试；原model/runner/训练源码不改，无optimizer/0训练。读取U0/U2/U4各epoch1/5/10/20/30，共15份；7个同epoch条件覆盖两套2×2，三份表征各编码一次复用head读出，Val/Test两进程GPU0。B64/72线程/AMP-TF32/2单线程spawnworkers/原CPU分batch sigmoid/历史人群不变；当前5类BCE/逐类AP/可靠Face/Full融合轨迹与交互完整保留，不按Test选epoch。

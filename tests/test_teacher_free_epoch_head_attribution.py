@@ -68,6 +68,10 @@ class EpochHeadAttributionTest(unittest.TestCase):
             ref.update({v+"_logits":z[v].numpy(),v+"_probabilities":p[v].numpy()})
         y=torch.tensor([[1.,0.],[0.,1.]])
         self.assertTrue(verify_replay(actual,ref,["a","b"],y)["all_logits_and_probabilities_exact"])
+        ref["face_reliable"]=torch.tensor([True,False]).numpy()
+        verify_replay(actual,ref,["a","b"],y,face_reliable=torch.tensor([True,False]))
+        with self.assertRaises(ValueError):
+            verify_replay(actual,ref,["a","b"],y,face_reliable=torch.tensor([False,False]))
         with self.assertRaises(ValueError):verify_replay(actual,ref,["b","a"],y)
         actual["full_logits"]=actual["full_logits"].copy()+.01
         with self.assertRaises(AssertionError):verify_replay(actual,ref,["a","b"],y)
