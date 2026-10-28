@@ -1,5 +1,35 @@
 # 下一步任务
 
+## 2026-10-28：执行Attention幅度/内容只读归因（实现预检中）
+
+用户授权先执行前述诊断再判断改进。本轮先现有C4 task0/2/7完整Val/Test，0训练，不自动展开第三项重训。新分支codex/protected-attention-gate-attribution-20261028，保留所有既有dirty分析。新增独立protected_attention_gate_attribution/run入口、GPU0 shell和6项机制测试；不改原模型/runner/Attention文件。
+
+TRAIN常量取各任务最后5轮C3/C4输出RMS比和C4门控均值，在新Val/Test读取前锁定。10条件：原动态/关闭、TRAIN缩放动态/常量、统一最终1%RMS上限的动态/常量/全开/质量分组内打乱门控，以及固定原动态或常量门控时屏蔽Face摘要。Face干预不再同时改变门控，门控错配保留质量标记和分布。原三路编码共享一次，原ON/OFF与独立视图逐batch精确重放；记录最终写入RMS/门控分布/相关BCE效用，报告AMP插值差，不把3阶段均值称8阶段平均。
+
+seed1/GPU0/B64/72线程/AMP-TF32/2单线程spawn workers/历史CPU每batch sigmoid，source3950b35只读，新源码独立Git-only worktree。GPU0约24GB空闲，其他卡忙且不使用。输出output/protected_attention_gate/seed1_task027_20261028_01、日志同前缀。协议docs/protected_attention_gate_execution_20261028.md；当前仅编译/语法预检，远程测试/首64smoke/正式待启动，不声称结果。main/test-only原状态SHA保留。
+
+## 2026-10-28：受保护联合摘要六组完整8任务结果已核验
+
+模型3950b35、调度8f8ab80全部complete；六组各240epoch/13950主更新/0主私有skip，48历史参数/loss/RNG及跨臂完整OFF/三路预测逐值通过。Val/Test原B0精确42.4628/49.4763、32.6800/39.5292。MLP42.5606/49.6355、32.7220/39.5811；普通联合Attention42.5156/49.6015、32.7075/39.5952；区域42.5427/49.6253、32.6746/39.5489；门控41.8629/48.8527、32.1570/38.9161；新增分支仅Full42.3024/49.2331、32.4328/39.1922。
+
+原函数保护成功，下降在新增读出而非Face共训损害原Full。MLP/普通Attention两split各8/8阶段小正，Attention未明确胜MLP；区域Test5/8正，门控/Full-only两split0/8。Task0门控Test即-0.9464，非主要遗忘。C4 TRAIN末轮gate约.405–.986、输出RMS原特征4.0%–9.9%，C3固定约1%；原消融混合内容选择与最多10倍剂量。C2 Face入口Test条件贡献最终+.0093/平均-.0065，C4关闭Face有所恢复但不回B0；无可靠Face人群仍明显损伤。
+
+本轮只读CPU已存logits固定0/.1/.25/.5/1缩放及TRAIN最后5轮RMS比例诊断（非新模型前向/部署成绩）：C4×.1 Val42.4882/49.5889、Test32.7108/39.6038；TRAIN等剂量Val42.4758/49.5873、Test32.7133/39.6085；支持写入过强为重要因素，恢复仍与MLP同量级。0/1端点概率逐值重放。原图分组500次bootstrap：C1 Test最终差[.0010,.0869]、C2[-.0253,.0846]、C2-C1[-.0746,.0377]，仅checkpoint条件区间/未多重校正/非多seed。
+
+1235非pth回传逐SHA，归档b019f48542d2ae64afc3c26943d428f2409d5420225656d7c75471bddd1881ac，48源compact SHA核验。独立NumPy2464项指标最大误差3.98e-13；分析output/protected_joint_attention/analysis_20261028_01，报告docs/protected_joint_attention_results_20261028.md，脚本scripts/emotic/analyze_protected_joint_attention.py（可选CPU Torch dose-only）。main/test-only状态SHA及源模型HEAD保持，GPU0空闲。分析分支codex/protected-joint-results-20261028，当前未提交/推送报告或分析，不改模型/不重训/不合并。
+
+下一步建议仅现有task0/2/7真实前向确认TRAIN锁定剂量，并比较同剂量动态/任务均值门控，分离内容与放大量；未执行。若再训，统一最终1%RMS上限，固定/任务标量/内容门控和MLP匹配对照，区域暂不自动叠加，不扩seed/层数/专家。Test参与开发全部披露；不可把离线最佳缩放当正式新结果。
+
+2026-10-28结构说明补记：后续解释以实际C4的第6层缓存、终层[h0,hPerson]Query、[h0,hPerson,reliable·hFace,r,v]门控、同head及新增目标SG为准。不能把当前区域mask称作原Full摘要改写、逐patch跨视图对齐或完全人物特征隔离；C2/C3固定门控与C4学习门控有幅度自由度差，精度变化不能单凭门控非零认定内容选择有效。原Face辅助监督和原共享更新照常，新增交互不保证原Face AP提高或最终Test必涨。本轮仅说明/文档，六组GPU0训练与后续评估保持现有队列，不新起实验。
+
+## 2026-10-28：GPU0六组并行已接管完成，原训练未重启
+
+调度源码8f8ab80已Git-only部署multi-lane-main-protected-joint-scheduling-20261028，5项专项远程通过（本地连同既有8项共13）；dry-run确认detached sessions与无tty。新tmux protected_joint_six_20261028只终止原controller3339902，原四训练PID3339982/3340572/3341343/3342106及工作目录完全不变，任务0继续至25/24/24/23轮。C4新PID3347791、FULL_ONLY3348364已各完成2轮。六组均0主/私有跳步，已完成轮原关键loss全部与历史精确一致，队列0失败。
+
+GPU0实测21358MiB占用/2724MiB空闲/100%；六组都活跃，pending为空。原模型源码HEAD/upstream仍3950b35且clean，cfg/训练过程不改；后续最多2评估自动跑8task Val/Test/OFF/证据移除和跨臂审计。runtime_scheduling_policy及handoff记录6并发，初始protocol保留4并发历史。原main/test-only状态SHA保持ea2e261e…/e9d1479f…。
+
+接管8份产物已同步本地output/protected_joint_scheduling/handoff_20261028_01并逐SHA核验，归档f44bb06280b61fd36dde0b656fbfb01a6cd0a723517417f4c5a677450bec764a。本地补执行笔记，运行源码固定不动。北京时间12:01 ETA：总剩余约7.4万主更新，六并发每组84步约81秒，合计约6.2 updates/s；训练约3–3.5h，完整双split/开关对照预留30–50min且部分重叠，总约3.5–4.5h，预计今日15:30–16:30完成，不保证绝对时间。
+
 ## 2026-10-28：受保护联合摘要六组并行调度（预检中）
 
 用户明确要求将C4内容门控和FULL_ONLY两组从排队改为GPU0并行。GPU0剩余9837MiB、原四训练占14245MiB；两组smoke峰值allocated约2821MiB，预计六组可容纳。新增独立调度分支codex/protected-joint-six-way-scheduling-20261028，原模型运行worktree/HEAD3950b35必须保持不变，以免破坏当前cfg/git一致性。
