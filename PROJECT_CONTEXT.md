@@ -1,5 +1,7 @@
 # 项目上下文
 
+2026-10-28归因预检补充：925d357相关24项通过、首64三阶段smoke通过、完整Test已结束；完整Val在尾batch函数式中间分量重算逐值检查停止，尚无完整双split结论。保留01失败/已成产物，不训练/改权重。改为严格保持原逐任务[batch,feature]的sigmoid/RMS形状，新增三个真实Val尾batch smoke；使用新run_id02完整重跑双split，原native/OFF预测仍必须逐值一致，不放宽其门槛。
+
 2026-10-28门控归因预检：9a4e6d6已Git-only部署独立multi-lane-main-protected-attention-gate-20261028，6项新机制测试通过。增加多任务系数/类别所有权重放测试及reference NPZ/CLIP SHA核验。新增模式为临时hooks＋函数式特征读出，不改既有模型；继续相关测试后首64 smoke与正式双split。尚无新指标或训练。
 
 ## 2026-10-28：执行Attention幅度/内容只读归因（实现预检中）

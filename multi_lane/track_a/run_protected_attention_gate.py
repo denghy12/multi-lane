@@ -37,10 +37,11 @@ def run(args):
     common=sum((['--'+name.replace('_','-'),str(getattr(args,name))] for name in
                 ('training_root','data_root','clip_checkpoint','face_manifest_root')),[])
     env=dict(os.environ,CUDA_VISIBLE_DEVICES='0',OMP_NUM_THREADS='72',MKL_NUM_THREADS='72')
-    def start(name,split,smoke=False):
+    def start(name,split,smoke=False,tail=False):
         output=args.output/name
         command=module+common+['--constants',str(constants),'--split',split,'--workers','2','--output',str(output)]
         if smoke:command+=['--smoke']
+        if tail:command+=['--smoke-tail']
         with (args.logs/(name+'.log')).open('a') as handle:
             child=subprocess.Popen(command,env=env,stdout=handle,stderr=subprocess.STDOUT,start_new_session=True)
         row=dict(name=name,pid=child.pid,command=command,started_unix=time.time(),output=str(output))
@@ -54,6 +55,12 @@ def run(args):
             if row['exit']:raise RuntimeError('Smoke failed; full runs not launched')
         smoke=read(args.output/'smoke_val/result.json')
         assert smoke['status']=='complete' and smoke['smoke'] and smoke['tasks']==list(TASKS)
+        if not (args.output/'smoke_tail/result.json').exists():
+            child,row=start('smoke_tail','val',True,True)
+            row['exit']=child.wait();row['finished_unix']=time.time()
+            if row['exit']:raise RuntimeError('Tail smoke failed; full runs not launched')
+        tail=read(args.output/'smoke_tail/result.json')
+        assert tail['status']=='complete' and tail['smoke_tail']
         for split in ('val','test'):
             if (args.output/split/'result.json').exists():
                 assert read(args.output/split/'result.json')['status']=='complete';continue

@@ -106,14 +106,20 @@ def candidate_deltas(model, capture, constants, permutation_seed=20261028):
     base, tasks = cache['base'], cache['lane_ids']
     native = capture.tensors(tasks)
     with torch.autocast(device_type=base.device.type, enabled=False):
-        gamma = native['gate_logit'].sigmoid()
-        old_bound = bounded_delta(native['raw'], base, .1)
+        # Preserve the original [batch,feature] reduction/sigmoid shapes, even
+        # on a partial last batch. Stacking a singleton task axis first can
+        # choose a different CUDA kernel and change FP32 rounding by one ULP.
+        gamma = torch.stack([capture.records[t]['gate_logit'].sigmoid() for t in tasks],1)
+        old_bound = torch.stack([bounded_delta(capture.records[t]['raw'],base[:,i],.1)
+                                 for i,t in enumerate(tasks)],1)
         if not torch.equal(gamma * old_bound, native['delta']):
-            raise AssertionError('Functional components did not exactly replay the original branch')
+            difference=float((gamma*old_bound-native['delta']).abs().max())
+            raise AssertionError(('Functional component replay mismatch',tuple(base.shape),tasks,difference))
         shape = (1, len(tasks), 1)
         scale = base.new_tensor([constants['scale'][t] for t in tasks]).reshape(shape)
         mean = base.new_tensor([constants['gate_mean'][t] for t in tasks]).reshape(shape)
-        tight = bounded_delta(native['raw'], base, .01)
+        tight = torch.stack([bounded_delta(capture.records[t]['raw'],base[:,i],.01)
+                             for i,t in enumerate(tasks)],1)
         # Preserve gate distribution and known quality flags while removing its
         # association with image content. A private CPU RNG never touches the
         # model's initialization/random stream and never reads labels.
@@ -138,7 +144,8 @@ def candidate_deltas(model, capture, constants, permutation_seed=20261028):
         capture.clear()
         model.interaction_delta(no_face=True)
         no_face = capture.tensors(tasks)
-        face_tight = bounded_delta(no_face['raw'], base, .01)
+        face_tight = torch.stack([bounded_delta(capture.records[t]['raw'],base[:,i],.01)
+                                  for i,t in enumerate(tasks)],1)
         deltas['cap1_dynamic_no_face_fixed_gate'] = gamma * face_tight
         deltas['cap1_constant_no_face'] = mean * face_tight
         denom = base.float().square().mean(-1).sqrt().clamp_min(1e-12)
@@ -158,7 +165,7 @@ def subset_metrics(task, probability, targets, reliable, sample_ids):
             for name,mask in masks.items() if mask.any()}
 
 
-def evaluate_stage(model, loader, task, reference, constants, output, smoke=False):
+def evaluate_stage(model, loader, task, reference, constants, output, smoke=False, reference_start=0):
     reference_hashes={str(reference/mode/'view_scores'/f'task{task}.npz'):
         _sha256(reference/mode/'view_scores'/f'task{task}.npz') for mode in ('on','off')}
     original = {mode:np.load(reference/mode/'view_scores'/f'task{task}.npz') for mode in ('on','off')}
@@ -178,18 +185,19 @@ def evaluate_stage(model, loader, task, reference, constants, output, smoke=Fals
             if not torch.equal(values['native'].float(),native.float()):
                 raise AssertionError('Native feature-forward replay changed logits')
             stop=cursor+len(y)
+            ref_slice=slice(reference_start+cursor,reference_start+stop)
             for mode,key in (('on','native'),('off','off')):
                 for field,actual in (('sample_ids',np.asarray(sample_ids)),('targets',y.numpy()),
                                      ('face_reliable',r.numpy())):
-                    if not np.array_equal(original[mode][field][cursor:stop],actual):
+                    if not np.array_equal(original[mode][field][ref_slice],actual):
                         raise AssertionError(('Population mismatch',task,mode,field))
                 cpu=values[key].float().cpu()
                 for field,actual in (('fused_logits',cpu.numpy()),
                                      ('fused_probabilities',torch.sigmoid(cpu).numpy())):
-                    if not np.array_equal(original[mode][field][cursor:stop],actual):
+                    if not np.array_equal(original[mode][field][ref_slice],actual):
                         raise AssertionError(('Original checkpoint prediction not exact',task,mode,field))
                 for name,value in views.items():
-                    if not np.array_equal(original[mode][name+'_logits'][cursor:stop],value.float().cpu().numpy()):
+                    if not np.array_equal(original[mode][name+'_logits'][ref_slice],value.float().cpu().numpy()):
                         raise AssertionError(('Native view drift',task,name))
                 batch_anchor_checks+=1
             for name,value in values.items():
@@ -204,7 +212,8 @@ def evaluate_stage(model, loader, task, reference, constants, output, smoke=Fals
     y=torch.cat(target_rows); reliable=torch.cat(reliable_rows).numpy(); gamma=torch.cat(gate_rows)
     if len(ids)!=len(set(ids)) or (not smoke and cursor!=len(original['on']['targets'])):
         raise AssertionError('Incomplete or duplicated evaluation population')
-    assert np.array_equal(np.asarray(lengths),original['on']['batch_lengths'][:len(lengths)])
+    assert reference_start%64==0
+    assert np.array_equal(np.asarray(lengths),original['on']['batch_lengths'][reference_start//64:reference_start//64+len(lengths)])
     assert np.array_equal(np.arange(y.shape[1]),original['on']['class_indices'])
     tasks=model._interaction_cache['lane_ids']; starts=np.cumsum((0,)+model._task_sizes)
     scales=torch.ones(y.shape[1])
@@ -258,6 +267,7 @@ def evaluate_stage(model, loader, task, reference, constants, output, smoke=Fals
 def evaluate(args):
     started=time.time(); git=runtime();set_seed(1,True)
     if args.smoke and args.split=='test':raise ValueError('Smoke does not evaluate Test')
+    if args.smoke_tail and not args.smoke:raise ValueError('Tail checking is smoke-only')
     constants=read(args.constants)
     if constants != calibrate(args.training_root,args.constants):
         raise AssertionError('TRAIN lock changed')
@@ -285,12 +295,16 @@ def evaluate(args):
         model.restore_task(task);model.requires_grad_(False).eval()
         before=tensor_state_digest(method_state(model))
         view=dataset_view(source,seen_indices(task),True)
+        reference_start=0
         if args.smoke:
             from torch.utils.data import Subset
-            view=Subset(view,range(min(64,len(view))))
+            if args.smoke_tail:
+                tail=len(view)%64 or 64;reference_start=len(view)-tail
+                view=Subset(view,range(reference_start,len(view)))
+            else:view=Subset(view,range(min(64,len(view))))
         loader=evaluation_loader(view,task,args.workers)
         reference=args.training_root.parent/args.split
-        row=evaluate_stage(model,loader,task,reference,constants,args.output,args.smoke)
+        row=evaluate_stage(model,loader,task,reference,constants,args.output,args.smoke,reference_start)
         assert row['samples']==len(view)
         assert before==tensor_state_digest(method_state(model))
         assert visual==tensor_state_digest(model.visual_encoder.state_dict())
@@ -301,7 +315,7 @@ def evaluate(args):
         print('GATE_ATTRIBUTION',args.split,task,{m:round(v['metrics']['mAP'],6) for m,v in row['conditions'].items()},flush=True)
     assert all(_sha256(Path(p))==s for p,s in hashes.items())
     write(args.output/'result.json',dict(status='complete',git=git,source_git=cfg['git'],
-        seed=1,tasks=list(TASKS),smoke=args.smoke,split=args.split,conditions=list(MODES),
+        seed=1,tasks=list(TASKS),smoke=args.smoke,smoke_tail=args.smoke_tail,split=args.split,conditions=list(MODES),
         selected_stage_mean_is_not_eight_task_average=True,
         training_updates=0,parameters_and_checkpoints_unchanged=True,checkpoint_sha256=hashes,
         constants_sha256=_sha256(args.constants),records=records,
@@ -315,5 +329,5 @@ if __name__=='__main__':
     p.add_argument('--training-root',type=Path,required=True);p.add_argument('--constants',type=Path,required=True)
     for n in ('data-root','clip-checkpoint','face-manifest-root','output'):p.add_argument('--'+n,type=Path)
     p.add_argument('--split',choices=('val','test'),default='val');p.add_argument('--workers',type=int,choices=(0,2),default=2)
-    p.add_argument('--smoke',action='store_true');args=p.parse_args()
+    p.add_argument('--smoke',action='store_true');p.add_argument('--smoke-tail',action='store_true');args=p.parse_args()
     calibrate(args.training_root,args.constants) if args.action=='calibrate' else evaluate(args)
