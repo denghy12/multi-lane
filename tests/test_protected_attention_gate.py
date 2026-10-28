@@ -83,6 +83,17 @@ class ProtectedGateTests(unittest.TestCase):
             # This fixture's gate depends only on the preserved quality flag.
             self.assertTrue(torch.equal(d['cap1_dynamic'],d['cap1_permuted_gate']))
 
+    def test_multilane_replay_preserves_task_ownership_and_coefficients(self):
+        m,x,c=self.make();m.activate_task(1);m.activate_task(2);m.requires_grad_(False).eval()
+        c['scale']=[.1,.2,.3]+[.15]*5
+        with ReadoutCapture(m) as capture,torch.no_grad():
+            z,_=m.seen_logits_with_views(x);d,_,_=candidate_deltas(m,capture,c)
+            self.assertEqual(tuple(d['native'].shape),(4,3,4))
+            self.assertTrue(torch.equal(z,m.cached_base_seen_logits(d['native'])))
+            for i in range(3):
+                self.assertTrue(torch.equal(d['train_scaled_dynamic'][:,i],
+                                            c['scale'][i]*d['native'][:,i]))
+
     def test_exception_removes_hooks_and_grad_enabled_use_is_rejected(self):
         m,x,c=self.make()
         with ReadoutCapture(m) as capture,torch.no_grad():m.seen_logits_with_views(x)

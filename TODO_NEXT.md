@@ -1,5 +1,7 @@
 # 下一步任务
 
+2026-10-28门控归因预检：9a4e6d6已Git-only部署独立multi-lane-main-protected-attention-gate-20261028，6项新机制测试通过。增加多任务系数/类别所有权重放测试及reference NPZ/CLIP SHA核验。新增模式为临时hooks＋函数式特征读出，不改既有模型；继续相关测试后首64 smoke与正式双split。尚无新指标或训练。
+
 ## 2026-10-28：执行Attention幅度/内容只读归因（实现预检中）
 
 用户授权先执行前述诊断再判断改进。本轮先现有C4 task0/2/7完整Val/Test，0训练，不自动展开第三项重训。新分支codex/protected-attention-gate-attribution-20261028，保留所有既有dirty分析。新增独立protected_attention_gate_attribution/run入口、GPU0 shell和6项机制测试；不改原模型/runner/Attention文件。

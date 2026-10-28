@@ -159,6 +159,8 @@ def subset_metrics(task, probability, targets, reliable, sample_ids):
 
 
 def evaluate_stage(model, loader, task, reference, constants, output, smoke=False):
+    reference_hashes={str(reference/mode/'view_scores'/f'task{task}.npz'):
+        _sha256(reference/mode/'view_scores'/f'task{task}.npz') for mode in ('on','off')}
     original = {mode:np.load(reference/mode/'view_scores'/f'task{task}.npz') for mode in ('on','off')}
     logit_rows = {n:[] for n in MODES}; probability_rows = {n:[] for n in MODES}
     ratio_rows = {n:[] for n in MODES}; gate_rows=[];permuted_rows=[]; target_rows=[]; ids=[]; reliable_rows=[]; lengths=[]
@@ -242,12 +244,14 @@ def evaluate_stage(model, loader, task, reference, constants, output, smoke=Fals
         interpolation_probs.append(torch.sigmoid(interpolated[begin:begin+n]));begin+=n
     interpolation_metrics=asdict(compute_metrics(task,torch.cat(interpolation_probs),y,.5))
     result=dict(task=task,samples=len(y),conditions=values,gate_utility=utility,
+        reference_sha256=reference_hashes,
         native_and_off_batch_anchor_checks=batch_anchor_checks,
         interpolation_comparison=dict(logit_max_abs_difference=max_interpolation_logit_error,
             offline_metrics=interpolation_metrics,feature_forward_metrics=values['train_scaled_dynamic']['metrics']),
         training_updates=0,shared_image_forward=True)
     write(output/f'task{task}.json',result)
     for z in original.values():z.close()
+    assert all(_sha256(Path(p))==sha for p,sha in reference_hashes.items())
     return result
 
 
@@ -260,6 +264,8 @@ def evaluate(args):
     cfg=read(args.training_root/'config.json'); complete=read(args.training_root/'training_complete.json')
     if cfg['arm']!='C4' or cfg!=complete['config'] or complete['status']!='complete':
         raise ValueError('Invalid source training')
+    if _sha256(args.clip_checkpoint)!=cfg['clip_checkpoint_sha256']:
+        raise ValueError('CLIP checkpoint differs from the trained source')
     # All existing model/training files must be byte-identical to the source.
     import subprocess
     changed=subprocess.check_output(['git','diff','--name-only',cfg['git']['commit'],'HEAD','--','multi_lane/track_a'],text=True).splitlines()
