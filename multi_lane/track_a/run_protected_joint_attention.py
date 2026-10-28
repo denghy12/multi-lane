@@ -114,6 +114,8 @@ def run(args):
                 time.sleep(3)
         if failures:
             raise RuntimeError('Job failure: '+repr(failures))
+        from .protected_joint_audit import verify_outputs
+        verify_outputs(args.output, tasks, args.smoke)
         rows = []
         for arm in ARMS:
             row = dict(arm=arm)

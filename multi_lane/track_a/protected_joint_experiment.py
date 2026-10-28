@@ -21,7 +21,6 @@ from .run_historical_b32_test_attribution import read, write
 from .runner import (TaskMetrics, build_optimizer_groups, build_transforms,
     compact_model_state_dict, dataset_view, git_metadata, resolve_dataset_parent,
     seen_indices, set_seed, summarize_tasks, tensor_state_digest, train_task)
-from .strong_full_evaluation import evaluate_fused_and_views
 from .task_recovery import atomic_save, restore_rng, rng_state, save_boundary
 
 def build(config, clip, arm):

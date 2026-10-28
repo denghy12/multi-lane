@@ -1,5 +1,7 @@
 # 下一步任务
 
+2026-10-28预检补充：2297dbe远程独立worktree已Git-only建立，5项新增机制测试、434项Track-A与52项相关回归全部通过。增加跨臂原参数/关键loss/增强batch摘要与完整OFF/单路NPZ逐值审计，评估仍共享同次三视图编码；清理新入口未用import，不改旧前向。下一步六组两任务×4更新真实smoke，尚未正式训练，无效果结论。
+
 ## 2026-10-28：执行受保护联合摘要Attention六组8任务（实现预检中）
 
 用户授权按方案修改并完整跑8task Val/Test，明确本轮不使用旧task0效果晋级门槛。新分支codex/protected-joint-attention-20261028，起点09a6729；保留此前dirty分析及其他工作树。新增protected_joint_attention/experiment/evaluation/run入口、GPU0队列与机制测试；原model.py不改，runner仅默认关闭的私有优化接口，历史build增加可选模型类型。
