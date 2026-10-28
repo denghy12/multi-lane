@@ -1,5 +1,19 @@
 # 工作日志
 
+## 2026-10-28：受保护联合摘要六组并行调度（预检中）
+
+用户明确要求将C4内容门控和FULL_ONLY两组从排队改为GPU0并行。GPU0剩余9837MiB、原四训练占14245MiB；两组smoke峰值allocated约2821MiB，预计六组可容纳。新增独立调度分支codex/protected-joint-six-way-scheduling-20261028，原模型运行worktree/HEAD3950b35必须保持不变，以免破坏当前cfg/git一致性。
+
+新增standalone expand_protected_joint_queue.py和5项测试（加已有8项调度测试，共13项本地通过）；使用独立Git-only调度worktree，接管原4个detached训练PID，只结束原controller PID、不发送信号给训练/worker、不重启训练，新增C4/FULL_ONLY。上限6训练/2评估、启动前空闲>=6GB和共享内存>=1GB，原B64/seed1/30epoch/8task/损失/随机流/验证标准均不改；自动续Val/Test/OFF/证据移除及完整跨臂审计。当前待远程dry-run/接管，未声称两新增组已启动。方案docs/protected_joint_six_way_scheduling_20261028.md。保留全部既有dirty分析及main/test-only。
+
+## 2026-10-28：六组完整8任务已在GPU0启动
+
+运行源码3950b35a734ccde4a9430e1ceb66ad45c840a042，local/remote HEAD/upstream一致，remote独立multi-lane-main-protected-joint-attention-20261028 clean。434项Track-A＋52项相关/新增测试通过。六臂各2任务×4更新smoke全部0skip，新梯度非零/有限；12个跨臂阶段原B0张量/关键loss/增强batch摘要及完整Val首64 OFF/三路预测逐值一致，旧任务参数/预测保护通过。单组峰值2808–2821MiB。
+
+正式tmux protected_joint_seed1_20261028，batch seed1_20261028_01；C0/C1/C2/C3已并行训练（PID详见queue.json；前两组3339982/3340572），C4/FULL_ONLY自动排队。GPU0瞬时100%/14151MiB，其他GPU未使用。启动复核：C0/C1/C2已完成task0前3轮、C3前2轮，全部0skip，已完成轮的原关键loss均与历史逐值相同；新增梯度/输出非零，队列0失败。尚无正式效果结论。六组均跑seed1完整8任务30epoch/B64，结束后自动双split及共享前向ON/OFF/移除新增Person或Face证据，不按task0效果截断。
+
+207份非pth预检产物已回传output/protected_joint_attention/preflight_snapshot_20261028_01并逐SHA核验，归档9454b2290832e64436560ee3219b1e88f5c3a1c2b897916dfeea4c3fc4d14dba。主树/test-only状态SHA仍ea2e261e…/e9d1479f…保持。完整协议docs/protected_joint_attention_execution_20261028.md；当前只本地补执行记录，不改运行源码、不合并main、不删除checkpoint。
+
 2026-10-28预检补充：2297dbe远程独立worktree已Git-only建立，5项新增机制测试、434项Track-A与52项相关回归全部通过。增加跨臂原参数/关键loss/增强batch摘要与完整OFF/单路NPZ逐值审计，评估仍共享同次三视图编码；清理新入口未用import，不改旧前向。下一步六组两任务×4更新真实smoke，尚未正式训练，无效果结论。
 
 ## 2026-10-28：执行受保护联合摘要Attention六组8任务（实现预检中）

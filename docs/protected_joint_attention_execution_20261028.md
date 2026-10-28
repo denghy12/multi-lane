@@ -45,3 +45,15 @@ bash scripts/emotic/run_protected_joint_attention_gpu0.sh seed1_20261028_01
 输出六组8task Val/Test最终与阶段平均、逐阶段/逐视图/可靠Face指标、ON/OFF与移除证据预测、原函数保真审计、恢复状态和资源信息。最终OFF应回到配对C0，并与历史B0相同。先确认原模型和旧任务保护，再判断Attention是否胜过MLP/Full-only和Face是否有条件贡献。
 
 目标Test最终32.6800、阶段平均39.5292均提升；33.6248/40.5129的完整模型均值仅为有成本标注的经验参照，不是监督答案。Test参与开发，保留所有组，不按Test选择早停epoch冒充新结果。
+
+
+## 实际启动记录
+
+- 运行commit：3950b35a734ccde4a9430e1ceb66ad45c840a042；本地/remote/upstream一致，服务器运行树clean。
+- 专项5项、Track-A434项、相关/新增52项均通过（专项包含在后52项内，不重复加总）。六组2任务各4更新smoke全部完成、0跳步；12个阶段跨臂原参数/loss/已记录增强batch摘要/全部首64 Val OFF与三路预测逐值一致；私有梯度非零，峰值allocated2808–2821MiB。
+- 正式已启动：2026-10-28，tmux protected_joint_seed1_20261028，run_id seed1_20261028_01。C0/C1/C2/C3并行，C4/FULL_ONLY排队；最多4作业、2评估规则生效。GPU0瞬时100%、约14.15GB占用。不会修改GPU1–7作业。
+- C0/C1正式首轮均84更新/0skip，已与历史30轮history的首轮关键loss逐值核对；其余任务仍按协议逐边界核验。当前尚无正式Val/Test成效结论。
+- 207份非pth smoke/回归产物已回传本地并逐SHA核验；归档SHA256 9454b2290832e64436560ee3219b1e88f5c3a1c2b897916dfeea4c3fc4d14dba。
+- 原服务器主/test-only状态SHA保持，源checkpoint只读。启动记录仅本地补充，运行源码固定3950b35，不需要用户手动启动。
+
+启动复核：C0/C1/C2 task0前3轮、C3前2轮均0skip，已完成轮原关键loss均与历史逐值相同，新梯度/输出非零；queue 0失败。startup_health.json已回传本地预检目录。此为运行健康检查，不是正式效果结果。
