@@ -187,13 +187,16 @@ def make_loader(view, task, workers, grouped=False, limit=None):
     return DataLoader(view, batch_sampler=batches, **options)
 
 
-def match_saved(reference, start, ids, y, logits, key):
+def match_saved(reference, start, ids, y, logits, key, context=''):
     end = start+len(ids)
     if list(reference['sample_ids'][start:end]) != list(map(str, ids)):
         raise AssertionError('Historical population or batch order changed')
     if not np.array_equal(reference['targets'][start:end], y.numpy()): raise AssertionError('Targets changed')
     if not np.array_equal(reference[key][start:end], logits.float().cpu().numpy()):
-        raise AssertionError('Native historical forward differs: '+key)
+        actual=logits.float().cpu().numpy();expected=reference[key][start:end]
+        raise AssertionError('Native historical forward differs: '+key+' '+context+
+            ' cursor='+str(start)+' batch='+str(len(ids))+' cells='+str(int((actual!=expected).sum()))+
+            ' max_abs='+str(float(np.abs(actual-expected).max())))
 
 
 @torch.no_grad()
@@ -241,6 +244,7 @@ def paired_population(model, loader, reference_root, task, output):
         with torch.cuda.amp.autocast(enabled=True):
             z, _ = model.seen_logits_with_views(images)
             native_delta = model._native_delta.clone(); cache = model._interaction_cache
+        match_saved(reference['native'],cursor,ids,y,z,'logits','direct_native_before_trace')
         base = cache['base']; lane_ids = cache['lane_ids']
         deltas = {k: [] for k in CONDITIONS}; diagnostics = {}
         geometry = pair_geometry(images['spatial_bbox'], vis, donor, model._private_sources['full'][0].shape[1]-1)
@@ -277,7 +281,7 @@ def paired_population(model, loader, reference_root, task, output):
         with torch.cuda.amp.autocast(enabled=True):
             for mode, parts in deltas.items(): mode_logits[mode] = model.cached_base_seen_logits(torch.stack(parts, 1)).float()
             off = model.cached_base_seen_logits(torch.zeros_like(native_delta)).float()
-        for mode in reference: match_saved(reference[mode], cursor, ids, y, mode_logits[mode], 'logits')
+        for mode in reference: match_saved(reference[mode], cursor, ids, y, mode_logits[mode], 'logits', mode)
         if not torch.equal(mode_logits['native'], z.float()): raise AssertionError('Native trace readout changed')
         b64, wd = head_projection(model, base, native_delta, lane_ids)
         add(arrays, 'base_fp64', b64); add(arrays, 'w_delta_fp64', wd); add(arrays, 'base_logits', off)
