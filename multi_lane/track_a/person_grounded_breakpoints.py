@@ -29,6 +29,7 @@ from .export_compact_test_scores import _sha256
 from .run_historical_b32_test_attribution import read, write
 
 TASKS = (0, 2, 6, 7)
+MINIMUM_TRACE_BATCH = 32
 CONDITIONS = ('native', 'early_swap', 'zero_condition', 'no_subject', 'no_face', 'late_query_swap')
 FIELDS = ('person_ln', 'condition_source_ln', 'preactivation', 'condition', 'shift',
           'query', 'alpha', 'summary', 'normalized_summary', 'subject_value',
@@ -203,29 +204,42 @@ def match_saved(reference, start, ids, y, logits, key, context=''):
 def full_population(model, loader, reference_root, task, output):
     native_ref = npz(reference_root/'on/view_scores'/f'task{task}.npz')
     off_ref = npz(reference_root/'off/view_scores'/f'task{task}.npz')
-    arrays = {}; cursor = 0; lengths = []
+    arrays = {}; cursor = 0; lengths = []; excluded = []
     for cpu, y, ids in loader:
-        images = move_model_inputs(cpu, torch.device('cuda'))
-        with torch.cuda.amp.autocast(enabled=True):
-            z, views = model.seen_logits_with_views(images)
-            delta = model._native_delta.clone(); cache = model._interaction_cache
-            off = model.cached_base_seen_logits(torch.zeros_like(delta))
-        match_saved(native_ref, cursor, ids, y, z, 'fused_logits')
-        match_saved(off_ref, cursor, ids, y, off, 'fused_logits')
-        for name in views: match_saved(native_ref, cursor, ids, y, views[name], name+'_logits')
-        b64, wd = head_projection(model, cache['base'], delta, cache['lane_ids'])
+        available = len(y)>=MINIMUM_TRACE_BATCH
+        if available:
+            images = move_model_inputs(cpu, torch.device('cuda'))
+            with torch.cuda.amp.autocast(enabled=True):
+                z, views = model.seen_logits_with_views(images)
+                delta = model._native_delta.clone(); cache = model._interaction_cache
+                off = model.cached_base_seen_logits(torch.zeros_like(delta))
+            match_saved(native_ref, cursor, ids, y, z, 'fused_logits')
+            match_saved(off_ref, cursor, ids, y, off, 'fused_logits')
+            for name in views: match_saved(native_ref, cursor, ids, y, views[name], name+'_logits')
+            b64, wd = head_projection(model, cache['base'], delta, cache['lane_ids'])
+            ratio=delta.float().square().mean(-1).sqrt()/cache['base'].float().square().mean(-1).sqrt().clamp_min(1e-12)
+        else:
+            if cursor+len(y)!=len(native_ref['targets']):raise AssertionError('Small batch is not the final source tail')
+            if list(native_ref['sample_ids'][cursor:cursor+len(y)])!=list(ids) or not np.array_equal(y.numpy(),native_ref['targets'][cursor:cursor+len(y)]):
+                raise AssertionError('Tail official population changed')
+            excluded.extend(map(str,ids))
+            z=native_ref['fused_logits'][cursor:cursor+len(y)];off=off_ref['fused_logits'][cursor:cursor+len(y)]
+            b64=np.full(y.shape,np.nan,dtype=np.float64);wd=b64.copy()
+            ratio=np.full((len(y),task+1),np.nan,dtype=np.float32)
         add(arrays, 'sample_ids', ids); add(arrays, 'targets', y)
-        add(arrays, 'native_logits', z.float()); add(arrays, 'base_logits', off.float())
+        add(arrays, 'native_logits', z.float() if isinstance(z,torch.Tensor) else z)
+        add(arrays, 'base_logits', off.float() if isinstance(off,torch.Tensor) else off)
         add(arrays, 'base_fp64', b64); add(arrays, 'w_delta_fp64', wd)
         add(arrays, 'native_probabilities', native_ref['fused_probabilities'][cursor:cursor+len(y)])
         add(arrays, 'base_probabilities', off_ref['fused_probabilities'][cursor:cursor+len(y)])
         add(arrays, 'face_reliable', cpu['face_reliable']); add(arrays, 'visibility', cpu['spatial_visibility'])
         add(arrays, 'bbox', cpu['spatial_bbox'])
-        add(arrays, 'feature_ratio', delta.float().square().mean(-1).sqrt()/cache['base'].float().square().mean(-1).sqrt().clamp_min(1e-12))
+        add(arrays, 'feature_ratio', ratio);add(arrays,'projection_available',np.full(len(y),available,dtype=bool))
         lengths.append(len(y)); cursor += len(y)
     values = packed(arrays); values['batch_lengths'] = np.asarray(lengths)
     np.savez_compressed(output/'full.npz', **values)
-    return dict(samples=cursor, historical_native_and_three_views_exact=True, historical_off_exact=True,
+    return dict(samples=cursor, tensor_forward_samples=cursor-len(excluded),untraced_small_tail_ids=excluded,
+        historical_replay_exact_on_all_traced_samples=True,official_source_population_preserved=True,
         source_on_sha256=_sha256(reference_root/'on/view_scores'/f'task{task}.npz'),
         source_off_sha256=_sha256(reference_root/'off/view_scores'/f'task{task}.npz'))
 
@@ -234,8 +248,12 @@ def full_population(model, loader, reference_root, task, output):
 def paired_population(model, loader, reference_root, task, output):
     reference = {name: npz(reference_root/'person_pairs'/f'task{task}_{name}.npz')
                  for name in ('native', 'early_swap', 'late_query_swap')}
-    arrays = {}; examples = {}; cursor = 0; lengths = []; example_ids = []
+    arrays = {}; examples = {}; cursor = 0; lengths = []; example_ids = [];excluded=[]
     for cpu, y, ids in loader:
+        if len(y)<MINIMUM_TRACE_BATCH:
+            if cursor+len(y)!=len(reference['native']['targets']):raise AssertionError('Small paired batch is not final tail')
+            if list(reference['native']['sample_ids'][cursor:cursor+len(y)])!=list(ids):raise AssertionError('Paired tail population changed')
+            excluded.extend(map(str,ids));cursor+=len(y);continue
         images = move_model_inputs(cpu, torch.device('cuda')); vis = images['spatial_visibility']
         donor, eligible = grouped_donors(ids, vis>0)
         comparable = (images['full']==images['full'][donor]).flatten(1).all(-1)
@@ -305,7 +323,8 @@ def paired_population(model, loader, reference_root, task, output):
         lengths.append(len(y)); cursor += len(y)
     values = packed(arrays); values['batch_lengths'] = np.asarray(lengths)
     np.savez_compressed(output/'pairs.npz', **values); np.savez_compressed(output/'tensor_examples.npz', **examples)
-    return dict(samples=cursor, eligible=int(values['eligible'].sum()), high_visibility=int(values['high_visibility'].sum()),
+    return dict(samples=len(values['targets']),source_samples=cursor,untraced_small_tail_ids=excluded,
+        eligible=int(values['eligible'].sum()), high_visibility=int(values['high_visibility'].sum()),
         native_early_and_late_replayed_exact=True, same_image_and_full_crop=True,
         early_condition_keeps_late_query_and_other_memories=True, examples=example_ids)
 
@@ -323,6 +342,8 @@ def run(args):
         class_order=cfg['model_template']['class_order'], task_sizes=[5,3,3,3,3,3,3,3],
         tasks=list(args.tasks), splits=args.splits, batch_size=64, workers=args.workers,
         initialization_threads=72, inference_threads=args.inference_threads, original_code_audit=code,
+        tensor_forward_minimum_batch=MINIMUM_TRACE_BATCH,small_tail_tensor_policy='excluded_with_named_ids_no_relaxed_replay',
+        official_full_population_scores='historical_source_scores_preserved_for_all_people',
         smoke=args.smoke, maximum_batches=1 if args.smoke else None,
         training_updates=0, teacher_used=False, parameter_assembly=False,
         source_training=str(args.training_root), source_config_sha256=_sha256(args.training_root/'config.json'),

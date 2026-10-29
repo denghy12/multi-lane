@@ -1,5 +1,13 @@
 # 项目上下文
 
+## 2026-10-29：诊断01严格回放中止；固定小尾batch策略后准备重跑02
+
+首次六组诊断seed1_20261029_01均在task0 Val配对尾batch中止；各组完整2285人的ON/OFF/三路已逐值重放，但最后4人batch在未插入观察器的原native前向就无法匹配。单独同checkpoint/同input连续前向，72→4→72线程均有变化（相对历史max abs .00390625；完整诊断首次尾batch曾.01171875），不是简单恢复72线程可解决。原参数和checkpoint未变，失败输出/日志/队列保留，不用其计算结果下机制结论，也不放宽容差。
+
+修复只限定诊断覆盖：全部原人物及历史正式ON/OFF概率/评分保留；新的张量前向固定只做原batch>=32的部分，不重排/补人/改变原batch。小尾batch名单明确保存，完整population NPZ中projection_available=False且Wdelta用NaN，分析仅在available人群计算投影分离/相邻负例；AP/AUC仍来自全部历史原预测。配对trace同样明确source人数与traced人数，排除小尾后所有条件在人群/batch上严格配对。不会将浮点波动计成人物条件效果，不混用诊断子集与正式全人群mAP。
+
+新增保留所有尾batch正式score且不伪造Wdelta的机制测试，待远程23相关+4 NumPy测试及两Attention组task0 Val完整full/paired预检。正式重跑ID改seed1_20261029_02，仍6arm×task0/2/6/7×Val/Test、GPU0最多6并行、0训练；诊断commit待推送。原source4349449和main/test-only未改，旧dirty分析保留，三上下文同步修正。执行文档已记录此覆盖限制，不能再声称所有人物都做了新张量前向。
+
 ## 2026-10-29：三个断点诊断预检通过，准备六组正式只读前向
 
 模型观察代码2622b73已Git-only部署独立multi-lane-main-person-grounded-breakpoint-audit-20261029，原source4349449全部原模块无修改。远程22项相关测试全部通过（包含7新trace机制、真实CUDA AMP及既有Summarize/调度），无skip；CONST_ATTN/GROUND_ATTN的task0 Val原full首64与原paired首batch真实smoke通过，每组62名有效供体，native/early/late logits与CPU sigmoid逐值重放、原alpha/summary/delta精确、method/视觉/源checkpoint未变。推理4线程/worker1不改变已检查预测。

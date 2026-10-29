@@ -57,3 +57,9 @@ tensor_examples.npz：首个原配对batch中按既定ID顺序取前16名有效r
 观察入口2622b73，22项相关测试通过且无skip；CONST_ATTN/GROUND_ATTN各task0 Val原full首64、paired首batch62名有效供体通过，native/early/late logits与CPU sigmoid逐值一致，traced alpha/summary/delta与原实现精确，所有参数/源checkpoint未变。每case约10.4/10.7秒（仅单batch，不是完整时间预估）。新增纯NumPy排序与区域控制4项本地测试通过；只补协议class_order/task_sizes和独立分析后ff同步，原观察计算不变。
 
 正式队列48case完成后自动调用scripts/emotic/analyze_person_grounded_breakpoints.py生成analysis目录，覆盖full mAP/逐类AP/AUC、解析Wdelta及相邻正负排序、paired各断点/区域分层、500次原图聚类均值区间。FP64为解释工具，历史CPU32概率仍为正式评分。队列分别保存forward completion与analysis completion，失败写独立failure而不冒充成功。正式启动后追加实际PID和健康状态。
+
+## 严格回放中止与小尾batch覆盖修正
+
+seed1_20261029_01六组均已退出、无活进程，完整task0 Val原ON/OFF/三路2285人已精确；配对最后4人batch的原native（在trace前）未精确。独立同input/同模型72→4→72重复前向也变化，max差.00390625；不放宽匹配阈值，不将其算作模型机制。01失败日志/文件保留。
+
+02固定只对原batch至少32人做新张量前向，不更改任何batch组成或排序。官方full NPZ仍包含全部源人物/标签/历史概率，尾人projection_available=False、Wdelta NaN，保存excluded ID；投影与相邻负例统计只在实际trace人群上，正式AP/AUC仍来自全历史人群。paired NPZ只含严格重放的原大batch，人群/条件完全配对，另报原配对总数与小尾名单。此处不是更换历史评估标准，而是明确只读张量证据覆盖限制。原先“全部完整真实前向”的表述由本节修正。正式新ID seed1_20261029_02，须23相关+4纯NumPy与两个Attention task0 Val全量大batch预检后再启动。

@@ -77,11 +77,14 @@ def main(args):
         for case in result['cases']:
             task,split=case['task'],case['split'];folder=root/split/f'task{task}'
             assert case['parameters_unchanged'] and case['training_updates']==0
-            assert case['full']['historical_native_and_three_views_exact'] and case['full']['historical_off_exact']
+            assert case['full']['historical_replay_exact_on_all_traced_samples'] and case['full']['official_source_population_preserved']
             assert case['paired']['native_early_and_late_replayed_exact'] and case['paired']['same_image_and_full_crop']
             for p in folder.glob('*.npz'):hashes[str(p)]=hashlib.sha256(p.read_bytes()).hexdigest()
             full,pair=load(folder/'full.npz'),load(folder/'pairs.npz')
             assert len(full['targets'])==COUNTS[split][task] and sum(full['batch_lengths'])==len(full['targets'])
+            available=full['projection_available'].astype(bool)
+            assert available.sum()==case['full']['tensor_forward_samples']
+            assert np.isfinite(full['w_delta_fp64'][available]).all() and np.isnan(full['w_delta_fp64'][~available]).all()
             assert len(set(full['sample_ids']))==len(full['targets'])
             assert sum(pair['batch_lengths'])==len(pair['targets'])
             lookup={s:i for i,s in enumerate(full['sample_ids'])};positions=np.asarray([lookup[s] for s in pair['sample_ids']])
@@ -102,15 +105,17 @@ def main(args):
                 rows['full_metrics'].append(dict(arm=arm,split=split,stage=task,mode=mode,samples=len(full['targets']),**m))
             on_ap,off_ap=ap(full['native_probabilities'],full['targets']),ap(full['base_probabilities'],full['targets'])
             for c,name in enumerate(names[:full['targets'].shape[1]]):
-                y=full['targets'][:,c];w=full['w_delta_fp64'][:,c];old=full['base_logits'][:,c];new=full['native_logits'][:,c]
+                y=full['targets'][:,c];old=full['base_logits'][:,c];new=full['native_logits'][:,c]
+                yp=y[available];w=full['w_delta_fp64'][available,c]
                 rows['class_ranking'].append(dict(arm=arm,split=split,stage=task,class_index=c,class_name=name,
                     owner_task=int(np.searchsorted(STARTS[1:],c,side='right')),positives=int(y.sum()),
                     AP=float(on_ap[c]),base_AP=float(off_ap[c]),AP_delta=float(on_ap[c]-off_ap[c]),
                     AUC=auc(new,y),base_AUC=auc(old,y),AUC_delta=auc(new,y)-auc(old,y),
-                    positive_w_delta=float(w[y==1].mean()) if (y==1).any() else None,
-                    negative_w_delta=float(w[y==0].mean()) if (y==0).any() else None,
-                    signed_projection_separation=float(w[y==1].mean()-w[y==0].mean()) if (y==1).any() and (y==0).any() else None,
-                    **adjacent_pairs(old,new,w,y)))
+                    projection_samples=int(available.sum()),projection_positives=int(yp.sum()),
+                    positive_w_delta=float(w[yp==1].mean()) if (yp==1).any() else None,
+                    negative_w_delta=float(w[yp==0].mean()) if (yp==0).any() else None,
+                    signed_projection_separation=float(w[yp==1].mean()-w[yp==0].mean()) if (yp==1).any() and (yp==0).any() else None,
+                    **adjacent_pairs(old[available],new[available],w,yp)))
             diagnostic_keys=[k for k,v in pair.items() if v.ndim==2 and v.shape[1]==task+1 and (
                 k.endswith(('_rms','_relative_diff','_cosine')) or k in ('alpha_total_variation',
                 'condition_saturated_gt2','condition_saturated_gt3','condition_tanh_derivative',
@@ -152,7 +157,8 @@ def main(args):
     assert all(hashlib.sha256(Path(p).read_bytes()).hexdigest()==h for p,h in hashes.items())
     proof=dict(status='verified',cases=cases,constant_negative_control_cases=negative_controls,
         original_files_unchanged=True,training_updates=0,source_files=hashes,
-        original_predictions_and_probability_replay=True,analytical_fp64_not_official_score=True,
+        original_predictions_and_probability_replay='exact_for_all_traced_samples',official_population_preserved=True,
+        small_tail_tensor_trace_excluded_with_ids=True,analytical_fp64_not_official_score=True,
         all_parameters_and_source_checkpoints_unchanged=True,bootstrap=args.bootstrap,
         training_seed_variance_measured=False,model_execution=False)
     (args.output/'integrity.json').write_text(json.dumps(proof,indent=2)+'\n')

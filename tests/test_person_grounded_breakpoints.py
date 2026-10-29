@@ -1,11 +1,14 @@
 import unittest
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import torch
 
 from multi_lane.track_a.person_grounded_summary import GroundedReadout
 from multi_lane.track_a.person_grounded_breakpoints import (
-    FIELDS, compare_fields, head_projection, pair_geometry, spatial_response, trace_module)
+    FIELDS, compare_fields, full_population, head_projection, pair_geometry, spatial_response, trace_module)
 
 
 class BreakpointTests(unittest.TestCase):
@@ -73,6 +76,23 @@ class BreakpointTests(unittest.TestCase):
         r=compare_fields(own,swap)
         self.assertGreater(float(r['query_diff_rms'][0]),0)
         self.assertEqual(float(r['alpha_total_variation'].sum()),0)
+
+    def test_small_tail_keeps_every_official_score_and_marks_projection_missing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            r=Path(directory);ids=np.array(['a','b','c','d']);y=torch.ones(4,5)
+            z=np.arange(20,dtype=np.float32).reshape(4,5);p=np.full((4,5),.6,dtype=np.float32)
+            for mode in ('on','off'):
+                folder=r/mode/'view_scores';folder.mkdir(parents=True)
+                np.savez_compressed(folder/'task0.npz',sample_ids=ids,targets=y.numpy(),
+                    fused_logits=z,fused_probabilities=p)
+            x=dict(face_reliable=torch.zeros(4,dtype=torch.bool),spatial_visibility=torch.ones(4),spatial_bbox=torch.zeros(4,4))
+            result=full_population(None,[(x,y,list(ids))],r,0,r)
+            self.assertEqual(result['samples'],4);self.assertEqual(result['tensor_forward_samples'],0)
+            with np.load(r/'full.npz') as data:
+                self.assertTrue(np.array_equal(data['native_probabilities'],p))
+                self.assertTrue(np.array_equal(data['sample_ids'],ids))
+                self.assertFalse(data['projection_available'].any())
+                self.assertTrue(np.isnan(data['w_delta_fp64']).all())
 
     @unittest.skipUnless(torch.cuda.is_available(),'actual CUDA autocast required')
     def test_trace_inside_real_cuda_autocast_stays_fp32(self):
