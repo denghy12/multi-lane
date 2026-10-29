@@ -1,5 +1,47 @@
 # 项目上下文
 
+## 2026-10-29：开始执行人物条件Summarize三个断点的只读诊断
+
+用户明确授权开始；新分支codex/person-grounded-breakpoint-audit-20261029从daaacef建立，保留全部既有dirty分析。新增独立person_grounded_breakpoints入口及队列/7机制测试，不修改原模型/训练代码。计划6个原arm×task0/2/6/7×Val/Test共48case；先完整历史人群native/OFF/三视图逐值重放及解析W·delta，再同图人物对追踪LN输入→pre/tanh→低秩shift→query→alpha→summary/LN/value→lateQuery/hidden/raw/delta，并比较自己/他人框及独占区域质量/面积密度。标签差异只分层，不挑供体；原Full crop不同则拒绝跨框比较。
+
+GPU0当前空闲24GB，其他卡满载不动。新worktree经Git-only部署，原source4349449所有原multi_lane文件要求无差异。源模型seed1历史b32/scale.03/30轮终点不变，无优化器、0更新；batch64、72线程初始化/推理4线程、worker1/prefetch1，以严格历史logits/CPU sigmoid逐值重放控制数值。最多6arm并行，3.5GB GPU/512MB shm启动余量。输出logs/output下person_grounded_breakpoints/seed1_20261029_01，完整路径/模块/诊断指标见docs/person_grounded_breakpoint_execution_20261029.md。
+
+本条创建时仅本地编译/diff检查通过，尚未远程测试/smoke/正式，不提前断言tanh饱和或人物条件恒定。模型source clean、main/test-only status --short SHA ea2e261e…/e9d1479f…保持。先7新测试+既有相关测试，再CONST_ATTN/GROUND_ATTN task0 Val首个原full/paired batch smoke，通过才启动；不改旧checkpoint、不开新训练、不合并main。
+
+## 2026-10-29：人物条件Summarize六组完整结束与只读归因完成
+
+GPU0／seed1／seed1_20261029_01，6×8任务、各240epoch／13950更新、主私有均0skip。原模型源码434944950677935c26d9484e4a05b319bd866f2a clean；实际原四并发队列自动完成，六并发接管未应用，不记为六组同时训练。6份TRAIN标定、12份完整Val／Test及全部预定干预完成，无failure；没有新训练、换头、A/B参数组装或教师。
+
+Val最终／平均；Test最终／平均：
+- B0 42.4628／49.4763；32.6800／39.5292。
+- 已有CLS-MLP 42.5495／49.6120；32.7139／39.5923。
+- 常量Pool 42.5180／49.6220；32.6726／39.5909。
+- 常量Attention 42.4484／49.5074；32.7007／39.6201。
+- Person条件Pool 42.4986／49.5905；32.6849／39.6294。
+- Person条件Attention 42.5259／49.6281；32.6783／39.5889。
+- Person＋定位Pool 42.4995／49.6346；32.6870／39.6158。
+- Person＋定位Attention 42.5114／49.5745；32.6589／39.5575。
+
+没有一组通过同时超过B0／CLS-MLP及同输入Pool的两项Test标准。六组最终相对B0的图片聚类bootstrap500次95%区间全部含0；常量Attention、内容Pool、定位Pool平均正差区间为正，限固定checkpoint、未校正多比较，不覆盖seed方差。
+
+48历史参数／loss／RNG边界精确，96份OFF与全部原三路输出逐值恢复B0。因此本轮不能解释成Face又损伤Full，也没有提高原Face单路。定位Attention的task7八lane平均主体框内质量Val31.21%→61.00%、Test31.56%→60.93%，但换错早期Person条件几乎不改预测；主体/Face入口没有稳定分类收益。定位Attention关闭新增Face后Test32.6887／39.5865，好于开启32.6589／39.5575，Val也提高。固定同范数错配方向六组最终Val/Test均不降，仅作归因，不作新正式最优。
+
+结构解释：框只参与定位loss与有效性，没有以坐标进入主体query；正确人物条件的端到端依赖仍弱。平均空间取证改善不等于区分当前人物／提供互补情绪证据。中层摘要到最终CLS语义对齐可能也是瓶颈，尚未证明唯一根因。不可断言tanh饱和、梯度冲突或所有Attention无效。
+
+原产物2924份已回传output/person_grounded_summary/complete_snapshot_20261029_01/snapshot，归档SHA f6c7f4240a48df57417ebd229f9df0342724a7cc5b43090e393c6d817aad23b9；全部逐SHA。独立NumPy复算7104组／133224项、最大误差4.84e-13，32常量交换／96无效Face／96同范数／288配对文件控制通过，48任务checkpoint训练/eval SHA匹配。1584训练/恢复pth仅留服务器，snapshot只含SHA清单。分析output/person_grounded_summary/analysis_20261029_02，复算脚本scripts/emotic/analyze_person_grounded_summary.py；analysis_01为空的失败初次目录，不是正式分析。
+
+完整报告docs/person_grounded_summary_results_20261029.md。建议保留B0与CLS-MLP，不扩seed/层数/query/scale；若继续，先已有checkpoint记录换人从条件偏移→query→alpha→summary→hidden→W·delta的传递与自己/他人框质量，区分人物取证和语义读出断点，未授权/未启动下一轮新训练。本轮只新增本地分析脚本/报告并更新三上下文，保留此前全部dirty文件，未提交/推送分析。main/test-only的git status --short SHA仍ea2e261e…/e9d1479f…，源模型checkout未改。
+
+
+## 2026-10-29：中断后复核，前四组训练已结束，GROUND两组继续；六并发接管未应用
+
+此前四train进程在中断期间已各自完成8task/240epoch/13950更新，GROUND两组已由原队列自动启动。重新进行六并发dry-run时，active已包含两train和两eval，detached_trainers全训练前提不成立；检查在任何信号、接管文件写入前中止，未杀controller/任何trainer、未重启或重复启动已完成组。原run控制器仍正常管理，无failure。六并发脚本在单独scheduler分支/worktree daaacef提交，4项本地和远程调度测试通过，但尚未应用；不要误记已实现六组同时训练，也不要为了凑并发重跑已完成模型。
+
+最新健康核对：CONST/CONTENT四组均完整8task训练完成，各0主私有skip、8历史参数/loss/RNG边界精确；四份Val均complete，两个Attention的Test已complete，其余两个Pool的Test当时运行/排队并已自动推进。GROUND_POOL/ATTN均task3 epoch9、累计6414成功更新、0skip，task0/1/2历史边界精确。六组均已启动，当前没有六个未完成训练需要同时启动，剩余两组训练与评估继续在GPU0并行；全部训练完成后依旧TRAIN标定→完整Val/Test/归因，不使用其他GPU。
+
+模型源worktree4349449仍clean，main/test-only状态SHA仍ea2e261e…/e9d1479f…不变。读取原队列、进度与审计后保存startup_health_after_interruption.json，已回传output/person_grounded_summary/startup_20261029。没有修改运行源码、超参数、batch或已有进度，没有新增训练/测试组。475预检产物已回传逐SHA，正式结果尚不完整，不提前作六组效果结论。用户“显存足够六组并发”偏好保留；下一次新运行应在初始状态就使用经验证的6并发政策。
+
+
 ## 2026-10-29：六组正式已启动；按用户要求升至六并发（调度迁移预检）
 
 模型源码434944950677935c26d9484e4a05b319bd866f2a已Git-only部署独立multi-lane-main-person-grounded-summary-20261029 clean，source/upstream一致。40专项/相关（含11新机制与真实CUDA AMP）和434 Track-A回归全通过。TRAIN单增强pass8任务均有定位监督，task6为127/627=20.255%，10batch全非空；不据此保证统计功效。六组两任务×4更新smoke、TRAIN标定、Val首64与归因均complete、主/私有0skip；12阶段跨臂原参数/关键loss/增强batch/OFF和三路预测逐值一致，U有梯度、FP32/1%cap/旧任务冻结/恢复通过。每stage61名早期条件交换、8名可靠Face交换；常量条件early_swap逐值不变。参数Pool221789/任务、Attention221728。475份非pth产物已回传逐SHA，archive3e52bae439ada02ebc1ad66b118844e66b6b23596ebb7ab19c11d4546f565a82。
