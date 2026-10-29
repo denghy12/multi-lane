@@ -250,6 +250,9 @@ class PrivateInteractionTraining:
         norm = math.sqrt(sum(float(p.grad.detach().float().square().sum())
                              for p in self.parameters if p.grad is not None))
         metrics = self.model.interaction_bank[self.model.current_task_id].last_metrics
+        module = self.model.interaction_bank[self.model.current_task_id]
+        if hasattr(module, 'after_backward_metrics'):
+            metrics.update(module.after_backward_metrics())
         self.values.append(dict(loss=float(loss.detach()), gradient_norm=norm, **metrics))
 
     def step(self):

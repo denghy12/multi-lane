@@ -1,5 +1,43 @@
 # 项目上下文
 
+## 2026-10-29：执行交互专用Summarize 2×2完整8任务（实现预检中）
+
+用户明确授权开始。新分支codex/private-summarize-attention-20261029从0e366d9，保留既有dirty分析。四组SUMMARY_FIXED_POOL/FIXED_ATTN/LEARN_POOL/LEARN_ATTN；原第6层LN tokens/查询sg缓存、共同FP32 Summarize重算，U零初始化且原模长匹配，10查询/任务共享三视图。Pool257→152→64，对照Attention64/4头，Q/V/O共同初始化，固定gain1/最终1%限幅。U在interaction_bank下，固定组为buffer、learn组为参数；私有目标只更新U/读出。原model/runner不改，通用build/config/eval/queue支持新方法与TRAIN标定前置依赖；新源模块/eval/launcher/11项机制测试已添加。
+
+seed1/8task/30epoch/B64，历史强B0主LR.0125/Adapter-U-读出.0004、BCE/ASL aux.1、b32/index1/scale.03/Person颜色扰动关闭/72线程及原报告RNG保持。仅GPU0，最多4作业/2非训练，6GB/1GB余量自动排队。训练后每组先固定TRAIN每任务4批标定修正均值方向，再完整Val/Test：ON/OFF/U0/固定Query单memory屏蔽；0/2/6/7补同范数TRAIN均值/错配方向，以及同图双方可见Query/证据交换，配对native单独保存。无外部任务参数或教师，不按早期精度筛选。
+
+完整协议docs/private_summarize_attention_execution_20261029.md，输出output/private_summarize_attention、日志logs同前缀。当前编译/bash/diff检查通过，尚未远程测试/smoke/正式训练，不声称有效。原main/test-only状态与其他GPU任务保留，后续Git-only同步独立worktree，检查通过才启动；三上下文已同步更新。
+
+
+## 2026-10-29：并行私有Summarize查询的下一阶段计划，仅分析未实现
+
+用户要求依据统一1%四组结果制定详细方案，明确不改代码。本次只读核对结果与MULTI-LANE §3.3/式3/图2/3，新增docs/parallel_private_summarize_attention_plan_20261029.md。研究问题为交互专用摘要取证与组合的分工，不把原摘要遗漏证据当已证实事实。主方案2×2：沿原查询/新增可学习查询 × 同输入近等参数池化MLP/Attention；保留B0及已有CLS-MLP强参照。两种读出统一token源、FP32重算Summarize、10摘要/视图、mask、Query条件/共同初始化/1%固定限幅，无学习gate或ROI。Pool使用共同64维q和Value，257→152→64 MLP配平Key投影，约198768/任务，对照Attention198912。共同模块按任务/组件配对初始化；可学习摘要经不同读出训练后不要求逐值相同，不夸称唯一算子因果效应。
+
+新查询每任务U为10×768，三视图共享，建议以原第6层查询的sg副本+零偏移、保持原模长学习方向，限制温度混杂。sg原tokens和原Selectors，但保留新摘要对U的梯度；原路径在同一30轮内照旧自训，新增目标只更新U/交互，head在新增目标中detach。保留独立optimizer/scaler/RNG、逐边界B0保真、旧任务封存，推理所有已见任务类别拼接。任务私有不是人物私有，Full多人归属仍需交换验证；不承诺原Face独立AP上涨。
+
+拟议正式seed1完整8task/30epoch/B64、历史B0配方/LR/72线程不变，仅GPU0，先实现smoke再完整双split，不用task0–2效果筛选绕过task6/7；此处没有执行命令或新入口。必要归因含OFF、U归零、固定Query的单memory屏蔽、人物Query/证据交换、TRAIN常量方向/同范数错配方向，及task6逐类排序。若两新摘要组均失败停止扩容；仅Pool改善则围绕取证报告，只有Attention优于同输入Pool/强参照且两项Test正向才推进。效果尚未知，未启动新训练/测试/提交/push，原模型/脚本源码未改。
+
+纠正文档参数量：每任务10×768=7680，8任务共61440（6.144万），此前execution误写614400，多算10倍；已完成四组未启用这些查询，实验参数和指标不受影响。对应旧说明已更正，三上下文同步记录，保留所有既有dirty文件。
+
+
+## 2026-10-28：统一1%上限四组8任务结果已核验，未见Attention特有净收益
+
+运行0e366d9四组训练/8份Val-Test均complete，各240epoch/13950主更新/0主私有skip，32历史原参数/30轮loss/RNG审计及跨臂审计通过；64完整OFF预测/所有原三路逐值重放历史B0。Val最终/平均、Test最终/平均：B0 42.4628/49.4763、32.6800/39.5292；MLP42.5495/49.6120、32.7139/39.5923；固定Attention42.4797/49.5224、32.6684/39.5668；任务标量42.5722/49.6820、32.6507/39.5451；图片门控42.4973/49.5523、32.6756/39.5989。Val四组8/8正；Test MLP8/8、Attention各6/8，task6/7负。三Attention未同时提高两项Test，MLP小正但条件区间跨0。
+
+结构发现：原Full/Person/Face不变，损失发生于新增delta读出，非Face共训损伤Full/主要增量遗忘。最终Attention平均RMS均约.99989%，所有人/所有lane> .95%；内容gain各任务均值1.0129–1.0421，图间std .000023–.000152，近常量。gain位于已饱和平滑Bound之前，正gain近似被归一化抵消；预算公平但拒绝能力未充分激活，不能普遍否定内容门控。Task6 Sadness/Sensitivity/Suffering Test的三Attention合计最终贡献−.0287/−.0380/−.0372，Suffering各约−.57；MLP该组近保持。Test Face入口最终/平均：MLP+.0099/+.0270，固定−.0111/−.0283，标量−.0015/+.0094，内容−.0004/+.0090；后者入口开关含gate输入变化。去Face仍不能消除Suffering损失，不归为单一路问题。
+
+889非pth产物已回传逐SHA，archive64c31b9c91bbfeb9ecdb8cc41f2ce414856a2952e6849fc5390932561a80874e；32compact checkpoint实测SHA同完成记录，原main/test-only状态保持。独立NumPy1792视图/人群组、33152数值误差3.98e−13；500次原图聚类/八阶段耦合bootstrap：MLP Test最终/平均区间[-.0072,.0842]/[-.0082,.1333]；图片门控平均[.0040,.1380]但最终[-.0565,.0447]，相对MLP平均差区间跨0。固定checkpoint/未多重校正/非seed方差。报告docs/protected_attention_dose_results_20261028.md，复算scripts/emotic/analyze_protected_attention_dose.py，回传/分析output/protected_attention_dose/{complete_snapshot_20261028_01,analysis_20261028_01}。
+
+本轮仅分析，无新训练/GPU前向；GPU0空闲。保留强B0和MLP控制，不扩seed/层数/gate/区域。若沿Attention继续，先以同输入池化MLP和固定摘要控制检验并行私有Summarize查询，既有候选仍未实现且效果未知，不将本轮自动作为有效性证明。不合并main、不删数据；本地更新报告与三上下文，原运行源码clean保持。
+
+
+## 2026-10-28：统一1%上限四组8task训练已启动
+
+运行0e366d9d5623ecd65500e4cc16ac72915b419e8d，服务器独立multi-lane-main-protected-attention-dose-20261028 clean且与本地/upstream一致。29项专项/相关（含8项新机制）全通过，434完整Track-A通过，另38项训练/恢复回归通过（有重叠，不累计独立测试数）。四组2任务×4更新smoke全部完成、每组8更新/0skip，8阶段原参数/loss/记录增强batch/OFF及三路预测精确一致，新梯度非零、最大写入≤1%、峰值allocated2819–2821MiB。
+
+正式seed1_20261028_01已启动，tmux attention_dose_seed1_20261028，DOSE_MLP/FIXED/TASK/CONTENT四组GPU0并行，约14259MiB/100%，queue无失败。首次健康核验MLP task0前4epoch、三Attention前3epoch，各84更新/epoch/0skip，原关键loss与历史逐值相同，实际上限通过。各组完整8任务后自动Val/Test及ON/OFF/入口归因，最多2评估；尚无正式精度结论。150预检/smoke产物回传逐SHA，archive2727b17250409b9275fb397f08ad04752a27420ee989e2ed4fd99a6b780f43b9。原主/test-only状态保持；本地仅补启动记录，不改正在运行源码、不合并main。协议docs/protected_attention_dose_execution_20261028.md；并行私有Summarize查询仍仅解释、未实现。
+
+
 ## 2026-10-28：执行统一1%上限的四组Attention训练控制（预检中）
 
 用户授权第一件事完整执行，第二件事仅要求MULTI-LANE术语解释。新分支codex/protected-attention-dose-controls-20261028，保留全部原dirty分析。四组DOSE_MLP/DOSE_FIXED/DOSE_TASK/DOSE_CONTENT，seed1/8task/30epoch/B64，强B0配方与同一学习分类头不变；最终delta=Bound_.01(alpha·raw)，固定alpha1、另两门控2sigmoid初值1，三Attention每task QKV初始化相同。无区域/新查询/教师/A-B安装；新增目标独立优化，只原目标更新原参数。增加独立dose模块/入口/测试，原readout仅提取可覆盖的gate/correction方法、保留默认原运算；通用audit/queue支持四组锚点，评估增加真实gain/范数profile。

@@ -24,7 +24,7 @@ def memory_available():
     return free, shm.f_bavail*shm.f_frsize/1024**2
 
 
-def run(args, arms=ARMS, anchor='C0'):
+def run(args, arms=ARMS, anchor='C0', calibration_module=None):
     from .protected_joint_experiment import runtime
     git = runtime()
     args.output.mkdir(parents=True, exist_ok=True); args.logs.mkdir(parents=True, exist_ok=True)
@@ -39,6 +39,7 @@ def run(args, arms=ARMS, anchor='C0'):
         test_used_for_development=True,evaluation_scope='samples_intersect_seen_classes',
         source_run=str(args.source_run),data_root=str(args.data_root),clip_checkpoint=str(args.clip_checkpoint),
         face_manifest_root=str(args.face_manifest_root),smoke_updates=args.smoke_updates if args.smoke else None)
+    if calibration_module:protocol['train_only_calibration_module']=calibration_module
     if (args.output/'protocol.json').exists():
         if read(args.output/'protocol.json') != protocol:
             raise ValueError('Queue protocol changed on restart')
@@ -70,6 +71,12 @@ def run(args, arms=ARMS, anchor='C0'):
             pending.append(dict(name=arm+'_'+split,kind='eval',arm=arm,output=str(root),
                 command=module+['eval','--training-root',str(args.output/arm/'train'),
                     '--split',split,'--workers','2','--output',str(root)]))
+    def after_training(arm):
+        if calibration_module:
+            root=args.output/arm/'train/summary_calibration'
+            pending.append(dict(name=arm+'_train_calibration',kind='calibrate',arm=arm,output=str(root),
+                command=[sys.executable,'-u','-m',calibration_module,'--training-root',str(args.output/arm/'train'),'--output',str(root)]))
+        else:add_evaluation(arm)
     try:
         while pending or active:
             for process,job in list(active):
@@ -82,20 +89,22 @@ def run(args, arms=ARMS, anchor='C0'):
                 else:
                     completed.add(job['name'])
                     if job['kind']=='train':
-                        add_evaluation(job['arm'])
+                        after_training(job['arm'])
+                    elif job['kind']=='calibrate':add_evaluation(job['arm'])
                 print('FINISH',job['name'],code,flush=True)
             if failures:
                 pending = []
             if pending and len(active)<args.maximum_jobs and time.time()-last>=12:
                 # Eval uses at most two processes; train gets the remaining slots.
                 jobs = [j for j in pending if j['kind']=='train' or
-                        sum(r['kind']=='eval' for _,r in active)<2]
+                        sum(r['kind']!='train' for _,r in active)<2]
                 if jobs:
                     job = jobs[0]
                     if ready(job):
                         pending.remove(job); completed.add(job['name'])
                         if job['kind']=='train':
-                            add_evaluation(job['arm'])
+                            after_training(job['arm'])
+                        elif job['kind']=='calibrate':add_evaluation(job['arm'])
                         continue
                     free, shm = memory_available()
                     if free>=6000 and shm>=1024:
