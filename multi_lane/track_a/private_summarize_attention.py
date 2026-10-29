@@ -38,6 +38,10 @@ class PrivateSummaryReadout(nn.Module):
         self.last_metrics={}
 
     def summarize(self,tokens,anchors,zero_query=False):
+        with torch.autocast(device_type=tokens['full'].device.type,enabled=False):
+            return self._summarize_fp32(tokens,anchors,zero_query)
+
+    def _summarize_fp32(self,tokens,anchors,zero_query=False):
         result={};cos=[];ratios=[];variation=[]
         for name in VIEWS:
             g=tokens[name].detach().float();s=anchors[name].detach().float()

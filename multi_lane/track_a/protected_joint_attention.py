@@ -245,6 +245,9 @@ class PrivateInteractionTraining:
             logits = F.linear(fused.float(), self.model.head.weight.detach().float(),
                               self.model.head.bias.detach().float())
             loss = compute_training_loss(logits, targets, current, 1., 'legacy_full_zero')
+        auxiliary_metrics = {}
+        if hasattr(self.model, 'interaction_training_objective'):
+            loss, auxiliary_metrics = self.model.interaction_training_objective(loss, self.scheduler.last_epoch)
         self.scaler.scale(loss).backward()
         self.scaler.unscale_(self.optimizer)
         norm = math.sqrt(sum(float(p.grad.detach().float().square().sum())
@@ -253,7 +256,7 @@ class PrivateInteractionTraining:
         module = self.model.interaction_bank[self.model.current_task_id]
         if hasattr(module, 'after_backward_metrics'):
             metrics.update(module.after_backward_metrics())
-        self.values.append(dict(loss=float(loss.detach()), gradient_norm=norm, **metrics))
+        self.values.append(dict(loss=float(loss.detach()), gradient_norm=norm, **metrics, **auxiliary_metrics))
 
     def step(self):
         before = self.scaler.get_scale()

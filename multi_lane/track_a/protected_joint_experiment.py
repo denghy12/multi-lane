@@ -24,10 +24,11 @@ from .runner import (TaskMetrics, build_optimizer_groups, build_transforms,
 from .task_recovery import atomic_save, restore_rng, rng_state, save_boundary
 
 def build(config, clip, arm):
+    from .person_grounded_summary import GROUNDED_ARMS, PersonGroundedModel
     from .protected_attention_dose import DOSE_ARMS, DoseMatchedModel
     from .private_summarize_attention import SUMMARY_ARMS, PrivateSummaryModel
     model = historical_build(config, clip,
-        model_class=PrivateSummaryModel if arm in SUMMARY_ARMS else DoseMatchedModel if arm in DOSE_ARMS else ProtectedJointModel)
+        model_class=PersonGroundedModel if arm in GROUNDED_ARMS else PrivateSummaryModel if arm in SUMMARY_ARMS else DoseMatchedModel if arm in DOSE_ARMS else ProtectedJointModel)
     model.initialize_interaction(arm)
     return model
 
@@ -233,6 +234,10 @@ def training_config(args, git, base, initial):
     if args.arm in SUMMARY_ARMS:
         config['kind']='protected_private_summary_2x2'
         config['interaction']=summary_configuration(args.arm)
+    from .person_grounded_summary import GROUNDED_ARMS, grounded_configuration
+    if args.arm in GROUNDED_ARMS:
+        config['kind']='protected_person_grounded_summary'
+        config['interaction']=grounded_configuration(args.arm)
     return config
 
 
@@ -290,7 +295,7 @@ def train(args):
     if initial != base['initial_selector_prompt_classifier_sha256']:
         raise AssertionError('Fresh initialization did not reproduce the historical recipe')
     cfg = training_config(args, git, base, initial)
-    if cfg['kind'] in ('protected_attention_dose_matched_controls','protected_private_summary_2x2'):
+    if cfg['kind'] in ('protected_attention_dose_matched_controls','protected_private_summary_2x2','protected_person_grounded_summary'):
         cfg['interaction']['parameters_per_task'] = [sum(p.numel() for p in m.parameters())
                                                    for m in model.interaction_bank]
         cfg['method_parameter_count'] = sum(p.numel() for n,p in model.named_parameters()
@@ -434,7 +439,7 @@ def evaluate(args):
     if cfg['smoke'] and args.split == 'test':
         raise ValueError('Smoke is implementation validation, not Test evaluation')
     constants=None
-    if cfg['kind']=='protected_private_summary_2x2':
+    if cfg['kind'] in ('protected_private_summary_2x2','protected_person_grounded_summary'):
         from .private_summary_evaluation import locked_constants
         constants=locked_constants(args.training_root)
     model = build(cfg['model_template'], Path(cfg['clip_checkpoint']), cfg['arm'])
@@ -462,7 +467,10 @@ def evaluate(args):
             view = Subset(view, range(min(64, len(view))))
         loader = evaluation_loader(view, task, args.workers)
         from .protected_joint_evaluation import evaluate_cached_modes
-        if constants is None:
+        if cfg['kind']=='protected_person_grounded_summary':
+            from .person_grounded_evaluation import evaluate_grounded_modes
+            values=evaluate_grounded_modes(model,loader,task,args.output,constants,args.workers,cfg['smoke'])
+        elif constants is None:
             values = evaluate_cached_modes(model, loader, task, args.output)
         else:
             from .private_summary_evaluation import evaluate_private_modes
@@ -496,7 +504,8 @@ def parser():
     p.add_argument('--output', type=Path, required=True)
     from .protected_attention_dose import DOSE_ARMS
     from .private_summarize_attention import SUMMARY_ARMS
-    p.add_argument('--arm', choices=ARMS+DOSE_ARMS+SUMMARY_ARMS)
+    from .person_grounded_summary import GROUNDED_ARMS
+    p.add_argument('--arm', choices=ARMS+DOSE_ARMS+SUMMARY_ARMS+GROUNDED_ARMS)
     p.add_argument('--source-run', type=Path)
     p.add_argument('--historical-reference-root', type=Path)
     p.add_argument('--data-root', type=Path)

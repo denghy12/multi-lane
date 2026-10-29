@@ -63,7 +63,7 @@ def load_checkpoint(model,training,cfg,task):
 def calibrate(training,output):
     started=time.time();git=runtime();set_seed(1,True)
     cfg=read(training/'config.json');complete=read(training/'training_complete.json')
-    assert cfg['kind']=='protected_private_summary_2x2' and complete['config']==cfg and cfg['git']==git
+    assert cfg['kind'] in ('protected_private_summary_2x2','protected_person_grounded_summary') and complete['config']==cfg and cfg['git']==git
     assert complete['status']=='complete'
     model=build(cfg['model_template'],Path(cfg['clip_checkpoint']),cfg['arm'])
     source=make_source(cfg['model_template'],Path(cfg['data_root']),Path(cfg['face_manifest_root']),'train')

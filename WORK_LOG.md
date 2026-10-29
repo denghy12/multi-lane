@@ -1,5 +1,51 @@
 # 工作日志
 
+## 2026-10-29：开始执行人物条件/空间锚定六组8任务（实现预检中）
+
+用户明确授权执行，task按上下文为Test。新分支codex/person-grounded-summary-20261029从b4015bc建立，保留所有既有dirty分析。新增person_grounded_summary模型（任务常量/Person内容/Person+定位 ×Pool/Attention），Full8全局+2主体、Person/Face各10；低秩条件16、主体U独立、查询模长匹配、主体不读Frozen CLS、全局保留197tokens。主体TRAIN框内质量loss .01前5轮warmup且>=90%可见，仅更新新主体查询/条件器。修复旧私有Summarize缺失autocast禁用；新增完整评估/早期条件交换、TRAIN几何统计、队列入口与机制测试。原model.py/runner.py不改，通用build/config/eval和私有目标仅按新kind分派。
+
+计划seed1/8task/30epoch/B64，主LR.0125、新模块和Adapter.0004，历史b32/index1/scale.03/aux.1/ASL/Person颜色扰动off/72线程及原RNG/历史人群口径。GPU0约24GB空闲、shm4GB，其他卡满载且不使用；最多4训练/2非训练，保留6GB GPU和1GB shm余量排队。先Git-only同步独立multi-lane-main-person-grounded-summary-20261029，完整TRAIN单增强pass统计有效定位监督，再相关单测/CUDA AMP、完整Track-A、六组2任务×4更新真实smoke与TRAIN标定/Val首64。通过历史原函数、RNG、恢复及归因检查后才启动六组完整8任务训练/Val/Test，不依据早期精度筛选。
+
+完整配置/路径/命令docs/person_grounded_summary_execution_20261029.md，机制方案docs/person_grounded_parallel_summary_plan_20261029.md；输出output/person_grounded_summary、日志logs同前缀。本条创建时仅本地编译/bash语法检查通过，远程测试/几何统计/正式尚未执行，效果未知。main/test-only状态SHA仍ea2e261e…/e9d1479f…保留，不合并、不删数据、不开其他GPU。
+
+
+## 2026-10-29：人物条件与空间锚定Summarize的下一阶段方案（仅计划）
+
+用户要求详细方案，本轮只读核对私有Summarize结果、旧selector_conditioner、旧空间摘要与受保护Attention结果，以及MULTI-LANE/DSCT/Conditional DETR原论文；新增docs/person_grounded_parallel_summary_plan_20261029.md。明确“Person→MLP→query delta”已有实现，不能换名当新突破。研究候选保留原三路自训练和梯度保护，在新增Full十摘要中用8个全局候选＋2个主体候选，Person/Face各10，总memory仍30。主体2查询由sg当前原Person最终CLS条件化低秩调制，模长匹配；先原Task Forward取hP并缓存第6层，后旁路先条件查询再压缩，不把最终CLS循环送回原第6层。
+
+主体只读196patch不读Frozen CLS；全局8仍可读197token/全局场景。仅主体2用TRAIN实际变换框的注意力框内质量loss，建议lambda.01前5轮warmup、>=90%可见才监督；不做推理硬ROI，不约束所有场景摘要，不添加情绪互斥负对/排序loss。Lloc只更新主体私有U/条件器，新增BCE更新新旁路，原BCE/ASL照旧更新原三路和head。原三路端点不变，目标是补充取证/融合，不承诺原Face单路改善。
+
+提议六组=任务常量/当前Person条件/Person条件+锚定 ×同输入Pool/Attention；常量条件用固定非零buffer输入同一条件器，后置Query仍保留自身Person信息。四组memory类型各自pool，322→127→64匹配64维4头单QueryAttention；估算221789/221728参数每任务，差61，落地后核验。不把名义参数匹配称有效容量严格相同。保留B0及CLS-MLP32.6800/39.5292、32.7139/39.5923。
+
+未来执行沿seed1/8task/30epoch/B64、主LR.0125/Adapter新模块.0004、b32/scale.03/Person颜色扰动off/原aux与ASL/72线程历史RNG；只GPU0自动排队，先修autocast CUDA验证，不根据前三任务效果截断。TRAIN人数5353/4394/861/9931/4352/2536/627/1526，task6仅300总主更新；须先核对>=90%可见有效定位供给，不自动改裁剪/采样/epoch补数据。正确早期Person条件交换应保持晚期Query、h0、原memory/head；正确目标优势、主体入口净贡献、两项Test超过强参照、Attention超过同输入Pool分层验收。若仅定位或Pool改善不称Attention成功；若全失败停止后置1%接口。
+
+本轮没有修改业务代码/训练配置，没有创建实现分支、运行数据统计/GPU/新实验、提交或push；新模块和lambda只是待验证方案。旧dirty分析全部保留，三上下文同步更新，未来需新codex/分支和Git-only部署，不合并main或删除数据。
+
+
+## 2026-10-29：私有Summarize四组8任务结果及FP32补评已核验
+
+本节为最新状态，后面的“预检／已启动／待评估”为历史过程。运行b4015bc、seed1_20261029_01全部complete：四组各240epoch／13950主更新／主私有0skip，32历史原参数／30轮loss／RNG及跨臂审计通过；64份OFF和全部原Full／Person／Face逐值恢复历史强B0，28旧TRAIN探针最大差0。原Val最终／平均42.4628／49.4763、Test32.6800／39.5292。
+
+原正式Val最终／平均、Test最终／平均：原查询Pool42.4565／49.5508、32.6372／39.5783；原查询Attention42.5033／49.5460、32.6716／39.5803；新查询Pool42.4860／49.6078、32.6704／39.6075；新查询Attention42.4957／49.5188、32.6607／39.5576。四组Test前6阶段正、task6/7负；task6 Sadness/Sensitivity/Suffering合计最终贡献−.0551/−.0254/−.0584/−.0235。没有两项Test同时超过B0，也未超过已有CLS-MLP32.7139／39.5923；新查询改善Pool点估计但不改善Attention，不声称稳定算子优势。
+
+U有梯度/实际偏移，查询夹角约.21–1.11度、模长匹配；首64复核摘要RMS变化约Pool3.32%、Attention2.53%，不能说完全没学。U归零Test最终/平均条件贡献Pool+.00150/+.00324，Attention+.00095/+.00185，直接净作用小；不撤销读出共适配。新Attention Face与Person入口在双split最终/平均均负。最终Test同图双方可见2842人Query/Person交换、双方可靠1321人Face交换；新Attention原Query优势−.0106、Face−.0568、Person+.0259，多阶段无稳定人物绑定证据。质量组内等范数错配方向最终Test四组都优于native，仅是诊断，不可当部署方法。修正几乎总饱和1%，原Full未变，损失发生于新delta读出。
+
+发现实现偏差：summarize的.float未关闭外层AMP，训练私有backward为FP32，原评估矩阵运算为FP16。GPU0额外0/2/7首64及完整8任务只读FP32补评，保持历史head AMP、人物/batch/CPU每batch sigmoid；原AMP64份逐值重放，OFF64份概率精确重放，32checkpoint SHA未变。补评原查询Pool42.4562／49.5507、32.6371／39.5784；原查询Attention42.5032／49.5458、32.6727／39.5818；新查询Pool42.4845／49.6071、32.6704／39.6074；新查询Attention42.4971／49.5192、32.6606／39.5578。主表最大变化.001495，不改变结论；原训练/模型源码保持，不把精度偏差当根因。 补评NumPy320份预测/17760值误差≤3.84e−13，OFF64/U0固定32/无效Face64阴性控制均精确通过。
+
+原1505产物回传逐SHA，archive a691477d7780ae258933f82b71b65812ad654bfef4f3c6e318824680e57186a7；补评390份archive0ceaab5603f0c1b2b563ca56406b2f15f73c9cd336bda8c2d27e87965ebe7c0c。原NumPy2944组/54992值误差≤4.13e−13，500次原图聚类/阶段耦合bootstrap仅learn Pool平均相对B0区间正，最终和主要组间比较跨0，非seed方差/未多重校正。报告docs/private_summarize_attention_results_20261029.md，复算scripts/emotic/analyze_private_summarize_attention.py及audit_private_summary_precision.py，完整回传与analysis在output/private_summarize_attention。
+
+本轮仅分析和只读精度补评，无新训练、无组装/教师、不合并main、不删checkpoint。remote实验源码clean，main/test-only状态SHA仍ea2e261e…/e9d1479f…；本地保留既有dirty分析并更新三上下文。原函数保护成功，当前Attention候选未通过推进条件；保留B0及CLS-MLP参照，不直接扩seed/查询/层数/scale。下次使用需修正Summarize autocast边界并补CUDA AMP回归；若继续研究，先验证摘要压缩前的人物条件取证和修正对应性，不把已试过的区域mask自动叠回。
+
+
+## 2026-10-29：交互专用Summarize四组完整8任务已启动
+
+运行b4015bc03def0fce29e4abcfca0b46d285878c73，本地/remote/upstream一致，独立multi-lane-main-private-summarize-attention-20261029 clean。33专项/相关含11新机制全部通过，434完整Track-A和15门控/恢复相关通过。四组2任务×4更新smoke、TRAIN标定、Val首64及开关/人物交换/同范数方向归因全部complete，0skip；8阶段跨臂原参数/loss/记录增强batch/OFF/三路逐值一致，query梯度/模长/原路径隔离/恢复/1%cap通过。每个smoke阶段61名Person、8名可靠Face实际交换，非空归因。参数/任务固定Pool198768、固定Attn198912、learn Pool206448、learn Attn206592。
+
+正式run seed1_20261029_01，tmux private_summary_seed1_20261029，四组GPU0同时训练；约14257MiB/100%，queue无失败。首次健康检查固定Pool task0已3epoch、另外三组2epoch，各84更新/epoch/0skip，原关键loss与历史精确一致；learn Pool/Attn新query梯度3.45e−5/8.36e−5、偏移范数.498/.483，持续更新。每组完整8任务后自动先TRAIN锁方向，再完整Val/Test和0/2/6/7人物/方向诊断；无早期效果门槛。当前没有正式精度结论，不要重复启动或修改运行源码。
+
+254份预检/smoke产物已回传逐SHA，archive7e40b4173557ba2aa2cc6cd5bb914ca4ba612224cded12ab30bb47b09f4e2d59，本地output/private_summarize_attention/preflight_snapshot_20261029_01。原main/test-only状态仍ea2e261e…/e9d1479f…保留。完整配置与实际记录docs/private_summarize_attention_execution_20261029.md；本地仅补记录，不在运行中pull/改源码、不合并main，不需要用户手动执行。
+
+
 ## 2026-10-29：执行交互专用Summarize 2×2完整8任务（实现预检中）
 
 用户明确授权开始。新分支codex/private-summarize-attention-20261029从0e366d9，保留既有dirty分析。四组SUMMARY_FIXED_POOL/FIXED_ATTN/LEARN_POOL/LEARN_ATTN；原第6层LN tokens/查询sg缓存、共同FP32 Summarize重算，U零初始化且原模长匹配，10查询/任务共享三视图。Pool257→152→64，对照Attention64/4头，Q/V/O共同初始化，固定gain1/最终1%限幅。U在interaction_bank下，固定组为buffer、learn组为参数；私有目标只更新U/读出。原model/runner不改，通用build/config/eval/queue支持新方法与TRAIN标定前置依赖；新源模块/eval/launcher/11项机制测试已添加。
