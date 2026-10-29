@@ -1,5 +1,13 @@
 # 项目上下文
 
+## 2026-10-29：三个断点诊断预检通过，准备六组正式只读前向
+
+模型观察代码2622b73已Git-only部署独立multi-lane-main-person-grounded-breakpoint-audit-20261029，原source4349449全部原模块无修改。远程22项相关测试全部通过（包含7新trace机制、真实CUDA AMP及既有Summarize/调度），无skip；CONST_ATTN/GROUND_ATTN的task0 Val原full首64与原paired首batch真实smoke通过，每组62名有效供体，native/early/late logits与CPU sigmoid逐值重放、原alpha/summary/delta精确、method/视觉/源checkpoint未变。推理4线程/worker1不改变已检查预测。
+
+增加独立NumPy分析脚本，4项排序/区域分层/聚类测试本地通过；预计同一正式队列后自动CPU分析，无需等待新训练。分析保存full完整历史mAP/逐类AP与全体AUC、Wdelta正负分离及B0相邻负样本修复/损伤比例；paired按原人物标签范围和面积/重叠/可见性分层输出各断点相对变化、空间binding gain、分类条件贡献与500次原图聚类区间。FP64仅用于线性头解析，不取代历史正式概率。
+
+待将这次仅新增分析/协议字段的提交ff同步，复核4项NumPy测试及source无差异后，启动6arm×4阶段×2split共48case。此时未报告正式断点或改进结论，未启动训练；输出/日志仍person_grounded_breakpoints/seed1_20261029_01。全部三上下文与执行文档已更新，旧dirty分析保留。
+
 ## 2026-10-29：开始执行人物条件Summarize三个断点的只读诊断
 
 用户明确授权开始；新分支codex/person-grounded-breakpoint-audit-20261029从daaacef建立，保留全部既有dirty分析。新增独立person_grounded_breakpoints入口及队列/7机制测试，不修改原模型/训练代码。计划6个原arm×task0/2/6/7×Val/Test共48case；先完整历史人群native/OFF/三视图逐值重放及解析W·delta，再同图人物对追踪LN输入→pre/tanh→低秩shift→query→alpha→summary/LN/value→lateQuery/hidden/raw/delta，并比较自己/他人框及独占区域质量/面积密度。标签差异只分层，不挑供体；原Full crop不同则拒绝跨框比较。

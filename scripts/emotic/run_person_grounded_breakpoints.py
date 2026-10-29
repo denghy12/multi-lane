@@ -43,6 +43,14 @@ def main(args):
     write(args.output/('failure.json' if failed else 'completion.json'),dict(status='failed' if failed else 'complete',
         arms=list(ARMS),tasks=[0,2,6,7],splits=['val','test'],records=records,failures=failed,training_updates=0))
     if failed:raise SystemExit(1)
+    command=[sys.executable,'-u','scripts/emotic/analyze_person_grounded_breakpoints.py',
+        '--root',str(args.output),'--output',str(args.output/'analysis'),'--bootstrap','500']
+    with (args.logs/'analysis.log').open('w') as stream:
+        code=subprocess.call(command,stdout=stream,stderr=subprocess.STDOUT,
+            env=dict(env,OMP_NUM_THREADS='4',MKL_NUM_THREADS='4'))
+    write(args.output/('analysis_failure.json' if code else 'analysis_complete.json'),
+        dict(status='failed' if code else 'complete',command=command,exit_code=code,training_updates=0))
+    if code:raise SystemExit(code)
 
 
 if __name__=='__main__':

@@ -316,6 +316,7 @@ def run(args):
     if args.output.exists(): raise ValueError('Output already exists; preserve prior diagnostic artifacts')
     args.output.mkdir(parents=True)
     protocol = dict(git=git, training_git=cfg['git'], arm=cfg['arm'], seed=1, gpu=0,
+        class_order=cfg['model_template']['class_order'], task_sizes=[5,3,3,3,3,3,3,3],
         tasks=list(args.tasks), splits=args.splits, batch_size=64, workers=args.workers,
         initialization_threads=72, inference_threads=args.inference_threads, original_code_audit=code,
         smoke=args.smoke, maximum_batches=1 if args.smoke else None,

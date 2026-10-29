@@ -51,3 +51,9 @@ tensor_examples.npz：首个原配对batch中按既定ID顺序取前16名有效r
       --logs logs/person_grounded_breakpoints/seed1_20261029_01 --maximum-jobs 6
 
 创建协议时仅本地静态编译/diff检查通过，远程测试/smoke/正式尚未执行，不能提前报告断点。后续真实执行记录追加。
+
+## 实际预检通过与自动CPU分析
+
+观察入口2622b73，22项相关测试通过且无skip；CONST_ATTN/GROUND_ATTN各task0 Val原full首64、paired首batch62名有效供体通过，native/early/late logits与CPU sigmoid逐值一致，traced alpha/summary/delta与原实现精确，所有参数/源checkpoint未变。每case约10.4/10.7秒（仅单batch，不是完整时间预估）。新增纯NumPy排序与区域控制4项本地测试通过；只补协议class_order/task_sizes和独立分析后ff同步，原观察计算不变。
+
+正式队列48case完成后自动调用scripts/emotic/analyze_person_grounded_breakpoints.py生成analysis目录，覆盖full mAP/逐类AP/AUC、解析Wdelta及相邻正负排序、paired各断点/区域分层、500次原图聚类均值区间。FP64为解释工具，历史CPU32概率仍为正式评分。队列分别保存forward completion与analysis completion，失败写独立failure而不冒充成功。正式启动后追加实际PID和健康状态。
