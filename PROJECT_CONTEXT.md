@@ -1,5 +1,14 @@
 # 项目上下文
 
+## 2026-10-29：六组正式已启动；按用户要求升至六并发（调度迁移预检）
+
+模型源码434944950677935c26d9484e4a05b319bd866f2a已Git-only部署独立multi-lane-main-person-grounded-summary-20261029 clean，source/upstream一致。40专项/相关（含11新机制与真实CUDA AMP）和434 Track-A回归全通过。TRAIN单增强pass8任务均有定位监督，task6为127/627=20.255%，10batch全非空；不据此保证统计功效。六组两任务×4更新smoke、TRAIN标定、Val首64与归因均complete、主/私有0skip；12阶段跨臂原参数/关键loss/增强batch/OFF和三路预测逐值一致，U有梯度、FP32/1%cap/旧任务冻结/恢复通过。每stage61名早期条件交换、8名可靠Face交换；常量条件early_swap逐值不变。参数Pool221789/任务、Attention221728。475份非pth产物已回传逐SHA，archive3e52bae439ada02ebc1ad66b118844e66b6b23596ebb7ab19c11d4546f565a82。
+
+正式run seed1_20261029_01、tmux person_grounded_seed1_20261029已启动，首四组在GPU0并行、GROUND两组初始排队。用户随后明确要求显存够时六组同时启动，覆盖原max4计划。将只迁移调度器，保留原训练进程/PID/开始时间和进度；模型worktree不pull/不修改、batch64/72线程和配方不变。新调度分支codex/person-grounded-six-way-20261029，独立scheduler worktree运行，采用已有detached PID接管逻辑，max6、非训练最多2、free GPU>=6GB/shm>=1GB/12秒间隔。TRAIN校准完成后才放行Val/Test，避免重复启动活进程。
+
+当前新调度4项本地测试/编译通过，尚未接管或声称六组全部在跑；实际接管后补PID与显存证据。新脚本scripts/emotic/expand_person_grounded_queue.py，不改正在运行模型/训练源码。main/test-only和既有dirty分析保留，三上下文已更新。后续队列自动完整8task Validation/Test及归因，不需用户手动执行。
+
+
 ## 2026-10-29：开始执行人物条件/空间锚定六组8任务（实现预检中）
 
 用户明确授权执行，task按上下文为Test。新分支codex/person-grounded-summary-20261029从b4015bc建立，保留所有既有dirty分析。新增person_grounded_summary模型（任务常量/Person内容/Person+定位 ×Pool/Attention），Full8全局+2主体、Person/Face各10；低秩条件16、主体U独立、查询模长匹配、主体不读Frozen CLS、全局保留197tokens。主体TRAIN框内质量loss .01前5轮warmup且>=90%可见，仅更新新主体查询/条件器。修复旧私有Summarize缺失autocast禁用；新增完整评估/早期条件交换、TRAIN几何统计、队列入口与机制测试。原model.py/runner.py不改，通用build/config/eval和私有目标仅按新kind分派。

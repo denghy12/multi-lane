@@ -51,3 +51,11 @@ bash scripts/emotic/run_person_grounded_summary_gpu0.sh seed1_20261029_01
 ## 实际进度
 
 创建协议时仅本地编译、shell语法及diff检查通过；尚无远程测试/统计/smoke/正式精度结论。后续实际记录追加，保留旧main/test-only状态SHA ea2e261e…/e9d1479f…。
+
+## 预检通过与首次正式启动
+
+- 模型运行commit434944950677935c26d9484e4a05b319bd866f2a，remote独立worktree clean。本地/upstream/remote HEAD一致。
+- 40项专项/相关（包含11新机制、CUDA AMP实际执行）与434项Track-A均通过。TRAIN统计task6有效定位127/627、10batch均非空，其余任务也全部非空。
+- 六组两任务各4更新smoke/标定/Val首64/全部归因通过；各8更新0主私有skip，12阶段原参数/loss/batch/OFF/三路逐值匹配。每stage61名Person、8名Face供体实际可交换。参数/任务Pool221789、Attention221728。
+- 475份预检产物已同步本地逐SHA，归档SHA3e52bae439ada02ebc1ad66b118844e66b6b23596ebb7ab19c11d4546f565a82。
+- 正式seed1_20261029_01已在原model worktree启动，初始四训练/两排队。用户随后要求六组同时启动，故仅调度上限改为6，所有模型/数据/超参数和原四进程保持。需要独立调度worktree接管，不能在运行中pull或改模型源码。
