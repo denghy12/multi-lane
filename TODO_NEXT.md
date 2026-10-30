@@ -1,5 +1,13 @@
 # 下一步任务
 
+## 2026-10-30：人物条件修复预检完成，正式效果待验证
+
+ffab151已实现互斥投影RMS约束/相对Query偏移增益及两套匹配Pool。55测试全过无skip、四组task0/1各4步，共32主/32私有更新0skip；4 TRAIN标定/Val首64和TRAIN多人探针完成，原参数/监督/增强/OFF逐值不变。48旧checkpoint保持，327份产物本地逐SHA，三上下文与执行文档均更新。完整8任务/Test未启动。
+
+不要把预检tanh不饱和当作人物绑定通过。换人Query差异仅0.000252%–0.001389%，部分binding gain为负，且与旧30轮不具相同步数。若继续，先分别检验充分学习后的raw/used z、人物偏移/Query方向、正确/错配取证及分类贡献；通过后再判断Attention与同输入Pool。不要直接叠加修复或盲增gain/容量。入口scripts/emotic/run_person_query_conditioning_gpu0.sh默认projection族，正式完整训练需明确执行，不自动续跑。保留B0/CLS-MLP正式参照。
+
+预检证据output/person_query_conditioning/preflight_snapshot_20261030/snapshot/output/person_query_conditioning/smoke_seed1_20261030_01/preflight_audit.json；详细配置/边界见docs/person_query_conditioning_execution_20261030.md。
+
 ## 2026-10-30：开始修改人物条件传递，两个互斥单因素版本
 
 用户授权开始修改，本次先代码/单测/真实短smoke，不自动启动完整8任务。新codex/person-query-conditioning-20261030从131919e，保留既有dirty。新增PersonQueryReadout/Model：QPROJ_GROUND_POOL/ATTN只在tanh前对C(LN(hP))做无affine RMS上限1，保留原loc .01/5轮warmup且f不放大；QGAIN_CONTENT_POOL/ATTN保留原投影/tanh且无loc，只把raw f以最大32小信号增益送入相对anchor RMS1%平滑上界。两项互斥，最终h0修正1%仍原样，不添加参数/改原U或原三路训练。模式参数为预先工程起点，非最优或提升保证。

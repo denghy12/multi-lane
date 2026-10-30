@@ -1,5 +1,13 @@
 # 项目上下文
 
+## 2026-10-30：人物条件修复代码与真实预检完成
+
+codex/person-query-conditioning-20261030源码ffab151已Git-only部署独立worktree。投影版只限制C(LN(hP))的RMS上限1；偏移版只做最大32小信号增益及相对Query 1%平滑上界，各有Pool/Attention，共4组，无组合修复/新增参数。原model.py/runner.py/person_grounded_summary.py不变。新11+旧44测试全部通过无skip，含真实CUDA AMP。
+
+GPU0顺序完成4组task0/1各4更新，共32主+32私有、0skip；4 TRAIN标定/Val首64完成。8份arm-task审计原参数/loss/增强batch/OFF及三路预测逐值一致。TRAIN各组task0 62人/55供体、task1 64人/58供体；native/固定lateQuery/zero-condition阴性控制精确，参数及SHA保持。投影used z RMS约<=1.00000009、used饱和0；增益不改z且偏移不超上界。但换人后Query差异仅投影0.000252%–0.000399%、增益0.000468%–0.001389%，仍小，未证明对应或分类收益，不能将4步与旧30轮直接比较。
+
+完整8任务及Test未启动，无正式mAP。旧48checkpoint和main/test-only保持。327非权重产物已本地逐SHA核验，归档af94f8f3…，output/person_query_conditioning/preflight_snapshot_20261030/snapshot。三上下文与执行协议均更新；仍先验证条件链条，不自动扩大Attention或叠加修复。
+
 ## 2026-10-30：开始修改人物条件传递，两个互斥单因素版本
 
 用户授权开始修改，本次先代码/单测/真实短smoke，不自动启动完整8任务。新codex/person-query-conditioning-20261030从131919e，保留既有dirty。新增PersonQueryReadout/Model：QPROJ_GROUND_POOL/ATTN只在tanh前对C(LN(hP))做无affine RMS上限1，保留原loc .01/5轮warmup且f不放大；QGAIN_CONTENT_POOL/ATTN保留原投影/tanh且无loc，只把raw f以最大32小信号增益送入相对anchor RMS1%平滑上界。两项互斥，最终h0修正1%仍原样，不添加参数/改原U或原三路训练。模式参数为预先工程起点，非最优或提升保证。

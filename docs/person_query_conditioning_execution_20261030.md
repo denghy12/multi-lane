@@ -65,3 +65,22 @@ GAIN保留原z和tanh，且仍无定位loss；只对原低秩raw=f(hP)做：
 将来若明确执行正式训练，可分别使用--family projection或--family gain保持实验顺序。默认只选projection族；不将两个修复叠加，不为已有四组旧控制默认重训。完整8任务结果必须同时比较B0/CLS-MLP、各自匹配旧控制和同输入Pool，并复核原函数。不能仅看前三任务正差或解除饱和就扩大训练。
 
 创建本协议时仅已完成本地静态检查，尚未宣称远程测试/真实smoke通过。通过后追加真实证据，三上下文同步。
+
+## 实际完成的预检
+
+执行源码ffab151d0f540cf38e310dcd70e2b3d6e2d94088，经Git-only部署上述独立worktree。新机制11项、既有条件取证/私有摘要/梯度保护/队列44项测试均通过，无skip，含真实CUDA AMP。静态编译、bash -n及git diff --check通过。
+
+GPU0最大1并发，四组各完成task0/1各4次主更新及4次私有更新，共32主/32私有更新、0skip。完成4份TRAIN标定及4份Val首64人预检。跨组8份arm-task审计确认原参数、原监督loss、增强batch流、OFF融合及三路独立预测逐值一致；新支路均有非零梯度。OFF参照是本次同短预算底座，不把它称为历史30轮正式B0精度。
+
+TRAIN探针各组使用相同task0首62人batch（55名双方可见供体）、task1首64人batch（58名供体），四组共452次有效人物条件交换；task1同时检查两条已见lane。Full图坐标逐像素一致、native修正精确重放、晚期Query不变、zero-condition交换阴性控制精确通过。探针0更新，模型/视觉参数、自有checkpoint SHA保持。
+
+| 检查 | 实际观察 | 结论边界 |
+| --- | --- | --- |
+| 投影尺度版 | 每轮日志used RMS最大约1.00000009；used abs(z)>3为0；平均tanh导数0.5661–0.6028 | 约束确实位于投影后，短训练未普遍饱和；不证明30轮后人物方向有效 |
+| 偏移增益版 | raw/used投影RMS完全一致，Query偏移低于1%上界 | 没有混入投影修复；1%是上界，不强制拉到1% |
+| 交换人物后的主体Query相对RMS差异 | 投影版0.000252%–0.000399%；增益版0.000468%–0.001389% | 人物信号非零，但仍很小，不能称人物对应检验通过 |
+| 框归属和分类修正 | 变化很小，部分binding mass gain仍为负 | 未证明正确人物优于错配或Attention有效 |
+
+完整8任务训练及Test未启动，无新正式mAP结果；不能将4步与旧30轮数值直接解释为机制提升。后续仍先检查充分学习后的投影→Query→取证→分类链条，再判断Attention与同输入Pool的相对收益，不自动叠加修复、扩大容量或搜索参数。
+
+旧48份源checkpoint SHA逐一匹配；main/test-only status SHA仍ea2e261e…/e9d1479f…，原model.py、runner.py、person_grounded_summary.py与131919e无差异。全部327份非权重产物已同步本地output/person_query_conditioning/preflight_snapshot_20261030/snapshot并逐SHA核验，服务器权重保留。归档SHA256 af94f8f36ad4b53363cfae7b9e8adc6a0844f65dd835418cc61e9edc957e0fcf；核心证据为snapshot/output/person_query_conditioning/smoke_seed1_20261030_01/preflight_audit.json及cross_arm_audit.json，日志在snapshot/logs/person_query_conditioning/。

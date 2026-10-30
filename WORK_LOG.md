@@ -1,5 +1,13 @@
 # 工作日志
 
+## 2026-10-30：条件传递两个单因素版本完成及预检
+
+ffab151（codex/person-query-conditioning-20261030）Git-only部署独立worktree。新增投影RMS上限1与独立相对Query偏移增益32/上界1%，各有Pool/Attention，无参数增长/组合修复，原三路训练及最终1%修正保持。11新+44旧测试全通过无skip，含实际CUDA AMP。
+
+GPU0最大1并发完成四组task0/1各4主+4私有更新，共32/32、0skip；4 TRAIN标定/Val首64完成。8份arm-task原参数/loss/增强输入/OFF及三路预测精确相同。TRAIN每组62人/55供体及64人/58供体，native/lateQuery/zero-condition控制均通过；人物交换Query差异仍仅0.000252%–0.001389%，尚无人物绑定或分类收益证据。投影used z RMS约<=1.00000009、used饱和0；增益未改投影。短训练不作正式效果依据。
+
+旧48checkpoint SHA不变，main/test-only状态不变，未启动完整8任务/Test。327份非权重结果日志已回传逐SHA核验至output/person_query_conditioning/preflight_snapshot_20261030/snapshot，归档af94f8f36ad4b53363cfae7b9e8adc6a0844f65dd835418cc61e9edc957e0fcf。三上下文和详细执行协议同步，未merge/删改数据/触及用户dirty。
+
 ## 2026-10-30：开始修改人物条件传递，两个互斥单因素版本
 
 用户授权开始修改，本次先代码/单测/真实短smoke，不自动启动完整8任务。新codex/person-query-conditioning-20261030从131919e，保留既有dirty。新增PersonQueryReadout/Model：QPROJ_GROUND_POOL/ATTN只在tanh前对C(LN(hP))做无affine RMS上限1，保留原loc .01/5轮warmup且f不放大；QGAIN_CONTENT_POOL/ATTN保留原投影/tanh且无loc，只把raw f以最大32小信号增益送入相对anchor RMS1%平滑上界。两项互斥，最终h0修正1%仍原样，不添加参数/改原U或原三路训练。模式参数为预先工程起点，非最优或提升保证。
