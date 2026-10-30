@@ -1,5 +1,39 @@
 # 工作日志
 
+## 2026-10-30：开始修改人物条件传递，两个互斥单因素版本
+
+用户授权开始修改，本次先代码/单测/真实短smoke，不自动启动完整8任务。新codex/person-query-conditioning-20261030从131919e，保留既有dirty。新增PersonQueryReadout/Model：QPROJ_GROUND_POOL/ATTN只在tanh前对C(LN(hP))做无affine RMS上限1，保留原loc .01/5轮warmup且f不放大；QGAIN_CONTENT_POOL/ATTN保留原投影/tanh且无loc，只把raw f以最大32小信号增益送入相对anchor RMS1%平滑上界。两项互斥，最终h0修正1%仍原样，不添加参数/改原U或原三路训练。模式参数为预先工程起点，非最优或提升保证。
+
+原person_grounded_summary.py/model.py/runner.py保持；通用build/config/eval/参数统计/CLI和TRAIN校准仅新kind分派，新增actual-path trace及TRAIN own/wrong/zero-condition probe。候选初始化逐参匹配旧控制，原B0仍自训练，无教师/任务参数安装。Pool221789/Attn221728每任务不变，seed1历史b32/scale.03/aux/ASL/Person颜色off/72线程配方保持。正式入口准备projection/gain两族单独运行，暂不正式训练。
+
+GPU0现有任务约17GB/99%，其他卡也满载不动。本次相关单测/CUDA AMP后，四组task0/1各4更新+B64 smoke在GPU0 max1自动等free>=6GB/shm>=1GB；之后自有checkpoint固定TRAIN多人probe0更新。日志/输出logs/output下person_query_conditioning，协议docs/person_query_conditioning_execution_20261030.md。当前仅实现与本地静态检查，远程未测、不声称效果。main/test-only/既有source权重不改，结果将回传核验，三上下文已更新。
+
+## 2026-10-30：48项断点诊断全部完成，定位两类条件传递瓶颈
+
+诊断seed1_20261029_02／源码131919e，六arm×task0/2/6/7×Val/Test共48case及CPU分析均complete，无新训练；源训练模型仍4349449。230份产物已同步本地逐SHA，归档b610657cf74822a73df355efb3a7fe5e01278b718cdc36db573f0e6b13e11bbc；48源compact SHA均与训练完成记录相同。原模型/诊断remote worktree clean，main/test-only status SHA仍ea2e261e…/e9d1479f…，无修改。
+
+主要新证据（stage7 lane7、Val1178/Test2829有效配对）：Person LN输入换人相对RMS差83.84%/83.80%；无定位Attn tanh输出仍差86.82%/88.68%，但f RMS只有.000383/.000378，对Query RMS1.3516调制太弱，Query只变.01835%/.01854%。定位Attn投影z仍差18.03%/18.16%，tanh后只.01059%/.01597%；abs(z)>3通道99.9416%/99.9249%，平均导数5.42e−5/6.86e−5，Query只变.000835%/.001185%。当前task0/2/6/7和Pool也出现定位版99.25%–99.94%饱和。不同模型有不同断点：不宜说所有模型都饱和或Person输入一样。近常量的是人物条件偏移，Full原查询/摘要仍可随图片变化。
+
+空间证据：定位Attn任务7配对人群，Val自己框/他人框质量均约39.64%，Test均约40.19%，无定位约29.86%/30.54%，两框一起提升。当前人物框确实监督loss；减少背景并同时读几个人可改善loss，但不足以说明指定当前目标。高可见+面积匹配+足够独占区域Val198/Test438人，自己相对他人密度、正确vs换人binding gain区间均跨0。CONTENT Attn Test全可见有微小正gain约7e−5，但Val不稳/控制后跨0，不能忽略该小信号，也不能升级有效人物读取结论。
+
+排序证据：GROUND Attn最终Sadness/Sensitivity/Suffering AP差，Val−.3329/−.0172/+.3721，Test−.2202/+.0255/−.4913。Suffering全体正负投影均值分离+.0179，但固定B0邻近负例修正方向−.008435，修复19.89%/破坏27.42%；Sadness修复16.24%/破坏20.25%。task6自身checkpoint已有损失（Test Suffering约−.4971），不能主要解释为后续遗忘。原Full/head未受新梯度损伤；人物绑定没通过，不能进一步唯一断言分类头接口是根因。
+
+正式完整8任务评分仍沿用原模型：B0 Val42.4628/49.4763、Test32.6800/39.5292；CLS-MLP42.5495/49.6120、32.7139/39.5923；CONST Pool42.5180/49.6220、32.6726/39.5909；CONST Attn42.4484/49.5074、32.7007/39.6201；CONTENT Pool42.4986/49.5905、32.6849/39.6294；CONTENT Attn42.5259/49.6281、32.6783/39.5889；GROUND Pool42.4995/49.6346、32.6870/39.6158；GROUND Attn42.5114/49.5745、32.6589/39.5575。没有新版本或新最好结果，不将4个诊断阶段平均当成8阶段平均。
+
+本地独立复算96指标/780逐类/16416配对/2736查询/2736空间/192区间；mAP/AP/AUC、邻近排序和区间与remote一致，少量float32分位等版本差<=5.8e−6。新增只读audit_person_grounded_breakpoint_results.py核验240历史文件和3648条人物×lane原始张量（RMS/tanh/导数/alpha/框覆盖），全部通过。16常量阴性case通过。正式全人物保留，小尾仅不做张量归因：Val投影最多缺29人/阶段，Test task6/7全部5367/5368人覆盖，核心排序损伤非尾样本导致。较严格标签差异子群可能只有29/38人，报告功效边界。
+
+报告docs/person_grounded_breakpoint_results_20261030.md；完整回传output/person_grounded_breakpoints/complete_snapshot_20261030_01/snapshot；独立分析analysis_20261030_01与raw_audit_20261030_01。下一步保留B0/CLS-MLP，停止本版Attention扩容；若继续，先单独检验C(LN(hP))投影后的尺度/饱和保护，再单独检验f相对Query的有效量级。输入hP已LN，不能重复加输入LN当新修复；正确人物取证须先稳定优于错配，再比较Attention/Pool或Task CLS语义对齐。去tanh/加LR/放大偏移不保证mAP。当前只更新本地报告/复算脚本和三上下文，保留旧dirty；未训练、未提交/推送/合并/删除。
+
+## 2026-10-29：三个断点正式02已启动，GPU0六组并行且首7case通过
+
+运行源码131919ed90e914244c7c7abf4daa0a1b80bd048c，local/upstream/remote已Git-only一致，独立multi-lane-main-person-grounded-breakpoint-audit-20261029 clean。23项相关+4项NumPy测试全通过、CUDA AMP实际执行无skip。CONST_ATTN/GROUND_ATTN的task0 Val全量预检通过：正式源2285人全保留且本阶段2285人新forward精确，paired原1139人中1135做新trace（4人尾batch不计张量统计），有效供体1109；原native/early/late概率精确匹配，所有参数/源checkpoint未变。19份完整修复预检产物已本地同步逐SHA，archive1c2a190e4a2624925682f52b739f048b9a07374a557e37120ab5e05453a88813；此前19首batch预检也已回传，旧01失败产物仍保留。
+
+正式run seed1_20261029_02、tmux person_grounded_breakpoints_seed1_20261029_02；六组实际全已启动，PID CONST_POOL4180948、CONST_ATTN4181472、CONTENT_POOL4182066、CONTENT_ATTN4182654、GROUND_POOL4183314、GROUND_ATTN4183975。健康检查6active／pending空／0failure，已有7/48case完成。仅GPU0约9760MiB，原48份compact SHA逐一重算与训练完成记录完全匹配，source4349449 clean、main/test-only status SHA仍ea2e261e…/e9d1479f…。startup_health.json已回传output/person_grounded_breakpoints/startup_20261029。
+
+剩余case自动按每arm task0/2/6/7的Val/Test完成；六arm完成后自动CPU生成analysis目录（各断点/框区域/分类排序及500次聚类统计），分别forward completion与analysis completion。没有新训练、没有组装模型、没有改旧评估标准。全历史mAP/AP/AUC仍用全部源人物；新Wdelta/张量只统计原batch>=32且精确重放人群，缺失尾样本名单与mask/NaN显式保存，不当作零值。尚无完整正式断点结论，不提前宣称tanh饱和或空间绑定失败。
+
+本地本次只补运行文档与三上下文，不再改/pull运行源码；已有dirty报告/分析均保留，不合并main、不删数据。不需用户手动启动或同步代码。完整协议docs/person_grounded_breakpoint_execution_20261029.md，正式产物/日志output/logs下person_grounded_breakpoints/seed1_20261029_02。
+
 ## 2026-10-29：诊断01严格回放中止；固定小尾batch策略后准备重跑02
 
 首次六组诊断seed1_20261029_01均在task0 Val配对尾batch中止；各组完整2285人的ON/OFF/三路已逐值重放，但最后4人batch在未插入观察器的原native前向就无法匹配。单独同checkpoint/同input连续前向，72→4→72线程均有变化（相对历史max abs .00390625；完整诊断首次尾batch曾.01171875），不是简单恢复72线程可解决。原参数和checkpoint未变，失败输出/日志/队列保留，不用其计算结果下机制结论，也不放宽容差。
