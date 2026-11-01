@@ -23,8 +23,9 @@ def weights(mask,mode):
 def main(args):
     torch.set_num_threads(2);root=args.snapshot
     names=read(root/'baseline/config.json')['class_order']
+    heads=read(args.head_accounting) if args.head_accounting else None
     result=dict(verified_score_records=0,paired_cohorts=[],summary={},stages={},final_views={},
-        classes={},counterfactual={},reliability={},score_scale={},training={})
+        classes={},counterfactual={},reliability={},score_scale={},training={},head_calibration={})
     for arm in ('I_W','I_M'):
         p=root/'experiment'/arm/'train'
         cfg=read(p/'config.json');hist=read(p/'training_history.json');audit=read(p/'audits.json')
@@ -49,6 +50,7 @@ def main(args):
             result['summary'][arm+'_'+split]=d['summary']
             result['stages'][split][arm]=[r['mAP'] for r in d['metrics']]
             counter={'W':[],'M':[]};native_differences=[]
+            calibration={k:[] for k in ('norm_to_full','bias_to_full','norm_and_bias_to_full')}
             for task in range(8):
                 b=load(root/'baseline'/split/'view_scores'/f'task{task}.npz')
                 x=load(root/'experiment'/arm/split/f'task{task}_scores.npz')
@@ -68,6 +70,23 @@ def main(args):
                     counter[mode].append(metric(p,x['targets'],task).mAP)
                     if arm.endswith(mode):
                         native_differences.append(float(np.max(np.abs(z-x['fused_logits']))))
+                if heads is not None:
+                    count=x['targets'].shape[1]
+                    reference=heads[arm]['full']
+                    rn=np.asarray(reference['row_norms'][:count],dtype=np.float32)
+                    rb=np.asarray(reference['bias'][:count],dtype=np.float32)
+                    w=weights(x['face_reliable'],arm[-1])
+                    for name in calibration:
+                        calibrated=[]
+                        for v in ('full','person','face'):
+                            h=heads[arm][v]
+                            norm=np.asarray(h['row_norms'][:count],dtype=np.float32)
+                            bias=np.asarray(h['bias'][:count],dtype=np.float32)
+                            scale=rn/norm if name!='bias_to_full' else np.ones_like(rn)
+                            offset=rb if name!='norm_to_full' else bias
+                            calibrated.append((x[v+'_logits']-bias)*scale+offset)
+                        z=sum(v*w[:,i,None] for i,v in enumerate(calibrated))
+                        calibration[name].append(metric(torch.from_numpy(z).sigmoid().numpy(),x['targets'],task).mAP)
                 if task!=7:continue
                 for label,data in (('B0',b),(arm,x)):
                     views={v:metric(data[v+'_probabilities'],data['targets']).mAP for v in ('fused','full','person','face')}
@@ -90,6 +109,8 @@ def main(args):
                         for i,(n,v,a,c) in enumerate(zip(names,delta,base['task_metrics'][task]['per_class_ap'],d['metrics'][task]['per_class_ap']))],key=lambda v:v['delta']))
             result['counterfactual'][arm+'_'+split]={mode:dict(stages=vals,final=vals[-1],average=float(np.mean(vals))) for mode,vals in counter.items()}
             result['counterfactual'][arm+'_'+split]['native_max_abs_logit_reconstruction_difference']=max(native_differences)
+            if heads is not None:
+                result['head_calibration'][arm+'_'+split]={k:dict(stages=v,final=v[-1],average=float(np.mean(v))) for k,v in calibration.items()}
     args.output.parent.mkdir(parents=True,exist_ok=True)
     args.output.write_text(json.dumps(result,indent=2)+'\n')
     print(json.dumps(dict(score_records=result['verified_score_records'],paired_records=len(result['paired_cohorts']),
@@ -100,4 +121,5 @@ if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--snapshot',type=Path,required=True)
     p.add_argument('--output',type=Path,required=True)
+    p.add_argument('--head-accounting',type=Path)
     main(p.parse_args())
