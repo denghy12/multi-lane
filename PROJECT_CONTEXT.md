@@ -1,5 +1,41 @@
 # 项目上下文
 
+## 2026-11-01：开始实现独立三视图CLS交互，待真实预检
+
+用户授权GPU0完整8任务Val/Test。新分支codex/crossvit-independent-three-view-20261101保留所有已有dirty；新增crossvit_three_view.py、crossvit_experiment.py、run_crossvit_three_view.py、GPU0入口和专项测试，无原model.py/runner.py修改。三份独立冻结骨干／三套ASP与heads；index5块后Task CLS读其他冻结patch，三接收模块同步；五臂I_W/I_M/C_W/C_M/P_M，seed1历史强配方。首版K/V无对方可训练ASP梯度，Face无效全屏蔽及空batch防Adam动量更新。
+
+新增执行协议docs/crossvit_independent_three_view_execution_20261101.md。先专项真实Torch/CUDA与五臂两任务4更新预检，再按峰值显存准入自动跑五组8任务及两split；每epoch可恢复、旧类TRAIN预测保护、ON/OFF同batch缓存Frozen Forward、评估CPU2线程。当前只完成本地语法检查，不能声称测试通过或正式已启动。
+
+## 2026-11-01：独立三视图CrossViT式方案，仅计划
+
+用户明确希望先不共享三分支参数，各自交互模块／head，末端融合logits；本轮只核对论文与当前结构并新增docs/crossvit_independent_three_view_plan_20261101.md，未改业务代码、未启动训练。候选为三份独立但同预训练值且始终冻结的ViT，三套视图－任务Adapter／Selectors／Prompts／heads；第6层本地任务块后，每个Task CLS读取其他视图冻结空间patch，3个任务私有接收模块同步更新CLS，再继续7–12层。不是旧Selector读取Full摘要写回，也不是解冻三个ViT或A/B组装。
+
+主比较含I-W/I-M无交互、C-W/C-M CLS-CA、P-M同输入Pool，共五组拟新增训练；历史权重与CrossViT式有效视图logits均值分开，B0已有checkpoint重放。seed1强配方／8任务／30epoch／历史标准，旧任务全部依赖封存；原始patch来自冻结流，首版没有经对方可训练摘要的跨分支梯度，但融合loss仍共同耦合。此前查询修复仍仅smoke，不因新计划自动补正式训练；新方案效果未知，现有dirty及所有源结果保持。
+
+## 2026-10-31：核对共训／换头／均值表中实际QKV
+
+本次限定用户给定seed1旧ATTENTION_BOUND表，不混入后来protected旁路。cross_view_attention.py与Face训练d1322ab无差异：Person Q=该层任务Selectors经LN/Wq，K/V=Full的10份摘要各自投影；Face也用任务Selectors和Full摘要，但独立Wq/Wk/Wv/Wo。10个768维输入映到64维/4头，每头10×10权重，输出写回本视图10份摘要，scale .1后按本视图摘要RMS cap .1限幅；不使用Person/Face摘要或最终CLS构造该次Q。两接收视图前向读取Full，没有反向消息或Person–Face互读；训练梯度仍可经Full摘要及共享参数改变Full。
+
+换B0分类头只改末端读出，不改QKV/摘要/Task CLS；两完整模型均值保留A一套Person Attention与B两套Person/Face Attention及各自Full摘要依赖，没有新增跨模型Attention。CrossViT则以单个本分支CLS agent读取对方patch（含自身投影CLS作为K/V），更新本CLS并继续编码。已核对本地源码/运行报告及官方论文实现；仅说明与三上下文维护，无模型修改/新实验。
+
+## 2026-10-30：CrossViT论文与当前三视图结构对照，仅研究分析
+
+按用户要求核对CrossViT原论文§3.2/3.3/4.3及IBM官方crossvit.py、engine.py。其跨分支使用本分支CLS作为agent，读取另一分支patch（K/V还包括投影后的自身CLS），只在该融合步更新CLS，再与本分支patch继续编码；两分支分别head后logits均值，同一模型共同训练。不能将其理解为CLS仅交换CLS、直接改写全部patch、冻结原函数或多模型参数组装。
+
+研究启发限定为候选：保留MULTI-LANE原任务路径及梯度保护，在任务内研究交互CLS状态、摘要/patch信息访问与分类读出。任务条件Person CLS不同于旧Person摘要Query；当前旁路已用最终CLS条件，单纯改名或增加单Query并非新机制。CrossViT同图多patch尺度与本项目人物crop/Face存在视野和目标身份差异，未解决同图多人归属；CA线性复杂度不等于整个模型线性。保留当前条件传递修复优先级，不以论文有效推导本项目有效，不改模型/训练入口、不启动新实验。来源https://arxiv.org/html/2103.14899及https://github.com/IBM/CrossViT/blob/main/models/crossvit.py。
+
+## 2026-10-30：导师总结补齐早期任务Query与人物摘要Query的选择依据
+
+按用户要求扩充同一docs/three_view_attention_research_summary_for_advisor_20261030.md，在第二节补3种结构控制（Person自注意力、任务Selector读取Full、Person摘要读取Full）及2项只读归因（关闭残差、同图换人），给出Val/Test、架构接口、动机与结果解释。明确没有另建Person Selector库；任务Selector、Person摘要及后期Person CLS是不同层级，保留任务查询是相对实验取舍而非已证明Attention有效。
+
+早期seed0/aux0/Adapter关闭/固定全人群单独标注，不能与后期seed1历史seen-positive强底座比较阶段平均。补“为什么选择任务查询”及导师可用段落，连到后期任务查询基础上的Person条件调制；原14组编号保留，章节顺延。58条数值表行54条直接对源表、4条交叉读出按单元格核验，23表/18本地来源链接通过。只改总结与三上下文，无新训练、无代码/源报告修改或提交推送。
+
+## 2026-10-30：导师汇报版三视图Attention研究总结
+
+按用户要求新增docs/three_view_attention_research_summary_for_advisor_20261030.md，从Person/可靠Face共训与B0换头、完整模型均值，串联固定头/独立Selector/保护Face、输出迁移及RNG修复、无教师排序、原函数保护、幅度与门控、私有Summarize、人物条件定位、断点诊断及当前修复。按14组实验及配套诊断说明前提/改动/原因/结果/归因，采用MULTI-LANE术语与整体数据流，保留Val/Test及结果来源。
+
+明确组合33.6248/40.5129不是自行训练单模型；首任务筛选不冒称8任务；私有Summarize采用FP32补评；当前查询修复仅预检、未启动完整训练。48条四指标结果已对源报告/交叉读出单元格核对，19表列数及17链接检查通过。仅新增总结和更新三上下文，无训练/模型改动/提交推送；既有dirty分析保持。
+
 ## 2026-10-30：人物条件修复代码与真实预检完成
 
 codex/person-query-conditioning-20261030源码ffab151已Git-only部署独立worktree。投影版只限制C(LN(hP))的RMS上限1；偏移版只做最大32小信号增益及相对Query 1%平滑上界，各有Pool/Attention，共4组，无组合修复/新增参数。原model.py/runner.py/person_grounded_summary.py不变。新11+旧44测试全部通过无skip，含真实CUDA AMP。

@@ -1,5 +1,41 @@
 # 工作日志
 
+## 2026-11-01：实现独立三分支与GPU0自动预检／正式队列
+
+用户要求开始，创建codex/crossvit-independent-three-view-20261101。新增独立封装，复用原局部Summarize／Task Forward与原BCE／Adapter-ASL训练路由，不改旧共享实现。构建三份冻结ViT／独立任务ASP/head、单CLS跨patch读取与同输入Pool、历史／均值logits控制；补每epoch恢复与旧依赖审计、Face完整mask和空batch动量保护、同batchON/OFF冻结缓存、2CPU线程评估。
+
+已检查远程worktree清单及主树／test-only状态，只GPU0空闲可用。记录状态SHA，不修改他人作业或dirty。新增方案／执行协议及三上下文；代码py_compile、shell bash -n通过，Torch专项／真实数据smoke待Git-only部署执行。后续授权范围包括提交推送与新worktree正式启动，不包括main合并或删除源产物。
+
+## 2026-11-01：制定独立三分支、CLS-agent交互与logits融合方案
+
+按用户“先不修改代码”要求，只读核对CrossViT论文及官方crossvit.py／engine.py、MULTI-LANE论文、当前_lane_block与原aux BCE／Adapter-ASL路由。新增docs/crossvit_independent_three_view_plan_20261101.md并同步三上下文，明确三份冻结骨干与三套可训练任务参数的区别、Task CLS读取跨视图原始patch的接口、第6层块后位置、可靠Face完整mask、独立heads与任务内logits融合、任务间依赖封存。
+
+给出B0参照＋五组独立分支训练控制，区分参数／head打包改变、历史权重与均值、CA与同输入Pool；完整8任务seed1／历史配方仅拟议。无模型代码修改、无服务器操作、无新分支／提交推送、无训练或模型前向；保留已有未提交分析与所有结果。文档静态检查随后执行。
+
+## 2026-10-31：解释指定旧共训表QKV及CrossViT差异
+
+核对historical_b32_modules ATTENTION_BOUND、SummaryAttention、model._lane_block与fixed_model_mean_forward。确认当前cross_view_attention.py与原Face执行d1322ab字节一致。两接收分路均用任务Selector作Q、Full摘要作K/V，投影独立；Person/Face本身作为残差底座和限幅参照，非内容Query。补充两级读取（Summarize后再CA）与原Task MSA的区别，换头/固定均值均不新增QKV或跨来源交互。
+
+对照CrossViT官方§3.3及实现，强调单CLS agent/对方patch/本CLS更新与本项目10Selector Query/10摘要/接收摘要写回的接口差异；记录前向不写Full不等于共同训练Full不变。只读核对和三上下文更新，不启动训练/前向、不改业务代码和既有结果。
+
+## 2026-10-30：只读核对CrossViT，解释可迁移机制与边界
+
+阅读原论文/官方实现，对照原MULTI-LANE及当前protected/private/person-grounded读取路径。区分CrossViT CLS-agent→对方patch→本CLS更新、旧Person摘要写回、新方案最终融合残差；说明同图多尺度与目标人物多crop、端到端共适应与原函数精确保真、分支head均值与同头特征融合的差异。官方CA含自身投影CLS作为K/V、无附加FFN，分支patch在融合步不变但后续/梯度不受冻结保护；全模型仍有分支MSA。
+
+仅提出交互CLS及摘要/patch访问的可检验候选，不包装已做过的CLS条件Query为新机制；仍须人物交换、同输入Pool、原函数恢复及两个Test目标。三上下文同步，无业务代码改动、无训练/模型前向、无提交推送或新实验启动。
+
+## 2026-10-30：补充导师版任务Selector／Person摘要Query实验链
+
+同一导师Markdown新增前期A–E：3训练控制与残差关闭/同图换人2诊断。完整对照任务Query42.8976/48.8781/32.4993/35.9290，Person Query42.1003/47.8098/31.7499/35.1945；关闭结果和本人/供体Query子群表均核源。解释任务查询稳定语义基础不等于固定注意力，Person动态不等于正确人物对应，关闭后仍有优势不能归为即时融合收益。
+
+修正全篇评估前提的适用范围：早期seed0、aux0、无Adapter、固定全人群，仅作原批次内对照；后期seed1强底座历史标准不变。章节重排，补2来源报告与人物条件后续逻辑，保留原14组实验编号。QA新增output/reports/three_view_attention_advisor_summary_20261030/document_checks_with_query_history.json：58条数值行/23表/18本地链接通过。仅本地文档编辑与三上下文维护，未训练/改代码/改权重/提交推送。
+
+## 2026-10-30：完成导师可读的研究主线Markdown总结
+
+新增docs/three_view_attention_research_summary_for_advisor_20261030.md，覆盖用户给定共训/换头/均值起点至当前条件修复，按14组实验与配套只读诊断叙述前提、结构改动、动机、结果、证据边界与后续逻辑。补原三路及受保护分支两张整体数据流图；完整Val/Test汇总、首任务/选定阶段/短预检分开标记；附16份来源报告链接和原MULTI-LANE术语来源。
+
+48条四指标结果中44条直接匹配源表，4条表征×头交叉行按6份源单元格核对；19表列数、代码围栏及17链接通过。QA记录output/reports/three_view_attention_advisor_summary_20261030/document_checks.json。三上下文同步，仅本地文档工作，不运行训练/远程前向，不改代码、旧报告或已有dirty，不提交/推送/合并。
+
 ## 2026-10-30：条件传递两个单因素版本完成及预检
 
 ffab151（codex/person-query-conditioning-20261030）Git-only部署独立worktree。新增投影RMS上限1与独立相对Query偏移增益32/上界1%，各有Pool/Attention，无参数增长/组合修复，原三路训练及最终1%修正保持。11新+44旧测试全通过无skip，含实际CUDA AMP。
