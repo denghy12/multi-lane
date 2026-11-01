@@ -38,9 +38,20 @@ def precision(model,mode):
                     with torch.autocast(device_type='cuda',enabled=False):
                         return forward(cls.float(),[m.float() for m in memories],masks)
                 module.forward=wrapped
+    if mode in ('amp_fp32_task_attention','amp_fp32_task_block'):
+        attribute='_prompt_attention' if mode.endswith('_attention') else '_lane_block'
+        for branch in model.branches.values():
+            forward=getattr(branch,attribute);originals.append((branch,attribute,forward))
+            def wrapped(*args,forward=forward,**kwargs):
+                with torch.autocast(device_type='cuda',enabled=False):
+                    args=tuple(x.float() if torch.is_tensor(x) and x.is_floating_point() else x for x in args)
+                    return forward(*args,**kwargs)
+            setattr(branch,attribute,wrapped)
     try:yield
     finally:
-        for module,forward in originals:module.forward=forward
+        for entry in originals:
+            if len(entry)==2:entry[0].forward=entry[1]
+            else:setattr(entry[0],entry[1],entry[2])
 
 
 def main(args):
@@ -57,7 +68,7 @@ def main(args):
     loader=DataLoader(dataset_view(source,task_indices(3),True),batch_size=64,shuffle=True,
         num_workers=2,prefetch_factor=1,pin_memory=True,drop_last=False)
     x,y,ids=next(iter(loader));x=move_model_inputs(x,torch.device('cuda'));y=y.cuda().float()
-    checkpoints=[args.training_root/'epoch_recovery/task3'/f'epoch{e:02d}.pth' for e in (1,10,13,14)]
+    checkpoints=[args.training_root/'epoch_recovery/task3'/f'epoch{e:02d}.pth' for e in args.epochs]
     hashes={str(p):_sha256(p) for p in checkpoints}
     rows=[]
     write(args.output/'inputs.json',dict(split='train',task=3,sample_ids=list(ids),
@@ -70,7 +81,7 @@ def main(args):
         weights={n:stats(p) for n,p in model.named_parameters()
             if n.startswith('exchange.3.') or n.endswith(('head.weight','head.bias'))}
         bad_state=[n for n,p in model.state_dict().items() if not torch.isfinite(p).all()]
-        for mode in ('amp','amp_off','amp_fp32_exchange','fp32','fp32_off'):
+        for mode in args.modes:
             trace=[];hooks=[]
             def hook(name):
                 def capture(module,inputs,output):
@@ -85,6 +96,7 @@ def main(args):
             torch.backends.cuda.matmul.allow_tf32=amp
             torch.backends.cudnn.allow_tf32=amp
             row=dict(checkpoint=str(path),mode=mode,bad_parameters=bad_state)
+            torch.autograd.set_detect_anomaly(mode=='amp_anomaly')
             try:
                 with precision(model,mode),torch.cuda.amp.autocast(enabled=amp):
                     z,views=model.current_all_logits_with_views(x)
@@ -114,6 +126,7 @@ def main(args):
             except BaseException as e:row['error']=repr(e)
             finally:
                 for h in hooks:h.remove()
+                torch.autograd.set_detect_anomaly(False)
             rows.append(row)
             write(args.output/'progress.json',dict(status='running',records=rows))
             print(path.stem,mode,row.get('logits',{}).get('fused'),row.get('first_nonfinite'),row.get('error'),flush=True)
@@ -129,4 +142,8 @@ if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--training-root',type=Path,required=True)
     p.add_argument('--output',type=Path,required=True)
+    p.add_argument('--epochs',nargs='+',type=int,default=[1,10,13,14])
+    p.add_argument('--modes',nargs='+',choices=('amp','amp_off','amp_fp32_exchange','fp32','fp32_off',
+        'amp_fp32_task_attention','amp_fp32_task_block','amp_anomaly'),
+        default=['amp','amp_off','amp_fp32_exchange','fp32','fp32_off'])
     main(p.parse_args())
