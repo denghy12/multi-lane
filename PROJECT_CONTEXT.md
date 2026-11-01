@@ -1,3 +1,7 @@
+## 2026-11-01 当前主线：历史独立三视图 R1 + CrossViT
+
+用户将参照改正为独立专家固定R1，Test final=33.0119±0.3038（seed0/1/2）。这是概率融合，不是原始logits；本轮seed1配对参照32.9575/40.1154。新分支 codex/r1-anchored-crossvit-20261101 从历史源 acf4634 创建，保留原scale0.1、Person颜色扰动、独立BCE+Adapter-ASL。先原生三分支重放，再运行第6层CLS跨视图Attention及同输入Pool。没有历史任务参数装配、教师或融合loss。GPU0、8task、30epoch、B64。详细协议 docs/r1_anchored_crossvit_20261101.md；当前尚未启动远程正式训练。下文较早的下一步只作历史记录。
+
 # 项目上下文
 
 ## 2026-09-09：R1中心Router公平性修正完成，动态Router停止

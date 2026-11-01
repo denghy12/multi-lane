@@ -1,3 +1,7 @@
+## 2026-11-01：将CrossViT实验重新锚定历史独立R1（实现阶段）
+
+核对历史三seed预测与源配置：固定R1=33.0119±0.3038，seed1=32.9575/40.1154；源代码为sigmoid概率融合。上一联合分支实验改变融合loss、scale和读出，不能替代此参照。从acf4634新建独立worktree/分支 codex/r1-anchored-crossvit-20261101，保留其他dirty工作树。新增原生重放、CLS-agent Attention、同输入Pool和显存/共享内存自动队列。原生监督、各视图增强和Face过滤不变，其他视图仅提供确定性冻结patch证据；每epoch保存完整恢复状态。增加原函数、RNG、梯度覆盖、mask、旧任务保护、恢复及CUDA AMP测试。当前本地编译/diff检查通过，远程测试和实验尚未启动。完整方案见 docs/r1_anchored_crossvit_20261101.md。
+
 # 工作日志
 
 ## 2026-09-09：完成R1中心Router公平性修正

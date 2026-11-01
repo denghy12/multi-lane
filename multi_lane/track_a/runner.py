@@ -740,6 +740,10 @@ def build_optimizer_groups(
                                  "weight_decay": weight_decay,
                                  "lr": selector_condition_learning_rate})
     adapter_parameters = list(model.adapter_optimizer_parameters())
+    if hasattr(model, 'r1_parameters'):
+        interaction=list(model.r1_parameters())
+        if interaction:
+            optimizer_groups.append(dict(params=interaction,lr=4e-4,weight_decay=0.))
     if adapter_parameters:
         if adapter_learning_rate is None or adapter_learning_rate <= 0:
             raise ValueError("Enabled adapters require a positive learning rate")
@@ -962,6 +966,14 @@ def train_task(
     regularization_calibration_samples = 0
     regularization_weight: Optional[float] = None
     epoch = 0
+    resume=getattr(model,'r1_resume',None)
+    if resume is not None:
+        optimizer.load_state_dict(resume['optimizer'])
+        scheduler.load_state_dict(resume['scheduler'])
+        scaler.load_state_dict(resume['scaler'])
+        history=resume['history']
+        epoch=resume['next_epoch']
+        completed_task_updates=resume['completed_task_updates']
     while (
         completed_task_updates < optimizer_updates_per_task
         if optimizer_updates_per_task is not None
@@ -995,7 +1007,7 @@ def train_task(
                 and completed_task_updates >= optimizer_updates_per_task
             ):
                 break
-            if isinstance(images, dict):
+            if isinstance(images, dict) and 'condition_valid' in images:
                 condition_samples += len(images["condition_valid"])
                 condition_valid_total += float(images["condition_valid"].sum())
                 condition_visible_total += float(images["bbox"][:, 4].sum())
@@ -1149,6 +1161,8 @@ def train_task(
             flush=True,
         )
         epoch += 1
+        if hasattr(model,'save_training_epoch'):
+            model.save_training_epoch(task_id,epoch,history,optimizer,scheduler,scaler,completed_task_updates)
     history[-1]["validation_current_mAP"] = current_validation_map(
         model, validation_loader, device, amp
     )
@@ -1323,6 +1337,8 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Save per-task method state without the frozen CLIP visual tower.",
     )
+    parser.add_argument('--r1-kind',choices=('native','attention','pool'))
+    parser.add_argument('--r1-view',choices=('full','person','face'))
     parser.add_argument(
         "--evaluation-score-purpose",
         choices=("validation_search", "fixed_test_fusion"),
@@ -1531,18 +1547,25 @@ def main() -> None:
     device = torch.device("cuda")
     root = Path(__file__).resolve().parents[2]
     output = args.output_root.expanduser().resolve()
-    output.mkdir(parents=True, exist_ok=False)
+    output.mkdir(parents=True, exist_ok=args.r1_kind is not None)
     save_checkpoints = not args.no_save_checkpoints
     if save_checkpoints:
-        (output / "checkpoints").mkdir()
+        (output / "checkpoints").mkdir(exist_ok=args.r1_kind is not None)
     if args.save_calibration_scores:
         (output / "calibration_scores").mkdir()
     if args.save_compact_checkpoints:
-        (output / "compact_checkpoints").mkdir()
+        (output / "compact_checkpoints").mkdir(exist_ok=args.r1_kind is not None)
 
     metadata = git_metadata(root)
     visual = load_openai_clip_visual(args.clip_checkpoint)
-    model = MultiLaneModel(
+    model_class=MultiLaneModel
+    extra={}
+    if args.r1_kind is not None:
+        from .r1_crossvit import R1Receiver
+        if args.r1_view is None:raise ValueError('R1 receiver view required')
+        model_class=R1Receiver
+        extra=dict(r1_kind=args.r1_kind,r1_view=args.r1_view,r1_root=output)
+    model = model_class(
         visual_encoder=visual,
         task_sizes=TASK_SIZES,
         num_selectors=10,
@@ -1562,6 +1585,7 @@ def main() -> None:
         selector_condition_layers=args.selector_condition_layers,
         selector_condition_hidden_dim=args.selector_condition_hidden_dim,
         selector_condition_scale=args.selector_condition_scale,
+        **extra,
     ).float().to(device)
     model.visual_encoder.requires_grad_(False)
     model.assert_visual_frozen()
@@ -1937,6 +1961,20 @@ def main() -> None:
         "adapter_parameters_per_task": adapter_parameters_per_task,
         "adapter_parameter_counts_per_task": adapter_parameter_counts_per_task,
     }
+    if args.r1_kind is not None:
+        config.update(r1_kind=args.r1_kind,r1_receiver=args.r1_view,r1_supervision='own_view_BCE_and_Adapter_ASL_no_fused_objective',
+            r1_primary_fusion='locked_R1_probability',r1_secondary_fusion='same_weights_logit',
+            r1_exchange_layer=5 if args.r1_kind!='native' else None,r1_exchange_dim=64,r1_exchange_heads=4,
+            r1_exchange_parameters=sum(p.numel() for p in model.r1_bank.parameters()),
+            r1_evidence='deterministic_native_eval_crops_of_same_TRAIN_person',r1_interaction_precision='FP32')
+        model.r1_config=config
+        path=output/'config.json'
+        if path.exists() and json.loads(path.read_text())!=config:raise ValueError('R1 recovery protocol changed')
+        if args.r1_kind!='native':
+            from .r1_crossvit import attach_evidence
+            train_source=attach_evidence(train_source,args.r1_view,dataset_parent,args.face_manifest_root)
+            val_source=attach_evidence(val_source,args.r1_view,dataset_parent,args.face_manifest_root)
+            reporting_source=attach_evidence(reporting_source,args.r1_view,dataset_parent,args.face_manifest_root)
     (output / "config.json").write_text(
         json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
@@ -1948,6 +1986,13 @@ def main() -> None:
     start = time.time()
     for task_id in range(args.max_tasks):
         print(f"begin_task={task_id}", flush=True)
+        if hasattr(model,'restore_completed_task'):
+            completed=model.restore_completed_task(task_id)
+            if completed is not None:
+                task_rows.append(TaskMetrics(**completed['row']))
+                training_history[str(task_id)]=completed['history']
+                print('R1_RESUME_COMPLETED',task_id,flush=True)
+                continue
         model.activate_task(task_id)
         fit_indices, calibration_indices = fit_calibration_indices(
             train_source, task_indices(task_id), args.calibration_fraction
@@ -2102,6 +2147,8 @@ def main() -> None:
                 json.dumps(calibration_counts, indent=2) + "\n",
                 encoding="utf-8",
             )
+        if hasattr(model,'save_completed_task'):
+            model.save_completed_task(task_id,history,asdict(row))
         print(
             f"task={task_id} {args.reporting_split}_mAP={row.mAP:.6f} "
             f"{args.reporting_split}_cF1={row.cF1:.6f} "

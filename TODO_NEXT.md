@@ -1,3 +1,11 @@
+## 2026-11-01 最新优先：R1基础上的CrossViT
+
+1. 完成测试与Git-only独立worktree部署，不改原主树或test-only。
+2. 9个短smoke通过后，启动GPU0三路native历史重放，补完整Validation/Test与可恢复checkpoint。
+3. 逐任务及融合重放失败立即停止交互队列；通过后自动运行Attention/Pool各三分支。
+4. 对比同seed1原R1（32.9575/40.1154），明确概率主读出/logit次读出，不与33.0119三seed均值直接配对。
+5. 同步日志/预测/状态并分析完整8task，尚不合main。协议见 docs/r1_anchored_crossvit_20261101.md。
+
 # 下一步任务
 
 ## 当前执行：固定R1三种子正式test（2026-09-09）
