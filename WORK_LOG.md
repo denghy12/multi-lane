@@ -1,5 +1,17 @@
 # 工作日志
 
+## 2026-11-01：审计CrossViT队列故障并补已有控制评估
+
+实际未完成：C_W task3因nonfinite ASL中断并触发清空pending；I_W/I_M训练完成但Val/Test均未执行，C_M/P_M未启动。先告知用户状态，未虚构任何五组最终结果。GPU0空闲，原1e2125e clean树启动crossvit_recover_val_20261101／crossvit_recover_test_20261101，各依次评估I_W/I_M，原数据/模型/历史标准不变。
+
+新建codex/crossvit-results-audit-20261101，保留全部dirty。新增只读audit_crossvit_nonfinite.py，以task3 epoch14保存RNG重放下一TRAIN batch，比较epoch1/10/13/14的AMP、OFF、FP32交互和FP32全路径，定位激活/梯度非有限；不优化或修改参数。参数静态检查暂未发现NaN/Inf，需实测后归因。原source/model代码与checkpoint不改。
+
+## 2026-11-01：专项／真实预检通过，GPU0正式三并发
+
+源码1e2125e经Git-only部署独立worktree，远程clean／upstream同HEAD。14专项全部通过含CUDA AMP，41历史回归通过。五臂两任务4更新总40／0skip、十项Val首64、公共初值／增强样本配对及旧依赖审计通过。实际峰值3524.6–4204.9MiB，队列选择3并发，正式8任务seed1已由入口自动启动，训练／后续Val/Test无需用户再次操作。
+
+已核对I_W／I_M／C_W task0首epoch84步0skip，C_M和P_M排队；GPU0约13460MiB／100%。每epoch完整恢复、主目标与Adapter-ASL路由保持、评估2CPU线程与ON/OFF冻结缓存。72份稳定预检产物已SCP回传（无代码／权重传输）并核验archive379ec3aa…及本地逐文件SHA清单。再次核对主树ea2e261e…／test-onlye9d1479f…状态不变。仅本地追加启动文档，未触碰运行源码和其他GPU。
+
 ## 2026-11-01：实现独立三分支与GPU0自动预检／正式队列
 
 用户要求开始，创建codex/crossvit-independent-three-view-20261101。新增独立封装，复用原局部Summarize／Task Forward与原BCE／Adapter-ASL训练路由，不改旧共享实现。构建三份冻结ViT／独立任务ASP/head、单CLS跨patch读取与同输入Pool、历史／均值logits控制；补每epoch恢复与旧依赖审计、Face完整mask和空batch动量保护、同batchON/OFF冻结缓存、2CPU线程评估。

@@ -1,5 +1,17 @@
 # 项目上下文
 
+## 2026-11-01：结果审计发现原队列中断，不能报告完整五组
+
+用户请求实验结果分析。只读核对1e2125e原运行后确认I_W/I_M完整8任务各13950更新训练完成，未评估；C_W task3 epoch14出现75有效步/81跳步、scaler降至5.421e-20，下一轮ASL收到非有限logits退出。原fail-fast控制器清空全部pending，C_M/P_M未启动，汇总不存在；queue.json仍running但failure.json已记录失败，需同时看进程与完成标记。
+
+已按原授权在原clean源树启动I_W/I_M完整Val/Test两条顺序评估队列（GPU0两并发，不改模型），当前补评进行中。新codex/crossvit-results-audit-20261101仅用于只读诊断脚本与报告；原模型/训练配方不改。新增TRAIN重放epoch14 RNG的forward/gradient诊断，比较AMP/FP32/仅交互FP32及OFF，核对源SHA。初查epoch14所有参数有限、投影权重模长温和，尚不能断言专家/Attention表示发散；待定位第一非有限激活。当前不得报完整五组最终或阶段均值。
+
+## 2026-11-01：CrossViT独立三视图五组正式已启动
+
+运行源码1e2125e，本地／远程独立multi-lane-main-crossvit-independent-20261101及upstream一致，远程clean。14专项（真实CUDA AMP无skip）＋41历史回归全通过；五臂两任务各4更新40总更新／0skip及10项Val首64完成。配对审计公共初值／增强batch相同、旧参数／ViT／TRAIN旧类预测保护通过。训练峰值I3524.6MiB、CA4204.9MiB、Pool4190.8MiB，队列实际3并发，最多2评估。
+
+tmux crossvit_three_view_seed1_20261101，正式output/crossvit_independent_three_view/seed1_20261101_01。I_W188483／I_M189152／C_W189764首epoch各84步0skip，C_M/P_M待排；GPU0约13.46GB／100%，GPU1–7不操作。完整8任务30epoch后自动Val/Test和0/2/6/7开关归因。72预检非权重文件已回传，archive SHA379ec3aa…并核验。主树/test-only状态SHA未变。当前未有正式最终结果；本次启动记录仅本地文档追加，不修改运行源码。
+
 ## 2026-11-01：开始实现独立三视图CLS交互，待真实预检
 
 用户授权GPU0完整8任务Val/Test。新分支codex/crossvit-independent-three-view-20261101保留所有已有dirty；新增crossvit_three_view.py、crossvit_experiment.py、run_crossvit_three_view.py、GPU0入口和专项测试，无原model.py/runner.py修改。三份独立冻结骨干／三套ASP与heads；index5块后Task CLS读其他冻结patch，三接收模块同步；五臂I_W/I_M/C_W/C_M/P_M，seed1历史强配方。首版K/V无对方可训练ASP梯度，Face无效全屏蔽及空batch防Adam动量更新。

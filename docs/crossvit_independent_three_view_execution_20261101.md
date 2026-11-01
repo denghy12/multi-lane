@@ -2,6 +2,14 @@
 
 2026-11-01用户授权修改并在GPU0高效运行完整8任务Validation／Test。本文件为实现与执行记录；当前先准备专项测试和真实预检，未报告任何正式精度。
 
+## 执行更新：正式五组队列已经启动
+
+运行源码`1e2125efaa12187364ef9b8e7d56e3d71447792b`，本地／远程新worktree branch、HEAD、upstream一致，远程clean。tmux `crossvit_three_view_seed1_20261101`。14项专项全部通过无skip，包含真实CUDA AMP；41项历史回归通过，总55项。五组真实task0/1各4更新，共40更新／0skip，10项Val首64完成；配对审计确认公共初始化、所有记录增强batch一致，旧参数／冻结骨干／固定TRAIN旧类预测受保护。无预检Test。
+
+预检训练峰值：I_W/I_M各3524.6MiB；C_W/C_M各4204.9MiB；P_M4190.8MiB。CA参数594432／任务、Pool596352／任务，差约0.32%。正式队列据此设最多3并发；截至启动核验，I_W PID188483、I_M189152、C_W189764运行，C_M/P_M排队。前两组已完成task0首epoch各84更新／0skip；C_W首epoch同为84更新／0skip。GPU0约13460MiB、利用率100%；其余GPU未操作。后续Val/Test及task0/2/6/7 ON/OFF自动排队。
+
+72份预检非权重产物已同步本地`output/crossvit_independent_three_view/preflight_snapshot_20261101_01/snapshot`，归档SHA256 `379ec3aad4b46214d050182684de0358563a5adbcb21e5040da4606e96cb3595`，核验通过并保存逐文件清单。主树／test-only状态SHA与启动前一致。正式训练无最终mAP，本地本段和三上下文为启动记录，不更新正在运行的源码或配置。
+
 研究方案：`crossvit_independent_three_view_plan_20261101.md`。源码分支`codex/crossvit-independent-three-view-20261101`。不修改历史工作树、原共享模型的model.py／runner.py，不安装来源A/B/B0任务参数。三份冻结CLIP与三套当前任务ASP/head独立，index5本地块后3个接收模块同步用Task CLS读取对方Frozen Forward空间patch，继续后续Task Forward。
 
 ## 配置和分组

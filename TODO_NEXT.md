@@ -1,5 +1,17 @@
 # 下一步任务
 
+## 2026-11-01：优先补评与只读非有限诊断，原五组并未完成
+
+原队列C_W task3 nonfinite后停止，I_W/I_M八任务训练完，C_M/P_M未启动。正在原1e2125e clean源树两并发补I_W/I_M完整Val/Test，不重复训练。接下来运行TRAIN只读激活/梯度与AMP/FP32对照；先区分精度问题、真实学习发散及队列故障，不把缺失数据当负结果，不擅改学习率或另训修订方法。
+
+补评后回传全部非权重产物并核验，比较历史B0两split/阶段/视图/类AP。明确其余三组仍缺完整8任务，不能回答Attention是否优于Pool；根据诊断决定如何恢复原授权未完成实验。
+
+## 2026-11-01：CrossViT正式训练进行中，不要重复启动
+
+运行1e2125e、tmux crossvit_three_view_seed1_20261101，五组seed1完整8任务／30epoch已自动启动，GPU0实测3并发。I_W/I_M/C_W运行，C_M/P_M自动后排；各自结束自动完整Val/Test及0/2/6/7 ON/OFF，最多2评估／2CPU计算线程。55测试及五臂40更新0skip／Val预检／配对保护全部通过，不需重跑预检或另起同名任务。
+
+下一次优先读logs/crossvit_independent_three_view/seed1_20261101_01/queue.json和各train/progress.json；源worktree代码与HEAD保持不动。完成后回传正式非权重产物核验，分别比较C_W-I_W、C_M-I_M、C_M-P_M和历史强参照两个Test mAP，并报告Val、逐视图、Face mask、参数与吞吐；不将条件OFF冒充重训无交互。当前只有启动结果，不能报告正式精度。
+
 ## 2026-11-01：当前执行独立三视图CrossViT五组
 
 用户已授权执行。源码/专项/队列已写、本地语法检查通过；下一步只选择本次新增文件与三上下文提交推送，Git-only新远程multi-lane-main-crossvit-independent-20261101，真实专项与五组task0/1各4更新／Val首64通过后，自动进入seed1完整8任务Val/Test。仅GPU0，实测峰值决定并发，保持batch64／30epoch／历史评估与原RNG，不借内存充裕改训练预算。
