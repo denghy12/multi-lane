@@ -1339,6 +1339,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument('--r1-kind',choices=('native','attention','pool'))
     parser.add_argument('--r1-view',choices=('full','person','face'))
+    parser.add_argument('--r1-evidence-manifest-root',type=Path)
     parser.add_argument(
         "--evaluation-score-purpose",
         choices=("validation_search", "fixed_test_fusion"),
@@ -1969,12 +1970,15 @@ def main() -> None:
             r1_evidence='deterministic_native_eval_crops_of_same_TRAIN_person',r1_interaction_precision='FP32')
         model.r1_config=config
         path=output/'config.json'
-        if path.exists() and json.loads(path.read_text())!=config:raise ValueError('R1 recovery protocol changed')
         if args.r1_kind!='native':
             from .r1_crossvit import attach_evidence
-            train_source=attach_evidence(train_source,args.r1_view,dataset_parent,args.face_manifest_root)
-            val_source=attach_evidence(val_source,args.r1_view,dataset_parent,args.face_manifest_root)
-            reporting_source=attach_evidence(reporting_source,args.r1_view,dataset_parent,args.face_manifest_root)
+            manifest=args.r1_evidence_manifest_root
+            if manifest is None:raise ValueError('R1 interactions require an evidence manifest')
+            config['r1_evidence_face_manifest']=load_face_manifest_provenance(manifest)
+            train_source=attach_evidence(train_source,args.r1_view,dataset_parent,manifest)
+            val_source=attach_evidence(val_source,args.r1_view,dataset_parent,manifest)
+            reporting_source=attach_evidence(reporting_source,args.r1_view,dataset_parent,manifest)
+        if path.exists() and json.loads(path.read_text())!=config:raise ValueError('R1 recovery protocol changed')
     (output / "config.json").write_text(
         json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )

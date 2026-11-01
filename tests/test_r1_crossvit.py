@@ -2,11 +2,14 @@ import copy
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
+from types import SimpleNamespace
 
 import torch
 
 from multi_lane.track_a.model import MultiLaneModel
-from multi_lane.track_a.r1_crossvit import R1Receiver,CLSAgent,EvidenceSource,compact
+from multi_lane.track_a.r1_crossvit import R1Receiver,CLSAgent,EvidenceSource,compact,attach_evidence
+from multi_lane.track_a.r1_crossvit_experiment import flags
 from multi_lane.track_a.runner import TASK_SIZES,train_task,build_optimizer_groups
 from test_track_a_reproduction import FakeVisual
 
@@ -122,6 +125,31 @@ class R1Tests(unittest.TestCase):
         a=sum(p.numel() for p in CLSAgent(768).parameters())
         b=sum(p.numel() for p in CLSAgent(768,pool=True).parameters())
         self.assertLess(abs(a-b)/a,.01)
+
+    def test_manifest_cli_is_separate_from_native_nonface_input(self):
+        args=SimpleNamespace(reference_root=Path('/reference'),data_root=Path('/data'),
+            clip_checkpoint=Path('/clip'),face_manifest_root=Path('/manifest'),output=Path('/out'))
+        for kind in ('native','attention','pool'):
+            for view in ('full','person','face'):
+                c=dict(seed=1,adapter_residual_scale=.1,parameter_group_loss_routing='adapter_asl',
+                    input_mode='face_crop' if view=='face' else 'full',person_crop_margin=0.,
+                    person_transform_mode='legacy_crop',person_color_jitter_strength=0.,
+                    person_color_jitter_probability=0.,train_crop_scale=[.05,1.])
+                with patch('multi_lane.track_a.r1_crossvit_experiment.read',return_value=c):
+                    command=flags(args,kind,view,True)
+                self.assertEqual('--face-manifest-root' in command,view=='face')
+                self.assertEqual('--r1-evidence-manifest-root' in command,kind!='native')
+
+    def test_auxiliary_dataset_only_supplies_manifest_to_face(self):
+        class Source:
+            sample_ids=['a'];splits=['train']
+        calls=[]
+        def dataset(*a,**kw):
+            self.assertEqual(kw['face_manifest_root'] is not None,kw['input_mode']=='face_crop')
+            self.assertTrue(kw['train']);calls.append(kw);return Source()
+        with patch('multi_lane.continual_datasets.continual_datasets.EMOTIC',side_effect=dataset):
+            for view in ('full','person','face'):attach_evidence(Source(),view,Path('/data'),Path('/manifest'))
+        self.assertEqual(len(calls),6)
 
     @unittest.skipUnless(torch.cuda.is_available(),'real CUDA required')
     def test_actual_cuda_amp_finite(self):

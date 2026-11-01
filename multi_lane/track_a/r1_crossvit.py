@@ -203,5 +203,6 @@ def attach_evidence(source,receiver,dataset_parent,manifest_root):
         auxiliary[v]=EMOTIC(str(dataset_parent),train=tuple(source.splits)==('train',),
             eval_splits=source.splits,transform=transform,
             input_mode={'full':'full','person':'person_crop','face':'face_crop'}[v],
-            person_crop_margin=.15 if v=='person' else 0.,face_manifest_root=manifest_root)
+            person_crop_margin=.15 if v=='person' else 0.,
+            face_manifest_root=manifest_root if v=='face' else None)
     return EvidenceSource(source,auxiliary,receiver)

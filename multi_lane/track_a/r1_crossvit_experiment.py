@@ -45,7 +45,7 @@ def flags(args,kind,view,smoke=False):
     if c['seed']!=1 or c['adapter_residual_scale']!=.1 or c['parameter_group_loss_routing']!='adapter_asl':
         raise ValueError('Historical R1 recipe changed')
     result=['--data-root',str(args.data_root),'--clip-checkpoint',str(args.clip_checkpoint),
-        '--face-manifest-root',str(args.face_manifest_root),'--output-root',str(args.output/kind/view/'train'),
+        '--output-root',str(args.output/kind/view/'train'),
         '--seed','1','--epochs','30','--max-tasks','2' if smoke else '8',
         '--train-batch-size','64','--eval-batch-size','64','--workers','2',
         '--source-learning-rate','0.05','--source-reference-batch-size','256','--weight-decay','0',
@@ -64,6 +64,8 @@ def flags(args,kind,view,smoke=False):
         '--evaluation-score-purpose','validation_search' if smoke else 'fixed_test_fusion',
         '--reporting-split','val' if smoke else 'test',
         '--r1-kind',kind,'--r1-view',view]
+    if view=='face':result+=['--face-manifest-root',str(args.face_manifest_root)]
+    if kind!='native':result+=['--r1-evidence-manifest-root',str(args.face_manifest_root)]
     if smoke:result+=['--optimizer-updates-per-task','2']
     return result
 
@@ -89,7 +91,8 @@ def validation(args):
         person_color_jitter_probability=c['person_color_jitter_probability'])
     parent=args.data_root.parent if args.data_root.name=='EMOTIC' else args.data_root
     source=EMOTIC(str(parent),train=False,eval_splits=('val',),transform=transform,
-        input_mode=c['input_mode'],person_crop_margin=c['person_crop_margin'],face_manifest_root=args.face_manifest_root)
+        input_mode=c['input_mode'],person_crop_margin=c['person_crop_margin'],
+        face_manifest_root=args.face_manifest_root if c['input_mode']=='face_crop' else None)
     if c['r1_kind']!='native':source=attach_evidence(source,c['r1_receiver'],parent,args.face_manifest_root)
     rows=[]
     for task in range(c['max_tasks']):

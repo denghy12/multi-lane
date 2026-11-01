@@ -1,3 +1,5 @@
+2026-11-01 入口验收更新：服务器161项测试通过。首轮真实smoke在数据集入口拒绝了误传给Full/Person的Face清单；未启动正式训练。已把本视图清单与交互证据清单分离，并补CLI/数据集工厂回归，保留失败日志，准备使用新批次重新验收。
+
 ## 2026-11-01 当前主线：历史独立三视图 R1 + CrossViT
 
 用户将参照改正为独立专家固定R1，Test final=33.0119±0.3038（seed0/1/2）。这是概率融合，不是原始logits；本轮seed1配对参照32.9575/40.1154。新分支 codex/r1-anchored-crossvit-20261101 从历史源 acf4634 创建，保留原scale0.1、Person颜色扰动、独立BCE+Adapter-ASL。先原生三分支重放，再运行第6层CLS跨视图Attention及同输入Pool。没有历史任务参数装配、教师或融合loss。GPU0、8task、30epoch、B64。详细协议 docs/r1_anchored_crossvit_20261101.md；当前尚未启动远程正式训练。下文较早的下一步只作历史记录。
