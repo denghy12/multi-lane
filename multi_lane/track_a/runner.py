@@ -1339,6 +1339,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument('--r1-kind',choices=('native','attention','pool'))
     parser.add_argument('--r1-view',choices=('full','person','face'))
+    parser.add_argument('--r1-sender-root', type=Path)
     parser.add_argument('--r1-evidence-manifest-root',type=Path)
     parser.add_argument(
         "--evaluation-score-purpose",
@@ -1565,7 +1566,7 @@ def main() -> None:
         from .r1_crossvit import R1Receiver
         if args.r1_view is None:raise ValueError('R1 receiver view required')
         model_class=R1Receiver
-        extra=dict(r1_kind=args.r1_kind,r1_view=args.r1_view,r1_root=output)
+        extra=dict(r1_kind=args.r1_kind,r1_view=args.r1_view,r1_root=output,r1_sender_root=args.r1_sender_root)
     model = model_class(
         visual_encoder=visual,
         task_sizes=TASK_SIZES,
@@ -1968,6 +1969,8 @@ def main() -> None:
             r1_exchange_layer=5 if args.r1_kind!='native' else None,r1_exchange_dim=64,r1_exchange_heads=4,
             r1_exchange_parameters=sum(p.numel() for p in model.r1_bank.parameters()),
             r1_evidence='deterministic_native_eval_crops_of_same_TRAIN_person',r1_interaction_precision='FP32')
+        if args.r1_sender_root is not None:
+            config["r1_sender_root"] = str(args.r1_sender_root)
         model.r1_config=config
         path=output/'config.json'
         if args.r1_kind!='native':

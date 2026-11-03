@@ -335,6 +335,7 @@ class MultiLaneModel(nn.Module):
         person_tokens: Optional[torch.Tensor] = None,
         person_patch_mask: Optional[torch.Tensor] = None,
         condition_valid: Optional[torch.Tensor] = None,
+        summary_only: bool = False,
     ) -> torch.Tensor:
         # The released block applies its first LayerNorm before both selector
         # aggregation and prompt attention.  Keep the residual stream itself
@@ -380,6 +381,8 @@ class MultiLaneModel(nn.Module):
                 frozen_normalized_image,
                 torch.softmax(similarity, dim=-1),
             )
+        if summary_only:
+            return selected
         summarized = torch.cat([task_cls, selected], dim=2)
         attention_output = self._prompt_attention(
             block,

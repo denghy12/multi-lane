@@ -75,12 +75,17 @@ class CLSAgent(nn.Module):
 
 
 class R1Receiver(MultiLaneModel):
-    def __init__(self,*args,r1_kind='native',r1_view='full',r1_root=None,r1_layer=5,r1_dim=64,r1_heads=4,**kwargs):
+    def __init__(self,*args,r1_kind='native',r1_view='full',r1_root=None,r1_layer=5,r1_dim=64,r1_heads=4,r1_sender_root=None,**kwargs):
         super().__init__(*args,**kwargs)
         if r1_kind not in KINDS or r1_view not in VIEWS:raise ValueError('Unknown R1 arm/view')
         if not 0<=r1_layer<len(self.visual_encoder.transformer.resblocks):raise ValueError('Invalid layer')
         self.r1_kind,self.r1_view,self.r1_layer=r1_kind,r1_view,r1_layer
         self.r1_root=Path(r1_root) if r1_root else None
+        if r1_sender_root is not None and (r1_view != 'face' or r1_kind == 'native'):
+            raise ValueError('Task summaries require an interaction-enabled Face receiver')
+        self.r1_sender_root = Path(r1_sender_root) if r1_sender_root else None
+        self._senders = {}
+        self._sender_stage = None
         self.r1_bank=nn.ModuleList();self.r1_enabled=True;self.r1_config=None;self.r1_resume=None
         if r1_kind!='native':
             with torch.random.fork_rng(devices=list(range(torch.cuda.device_count()))):
@@ -113,28 +118,74 @@ class R1Receiver(MultiLaneModel):
         extra=[f'r1_bank.{self.current_task_id}.{n}' for n,p in self.r1_bank[self.current_task_id].named_parameters()] if self.r1_bank and self.current_task_id>=0 else []
         return (*super().optimizer_parameter_names(),*extra)
 
+    @torch.no_grad()
+    def sender_summaries(self, images, lanes):
+        stage = self.current_task_id
+        if self._sender_stage != stage:
+            for view in ('full', 'person'):
+                if view not in self._senders:
+                    # Keep sender parameters out of the receiver optimizer and checkpoints.
+                    with torch.random.fork_rng(devices=[]):
+                        sender = MultiLaneModel(
+                            self.visual_encoder, self.task_sizes,
+                            num_selectors=self.num_selectors, num_prompts=self.num_prompts,
+                            num_prompt_layers=self.num_prompt_layers, normalize=self.normalize,
+                            adapter_mode='image_token', adapter_bottleneck_dim=32,
+                            adapter_layer_indices=(1,), adapter_residual_scale=.1,
+                            adapter_activation='relu',
+                        ).to(images['full'].device).eval().requires_grad_(False)
+                    self._senders[view] = sender
+                sender = self._senders[view]
+                path = self.r1_sender_root / view / 'train' / 'compact_checkpoints' / f'task{stage}.pth'
+                payload = torch.load(path, map_location='cpu', weights_only=False)
+                if payload['task_id'] != stage:
+                    raise ValueError(f'Sender checkpoint has the wrong stage: {path}')
+                missing = sender.load_state_dict(payload['model'], strict=False)
+                if missing.unexpected_keys or any(not k.startswith('visual_encoder.') for k in missing.missing_keys):
+                    raise ValueError(f'Incomplete sender checkpoint: {path}')
+                sender.restore_task(stage)
+                sender.requires_grad_(False)
+            self._sender_stage = stage
+
+        summaries = []
+        for view, sender in self._senders.items():
+            image = images['evidence_' + view]
+            tokens = sender._visual_tokens(image)
+            state = sender._initial_lane_tokens(len(image), lanes)
+            for layer, block in enumerate(self.visual_encoder.transformer.resblocks):
+                if layer == self.r1_layer:
+                    summaries.append(sender._lane_block(block, tokens, state, lanes, layer, summary_only=True))
+                    break
+                state = sender._lane_block(block, tokens, state, lanes, layer)
+                tokens = block(tokens.permute(1, 0, 2)).permute(1, 0, 2)
+        return summaries
+
     def encode_lanes(self,images,all_seen_lanes):
         own=images['full'] if isinstance(images,dict) else images
         if not self.r1_bank or not self.r1_enabled:return super().encode_lanes(own,all_seen_lanes)
         if not isinstance(images,dict):raise ValueError('Cross-view evidence missing')
         others=[v for v in VIEWS if v!=self.r1_view]
+        lanes=self._lane_ids(all_seen_lanes)
+        summaries = self.sender_summaries(images, lanes) if self.r1_sender_root else None
         with torch.no_grad():
             memories=[];masks=[]
             for v in others:
+                if summaries is not None:
+                    masks.append(torch.ones(len(own), device=own.device, dtype=torch.bool))
+                    continue
                 x=self._visual_tokens(images['evidence_'+v])
                 for block in list(self.visual_encoder.transformer.resblocks)[:self.r1_layer+1]:
                     x=block(x.permute(1,0,2)).permute(1,0,2)
                 memories.append(x[:,1:].detach())
                 masks.append(images['evidence_face_reliable'].bool() if v=='face'
                     else torch.ones(len(own),device=own.device,dtype=torch.bool))
-        lanes=self._lane_ids(all_seen_lanes)
         self.adapter_bank.reset_auxiliary_metrics()
         tokens=self._visual_tokens(own);state=self._initial_lane_tokens(len(own),lanes)
         for layer,block in enumerate(self.visual_encoder.transformer.resblocks):
             state=self._lane_block(block,tokens,state,lanes,layer)
             with torch.no_grad():tokens=block(tokens.permute(1,0,2)).permute(1,0,2)
             if layer==self.r1_layer:
-                state=torch.stack([torch.cat([self.r1_bank[t](state[i,:,:1],memories,masks),state[i,:,1:]],1)
+                state=torch.stack([torch.cat([self.r1_bank[t](state[i,:,:1],memories if summaries is None else [x[i] for x in summaries],masks),state[i,:,1:]],1)
                                    for i,t in enumerate(lanes)])
         state=self.visual_encoder.ln_post(state)
         if self.visual_encoder.proj is not None:state=state@self.visual_encoder.proj
