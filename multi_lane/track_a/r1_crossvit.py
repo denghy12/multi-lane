@@ -39,9 +39,16 @@ def compact(model):
 
 
 class CLSAgent(nn.Module):
-    def __init__(self,width,dim=64,heads=4,pool=False):
+    def __init__(self,width,dim=64,heads=4,pool=False,query_mode='cls'):
         super().__init__();self.dim,self.heads,self.pool=dim,heads,pool
         if dim%heads:raise ValueError('Invalid head width')
+        if query_mode not in ('cls','selector_mean','selectors'):
+            raise ValueError('Unknown query source')
+        if pool and query_mode != 'cls':
+            raise ValueError('Pool has no query-source ablation')
+        self.query_mode=query_mode
+        self.diagnostic_enabled=False
+        self.last_diagnostic=None
         self.types=nn.Parameter(torch.randn(2,width)*.02)
         self.v=nn.Linear(width,dim,bias=False)
         if pool:
@@ -53,7 +60,7 @@ class CLSAgent(nn.Module):
             self.out=nn.Linear(dim,width,bias=False)
         nn.init.zeros_(self.out.weight)
 
-    def forward(self,cls,memories,masks):
+    def forward(self,cls,memories,masks,selectors=None):
         # Keep only the NEW readout in FP32; the original R1 task path is unchanged.
         with torch.autocast(device_type=cls.device.type,enabled=False):
             c=F.layer_norm(cls.float(),(cls.shape[-1],))
@@ -62,24 +69,52 @@ class CLSAgent(nn.Module):
                 parts=[self.v(x).mean(1)*m[:,None].float() for x,m in zip(sources,masks)]
                 delta=self.out(F.gelu(self.mlp(torch.cat([c[:,0],*parts],-1))))[:,None]
             else:
+                if self.query_mode == 'cls':
+                    queries=c
+                else:
+                    if selectors is None or selectors.ndim != 3 or selectors.shape[1] == 0:
+                        raise ValueError('Selector queries require nonempty selector states')
+                    queries=selectors.float()
+                    if self.query_mode == 'selector_mean':
+                        queries=queries.mean(dim=1,keepdim=True)
+                    queries=F.layer_norm(queries,(queries.shape[-1],))
+                # The memory remains identical for all query sources, including own CLS.
                 memory=torch.cat([c,*sources],1)
                 b=len(c);d=self.dim//self.heads
-                q=self.q(c).reshape(b,1,self.heads,d).transpose(1,2)
+                q=self.q(queries).reshape(b,-1,self.heads,d).transpose(1,2)
                 k=self.k(memory).reshape(b,-1,self.heads,d).transpose(1,2)
                 v=self.v(memory).reshape(b,-1,self.heads,d).transpose(1,2)
                 valid=torch.cat([torch.ones(b,1,dtype=torch.bool,device=c.device),
                     *[m[:,None].expand(-1,x.shape[1]) for m,x in zip(masks,sources)]],1)
                 a=((q@k.transpose(-2,-1))*d**-.5).masked_fill(~valid[:,None,None],float('-inf')).softmax(-1)
-                delta=self.out((a@v).transpose(1,2).reshape(b,1,self.dim))
+                contexts=(a@v).transpose(1,2).reshape(b,-1,self.dim)
+                delta=self.out(contexts.mean(dim=1,keepdim=True))
+                if self.diagnostic_enabled:
+                    with torch.no_grad():
+                        masses=[];offset=0
+                        for size in [1,*[x.shape[1] for x in sources]]:
+                            masses.append(float(a[...,offset:offset+size].sum(-1).mean()))
+                            offset+=size
+                        entropy=-(a*a.clamp_min(1e-30).log()).sum(-1)
+                        self.last_diagnostic=dict(query_count=queries.shape[1],source_masses=masses,
+                            query_batch_std=float(queries.std(dim=0,unbiased=False).mean()),
+                            query_slot_std=float(queries.std(dim=1,unbiased=False).mean()),
+                            projected_query_norm=float(q.norm(dim=-1).mean()),
+                            projected_key_norm=float(k.norm(dim=-1).mean()),
+                            attention_entropy=float(entropy.mean()),
+                            residual_to_cls_norm=float((delta.norm(dim=-1)/cls.float().norm(dim=-1).clamp_min(1e-8)).mean()))
         return cls+delta
 
 
 class R1Receiver(MultiLaneModel):
-    def __init__(self,*args,r1_kind='native',r1_view='full',r1_root=None,r1_layer=5,r1_dim=64,r1_heads=4,r1_sender_root=None,**kwargs):
+    def __init__(self,*args,r1_kind='native',r1_view='full',r1_root=None,r1_layer=5,r1_dim=64,r1_heads=4,r1_sender_root=None,r1_query_mode='cls',**kwargs):
         super().__init__(*args,**kwargs)
         if r1_kind not in KINDS or r1_view not in VIEWS:raise ValueError('Unknown R1 arm/view')
         if not 0<=r1_layer<len(self.visual_encoder.transformer.resblocks):raise ValueError('Invalid layer')
         self.r1_kind,self.r1_view,self.r1_layer=r1_kind,r1_view,r1_layer
+        self.r1_query_mode=r1_query_mode
+        if r1_query_mode != 'cls' and (r1_kind != 'attention' or r1_view != 'face' or r1_sender_root is not None):
+            raise ValueError('Selector-query ablation requires frozen-patch Face Attention')
         self.r1_root=Path(r1_root) if r1_root else None
         if r1_sender_root is not None and (r1_view != 'face' or r1_kind == 'native'):
             raise ValueError('Task summaries require an interaction-enabled Face receiver')
@@ -90,7 +125,7 @@ class R1Receiver(MultiLaneModel):
         if r1_kind!='native':
             with torch.random.fork_rng(devices=list(range(torch.cuda.device_count()))):
                 torch.manual_seed(20261102)
-                self.r1_bank.extend(CLSAgent(self.width,r1_dim,r1_heads,r1_kind=='pool') for _ in self.task_sizes)
+                self.r1_bank.extend(CLSAgent(self.width,r1_dim,r1_heads,r1_kind=='pool',r1_query_mode) for _ in self.task_sizes)
 
     def activate_task(self,task):
         super().activate_task(task);self._configure_bank(task);self.r1_resume=None
@@ -185,7 +220,7 @@ class R1Receiver(MultiLaneModel):
             state=self._lane_block(block,tokens,state,lanes,layer)
             with torch.no_grad():tokens=block(tokens.permute(1,0,2)).permute(1,0,2)
             if layer==self.r1_layer:
-                state=torch.stack([torch.cat([self.r1_bank[t](state[i,:,:1],memories if summaries is None else [x[i] for x in summaries],masks),state[i,:,1:]],1)
+                state=torch.stack([torch.cat([self.r1_bank[t](state[i,:,:1],memories if summaries is None else [x[i] for x in summaries],masks,selectors=state[i,:,1:]),state[i,:,1:]],1)
                                    for i,t in enumerate(lanes)])
         state=self.visual_encoder.ln_post(state)
         if self.visual_encoder.proj is not None:state=state@self.visual_encoder.proj

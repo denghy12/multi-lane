@@ -1339,6 +1339,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument('--r1-kind',choices=('native','attention','pool'))
     parser.add_argument('--r1-view',choices=('full','person','face'))
+    parser.add_argument('--r1-query-mode',choices=('cls','selector_mean','selectors'),default='cls')
+    parser.add_argument('--r1-fusion-readout',choices=('probability','logit'),default='probability')
+    parser.add_argument('--r1-smoke-eval-samples',type=int)
     parser.add_argument('--r1-sender-root', type=Path)
     parser.add_argument('--r1-evidence-manifest-root',type=Path)
     parser.add_argument(
@@ -1420,6 +1423,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if args.r1_smoke_eval_samples is not None and args.r1_kind is None:
+        raise ValueError('Bounded R1 smoke is unavailable outside the R1 experiment')
     paired_inputs = (
         args.paired_full_person
         or args.selector_conditioning != "disabled"
@@ -1566,7 +1571,7 @@ def main() -> None:
         from .r1_crossvit import R1Receiver
         if args.r1_view is None:raise ValueError('R1 receiver view required')
         model_class=R1Receiver
-        extra=dict(r1_kind=args.r1_kind,r1_view=args.r1_view,r1_root=output,r1_sender_root=args.r1_sender_root)
+        extra=dict(r1_kind=args.r1_kind,r1_view=args.r1_view,r1_root=output,r1_sender_root=args.r1_sender_root,r1_query_mode=args.r1_query_mode)
     model = model_class(
         visual_encoder=visual,
         task_sizes=TASK_SIZES,
@@ -1965,10 +1970,19 @@ def main() -> None:
     }
     if args.r1_kind is not None:
         config.update(r1_kind=args.r1_kind,r1_receiver=args.r1_view,r1_supervision='own_view_BCE_and_Adapter_ASL_no_fused_objective',
-            r1_primary_fusion='locked_R1_probability',r1_secondary_fusion='same_weights_logit',
+            r1_primary_fusion='locked_R1_'+args.r1_fusion_readout,
+            r1_secondary_fusion='same_weights_'+('probability' if args.r1_fusion_readout=='logit' else 'logit'),
+            r1_query_mode=args.r1_query_mode,
+            r1_query_count=model.num_selectors if args.r1_query_mode=='selectors' else 1,
+            r1_query_reduction='mean_contexts_before_shared_output',
             r1_exchange_layer=5 if args.r1_kind!='native' else None,r1_exchange_dim=64,r1_exchange_heads=4,
             r1_exchange_parameters=sum(p.numel() for p in model.r1_bank.parameters()),
             r1_evidence='deterministic_native_eval_crops_of_same_TRAIN_person',r1_interaction_precision='FP32')
+        if args.r1_smoke_eval_samples is not None:
+            if (args.optimizer_updates_per_task is None or args.reporting_split != 'val'
+                    or not 1 <= args.r1_smoke_eval_samples <= 512):
+                raise ValueError('Bounded R1 smoke requires capped TRAIN updates and validation reporting')
+            config['r1_smoke_eval_samples']=args.r1_smoke_eval_samples
         if args.r1_sender_root is not None:
             config["r1_sender_root"] = str(args.r1_sender_root)
         model.r1_config=config
@@ -2028,6 +2042,9 @@ def main() -> None:
             seen_indices(task_id),
             include_sample_id=args.save_evaluation_scores,
         )
+        if args.r1_smoke_eval_samples is not None:
+            val_view=torch.utils.data.Subset(val_view,range(min(len(val_view),args.r1_smoke_eval_samples)))
+            reporting_view=torch.utils.data.Subset(reporting_view,range(min(len(reporting_view),args.r1_smoke_eval_samples)))
         train_loader = DataLoader(
             train_view, batch_size=args.train_batch_size, shuffle=True,
             num_workers=args.workers, pin_memory=True, drop_last=False,

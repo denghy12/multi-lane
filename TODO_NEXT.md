@@ -1,3 +1,11 @@
+## 2026-11-04 Face-only Selector Query三组实现及待启动协议
+
+用户授权只跑CLS单Q、Selector均值单Q、10 Selector Q，不重训原R1/Pool。新分支codex/r1-selector-query-20261104，基于a2642bc独立worktree。仅三条Face从CLIP起点训练，Full/Person及基线使用既有独立R1预测；统一中层index5、冻结patch KV(含原Face CLS)、768→64/4头、原投影前LN、零out无额外cap、10Q平均context后写回CLS继续后6层。原Face BCE/Adapter-ASL、seed1/B64/30轮、主LR0.0125/Adapter及交互4e-4/cosine，固定R1 logits融合。三组任务模块初值/参数量匹配。
+
+实现修改r1_crossvit.py、runner.py、r1_crossvit_experiment.py，新增run_r1_selector_query.py/GPU0入口、专项测试及docs/r1_selector_query_20261104.md。先单元回归与每组2任务×2更新的Val64 smoke，检查梯度/旧状态保护，再自动三组正式8任务；GPU0最多3训练、2验证，显存不足排队。失败不清空其他作业。输出/日志r1_selector_query/seed1_20261104。只读检查确认GPU0空闲，其余GPU不使用；原服务器主树/test-only已有用户dirty保持。
+
+本条为实现/启动前记录，验证与运行状态待后续更新，不宣称已启动正式训练。
+
 ## 2026-11-04 最终CLS QK归一化最小对照实现
 
 新分支 codex/r1-cls-qk-normalized-control，继承ef6fdcc。复用上一轮自行训练并精确重放的三路原生阶段，重训Uniform与投影后Q/K分别无仿射LayerNorm的Attention。固定64维、同V/out初值、同shuffle、cap0.05、5epoch、B64、Adam0.0004/cosine、融合BCE。新入口 scripts/emotic/run_r1_cls_qk_control_gpu0.sh，详细协议 docs/r1_cls_qk_control_20261104.md。新增TRAIN探针、日志、恢复、原生重放和同checkpoint强制均匀读出。CPU静态检查通过，远程测试与GPU smoke待执行。输出 output/r1_cls_qk_control/seed1_20261104，日志同名目录，仅GPU0。
