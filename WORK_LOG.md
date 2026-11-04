@@ -1,3 +1,7 @@
+## 2026-11-04 最终CLS QK归一化最小对照实现
+
+新分支 codex/r1-cls-qk-normalized-control，继承ef6fdcc。复用上一轮自行训练并精确重放的三路原生阶段，重训Uniform与投影后Q/K分别无仿射LayerNorm的Attention。固定64维、同V/out初值、同shuffle、cap0.05、5epoch、B64、Adam0.0004/cosine、融合BCE。新入口 scripts/emotic/run_r1_cls_qk_control_gpu0.sh，详细协议 docs/r1_cls_qk_control_20261104.md。新增TRAIN探针、日志、恢复、原生重放和同checkpoint强制均匀读出。CPU静态检查通过，远程测试与GPU smoke待执行。输出 output/r1_cls_qk_control/seed1_20261104，日志同名目录，仅GPU0。
+
 2026-11-01 入口验收更新：服务器161项测试通过。首轮真实smoke在数据集入口拒绝了误传给Full/Person的Face清单；未启动正式训练。已把本视图清单与交互证据清单分离，并补CLI/数据集工厂回归，保留失败日志，准备使用新批次重新验收。
 
 ## 2026-11-01：将CrossViT实验重新锚定历史独立R1（实现阶段）
