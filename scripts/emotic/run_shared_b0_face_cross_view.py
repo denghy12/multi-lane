@@ -93,7 +93,7 @@ def probe(train, args):
     for n in ('v.weight','out.weight', *(['q.weight','k.weight'] if c['shared_face_readout']=='attention' else ['mlp.weight'])):
         assert gradients[n] is not None and gradients[n]>0 and torch.isfinite(torch.tensor(gradients[n])),(n,gradients)
     with torch.no_grad():
-        on=z.detach();on_views={k:v.detach() for k,v in views.items()}
+        on,on_views,_=model.current_all_logits_with_view_features(images)
         model.face_cls_bank.runtime_enabled=False
         off,off_views,_=model.current_all_logits_with_view_features(images)
         assert torch.equal(on_views['full'],off_views['full']) and torch.equal(on_views['person'],off_views['person'])
@@ -101,6 +101,7 @@ def probe(train, args):
         assert torch.equal(on[bad],off[bad])
     with torch.no_grad():
         model.restore_task(7)
+        model.face_cls_bank.runtime_enabled=True
         late=model.seen_logits(images)
         assert late.shape==(len(ids),26) and torch.isfinite(late).all()
     write(train.parent/'train_probe.json',dict(eight_lane_shape=list(late.shape),gradients=gradients,stats=model.face_cls_bank.statistics(),
@@ -126,7 +127,7 @@ def run(args):
     if not args.smoke:
         smoke=json.loads((args.smoke_root/'completion.json').read_text())
         assert smoke['status']=='complete' and smoke['smoke'] and smoke['baseline_replay']['status']=='exact'
-        assert smoke['head']==subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
+        assert smoke.get('verification_head',smoke['head'])==subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
         reservations=smoke['reservations_mib']
     else:reservations={a:7000 for a in ARMS}
     common=SimpleNamespace(data_root=args.data_root,clip_checkpoint=args.clip_checkpoint,face_manifest_root=args.face_manifest_root,smoke=args.smoke)
@@ -215,11 +216,48 @@ def run(args):
     print('SHARED_B0_FACE_COMPLETE',root,flush=True)
 
 
+
+def verify_existing_smoke(root,args):
+    """Reuse completed training only when all runtime/training files are identical."""
+    old=json.loads((root/'protocol.json').read_text())
+    head=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
+    changed=subprocess.check_output(['git','diff','--name-only',old['head'],head],text=True).splitlines()
+    if set(changed)-{'scripts/emotic/run_shared_b0_face_cross_view.py'}:
+        raise ValueError('Cannot reuse smoke after training/runtime source changes: '+str(changed))
+    checks={a:verify_training(root/a/'train',True) for a in ARMS}
+    assert len({d['initial_base_sha256'] for d in checks.values()})==1
+    for field in ('cpu_rng_at_task_boundaries','cuda_rng_at_task_boundaries'):
+        streams=[d[field] for d in checks.values()];assert all(x==streams[0] for x in streams)
+    baseline=compare_smoke(root,args.archive_smoke)
+    logs=Path('logs/shared_b0_face_cross_view')/root.name
+    logs.mkdir(exist_ok=True,parents=True)
+    env=dict(os.environ,MULTILANE_EVAL_THREADS='4',OMP_NUM_THREADS='4',MKL_NUM_THREADS='4')
+    for arm in ARMS:
+        if not (root/arm/'historical_val/result.json').exists():
+            j=eval_job(SimpleNamespace(**dict(vars(args),smoke=True)),root,arm,'val')
+            with (logs/(arm+'_val_reverified.log')).open('x') as stream:
+                subprocess.run([sys.executable,'-u','-m',j['module'],*j['arguments']],env=env,stdout=stream,stderr=subprocess.STDOUT,check=True)
+        if arm!='B0':
+            with (logs/(arm+'_probe_reverified.log')).open('x') as stream:
+                subprocess.run([sys.executable,'-u',__file__,'--probe',str(root/arm/'train'),
+                    '--data-root',str(args.data_root),'--clip-checkpoint',str(args.clip_checkpoint),
+                    '--face-manifest-root',str(args.face_manifest_root)],env=env,stdout=stream,stderr=subprocess.STDOUT,check=True)
+    reserve={}
+    for arm in ARMS:
+        audit=json.loads((root/arm/'train/paired_protocol_audit.json').read_text())
+        reserve[arm]=int(audit['peak_reserved_mib']*1.25+1024)
+    write(root/'completion.json',dict(old,status='complete',baseline_replay=baseline,
+        verification_head=head,training_source_unchanged=True,orchestration_diff=changed,
+        reservations_mib=reserve,same_base_initialization=True,same_sampler_rng=True,same_cuda_rng=True))
+    print('SMOKE_REVERIFIED',root,'training_source',old['head'],'verification_source',head,flush=True)
+
+
 def main():
     p=argparse.ArgumentParser()
     p.add_argument('--root',type=Path,default=Path('output/shared_b0_face_cross_view/seed1_20261105'))
     p.add_argument('--smoke',action='store_true');p.add_argument('--smoke-root',type=Path)
     p.add_argument('--probe',type=Path)
+    p.add_argument('--verify-smoke-root',type=Path)
     p.add_argument('--data-root',type=Path,default=Path('../multi-lane-main/datasets/EMOTIC'))
     p.add_argument('--clip-checkpoint',type=Path,default=Path('../CODE_DDP/pretrained/clip/ViT-B-16.pt'))
     p.add_argument('--face-manifest-root',type=Path,default=Path('../emotic_benchmark_runs/multi_lane_face_test_manifest_v0.1/face_manifest_train_val_test_v1_20260909'))
@@ -228,6 +266,7 @@ def main():
     p.add_argument('--archive-full',type=Path,default=old/'formal_seed1_20261025_01/BASE/train')
     args=p.parse_args()
     if args.probe:probe(args.probe,args)
+    elif args.verify_smoke_root:verify_existing_smoke(args.verify_smoke_root,args)
     else:run(args)
 
 if __name__=='__main__':main()
