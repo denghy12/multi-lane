@@ -5,6 +5,7 @@ from .spatial_resume import checkpoint_source_git
 
 import argparse
 import json
+import os
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -39,7 +40,8 @@ def evaluate_split(source_run: Path, output: Path, split: str,
                    expected_tasks: int = 8, workers: int = None,
                    checkpoint_tasks=None, disable_joint_residual: bool = False,
                    disable_stacking_modules=(),
-                   historical_b32_test_attribution: bool = False) -> dict:
+                   historical_b32_test_attribution: bool = False,
+                   disable_shared_face_runtime: bool = False) -> dict:
     if split not in {"val", "test"}:
         raise ValueError("Split must be val or test")
     expected_tasks = 1 if allow_smoke else expected_tasks
@@ -47,11 +49,17 @@ def evaluate_split(source_run: Path, output: Path, split: str,
     if (not task_ids or len(set(task_ids)) != len(task_ids)
             or any(t < 0 or t >= expected_tasks for t in task_ids)):
         raise ValueError("Invalid checkpoint selection")
-    if (checkpoint_tasks is not None or disable_joint_residual) and split != "val" and not historical_b32_test_attribution:
+    if (checkpoint_tasks is not None or disable_joint_residual) and split != "val" and not historical_b32_test_attribution and not disable_shared_face_runtime:
         raise ValueError("Joint residual attribution is validation-only")
     if output.exists():
         raise FileExistsError(output)
     config = json.loads((source_run / "config.json").read_text())
+    if disable_shared_face_runtime:
+        if (config.get('shared_face_readout') not in {'pool', 'attention'} or full_cohort
+                or disable_moe_runtime or disable_specialist_runtime or disable_joint_residual
+                or disable_stacking_modules or historical_b32_test_attribution
+                or task_ids != ([0,1] if expected_tasks == 2 else [0,2,7])):
+            raise ValueError('Shared Face OFF requires the declared diagnostic boundaries')
     if historical_b32_test_attribution:
         from .historical_b32_test_attribution import validate_request
         validate_request(config, split, checkpoint_tasks, disable_stacking_modules, expected_tasks,
@@ -132,6 +140,9 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         module_stacking=config.get("module_stacking", False),
         strong_full_asl=config.get("strong_full_asl", False),
         historical_b32_modules=config.get('historical_b32_modules', False),
+        shared_face_readout=config.get('shared_face_readout', 'disabled'),
+        shared_face_layer=config.get('shared_face_layer', 5), shared_face_dim=config.get('shared_face_dim', 64),
+        shared_face_heads=config.get('shared_face_heads', 4), shared_face_cap=config.get('shared_face_cap', .05),
         cross_view_residual_cap=config.get('cross_view_residual_cap', 0.),
         spatial_summary_bias_mode=config.get('spatial_summary_bias_mode', 'raw'),
         cross_view_mode=config.get("cross_view_mode", "disabled"),
@@ -148,6 +159,10 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         view_classifier_mode=config["view_classifier_mode"],
     ).float().to(device)
     model.assert_visual_frozen()
+    if os.environ.get('MULTILANE_EVAL_THREADS'):
+        torch.set_num_threads(int(os.environ['MULTILANE_EVAL_THREADS']))
+    if disable_shared_face_runtime:
+        model.face_cls_bank.runtime_enabled = False
     if disable_joint_residual:
         if config.get("joint_summary_mode") not in {"dense", "moe"}:
             raise ValueError("Residual intervention requires learned joint summaries")
@@ -245,6 +260,9 @@ def evaluate_split(source_run: Path, output: Path, split: str,
         "spatial_summary_statistics": spatial_statistics,
         "cross_view_mode": model.cross_view_mode,
         "cross_view_statistics": cross_view_statistics,
+        "shared_face_runtime_off": disable_shared_face_runtime,
+        "shared_face_statistics_last_batch": model.face_cls_bank.statistics() if model.face_cls_bank is not None else None,
+        "cpu_threads": torch.get_num_threads(),
         "person_endpoint_semantics": config.get("cross_view_person_endpoint", "person_only"),
         "joint_summary_mode": model.joint_summary_mode,
         "checkpoint_tasks": task_ids,
@@ -287,6 +305,7 @@ def main() -> None:
                         help="Replay one-task smoke checkpoint on validation only.")
     parser.add_argument("--full-cohort", action="store_true",
                         help="Use every person at every task for comparable continual curves.")
+    parser.add_argument("--disable-shared-face-runtime", action="store_true")
     parser.add_argument("--disable-moe-runtime", action="store_true",
                         help="Evaluate the same checkpoints with the MoE residual off.")
     parser.add_argument("--disable-specialist-runtime", action="store_true",
@@ -313,7 +332,8 @@ def main() -> None:
                    checkpoint_tasks=args.checkpoint_tasks,
                    disable_joint_residual=args.disable_joint_residual,
                    disable_stacking_modules=args.disable_stacking_modules,
-                   historical_b32_test_attribution=args.historical_b32_test_attribution)
+                   historical_b32_test_attribution=args.historical_b32_test_attribution,
+                   disable_shared_face_runtime=args.disable_shared_face_runtime)
 
 
 if __name__ == "__main__":

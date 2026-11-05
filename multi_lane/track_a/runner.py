@@ -2242,7 +2242,7 @@ def train_task(
                         and adapter_regularization == "none"
                         and ranking_loader is None
                     ),
-                    allow_unused_model_parameters=getattr(model, 'cross_view_face_attention', False),
+                    allow_unused_model_parameters=(getattr(model, 'cross_view_face_attention', False) or model.face_cls_bank is not None),
                 )
             if private_interaction is not None:
                 private_interaction.backward(current_targets, current)
@@ -2262,6 +2262,10 @@ def train_task(
                 adapter_gradient_batches += 1
             if (getattr(model, "strong_full_asl", False) or getattr(model, "historical_b32_modules", False)) and batch_index == 0:
                 epoch_parameter_gradients = strong_full_gradient_diagnostics(model, scale_before)
+            if model.face_cls_bank is not None and batch_index == 0:
+                epoch_parameter_gradients.update({
+                    'face_exchange_grad_' + n: float(p.grad.detach().float().norm() / scale_before)
+                    for n, p in model.face_cls_bank.tasks[task_id].named_parameters() if p.grad is not None})
             if complementary_loss is not None:
                 from .complementary_update import select_auxiliary_gradients
                 # Register GradScaler's original-base overflow state once. Candidate
@@ -2756,6 +2760,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         ),
         default="disabled",
     )
+    parser.add_argument('--shared-face-readout', choices=('disabled', 'pool', 'attention'), default='disabled')
+    parser.add_argument('--shared-face-layer', type=int, default=5)
+    parser.add_argument('--shared-face-dim', type=int, default=64)
+    parser.add_argument('--shared-face-heads', type=int, default=4)
+    parser.add_argument('--shared-face-cap', type=float, default=.05)
     parser.add_argument("--cross-view-mode", choices=("disabled", "person_self", "task_full", "person_full"), default="disabled")
     parser.add_argument("--cross-view-layer", type=int, default=5)
     parser.add_argument("--cross-view-dim", type=int, default=64)
@@ -3525,6 +3534,9 @@ def run(args: argparse.Namespace) -> None:
         historical_b32_modules=args.historical_b32_modules,
         cross_view_residual_cap=args.cross_view_residual_cap,
         cross_view_face_attention=args.cross_view_face_attention,
+        shared_face_readout=args.shared_face_readout, shared_face_layer=args.shared_face_layer,
+        shared_face_dim=args.shared_face_dim, shared_face_heads=args.shared_face_heads,
+        shared_face_cap=args.shared_face_cap,
         spatial_summary_bias_mode=args.spatial_summary_bias_mode,
         cross_view_mode=args.cross_view_mode,
         cross_view_layer=args.cross_view_layer,
@@ -3602,6 +3614,8 @@ def run(args: argparse.Namespace) -> None:
         if model.selector_conditioner is not None else 0
     )
     fusion_parameters_per_task = model.view_fusion_module.parameter_count_per_task()
+    if model.face_cls_bank is not None:
+        fusion_parameters_per_task += model.face_cls_bank.parameter_count_per_task()
     if model.joint_summary_bank is not None:
         fusion_parameters_per_task += model.joint_summary_bank.parameter_count_per_task()
     if model.cross_view_bank is not None:
@@ -3789,6 +3803,11 @@ def run(args: argparse.Namespace) -> None:
         "module_stacking": bool(args.module_stacking),
         "strong_full_asl": bool(args.strong_full_asl),
         "historical_feature_fusion": bool(args.historical_feature_fusion),
+        "shared_face_readout": args.shared_face_readout,
+        "shared_face_layer": args.shared_face_layer, "shared_face_dim": args.shared_face_dim,
+        "shared_face_heads": args.shared_face_heads, "shared_face_cap": args.shared_face_cap,
+        "shared_face_parameters_per_task": model.face_cls_bank.parameter_count_per_task() if model.face_cls_bank is not None else 0,
+        "shared_face_position": "after_complete_task_block_before_next_task_block",
         "historical_b32_profile": args.historical_b32_profile,
         "historical_b32_modules": args.historical_b32_modules,
         "historical_b32_private_selectors": args.historical_b32_private_selectors,
@@ -3979,7 +3998,7 @@ def run(args: argparse.Namespace) -> None:
         ),
         "view_fusion_learning_rate": (
             args.view_fusion_learning_rate
-            if (model.view_fusion_module.learned or args.joint_summary_mode in {"dense", "moe"} or model.cross_view_bank is not None or model.spatial_summary_bank is not None) else None
+            if (model.view_fusion_module.learned or args.joint_summary_mode in {"dense", "moe"} or model.cross_view_bank is not None or model.spatial_summary_bank is not None or model.face_cls_bank is not None) else None
         ),
         "view_residual_scale": (
             args.view_residual_scale
@@ -4628,6 +4647,8 @@ def run(args: argparse.Namespace) -> None:
                     args.moe_balance_weight if args.adapter_mode in {"moe_task_ffn_v2", "moe_task_ffn_v3", "moe_task_ffn_v4"} else 0.0
                 ),
                 recovery_state=recovery_state,
+                epoch_callback=(shared_face_epoch_callback(model, output, task_id, config, train_loader)
+                                if model.face_cls_bank is not None else None),
             )
             if model.joint_summary_bank is not None:
                 joint_after = tensor_state_digest({n: v for n, v in model.joint_summary_bank.state_dict().items()
@@ -4921,6 +4942,26 @@ def run(args: argparse.Namespace) -> None:
     print(json.dumps(summary["metrics"], indent=2), flush=True)
     print("MULTI_LANE_TRACK_A_COMPLETE", flush=True)
 
+
+
+
+
+def shared_face_epoch_callback(model, output, task_id, config, loader):
+    from .task_recovery import rng_state
+    def save(epoch, history, state):
+        path = output / 'epoch_recovery' / f'task{task_id}_latest.pth'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = dict(kind='shared_face_epoch_boundary', task_id=task_id, epoch=epoch,
+            config=config, model=compact_model_state_dict(model), training_state=state,
+            requires_grad={n:p.requires_grad for n,p in model.named_parameters()},
+            rng=rng_state(), sampler_generator=loader.generator.get_state() if loader.generator is not None else None)
+        temporary = path.with_suffix('.tmp')
+        torch.save(payload, temporary); temporary.replace(path)
+        stats = output / 'face_exchange_statistics.json'
+        previous = json.loads(stats.read_text()) if stats.exists() else {}
+        previous.setdefault(str(task_id), {})[str(epoch)] = model.face_cls_bank.statistics()
+        temporary = stats.with_suffix('.tmp'); temporary.write_text(json.dumps(previous, indent=2)+'\n'); temporary.replace(stats)
+    return save
 
 if __name__ == "__main__":
     main()

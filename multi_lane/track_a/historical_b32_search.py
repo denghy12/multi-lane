@@ -59,6 +59,12 @@ def validate_config(config):
         adapter_task_initialization='independent', amp=True, tf32=True,
         fixed_view_sampler_protocol=None, parameter_group_loss_routing='adapter_asl',
         evaluation_scope='samples_intersect_seen_classes'))
+    mode=config.get('shared_face_readout', 'disabled')
+    if mode != 'disabled':
+        _check(config, dict(shared_face_layer=5, shared_face_dim=64, shared_face_heads=4,
+            shared_face_cap=.05, view_fusion_learning_rate=.0004))
+        if mode not in {'pool', 'attention'} or config['historical_b32_profile'] != 'THREE_BASE':
+            raise ValueError('Shared Face interface requires the original B0 profile')
     return config['historical_b32_profile']
 
 

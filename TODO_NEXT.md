@@ -1,3 +1,9 @@
+## 2026-11-05 共享B0 Face CLS三组实验实现与部署准备
+
+用户授权执行B0/Face Pool/Face Attention。新独立分支exp/shared-b0-face-cross-view-20261105，基于58db7f7；尚未启动正式训练。保留seed1/8task/30轮/B64、b32 scale.03、关闭Person颜色扰动、融合BCE+.1有效视图辅助BCE及Adapter-ASL、共同head和固定特征融合。仅可靠Face在第6完整Task块后接收修正；Q=Face Task CLS、KV=自身CLS+Full/Person同批第6完整Frozen块后patch；Pool同外部输入。64维4头、投影后QK LN、FP32读取、相同5% CLS范数平滑cap，任务私有旧模块冻结，初始化不消耗原随机流。
+
+代码shared_face_cross_view.py及model/runner/evaluate/export适配，新增专项测试、GPU0显存准入队列和执行方案docs/shared_b0_face_cross_view_execution_20261105.md。须单测/历史回归、三组2任务×2更新真实Val smoke与历史B0逐值重放、固定TRAIN梯度探针通过后，自动3组完整训练及Val/Test，新增组task0/2/7 OFF两split归因。原Full不直接接收不构成共享训练保护；两新模型从CLIP及本任务初始化自行学习，不安装历史头或教师。启动后另记录实测状态，不把实现完成当作已跑结果。其他任务/主树用户改动/test-only不修改。
+
 # 下一步任务
 
 ## 2026-11-01：优先补评与只读非有限诊断，原五组并未完成

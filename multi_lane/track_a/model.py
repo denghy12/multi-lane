@@ -31,6 +31,7 @@ from .view_fusion import TaskwiseViewFusion
 from .joint_summary import TaskJointSummaryBank
 from .cross_view_attention import TaskCrossViewAttentionBank
 from .spatial_summary import TaskSpatialSummary
+from .shared_face_cross_view import TaskFaceCLSBank
 
 ModelInputs = Union[torch.Tensor, Dict[str, torch.Tensor]]
 
@@ -113,6 +114,11 @@ class MultiLaneModel(nn.Module):
         cross_view_residual_cap: float = 0.,
         spatial_summary_bias_mode: str = 'raw',
         cross_view_face_attention: bool = False,
+        shared_face_readout: str = "disabled",
+        shared_face_layer: int = 5,
+        shared_face_dim: int = 64,
+        shared_face_heads: int = 4,
+        shared_face_cap: float = .05,
     ) -> None:
         super().__init__()
         if not task_sizes or any(int(size) <= 0 for size in task_sizes):
@@ -545,6 +551,19 @@ class MultiLaneModel(nn.Module):
                 self.num_tasks, self.width, cross_view_mode, cross_view_layer,
                 cross_view_dim, cross_view_heads, cross_view_scale, cross_view_residual_cap,
                 face_attention=cross_view_face_attention)
+        self.shared_face_readout = shared_face_readout
+        self.face_cls_bank = None
+        if shared_face_readout != 'disabled':
+            if (shared_face_readout not in {'pool', 'attention'} or view_fusion != 'fixed_three_view'
+                    or view_classifier_mode != 'shared_post_fusion' or selector_mode != 'shared'
+                    or prompt_mode != 'shared' or adapter_mode != 'image_token'
+                    or adapter_view_mode != 'shared' or cross_view_mode != 'disabled'
+                    or spatial_summary_mode != 'disabled' or joint_summary_mode != 'disabled'
+                    or parax_mode != 'disabled' or detach_view_fusion_features
+                    or not 0 <= shared_face_layer < len(blocks)):
+                raise ValueError('Shared Face exchange requires the unmodified shared three-view base')
+            self.face_cls_bank = TaskFaceCLSBank(self.num_tasks, self.width, shared_face_readout,
+                shared_face_layer, shared_face_dim, shared_face_heads, shared_face_cap)
         self._last_fusion_weights: Optional[torch.Tensor] = None
         self._last_base_fused_logits: Optional[torch.Tensor] = None
 
@@ -604,6 +623,8 @@ class MultiLaneModel(nn.Module):
             self.joint_summary_bank.restore_task(task_id)
         if self.cross_view_bank is not None:
             self.cross_view_bank.restore_task(task_id)
+        if self.face_cls_bank is not None:
+            self.face_cls_bank.restore_task(task_id)
         self._current_task_id = int(task_id)
 
     def restore_task(self, task_id: int) -> None:
@@ -622,6 +643,8 @@ class MultiLaneModel(nn.Module):
             self.joint_summary_bank.restore_task(task_id)
         if self.cross_view_bank is not None:
             self.cross_view_bank.restore_task(task_id)
+        if self.face_cls_bank is not None:
+            self.face_cls_bank.restore_task(task_id)
         self._current_task_id = int(task_id)
 
     def set_adapter_runtime_enabled(self, enabled: bool) -> None:
@@ -1261,6 +1284,14 @@ class MultiLaneModel(nn.Module):
                     person_tokens = block(
                         person_tokens.permute(1, 0, 2)
                     ).permute(1, 0, 2)
+            if (self.face_cls_bank is not None and summary_cache is not None
+                    and layer_id == self.face_cls_bank.layer):
+                if image_view in {'full', 'person'}:
+                    summary_cache[image_view] = image_tokens[:, 1:].detach()
+                elif image_view == 'face':
+                    lane_tokens = self.face_cls_bank.apply_face(lane_tokens,
+                        [summary_cache['full'], summary_cache['person']],
+                        summary_cache['face_reliable'], lane_ids)
         lane_tokens = self.visual_encoder.ln_post(lane_tokens)
         if self.visual_encoder.proj is not None:
             lane_tokens = lane_tokens @ self.visual_encoder.proj
@@ -1369,6 +1400,13 @@ class MultiLaneModel(nn.Module):
             features["full"] = self._encode_single_lanes(
                 images["full"], all_seen_lanes, image_view="full"
             )
+        elif self.face_cls_bank is not None:
+            summary_cache = {'face_reliable': face_reliable.bool()}
+            try:
+                features = {name: self._encode_single_lanes(images[name], all_seen_lanes,
+                    image_view=name, summary_cache=summary_cache) for name in ('full', 'person', 'face')}
+            finally:
+                summary_cache.clear()
         elif self.module_stacking:
             if "cross_view_query_donor" in images:
                 raise ValueError("Factorial task Query does not accept Person Query donors")
@@ -1650,6 +1688,8 @@ class MultiLaneModel(nn.Module):
 
     def fusion_optimizer_parameters(self) -> Iterable[nn.Parameter]:
         yield from self.view_fusion_module.active_parameters()
+        if self.face_cls_bank is not None:
+            yield from self.face_cls_bank.active_parameters()
         if self.joint_summary_bank is not None:
             yield from self.joint_summary_bank.active_parameters()
         if self.cross_view_bank is not None:
@@ -1694,6 +1734,8 @@ class MultiLaneModel(nn.Module):
         if self.cross_view_bank is not None:
             names.extend(f"cross_view_bank.{name}"
                          for name, p in self.cross_view_bank.named_parameters() if p.requires_grad)
+        if self.face_cls_bank is not None:
+            names.extend(f"face_cls_bank.{name}" for name, p in self.face_cls_bank.named_parameters() if p.requires_grad)
         if self.spatial_summary_bank is not None:
             names.extend(f"spatial_summary_bank.{name}"
                          for name, p in self.spatial_summary_bank.named_parameters() if p.requires_grad)
