@@ -82,6 +82,7 @@ def model_from_config(c,clip):
         normalize=c['normalize'],adapter_mode='image_token',adapter_bottleneck_dim=32,
         adapter_layer_indices=(1,),adapter_residual_scale=.1,adapter_activation='relu',
         r1_kind=c['r1_kind'],r1_view=c['r1_receiver'],r1_sender_root=c.get('r1_sender_root'),
+        r1_layer=c.get('r1_exchange_layer') if c.get('r1_exchange_layer') is not None else 5,
         r1_query_mode=c.get('r1_query_mode','cls'), **extra).float().cuda()
 
 

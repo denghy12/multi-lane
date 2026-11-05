@@ -977,6 +977,7 @@ def train_task(
         multistep_gamma=scheduler_multistep_gamma,
     )
     scaler = torch.cuda.amp.GradScaler(enabled=amp)
+    fixed_scale = getattr(model, 'r1_fixed_loss_scale', None)
     current = list(task_indices(task_id))
     history: List[Dict[str, float]] = []
     completed_task_updates = 0
@@ -993,6 +994,10 @@ def train_task(
         history=resume['history']
         epoch=resume['next_epoch']
         completed_task_updates=resume['completed_task_updates']
+    if amp and fixed_scale is not None:
+        state = scaler.state_dict()
+        state.update(scale=float(fixed_scale), growth_interval=1000000000, _growth_tracker=0)
+        scaler.load_state_dict(state)
     while (
         completed_task_updates < optimizer_updates_per_task
         if optimizer_updates_per_task is not None
@@ -1360,6 +1365,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--r1-view',choices=('full','person','face'))
     parser.add_argument('--r1-query-mode',choices=('cls','selector_mean','selectors'),default='cls')
     parser.add_argument('--r1-frozen-mode', choices=('image_cls', 'patch'))
+    parser.add_argument('--r1-exchange-layer', type=int, default=5)
+    parser.add_argument('--r1-fixed-loss-scale', type=float)
+    parser.add_argument('--r1-recovery-source', type=Path)
     parser.add_argument('--r1-fusion-readout',choices=('probability','logit'),default='probability')
     parser.add_argument('--r1-smoke-eval-samples',type=int)
     parser.add_argument('--r1-sender-root', type=Path)
@@ -1443,6 +1451,14 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if args.r1_fixed_loss_scale is not None and (
+            args.r1_frozen_mode is None or not math.isfinite(args.r1_fixed_loss_scale)
+            or args.r1_fixed_loss_scale <= 0):
+        raise ValueError('Fixed loss scaling requires a positive finite frozen-receiver scale')
+    if args.r1_recovery_source is not None and (
+            args.r1_frozen_mode != 'image_cls' or args.r1_view != 'person'
+            or args.r1_exchange_layer != 5 or args.r1_fixed_loss_scale is None):
+        raise ValueError('External recovery is restricted to the original layer6 CLS Person path')
     if args.r1_frozen_mode is not None and (
             args.r1_kind != 'attention' or args.r1_view not in ('person', 'face')
             or args.r1_sender_root is not None or args.r1_query_mode != 'cls'):
@@ -1600,6 +1616,8 @@ def main() -> None:
             from .r1_frozen_cross_view import FrozenR1Receiver
             model_class = FrozenR1Receiver
             extra['frozen_cross_mode'] = args.r1_frozen_mode
+            extra['r1_layer'] = args.r1_exchange_layer
+            extra['recovery_source'] = args.r1_recovery_source
     model = model_class(
         visual_encoder=visual,
         task_sizes=TASK_SIZES,
@@ -1623,6 +1641,7 @@ def main() -> None:
         **extra,
     ).float().to(device)
     model.visual_encoder.requires_grad_(False)
+    model.r1_fixed_loss_scale = args.r1_fixed_loss_scale
     model.assert_visual_frozen()
     lane_parameters = model.selectors.numel() + sum(p.numel() for p in model.prompts)
     classifier_parameters = sum(p.numel() for p in model.head.parameters())
@@ -2008,13 +2027,19 @@ def main() -> None:
             r1_evidence='deterministic_native_eval_crops_of_same_TRAIN_person',r1_interaction_precision='FP32')
         if args.r1_frozen_mode is not None:
             config.update(r1_frozen_mode=args.r1_frozen_mode, r1_frozen_cap=.05,
-                r1_exchange_site='after_Frozen_block6_before_Task_block7_Summarize',
+                r1_exchange_layer=args.r1_exchange_layer,
+                r1_exchange_site=f'after_Frozen_block{args.r1_exchange_layer+1}_before_Task_block{args.r1_exchange_layer+2}_Summarize',
                 r1_query_count=1 if args.r1_frozen_mode == 'image_cls' else int(visual.positional_embedding.shape[0]-1),
                 r1_query_reduction='none; each query updates its own visual token',
                 r1_query_normalization='input_LN_and_post_projection_per_head_QK_LN_no_affine',
                 r1_cap_reference='0.05 * detached_pre_injection_image_CLS_norm; total_Frobenius_budget',
                 r1_task_private_visual_suffix=True, r1_evaluation_threads=2)
             config['total_method_parameters'] += config['r1_exchange_parameters']
+            if args.r1_fixed_loss_scale is not None:
+                config.update(r1_fixed_loss_scale=args.r1_fixed_loss_scale,
+                    r1_loss_scale_growth_interval=1000000000)
+            if args.r1_recovery_source is not None:
+                config['r1_recovery_source'] = str(args.r1_recovery_source)
         if args.r1_smoke_eval_samples is not None:
             if (args.optimizer_updates_per_task is None or args.reporting_split != 'val'
                     or not 1 <= args.r1_smoke_eval_samples <= 512):

@@ -1,3 +1,13 @@
+## 2026-11-05 第6层有效恢复与第9层六组对照实现
+
+用户授权补齐原两配置并将Attention后移。新分支exp/frozen-cross-view-late-stable-20261105（基于24b34d6），第6层CLS Person仅从task3 epoch18恢复model/Adam/scheduler/scaler/RNG，task0–2完整边界及预测只读复用，拒绝epoch19跳步记录和训练配置/优化器顺序变化。补跑仍30轮完整预算，新增固定loss scale4096、禁增长；此为数值策略变化，明确记录，不当作旧轨迹完全重放。
+
+固定epoch18权重、按保存RNG重建epoch19前8及末16个TRAIN原增强batch，共24批×AMP131072/4096/1与FP32，全部梯度有限、未复现动态训练的溢出；4096与FP32方向余弦最低约.9985。诊断0更新、不用Test，checkpoint SHA不变；不能声称定位到溢出算子。接下来需真实两更新续训smoke及完整epoch19确认。
+
+第9完整Frozen block后（index8）从头训练image_cls/patch × Person/Face四路径，形成Face-only/Person-only/双接收六配置；QKV/权重形式/上限/各路BCE+Adapter-ASL/seed1/B64/30轮不变，loss scale也4096。比较深度包含同层证据接口变化；旧第6层三个有效组为历史动态scaler，不作绝对纯位置因果结论。新损失缩放不改变AMP前向或LR，不增加loss/模块。GPU0最多2任务显存准入。
+
+新增DAG编排：先恢复及验证第6层，后移训练可并行；失败只阻断依赖项，成功模型继续评估。输出output/r1_frozen_late_stable/seed1_20261105，日志同名logs目录。修改runner.py/FrozenR1Receiver/配置加载器，新增late/stable入口、测试、计划。此时仅静态检查通过，远程测试/smoke/正式启动待核验，未宣称效果。旧worktree及所有源checkpoint不覆盖。
+
 ## 2026-11-05 预检分开结构保护与AMP批形状舍入
 
 四条真实smoke训练各2任务×2更新均完成、0skip。原预检将T=1与T=2的AMP输出直接按2e-5比较，拦截1.22e-4至2.44e-4差异；已确认首条路径旧Adapter/CA/Selectors/Prompts/head块逐值不变。修订预检：旧参数逐值核对及相同lane数量的旧路径比较；零修正同时报告AMP差异与关闭TF32的FP32等价性，不再把不同GEMM形状的舍入直接判为训练漂移。尚待新版实际检查通过。

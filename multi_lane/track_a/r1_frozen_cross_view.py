@@ -3,11 +3,13 @@
 Only the receiving stream retains input gradients. The CLIP weights and the
 two sending streams remain frozen. Old task modules never change.
 """
+from pathlib import Path
+import hashlib
 import torch
 from torch import nn
 from torch.nn import functional as F
 
-from .r1_crossvit import R1Receiver, VIEWS
+from .r1_crossvit import R1Receiver, VIEWS, restore_rng
 
 MODES = ('image_cls', 'patch')
 
@@ -78,7 +80,8 @@ class FrozenCrossAgent(nn.Module):
 
 
 class FrozenR1Receiver(R1Receiver):
-    def __init__(self, *args, frozen_cross_mode='image_cls', frozen_cross_cap=.05, **kwargs):
+    def __init__(self, *args, frozen_cross_mode='image_cls', frozen_cross_cap=.05,
+                 recovery_source=None, **kwargs):
         if kwargs.get('r1_view') not in ('person', 'face'):
             raise ValueError('Full is protected; only Person and Face may receive')
         if kwargs.get('r1_sender_root') is not None or kwargs.get('r1_query_mode', 'cls') != 'cls':
@@ -89,10 +92,60 @@ class FrozenR1Receiver(R1Receiver):
             raise ValueError('A later Summarize block is required after visual injection')
         self.frozen_cross_mode, self.frozen_cross_cap = frozen_cross_mode, frozen_cross_cap
         self.r1_kind = 'attention'
+        self.recovery_source = Path(recovery_source) if recovery_source else None
         with torch.random.fork_rng(devices=list(range(torch.cuda.device_count()))):
             torch.manual_seed(20261105)
             self.r1_bank.extend(FrozenCrossAgent(self.width, kwargs.get('r1_dim', 64),
                 kwargs.get('r1_heads', 4), frozen_cross_mode, frozen_cross_cap) for _ in self.task_sizes)
+
+    def _load_external(self, path, task, training=False):
+        saved = torch.load(path, map_location='cpu', weights_only=False)
+        if saved['task'] != task:
+            raise ValueError('External recovery task differs')
+        original, current = saved['config'], self.r1_config
+        allowed = {'git', 'r1_fixed_loss_scale', 'r1_loss_scale_growth_interval', 'r1_recovery_source'}
+        changed = [k for k in original.keys() | current.keys()
+                   if k not in allowed and original.get(k) != current.get(k)]
+        if changed:
+            raise ValueError(f'External recovery recipe changed: {changed}')
+        history = saved['training']['history'] if training else saved['history']
+        if any(r['skipped_optimizer_steps'] for r in history):
+            raise ValueError('External recovery contains skipped updates')
+        if training and (saved['training']['next_epoch'] != 18
+                         or saved['training']['completed_task_updates'] != 2808):
+            raise ValueError('Only the complete task3 epoch18 boundary is allowed')
+        missing = self.load_state_dict(saved['model'], strict=False)
+        if missing.unexpected_keys or any(not n.startswith('visual_encoder.') for n in missing.missing_keys):
+            raise ValueError('Incomplete external state')
+        self.restore_task(task)
+        if training:
+            from .runner import build_optimizer_groups
+            _, _, groups = build_optimizer_groups(self, 0., adapter_learning_rate=current['adapter_learning_rate'])
+            names = {id(p):n for n,p in self.named_parameters()}
+            actual = [[names[id(p)] for p in group['params']] for group in groups]
+            if actual != saved['training']['optimizer_parameter_names']:
+                raise ValueError('Optimizer parameter ordering changed')
+            self.r1_resume = saved['training']
+        restore_rng(saved['rng'])
+        if self.r1_root:
+            from .r1_crossvit_experiment import write
+            write(self.r1_root/f'external_task{task}_provenance.json', dict(
+                source=str(path), sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+                source_config=original, numerical_policy_only_change=True, epoch18=training))
+        return saved
+
+    def restore_completed_task(self, task):
+        own = super().restore_completed_task(task)
+        if own is not None:
+            return own
+        if self.recovery_source is not None and task < 3:
+            return self._load_external(self.recovery_source/'task_recovery'/f'task{task}.pth', task)
+        return None
+
+    def activate_task(self, task):
+        super().activate_task(task)
+        if self.recovery_source is not None and task == 3 and self.r1_resume is None:
+            self._load_external(self.recovery_source/'epoch_recovery/task3/epoch18.pth', task, True)
 
     def save_training_epoch(self, task, epoch, history, optimizer, scheduler, scaler, updates):
         history[-1]['cross_view_last_gradient_norms'] = {
