@@ -23,11 +23,13 @@ class SharedB0FaceTest(unittest.TestCase):
                 'face_reliable':torch.tensor([True,False,True])}
 
     def test_zero_output_and_random_stream_preserved(self):
-        models={};states={}
+        models={};states={};cuda_states={}
         for mode in ('disabled','pool','attention'):
             models[mode]=self.model(mode);states[mode]=torch.get_rng_state()
+            cuda_states[mode]=torch.cuda.get_rng_state_all() if torch.cuda.is_available() else []
             models[mode].activate_task(0)
         self.assertTrue(all(torch.equal(v,states['disabled']) for v in states.values()))
+        self.assertTrue(all(all(torch.equal(x,y) for x,y in zip(v,cuda_states['disabled'])) for v in cuda_states.values()))
         images=self.images();ref=models['disabled'].current_all_logits(images)
         for m in models.values(): self.assertTrue(torch.equal(ref,m.current_all_logits(images)))
         for mode in ('pool','attention'):

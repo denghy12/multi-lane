@@ -1,3 +1,7 @@
+## 2026-11-05 启动前补齐随机流与旧入口兼容检查
+
+27项首轮测试通过，B0真实2任务×2更新与历史smoke的loss/参数/预测逐值一致，Pool短训练零跳步。复核补齐旧独立模型的可选属性兼容，以及CPU私有Generator初始化以避免torch.manual_seed在CPU fork中同时改写CUDA RNG。新增CPU/CUDA RNG逐值检查、恢复状态CUDA随机流比较、真实64×26八lane形状探针。两批预检在自有队列内停止，结果保留，不把它们当作正式结果；最终源版本下重跑完整门槛。仅GPU0/自有进程，未修改其他实验或用户工作树。
+
 ## 2026-11-05 共享B0 Face CLS三组实验实现与部署准备
 
 用户授权执行B0/Face Pool/Face Attention。新独立分支exp/shared-b0-face-cross-view-20261105，基于58db7f7；尚未启动正式训练。保留seed1/8task/30轮/B64、b32 scale.03、关闭Person颜色扰动、融合BCE+.1有效视图辅助BCE及Adapter-ASL、共同head和固定特征融合。仅可靠Face在第6完整Task块后接收修正；Q=Face Task CLS、KV=自身CLS+Full/Person同批第6完整Frozen块后patch；Pool同外部输入。64维4头、投影后QK LN、FP32读取、相同5% CLS范数平滑cap，任务私有旧模块冻结，初始化不消耗原随机流。

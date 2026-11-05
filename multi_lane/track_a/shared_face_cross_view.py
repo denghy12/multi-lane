@@ -69,10 +69,10 @@ class TaskFaceCLSBank(nn.Module):
         self.runtime_enabled = True
         # Never consume the initialization/augmentation/sampler RNG of B0.
         with torch.random.fork_rng(devices=[]):
-            torch.manual_seed(20261105)
+            torch.random.default_generator.manual_seed(20261105)
             self.tasks = nn.ModuleList()
             for task in range(tasks):
-                torch.manual_seed(20261105 + task)
+                torch.random.default_generator.manual_seed(20261105 + task)
                 self.tasks.append(FaceCLSReadout(width, dim, heads, mode, cap))
         self.current = -1
         self.requires_grad_(False)

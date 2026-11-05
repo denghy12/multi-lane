@@ -26,7 +26,7 @@ def verify_training(path, smoke):
     import torch
     from multi_lane.track_a.export_compact_test_scores import _torch_load
     result=verify_train(path,smoke)
-    previous=None
+    previous=None;cuda_rng=[]
     for t in range(2 if smoke else 8):
         state=_torch_load(path/'compact_checkpoints'/f'task{t}.pth')['model']
         if previous:
@@ -34,6 +34,9 @@ def verify_training(path, smoke):
                 if k.startswith('face_cls_bank.tasks.') and int(k.split('.')[2])<t:
                     assert torch.equal(v,previous[k]),k
         previous=state
+        boundary=_torch_load(path/'recovery_checkpoints'/f'task{t}_before_reporting.pth')
+        cuda_rng.append([hashlib.sha256(v.numpy().tobytes()).hexdigest() for v in boundary['rng']['torch_cuda']])
+    result['cuda_rng_at_task_boundaries']=cuda_rng
     result['old_face_readouts_unchanged']=True
     return result
 
@@ -95,7 +98,11 @@ def probe(train, args):
         assert torch.equal(on_views['full'],off_views['full']) and torch.equal(on_views['person'],off_views['person'])
         bad=~images['face_reliable'].bool()
         assert torch.equal(on[bad],off[bad])
-    write(train.parent/'train_probe.json',dict(gradients=gradients,stats=model.face_cls_bank.statistics(),
+    with torch.no_grad():
+        model.restore_task(7)
+        late=model.seen_logits(images)
+        assert late.shape==(len(ids),26) and torch.isfinite(late).all()
+    write(train.parent/'train_probe.json',dict(eight_lane_shape=list(late.shape),gradients=gradients,stats=model.face_cls_bank.statistics(),
         source_split='train',sample_ids=list(ids),full_person_inference_equal=True,
         unreliable_inference_equal=True,frozen_visual_no_gradient=True))
 
@@ -189,6 +196,8 @@ def run(args):
     # New modules must not alter sampler/augmentation RNG consumption at boundaries.
     assert len({a['initial_base_sha256'] for a in audits.values()})==1
     streams=[a['cpu_rng_at_task_boundaries'] for a in audits.values()]
+    assert all(s==streams[0] for s in streams)
+    streams=[a['cuda_rng_at_task_boundaries'] for a in audits.values()]
     assert all(s==streams[0] for s in streams)
     rows=[]
     for arm in ARMS:
