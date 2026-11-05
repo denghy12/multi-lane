@@ -2242,7 +2242,7 @@ def train_task(
                         and adapter_regularization == "none"
                         and ranking_loader is None
                     ),
-                    allow_unused_model_parameters=(getattr(model, 'cross_view_face_attention', False) or model.face_cls_bank is not None),
+                    allow_unused_model_parameters=(getattr(model, 'cross_view_face_attention', False) or getattr(model, 'face_cls_bank', None) is not None),
                 )
             if private_interaction is not None:
                 private_interaction.backward(current_targets, current)
@@ -2262,7 +2262,7 @@ def train_task(
                 adapter_gradient_batches += 1
             if (getattr(model, "strong_full_asl", False) or getattr(model, "historical_b32_modules", False)) and batch_index == 0:
                 epoch_parameter_gradients = strong_full_gradient_diagnostics(model, scale_before)
-            if model.face_cls_bank is not None and batch_index == 0:
+            if getattr(model, 'face_cls_bank', None) is not None and batch_index == 0:
                 epoch_parameter_gradients.update({
                     'face_exchange_grad_' + n: float(p.grad.detach().float().norm() / scale_before)
                     for n, p in model.face_cls_bank.tasks[task_id].named_parameters() if p.grad is not None})
@@ -3998,7 +3998,7 @@ def run(args: argparse.Namespace) -> None:
         ),
         "view_fusion_learning_rate": (
             args.view_fusion_learning_rate
-            if (model.view_fusion_module.learned or args.joint_summary_mode in {"dense", "moe"} or model.cross_view_bank is not None or model.spatial_summary_bank is not None or model.face_cls_bank is not None) else None
+            if (model.view_fusion_module.learned or args.joint_summary_mode in {"dense", "moe"} or model.cross_view_bank is not None or model.spatial_summary_bank is not None or getattr(model, 'face_cls_bank', None) is not None) else None
         ),
         "view_residual_scale": (
             args.view_residual_scale
