@@ -34,7 +34,8 @@ def verify_training(path, smoke):
                 if k.startswith('face_cls_bank.tasks.') and int(k.split('.')[2])<t:
                     assert torch.equal(v,previous[k]),k
         previous=state
-        boundary=_torch_load(path/'recovery_checkpoints'/f'task{t}_before_reporting.pth')
+        from multi_lane.track_a.verify_spatial_summary import load_boundary
+        boundary=load_boundary(path/'recovery_checkpoints'/f'task{t}_before_reporting.pth')
         cuda_rng.append([hashlib.sha256(v.numpy().tobytes()).hexdigest() for v in boundary['rng']['torch_cuda']])
     result['cuda_rng_at_task_boundaries']=cuda_rng
     result['old_face_readouts_unchanged']=True
