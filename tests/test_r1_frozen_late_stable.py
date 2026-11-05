@@ -49,6 +49,17 @@ class LateStableTests(unittest.TestCase):
             m.r1_config['recipe']='a';payload['history'][0]['skipped_optimizer_steps']=1;torch.save(payload,p)
             with self.assertRaises(ValueError):m._load_external(p,0)
 
+    def test_fp32_nonfinite_guard_prevents_any_parameter_update(self):
+        m,x=self.model();m.r1_require_finite_gradients=True
+        before=compact(m)
+        handle=m.head.weight.register_hook(lambda g:g*float('nan'))
+        y=torch.zeros(4,5);y[:,0]=1
+        with self.assertRaises(FloatingPointError):
+            train_task(m,[(x,y)],[(x,y)],torch.device('cpu'),0,1,.001,0.,1.,False,
+                adapter_learning_rate=.0004,loss_routing='adapter_asl')
+        handle.remove()
+        self.assertTrue(all(torch.equal(v,compact(m)[n]) for n,v in before.items()))
+
     def test_failed_job_does_not_block_independent_evaluation(self):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d);flag=root/'evaluated'

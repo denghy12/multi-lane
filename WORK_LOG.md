@@ -1,3 +1,11 @@
+## 2026-11-05 定位动态重放batch140的AMP非有限梯度并改为FP32恢复
+
+9d84f55固定scale4096的正式第6层恢复仍在epoch19发生3skip，原失败状态保留；第9层四路径DAG独立继续，不能宣称两组已补齐。固定权重24批诊断未复现，随后从原epoch18在内存重放Adam到首个异常：batch140，同一更新前状态及同一增强输入下AMP4096与AMP1均在Selectors/Prompts0-1/Adapter产生非有限梯度，FP32所有梯度有限，CA参数梯度未列为非有限。不能再将缩放增长视为唯一解释。
+
+新分支exp/frozen-layer6-fp32-recovery-20261105（源9d84f55），只处理第6层CLS Person，不改变运行中的第9层源。仍从原epoch18恢复Adam/scheduler/RNG，禁AMP和TF32，增加optimizer.step前有限梯度保护；外部恢复仅在显式FP32恢复标记下允许amp/tf32配置变化。首3任务权重与前18轮保留，旧epoch19不读。新FP32训练完整8task预算，之后Person全部八阶段Val/Test统一FP32重新前向，避免早期缓存AMP与后期FP32混为一个评估口径；Full/Face保持原来源，形成原缺失两配置。
+
+新入口run_r1_layer6_fp32_recovery.py：先两更新FP32真实恢复smoke和显存准入，再正式续训；新目录output及logs/r1_layer6_fp32_recovery/seed1_20261105。与后移组利用GPU0余量并行，空间不足排队，不取消或改动后移组。当前仅完成代码及静态检查，远程测试/正式FP32启动待核验，尚无新效果。
+
 ## 2026-11-05 第6层有效恢复与第9层六组对照实现
 
 用户授权补齐原两配置并将Attention后移。新分支exp/frozen-cross-view-late-stable-20261105（基于24b34d6），第6层CLS Person仅从task3 epoch18恢复model/Adam/scheduler/scaler/RNG，task0–2完整边界及预测只读复用，拒绝epoch19跳步记录和训练配置/优化器顺序变化。补跑仍30轮完整预算，新增固定loss scale4096、禁增长；此为数值策略变化，明确记录，不当作旧轨迹完全重放。

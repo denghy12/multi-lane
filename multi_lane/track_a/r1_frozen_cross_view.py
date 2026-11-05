@@ -104,6 +104,8 @@ class FrozenR1Receiver(R1Receiver):
             raise ValueError('External recovery task differs')
         original, current = saved['config'], self.r1_config
         allowed = {'git', 'r1_fixed_loss_scale', 'r1_loss_scale_growth_interval', 'r1_recovery_source'}
+        if current.get('r1_fp32_recovery') and not current['amp'] and not current['tf32']:
+            allowed.update({'amp','tf32','r1_fp32_recovery','r1_gradient_finite_guard'})
         changed = [k for k in original.keys() | current.keys()
                    if k not in allowed and original.get(k) != current.get(k)]
         if changed:

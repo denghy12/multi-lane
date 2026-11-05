@@ -1104,6 +1104,11 @@ def train_task(
                     and adapter_regularization == "none"
                 ),
             )
+            if getattr(model, 'r1_require_finite_gradients', False):
+                finite = torch.stack([torch.isfinite(p.grad).all()
+                    for p in (*model_parameters, *adapter_parameters) if p.grad is not None]).all()
+                if not bool(finite):
+                    raise FloatingPointError('Nonfinite FP32 recovery gradient; optimizer was not updated')
             scaler.step(optimizer)
             scaler.update()
             if float(scaler.get_scale()) >= scale_before:
@@ -1368,6 +1373,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--r1-exchange-layer', type=int, default=5)
     parser.add_argument('--r1-fixed-loss-scale', type=float)
     parser.add_argument('--r1-recovery-source', type=Path)
+    parser.add_argument('--r1-fp32-recovery', action='store_true')
     parser.add_argument('--r1-fusion-readout',choices=('probability','logit'),default='probability')
     parser.add_argument('--r1-smoke-eval-samples',type=int)
     parser.add_argument('--r1-sender-root', type=Path)
@@ -1457,8 +1463,10 @@ def main() -> None:
         raise ValueError('Fixed loss scaling requires a positive finite frozen-receiver scale')
     if args.r1_recovery_source is not None and (
             args.r1_frozen_mode != 'image_cls' or args.r1_view != 'person'
-            or args.r1_exchange_layer != 5 or args.r1_fixed_loss_scale is None):
+            or args.r1_exchange_layer != 5 or (args.r1_fixed_loss_scale is None and not args.r1_fp32_recovery)):
         raise ValueError('External recovery is restricted to the original layer6 CLS Person path')
+    if args.r1_fp32_recovery and (args.r1_recovery_source is None or not args.no_amp or not args.no_tf32):
+        raise ValueError('FP32 recovery must explicitly disable AMP and TF32')
     if args.r1_frozen_mode is not None and (
             args.r1_kind != 'attention' or args.r1_view not in ('person', 'face')
             or args.r1_sender_root is not None or args.r1_query_mode != 'cls'):
@@ -1642,6 +1650,7 @@ def main() -> None:
     ).float().to(device)
     model.visual_encoder.requires_grad_(False)
     model.r1_fixed_loss_scale = args.r1_fixed_loss_scale
+    model.r1_require_finite_gradients = args.r1_fp32_recovery
     model.assert_visual_frozen()
     lane_parameters = model.selectors.numel() + sum(p.numel() for p in model.prompts)
     classifier_parameters = sum(p.numel() for p in model.head.parameters())
@@ -2040,6 +2049,8 @@ def main() -> None:
                     r1_loss_scale_growth_interval=1000000000)
             if args.r1_recovery_source is not None:
                 config['r1_recovery_source'] = str(args.r1_recovery_source)
+            if args.r1_fp32_recovery:
+                config.update(r1_fp32_recovery=True,r1_gradient_finite_guard=True)
         if args.r1_smoke_eval_samples is not None:
             if (args.optimizer_updates_per_task is None or args.reporting_split != 'val'
                     or not 1 <= args.r1_smoke_eval_samples <= 512):

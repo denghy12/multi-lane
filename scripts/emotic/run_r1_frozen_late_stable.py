@@ -105,7 +105,7 @@ def summarize_family(root, reference, manifest, paths, destination):
     write(destination,dict(results=output,independently_predeclared_paths=True))
 
 
-def resume_smoke(root, source):
+def resume_smoke(root, source, force_fp32=False):
     from torch.utils.data import DataLoader,Subset
     from multi_lane.continual_datasets.continual_datasets import EMOTIC
     from multi_lane.track_a.r1_crossvit_experiment import model_from_config
@@ -116,6 +116,11 @@ def resume_smoke(root, source):
     model.r1_fixed_loss_scale=4096.;model.recovery_source=source
     model.r1_root=root;model.r1_config=dict(c,r1_fixed_loss_scale=4096.,
         r1_loss_scale_growth_interval=1000000000,r1_recovery_source=str(source))
+    if force_fp32:
+        model.r1_fixed_loss_scale=None;model.r1_require_finite_gradients=True
+        model.r1_config=dict(c,amp=False,tf32=False,r1_fp32_recovery=True,
+            r1_gradient_finite_guard=True,r1_recovery_source=str(source))
+        torch.backends.cuda.matmul.allow_tf32=False;torch.backends.cudnn.allow_tf32=False
     model.restore_completed_task(2);model.activate_task(3)
     loaded=model.r1_resume
     if loaded['completed_task_updates']!=2808:raise ValueError('Wrong recovery boundary')
@@ -135,13 +140,14 @@ def resume_smoke(root, source):
                 if i>=2:break
                 yield b
     validation=DataLoader(Subset(view,range(64)),batch_size=64,num_workers=0)
-    history=train_task(model,TwoBatches(),validation,torch.device('cuda'),3,19,.0125,0.,1.,True,
+    history=train_task(model,TwoBatches(),validation,torch.device('cuda'),3,19,.0125,0.,1.,not force_fp32,
         adapter_learning_rate=.0004,loss_routing='adapter_asl')
     last=history[-1]
     if last['optimizer_steps']!=2 or last['skipped_optimizer_steps']:
         raise ValueError('Continuation smoke failed')
     write(root/'smoke_result.json',dict(status='passed',restored_epoch=18,restored_updates=2808,
-        restored_optimizer_and_scheduler=True,loss_scale=4096,new_updates=2,skips=0,
+        restored_optimizer_and_scheduler=True,loss_scale=None if force_fp32 else 4096,
+        precision='FP32' if force_fp32 else 'AMP',new_updates=2,skips=0,
         smoke_only_not_a_complete_epoch=True,peak_reserved_mib=torch.cuda.max_memory_reserved()/1024**2))
 
 

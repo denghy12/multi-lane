@@ -113,7 +113,7 @@ def validation(args):
         if args.smoke:dataset=Subset(dataset,range(min(64,len(dataset))))
         loader=DataLoader(dataset,batch_size=64,shuffle=False,num_workers=2,prefetch_factor=1,
             worker_init_fn=single_thread_worker,generator=torch.Generator().manual_seed(77191+task))
-        row=evaluate(model,loader,torch.device('cuda'),task,.5,True,
+        row=evaluate(model,loader,torch.device('cuda'),task,.5,bool(c['amp']),
             score_output_path=args.output/'scores'/f'task{task}.npz')
         rows.append(row);write(args.output/'progress.json',dict(tasks_completed=[r.task_id for r in rows]))
         print('R1_VALIDATION',c['r1_kind'],c['r1_receiver'],task,row.mAP,flush=True)
