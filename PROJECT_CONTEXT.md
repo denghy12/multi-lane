@@ -1,3 +1,9 @@
+## 2026-11-05 预检分开结构保护与AMP批形状舍入
+
+四条真实smoke训练各2任务×2更新均完成、0skip。原预检将T=1与T=2的AMP输出直接按2e-5比较，拦截1.22e-4至2.44e-4差异；已确认首条路径旧Adapter/CA/Selectors/Prompts/head块逐值不变。修订预检：旧参数逐值核对及相同lane数量的旧路径比较；零修正同时报告AMP差异与关闭TF32的FP32等价性，不再把不同GEMM形状的舍入直接判为训练漂移。尚待新版实际检查通过。
+
+训练模块未改，增加verify-smoke入口，仅在git diff确认全部multi_lane训练代码不变时重用已完成的16更新，独立重跑四条前向/梯度检查；不改旧protocol、不把旧失败写成原先通过，不重训已有基线。正式八任务仍未放行。
+
 ## 2026-11-05 Frozen Forward六组接收方向实验实现
 
 用户授权图像CLS/patch两种交互各做Face-only、Person-only和Person+Face。新分支exp/frozen-cross-view-six-20261105，基于ee5dcbb独立worktree。四条新接收路径各seed1/8task/30epoch/B64，六组预定读出；Full与未增强路径复用原R1，不重跑基线。两接收者只读取交互前冻结patch，因此双接收复用同批Person/Face路径等价于原独立监督训练图，不根据结果挑头或参数。

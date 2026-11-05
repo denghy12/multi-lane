@@ -122,14 +122,29 @@ def preflight(train, inputs, output):
     images, _, ids = next(iter(DataLoader(Subset(data,range(min(64,len(data)))),batch_size=64,num_workers=0)))
     images = {k:v.cuda() for k,v in images.items()}
     restore(model,train,0)
+    old_state = {n:v.detach().cpu().clone() for n,v in model.state_dict().items()
+                 if n.startswith(('r1_bank.0.', 'adapter_bank.task_adapters.0.'))}
+    old_selectors=model.selectors[0].detach().cpu().clone()
+    old_prompts=[p[:,0].detach().cpu().clone() for p in model.prompts]
+    old_head=(model.head.weight[:5].detach().cpu().clone(),model.head.bias[:5].detach().cpu().clone())
     with torch.no_grad(),torch.autocast('cuda'):
         old = model.seen_logits(images).float()
+    # Hold lane cardinality fixed: changing T also changes AMP GEMM shapes.
+    model.restore_task(1)
+    with torch.no_grad(),torch.autocast('cuda'):
+        old_same_shape=model.seen_logits(images)[:,:5].float()
     restore(model,train,1)
     with torch.no_grad(),torch.autocast('cuda'):
         later = model.seen_logits(images)[:,:5].float()
-    drift = float((old-later).abs().max())
-    if drift > 2e-5:
-        raise AssertionError(f'Old task drift: {drift}')
+    drift = float((old_same_shape-later).abs().max())
+    lane_count_rounding=float((old-later).abs().max())
+    immutable=(all(torch.equal(v,model.state_dict()[n].cpu()) for n,v in old_state.items())
+        and torch.equal(old_selectors,model.selectors[0].cpu())
+        and all(torch.equal(v,p[:,0].cpu()) for v,p in zip(old_prompts,model.prompts))
+        and torch.equal(old_head[0],model.head.weight[:5].cpu())
+        and torch.equal(old_head[1],model.head.bias[:5].cpu()))
+    if not immutable or drift > 2e-5:
+        raise AssertionError(f'Old task changed: immutable={immutable}, same-shape drift={drift}')
     saved_out = [m.out.weight.detach().clone() for m in model.r1_bank]
     with torch.no_grad():
         for module in model.r1_bank:
@@ -140,8 +155,19 @@ def preflight(train, inputs, output):
         native = model.seen_logits(images).float()
         model.r1_enabled=True
     identity_error = float((zero-native).abs().max())
-    if identity_error > 2e-5:
-        raise AssertionError(f'Zero identity failed: {identity_error}')
+    tf32=(torch.backends.cuda.matmul.allow_tf32,torch.backends.cudnn.allow_tf32)
+    torch.backends.cuda.matmul.allow_tf32=False;torch.backends.cudnn.allow_tf32=False
+    try:
+        with torch.no_grad(),torch.autocast('cuda',enabled=False):
+            exact_zero=model.seen_logits(images).float()
+            model.r1_enabled=False
+            exact_native=model.seen_logits(images).float()
+            model.r1_enabled=True
+        fp32_identity_error=float((exact_zero-exact_native).abs().max())
+    finally:
+        torch.backends.cuda.matmul.allow_tf32,torch.backends.cudnn.allow_tf32=tf32
+    if fp32_identity_error > 2e-5:
+        raise AssertionError(f'FP32 zero identity failed: {fp32_identity_error}')
     with torch.no_grad():
         for module,value in zip(model.r1_bank,saved_out):
             module.out.weight.copy_(value)
@@ -183,7 +209,9 @@ def preflight(train, inputs, output):
     history = read(train/'training_history.json')
     peak = max(row.get('cuda_peak_reserved_mib',0) for rows in history.values() for row in rows)
     peak = max(peak,torch.cuda.max_memory_reserved()/1024**2)
-    write(output,dict(status='passed',old_task_max_drift=drift,zero_output_max_difference=identity_error,
+    write(output,dict(status='passed',old_task_same_shape_max_drift=drift,old_parameters_bitwise_unchanged=immutable,
+        changed_lane_count_amp_rounding=lane_count_rounding,
+        zero_output_amp_max_difference=identity_error,zero_output_fp32_max_difference=fp32_identity_error,
         sender_and_visual_gradients_absent=True,gradient_norms=gradients,diagnostics=diagnostics,
         eight_lane_shape=list(eight.shape),smoke_train_peak_reserved_mib=peak,
         admission_memory_mib=int(peak*1.2+1024)))
@@ -301,7 +329,7 @@ def aggregate(root,reference,manifest,off=False):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action',choices=('run','preflight','off','probe'),nargs='?',default='run')
+    parser.add_argument('action',choices=('run','preflight','off','probe','verify-smoke'),nargs='?',default='run')
     parser.add_argument('--root',type=Path,default=Path('output/r1_frozen_cross_view/seed1_20261105'))
     parser.add_argument('--reference',type=Path,default=Path('../multi-lane-main-r1-crossvit-20261101/output/r1_crossvit/seed1_20261101_02'))
     parser.add_argument('--training-root',type=Path);parser.add_argument('--output',type=Path)
@@ -311,6 +339,24 @@ def main():
     if args.action=='preflight':return preflight(args.training_root,inputs,args.output)
     if args.action=='off':return off_evaluation(args.training_root,inputs,args.output)
     if args.action=='probe':return train_probe(args.training_root,inputs,args.output)
+    if args.action=='verify-smoke':
+        # Reuse completed tiny training only when every training module is unchanged.
+        old=read(args.root/'protocol.json')['git']['commit']
+        changed=subprocess.check_output(['git','diff','--name-only',old,'HEAD','--','multi_lane'],text=True).strip()
+        if changed:raise ValueError('Training code changed; a fresh smoke run is required')
+        for m in MODES:
+            for v in VIEWS:check_training(folder(args.root,m,v),args.reference,v,2,True)
+        logs=Path('logs/r1_frozen_cross_view')/args.root.name
+        jobs=[dict(name=f'{m}_{v}_preflight',command=[sys.executable,'-u',__file__,'preflight',
+            '--training-root',str(folder(args.root,m,v)),'--output',str(args.root/'preflight'/f'{m}_{v}.json')],memory_mib=13000)
+            for m in MODES for v in VIEWS]
+        queue(jobs,logs,args.root,'preflight',1)
+        original=read(args.root/'protocol.json')
+        if any(sha(p)!=h for p,h in original['source_hashes'].items()):raise AssertionError('Reference changed')
+        write(args.root/'completion.json',dict(status='complete',smoke=True,
+            training_source=old,verification_source=git_metadata(Path(__file__).resolve().parents[2]),
+            training_code_unchanged=True,sources_unchanged=True))
+        return
     root=args.root;root.mkdir(parents=True,exist_ok=True)
     logs=Path('logs/r1_frozen_cross_view')/root.name;logs.mkdir(parents=True,exist_ok=True)
     git=git_metadata(Path(__file__).resolve().parents[2])

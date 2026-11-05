@@ -8,5 +8,9 @@ mkdir -p "logs/r1_frozen_cross_view/$RUN_ID"
 "$PYTHON_BIN" -m unittest discover -s tests -p test_r1_frozen_cross_view.py -v > "logs/r1_frozen_cross_view/$RUN_ID/frozen_tests.log" 2>&1
 "$PYTHON_BIN" -m unittest discover -s tests -p test_r1_crossvit.py -v > "logs/r1_frozen_cross_view/$RUN_ID/r1_regression.log" 2>&1
 "$PYTHON_BIN" -m unittest discover -s tests -p test_r1_selector_query.py -v > "logs/r1_frozen_cross_view/$RUN_ID/query_regression.log" 2>&1
-"$PYTHON_BIN" -u scripts/emotic/run_r1_frozen_cross_view.py --smoke --root "output/r1_frozen_cross_view/${RUN_ID}_smoke" > "logs/r1_frozen_cross_view/$RUN_ID/smoke_controller.log" 2>&1
+if [ -f "output/r1_frozen_cross_view/${RUN_ID}_smoke/training_checks.json" ]; then
+  "$PYTHON_BIN" -u scripts/emotic/run_r1_frozen_cross_view.py verify-smoke --root "output/r1_frozen_cross_view/${RUN_ID}_smoke" > "logs/r1_frozen_cross_view/$RUN_ID/smoke_reverification.log" 2>&1
+else
+  "$PYTHON_BIN" -u scripts/emotic/run_r1_frozen_cross_view.py --smoke --root "output/r1_frozen_cross_view/${RUN_ID}_smoke" > "logs/r1_frozen_cross_view/$RUN_ID/smoke_controller.log" 2>&1
+fi
 "$PYTHON_BIN" -u scripts/emotic/run_r1_frozen_cross_view.py --root "output/r1_frozen_cross_view/$RUN_ID" > "logs/r1_frozen_cross_view/$RUN_ID/controller.log" 2>&1
