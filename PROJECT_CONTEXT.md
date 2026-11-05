@@ -4,7 +4,7 @@
 
 新分支fix/frozen-late-parallel-scheduler-20261105，基于9d84f55，仅新增调度器/测试/说明，不改模型和训练配方。暂停旧dispatcher746383（非训练进程），快照并接管两个原始子PID746817/748002，保持其进度/RNG；新训练仍从原9d84f55源执行。最多4条late作业，按实测reserved+768MiB及全局512MiB余量准入，优先patch Person再Face，启动期完整预留，未启动的按余量等待。CUDA驱动PID属于宿主，与容器PID不同，不用错误PID映射重复预留稳态进程。
 
-只有新调度器接管成功后才冻结旧dispatcher；未启动新job前出错会恢复旧dispatcher。旧dispatcher保持暂停，直到已接管模型都结束才退休；运行期间不可手动SIGCONT旧dispatcher，避免双重派发。原模型源9d84f55保持不变，更新原queue.json及parallel_control/provenance旁路记录，不改protocol/超参。当前本地3项通过、Linux进程测试待远程；正式patch启动待核验。
+先暂停旧dispatcher取得一致快照；未启动新job前出错会恢复旧dispatcher。接管成功后旧dispatcher保持暂停，直到已接管模型都结束才退休；运行期间不可手动SIGCONT旧dispatcher，避免双重派发。原模型源9d84f55保持不变，更新原queue.json及parallel_control/provenance旁路记录，不改protocol/超参。当前本地3项通过、Linux进程测试待远程；正式patch启动待核验。
 
 ## 2026-11-05 第6层有效恢复与第9层六组对照实现
 
