@@ -1,0 +1,13 @@
+**第9层GPU0并行调度调整**
+
+用户授权把patch接收路径加入并行。训练协议、batch64、随机流、模型代码及输出目录不变，仅接管排队器。原模型工作树9d84f55保持clean；新调度代码在独立fix分支，用原入口重建相同DAG并接管已有进程。
+
+当前GPU0已用约17.6GB/24.6GB。两条CLS约4.1GB各，FP32恢复约8.7GB及父进程0.6GB。patch预检reserved4048MiB；加CUDA上下文与余量后，现有空间可以先加一条，第二条由实测显存准入。并发上限从2提高到4，不以牺牲既有进度或修改batch来强行同时容纳。
+
+每条新job预算=该模式smoke峰值reserved+768MiB，另保留全局512MiB。新job完成首epoch前完整预留预算，防止CPU加载时显存尚未占用造成超额派发；已完成epoch的既有进程使用实际全卡剩余空间。CUDA驱动报告宿主PID、Python队列使用容器PID，故不通过错误PID映射对稳态进程重复扣减预算。
+
+接管只向旧dispatcher发SIGSTOP；模型子进程继续运行，PID/starttime保持不变。验证旧dispatcher命令、cwd及其直接模型子进程与快照一致后，暂停旧队列派发，用原模型代码启动patch，先Person后Face。成功任务仍按依赖做完整Val/Test和六组汇总。原第6层缩放恢复失败状态保留；第6层FP32恢复在另一独立队列继续。
+
+原queue.json由新调度器维护，新增parallel_handoff_before.json、parallel_control.json、parallel_scheduler_provenance.json记录来源和所有PID。运行中不能手动SIGCONT旧dispatcher，否则可能重复派发。只有接管模型都结束后才退休旧dispatcher；接管前检查失败会恢复旧dispatcher且不启动新job。
+
+入口run_r1_late_parallel_scheduler.py，参数为原模型worktree、原dispatcher PID、原结果root；仅GPU0。原所有checkpoint、原始protocol和模型源不覆盖。专项测试包括patch优先级、启动显存预留、上下文开销，以及Linux真实父进程暂停但子进程继续/退出状态接管。
