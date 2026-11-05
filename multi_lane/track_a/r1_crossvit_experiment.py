@@ -71,12 +71,18 @@ def flags(args,kind,view,smoke=False):
 
 
 def model_from_config(c,clip):
-    return R1Receiver(load_openai_clip_visual(clip),TASK_SIZES,
+    model_class = R1Receiver
+    extra = {}
+    if c.get('r1_frozen_mode'):
+        from .r1_frozen_cross_view import FrozenR1Receiver
+        model_class = FrozenR1Receiver
+        extra = dict(frozen_cross_mode=c['r1_frozen_mode'], frozen_cross_cap=c['r1_frozen_cap'])
+    return model_class(load_openai_clip_visual(clip),TASK_SIZES,
         num_selectors=c['num_selectors'],num_prompts=c['num_prompts'],num_prompt_layers=c['num_prompt_layers'],
         normalize=c['normalize'],adapter_mode='image_token',adapter_bottleneck_dim=32,
         adapter_layer_indices=(1,),adapter_residual_scale=.1,adapter_activation='relu',
         r1_kind=c['r1_kind'],r1_view=c['r1_receiver'],r1_sender_root=c.get('r1_sender_root'),
-        r1_query_mode=c.get('r1_query_mode','cls')).float().cuda()
+        r1_query_mode=c.get('r1_query_mode','cls'), **extra).float().cuda()
 
 
 def single_thread_worker(_):torch.set_num_threads(1)

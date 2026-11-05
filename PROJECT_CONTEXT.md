@@ -1,3 +1,11 @@
+## 2026-11-05 Frozen Forward六组接收方向实验实现
+
+用户授权图像CLS/patch两种交互各做Face-only、Person-only和Person+Face。新分支exp/frozen-cross-view-six-20261105，基于ee5dcbb独立worktree。四条新接收路径各seed1/8task/30epoch/B64，六组预定读出；Full与未增强路径复用原R1，不重跑基线。两接收者只读取交互前冻结patch，因此双接收复用同批Person/Face路径等价于原独立监督训练图，不根据结果挑头或参数。
+
+第6完整Frozen block后注入；图像CLS Q只更新自身CLS，196patch Q保留196输出分别写回，K/V为自身CLS+另两路原冻结patch，无效Face在softmax前屏蔽。64维4头、投影后分head无仿射QK LN、零out、逐图总修正cap=0.05×接收方原图像CLS范数。ViT权重冻结，接收后缀及Summarize保留输入梯度；CA每任务独立并冻结旧模块，不原地覆盖公共前缀。原BCE/Adapter-ASL，main0.0125/new+adapter4e-4，固定R1 logits后sigmoid。
+
+修改model.py/runner.py/r1_crossvit_experiment.py，新增r1_frozen_cross_view.py、六组controller/GPU0入口、专项测试和详细计划。GPU0按显存准入最多两进程，先真实梯度/旧路径/零恢复/无效Face/8lane smoke，再完整训练及八阶段Val/Test、TRAIN探针、task0/2/7完整OFF。目录output与logs/r1_frozen_cross_view/seed1_20261105。当前实现完成静态检查，远程单元测试/smoke/正式启动尚待核验，不能报告效果。
+
 ## 2026-11-04 Face-only Selector Query三组实现及待启动协议
 
 用户授权只跑CLS单Q、Selector均值单Q、10 Selector Q，不重训原R1/Pool。新分支codex/r1-selector-query-20261104，基于a2642bc独立worktree。仅三条Face从CLIP起点训练，Full/Person及基线使用既有独立R1预测；统一中层index5、冻结patch KV(含原Face CLS)、768→64/4头、原投影前LN、零out无额外cap、10Q平均context后写回CLS继续后6层。原Face BCE/Adapter-ASL、seed1/B64/30轮、主LR0.0125/Adapter及交互4e-4/cosine，固定R1 logits融合。三组任务模块初值/参数量匹配。

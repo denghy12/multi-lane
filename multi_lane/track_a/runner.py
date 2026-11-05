@@ -647,6 +647,24 @@ def write_evaluation_scores(
     )
 
 
+def receiver_evaluation_threads(function):
+    """Bound evaluation CPU contention without changing native train RNG/threads."""
+    from functools import wraps
+    @wraps(function)
+    def wrapped(model, *args, **kwargs):
+        original = torch.get_num_threads()
+        target = 2 if hasattr(model, 'frozen_cross_mode') else original
+        if target != original:
+            torch.set_num_threads(target)
+        try:
+            return function(model, *args, **kwargs)
+        finally:
+            if target != original:
+                torch.set_num_threads(original)
+    return wrapped
+
+
+@receiver_evaluation_threads
 def evaluate(
     model: MultiLaneModel,
     loader: Iterable,
@@ -694,6 +712,7 @@ def evaluate(
     return compute_metrics(task_id, all_scores, all_targets, threshold)
 
 
+@receiver_evaluation_threads
 def current_validation_map(
     model: MultiLaneModel, loader: Iterable, device: torch.device, amp: bool
 ) -> float:
@@ -1340,6 +1359,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--r1-kind',choices=('native','attention','pool'))
     parser.add_argument('--r1-view',choices=('full','person','face'))
     parser.add_argument('--r1-query-mode',choices=('cls','selector_mean','selectors'),default='cls')
+    parser.add_argument('--r1-frozen-mode', choices=('image_cls', 'patch'))
     parser.add_argument('--r1-fusion-readout',choices=('probability','logit'),default='probability')
     parser.add_argument('--r1-smoke-eval-samples',type=int)
     parser.add_argument('--r1-sender-root', type=Path)
@@ -1423,6 +1443,10 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if args.r1_frozen_mode is not None and (
+            args.r1_kind != 'attention' or args.r1_view not in ('person', 'face')
+            or args.r1_sender_root is not None or args.r1_query_mode != 'cls'):
+        raise ValueError('Frozen-stream interaction requires Person/Face frozen-patch Attention')
     if args.r1_smoke_eval_samples is not None and args.r1_kind is None:
         raise ValueError('Bounded R1 smoke is unavailable outside the R1 experiment')
     paired_inputs = (
@@ -1572,6 +1596,10 @@ def main() -> None:
         if args.r1_view is None:raise ValueError('R1 receiver view required')
         model_class=R1Receiver
         extra=dict(r1_kind=args.r1_kind,r1_view=args.r1_view,r1_root=output,r1_sender_root=args.r1_sender_root,r1_query_mode=args.r1_query_mode)
+        if args.r1_frozen_mode is not None:
+            from .r1_frozen_cross_view import FrozenR1Receiver
+            model_class = FrozenR1Receiver
+            extra['frozen_cross_mode'] = args.r1_frozen_mode
     model = model_class(
         visual_encoder=visual,
         task_sizes=TASK_SIZES,
@@ -1978,6 +2006,15 @@ def main() -> None:
             r1_exchange_layer=5 if args.r1_kind!='native' else None,r1_exchange_dim=64,r1_exchange_heads=4,
             r1_exchange_parameters=sum(p.numel() for p in model.r1_bank.parameters()),
             r1_evidence='deterministic_native_eval_crops_of_same_TRAIN_person',r1_interaction_precision='FP32')
+        if args.r1_frozen_mode is not None:
+            config.update(r1_frozen_mode=args.r1_frozen_mode, r1_frozen_cap=.05,
+                r1_exchange_site='after_Frozen_block6_before_Task_block7_Summarize',
+                r1_query_count=1 if args.r1_frozen_mode == 'image_cls' else int(visual.positional_embedding.shape[0]-1),
+                r1_query_reduction='none; each query updates its own visual token',
+                r1_query_normalization='input_LN_and_post_projection_per_head_QK_LN_no_affine',
+                r1_cap_reference='0.05 * detached_pre_injection_image_CLS_norm; total_Frobenius_budget',
+                r1_task_private_visual_suffix=True, r1_evaluation_threads=2)
+            config['total_method_parameters'] += config['r1_exchange_parameters']
         if args.r1_smoke_eval_samples is not None:
             if (args.optimizer_updates_per_task is None or args.reporting_split != 'val'
                     or not 1 <= args.r1_smoke_eval_samples <= 512):

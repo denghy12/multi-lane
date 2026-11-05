@@ -336,11 +336,14 @@ class MultiLaneModel(nn.Module):
         person_patch_mask: Optional[torch.Tensor] = None,
         condition_valid: Optional[torch.Tensor] = None,
         summary_only: bool = False,
+        preserve_image_gradient: bool = False,
     ) -> torch.Tensor:
         # The released block applies its first LayerNorm before both selector
         # aggregation and prompt attention.  Keep the residual stream itself
         # unnormalized, as in the original pre-norm transformer.
-        frozen_normalized_image = block.ln_1(image_tokens).detach()
+        frozen_normalized_image = block.ln_1(image_tokens)
+        if not preserve_image_gradient:
+            frozen_normalized_image = frozen_normalized_image.detach()
         normalized_lane = block.ln_1(lane_tokens)
         task_cls = normalized_lane[:, :, :1]
         selectors = normalized_lane[:, :, 1:]
