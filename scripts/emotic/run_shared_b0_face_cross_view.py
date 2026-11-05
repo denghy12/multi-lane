@@ -92,21 +92,33 @@ def probe(train, args):
     assert all(p.grad is None for p in model.visual_encoder.parameters())
     for n in ('v.weight','out.weight', *(['q.weight','k.weight'] if c['shared_face_readout']=='attention' else ['mlp.weight'])):
         assert gradients[n] is not None and gradients[n]>0 and torch.isfinite(torch.tensor(gradients[n])),(n,gradients)
+    before={n:p.detach().clone() for n,p in model.named_parameters() if not n.startswith('visual_encoder.')}
     with torch.no_grad():
         on,on_views,_=model.current_all_logits_with_view_features(images)
+        again,again_views,_=model.current_all_logits_with_view_features(images)
         model.face_cls_bank.runtime_enabled=False
         off,off_views,_=model.current_all_logits_with_view_features(images)
-        assert torch.equal(on_views['full'],off_views['full']) and torch.equal(on_views['person'],off_views['person'])
+        off_again,off_again_views,_=model.current_all_logits_with_view_features(images)
         bad=~images['face_reliable'].bool()
-        assert torch.equal(on[bad],off[bad])
+        maxerr=lambda a,b:float((a-b).abs().max()) if a.numel() else 0.
+        protection={v:dict(on_off=maxerr(on_views[v],off_views[v]),
+            repeat_on=maxerr(on_views[v],again_views[v]),repeat_off=maxerr(off_views[v],off_again_views[v]))
+            for v in ('full','person')}
+        protection['unreliable_fusion']=dict(on_off=maxerr(on[bad],off[bad]),
+            repeat_on=maxerr(on[bad],again[bad]),repeat_off=maxerr(off[bad],off_again[bad]))
+        # FP32 repeated forwards on this CUDA stack themselves vary ~1e-7.
+        # Report the controls; never label this numerical check bitwise replay.
+        assert all(d['on_off']<=1e-6 and d['repeat_on']<=1e-6 and d['repeat_off']<=1e-6 for d in protection.values()),protection
+        assert all(torch.equal(p,before[n]) for n,p in model.named_parameters() if n in before)
     with torch.no_grad():
         model.restore_task(7)
         model.face_cls_bank.runtime_enabled=True
         late=model.seen_logits(images)
         assert late.shape==(len(ids),26) and torch.isfinite(late).all()
     write(train.parent/'train_probe.json',dict(eight_lane_shape=list(late.shape),gradients=gradients,stats=model.face_cls_bank.statistics(),
-        source_split='train',sample_ids=list(ids),full_person_inference_equal=True,
-        unreliable_inference_equal=True,frozen_visual_no_gradient=True))
+        source_split='train',sample_ids=list(ids),full_person_inference_within_fp32_repeatability=True,
+        unreliable_inference_within_fp32_repeatability=True,fp32_atol=1e-6,protection=protection,
+        all_method_parameters_bitwise_unchanged=True,frozen_visual_no_gradient=True))
 
 
 def eval_job(args,root,arm,split,off=False):
@@ -235,10 +247,10 @@ def verify_existing_smoke(root,args):
     for arm in ARMS:
         if not (root/arm/'historical_val/result.json').exists():
             j=eval_job(SimpleNamespace(**dict(vars(args),smoke=True)),root,arm,'val')
-            with (logs/(arm+'_val_reverified.log')).open('x') as stream:
+            with (logs/(arm+'_val_'+head[:8]+'.log')).open('x') as stream:
                 subprocess.run([sys.executable,'-u','-m',j['module'],*j['arguments']],env=env,stdout=stream,stderr=subprocess.STDOUT,check=True)
         if arm!='B0':
-            with (logs/(arm+'_probe_reverified.log')).open('x') as stream:
+            with (logs/(arm+'_probe_'+head[:8]+'.log')).open('x') as stream:
                 subprocess.run([sys.executable,'-u',__file__,'--probe',str(root/arm/'train'),
                     '--data-root',str(args.data_root),'--clip-checkpoint',str(args.clip_checkpoint),
                     '--face-manifest-root',str(args.face_manifest_root)],env=env,stdout=stream,stderr=subprocess.STDOUT,check=True)
