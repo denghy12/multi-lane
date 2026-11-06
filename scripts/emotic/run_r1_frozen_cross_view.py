@@ -15,7 +15,7 @@ import torch
 from torch.utils.data import DataLoader, Subset
 
 from multi_lane.continual_datasets.continual_datasets import EMOTIC
-from multi_lane.track_a.r1_crossvit import attach_evidence
+from multi_lane.track_a.r1_crossvit import CLSAgent, attach_evidence
 from multi_lane.track_a.r1_crossvit_experiment import (
     flags, read, write, validation, model_from_config, single_thread_worker)
 from multi_lane.track_a.r1_frozen_cross_view import MODES, FrozenCrossAgent
@@ -145,7 +145,7 @@ def preflight(train, inputs, output):
         and torch.equal(old_head[1],model.head.bias[:5].cpu()))
     if not immutable or drift > 2e-5:
         raise AssertionError(f'Old task changed: immutable={immutable}, same-shape drift={drift}')
-    agents = [m for m in model.r1_bank.modules() if isinstance(m, FrozenCrossAgent)]
+    agents = [m for m in model.r1_bank.modules() if isinstance(m, (FrozenCrossAgent, CLSAgent))]
     saved_out = [m.out.weight.detach().clone() for m in agents]
     with torch.no_grad():
         for module in agents:
@@ -186,6 +186,9 @@ def preflight(train, inputs, output):
         probe_logits = model.seen_logits(images)
     diagnostics = {str(t): model.cross_agent(t, model.frozen_cross_layers[-1]).last_diagnostic
                    for t in range(2)}
+    if model.task_pool_layer is not None:
+        for t in range(2):
+            diagnostics[str(t)]['pool'] = model.r1_bank[t][1].last_diagnostic
     # Gradient check uses trained smoke state, so Q/K/V must all participate.
     model.zero_grad(set_to_none=True)
     for k in images:

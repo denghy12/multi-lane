@@ -1,3 +1,7 @@
+## 2026-11-06 Face Task Pool 与 Frozen patch 组合
+
+用户授权执行。新Face接收路从头自训，Task6后原Pool更新Task CLS，Frozen9后patch更新图像tokens，Task10起同一任务表示合并两种证据。固定原Full/Person，八阶段对照R1、原Pool、L9 Face patch及共训组合。自动task0/2/7两split开关，原Pool无限幅，patch限5%。另在旧源只读补Pool Face＋L9 Person的八阶段OFF。配置见docs/r1_face_pool_patch_20261106.md，实际状态以启动记录为准。
+
 ## 2026-11-06 第8＋9层 patch 双接收对照
 
 以第9层为单层参照，按相邻层Validation先选第8＋9层，按用户追加请求同时做第9＋10层。每对共享/独立交互各训练Person与Face，共八条路径，两处各2.5%，Full复用原R1。固定seed1/8任务/30轮/B64/AMP4096，原R1 BCE+Adapter-ASL及固定logits读出。自动全8 Val/Test和task0/2/7开关归因。统一显存准入并为八路任务评估保留余量。已修复Linux Python3.9的入口类型注解，配置见docs/r1_patch_two_layer_20261106.md，正式状态以后续记录为准。

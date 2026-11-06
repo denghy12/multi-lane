@@ -1368,6 +1368,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--r1-exchange-layer', type=int, default=5)
     parser.add_argument('--r1-exchange-second-layer', type=int)
     parser.add_argument('--r1-exchange-sharing', choices=('shared', 'independent'), default='shared')
+    parser.add_argument('--r1-task-pool-layer', type=int)
     parser.add_argument('--r1-fixed-loss-scale', type=float)
     parser.add_argument('--r1-recovery-source', type=Path)
     parser.add_argument('--r1-fusion-readout',choices=('probability','logit'),default='probability')
@@ -1453,6 +1454,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if args.r1_task_pool_layer is not None and args.r1_frozen_mode != 'patch':
+        raise ValueError('Task Pool combination requires Frozen Forward patch Attention')
     if args.r1_exchange_second_layer is not None and args.r1_frozen_mode != 'patch':
         raise ValueError('A second exchange site requires Frozen Forward patch Attention')
     if args.r1_exchange_sharing == 'independent' and args.r1_exchange_second_layer is None:
@@ -1626,6 +1629,7 @@ def main() -> None:
             extra['recovery_source'] = args.r1_recovery_source
             extra['frozen_cross_second_layer'] = args.r1_exchange_second_layer
             extra['frozen_cross_sharing'] = args.r1_exchange_sharing
+            extra['task_pool_layer'] = args.r1_task_pool_layer
     model = model_class(
         visual_encoder=visual,
         task_sizes=TASK_SIZES,
@@ -2043,6 +2047,9 @@ def main() -> None:
                 r1_cap_reference='0.05 * detached_pre_injection_image_CLS_norm; total_Frobenius_budget',
                 r1_task_private_visual_suffix=True, r1_evaluation_threads=2)
             config['total_method_parameters'] += config['r1_exchange_parameters']
+            if args.r1_task_pool_layer is not None:
+                config.update(r1_task_pool_layer=args.r1_task_pool_layer,
+                              r1_task_pool_cap=None, r1_task_pool_sender='same_depth_frozen_patch')
             if args.r1_exchange_second_layer is not None:
                 config.update(r1_exchange_second_layer=args.r1_exchange_second_layer,
                     r1_exchange_sharing=args.r1_exchange_sharing,

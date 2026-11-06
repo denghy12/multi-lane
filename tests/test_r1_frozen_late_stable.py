@@ -16,12 +16,12 @@ class LateStableTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):torch.set_num_threads(1)
 
-    def model(self,layer=8, **kwargs):
+    def model(self,layer=8, view='person', **kwargs):
         torch.manual_seed(99);v=FakeVisual()
         v.transformer.resblocks.extend(copy.deepcopy(v.transformer.resblocks[0]) for _ in range(11))
         m=FrozenR1Receiver(v,TASK_SIZES,num_selectors=3,num_prompts=2,num_prompt_layers=1,
             adapter_mode='image_token',adapter_bottleneck_dim=4,adapter_layer_indices=(0,),
-            r1_view='person',r1_layer=layer,r1_dim=8,r1_heads=2, **kwargs)
+            r1_view=view,r1_layer=layer,r1_dim=8,r1_heads=2, **kwargs)
         m.activate_task(0)
         x=torch.randn(4,3,4,4)
         inputs=dict(full=x,evidence_full=x*.7,evidence_face=x*.6,
@@ -68,6 +68,38 @@ class LateStableTests(unittest.TestCase):
                 self.assertGreater(float(late.out.weight.grad.norm()), 0)
                 model.activate_task(1)
                 self.assertFalse(any(p.requires_grad for p in model.r1_bank[0].parameters()))
+
+    def test_task_pool_changes_task_state_without_rewriting_patch_query(self):
+        model, images = self.model(8, view='face', frozen_cross_mode='patch', task_pool_layer=5)
+        images['evidence_person'] = images.pop('evidence_face')
+        patch, pool = model.r1_bank[0]
+        self.assertEqual(patch.cap, .05)
+        with torch.no_grad():
+            for module in (patch, pool):
+                module.out.weight.normal_(std=.2)
+        seen = []
+        pool_hook = pool.register_forward_pre_hook(lambda _, args: seen.append(('pool', args[0].detach())))
+        patch_hook = patch.register_forward_pre_hook(lambda _, args: seen.append(('patch', args[0].detach())))
+        both = model.current_all_logits(images)
+        self.assertEqual([name for name, _ in seen], ['pool', 'patch'])
+        both_patch_input = seen[-1][1]
+        seen.clear()
+        model.task_pool_enabled = False
+        patch_only = model.current_all_logits(images)
+        self.assertEqual([name for name, _ in seen], ['patch'])
+        torch.testing.assert_close(both_patch_input, seen[0][1], rtol=0, atol=0)
+        self.assertFalse(torch.equal(both, patch_only))
+        model.task_pool_enabled = True
+        model.frozen_cross_active_layers = ()
+        seen.clear()
+        model.current_all_logits(images)
+        self.assertEqual([name for name, _ in seen], ['pool'])
+        pool_hook.remove()
+        patch_hook.remove()
+        model.frozen_cross_active_layers = (8,)
+        both.square().mean().backward()
+        self.assertGreater(float(patch.out.weight.grad.norm()), 0)
+        self.assertGreater(float(pool.out.weight.grad.norm()), 0)
 
     def test_external_state_accepts_only_numerical_metadata_changes(self):
         m,_=self.model();m.r1_config={'recipe':'a','git':2,'r1_fixed_loss_scale':4096}

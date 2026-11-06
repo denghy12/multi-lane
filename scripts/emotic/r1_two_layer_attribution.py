@@ -20,8 +20,12 @@ def evaluate_switches(train, output):
     set_seed(1, True)
     torch.set_num_threads(2)
     model = model_from_config(read(train / 'config.json'), inputs.clip_checkpoint)
-    early, late = model.frozen_cross_layers
-    modes = dict(zip(VARIANTS, ((early,), (late,), ())))
+    if model.task_pool_layer is not None:
+        modes = {'pool_only': ((), True), 'patch_only': (model.frozen_cross_layers, False),
+                 'both_off': ((), False)}
+    else:
+        early, late = model.frozen_cross_layers
+        modes = dict(zip(VARIANTS, (((early,), False), ((late,), False), ((), False))))
     checkpoints = {train / 'compact_checkpoints' / f'task{task}.pth' for task in TASKS}
     hashes = {str(path): sha(path) for path in sorted(checkpoints)}
     device = torch.device('cuda')
@@ -41,9 +45,10 @@ def evaluate_switches(train, output):
                     images = move_model_inputs(images, device)
                     labels.append(target.float().cpu())
                     ids.extend(batch_ids)
-                    for name, active in modes.items():
-                        model.r1_enabled = bool(active)
+                    for name, (active, pool) in modes.items():
+                        model.r1_enabled = bool(active) or pool
                         model.frozen_cross_active_layers = active
+                        model.task_pool_enabled = pool
                         # Separate autocast contexts avoid leaking cached weights across switches.
                         with torch.autocast('cuda'):
                             row = model.seen_logits(images).float().cpu()

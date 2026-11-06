@@ -68,6 +68,12 @@ class CLSAgent(nn.Module):
             if self.pool:
                 parts=[self.v(x).mean(1)*m[:,None].float() for x,m in zip(sources,masks)]
                 delta=self.out(F.gelu(self.mlp(torch.cat([c[:,0],*parts],-1))))[:,None]
+                if self.diagnostic_enabled:
+                    with torch.no_grad():
+                        self.last_diagnostic = {
+                            'residual_to_cls_norm': float((delta.norm(dim=-1) /
+                                cls.float().norm(dim=-1).clamp_min(1e-8)).mean())
+                        }
             else:
                 if self.query_mode == 'cls':
                     queries=c
