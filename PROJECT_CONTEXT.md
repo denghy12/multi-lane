@@ -1,3 +1,7 @@
+## 2026-11-06 Frozen9 Person＋Face 多 seed 扫描
+
+用户要求新增seed0/2并多测seed。预先固定追加seed3/4，共四个新seed各从头训练Full/Person/Face，复用seed1完整结果。原seed0/2 Full Test存档配方相同，Val存档有校准训练排除，故统一训练同seed Full并对历史Test预测核验。新实验不改变正在运行Task10，按其峰值预算预留后使用GPU0/1。八阶段Val/Test及各指标排名、均值/样本std自动输出。配置见docs/r1_frozen9_seed_sweep_20261106.md。
+
 ## 2026-11-06 Frozen9 patch 后接 Task10 Pool 的双接收对照
 
 按用户授权，Person/Face各自先在Frozen9接受空间patch交互，经Task10 Summarize/MSA后再写Task CLS。Pool取两发送方原Frozen9 patch，和patch阶段共用冻结发送前向；Person屏蔽不可靠Face。Patch上限为5%图像CLS，所有新Pool上限2.5% Task CLS，统一初始化、原BCE/Adapter-ASL、seed1/8任务/30轮/B64/AMP4096。四条新路径形成Face加Pool、两路加Pool及仅Pool三个正式组合，复用原Frozen9双接收/R1/历史Face Pool。配置见docs/r1_frozen9_task10_pool_20261106.md，实际状态以启动核验为准。

@@ -246,6 +246,8 @@ class R1Receiver(MultiLaneModel):
 
     def save_training_epoch(self,task,epoch,history,optimizer,scheduler,scaler,updates):
         if not self.r1_root:return
+        if torch.cuda.is_available():
+            history[-1].setdefault('cuda_peak_reserved_mib', torch.cuda.max_memory_reserved() / 1024**2)
         names={id(p):n for n,p in self.named_parameters()}
         training=dict(optimizer=copy.deepcopy(optimizer.state_dict()),scheduler=copy.deepcopy(scheduler.state_dict()),
             scaler=scaler.state_dict(),history=copy.deepcopy(history),next_epoch=epoch,completed_task_updates=updates,

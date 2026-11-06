@@ -40,13 +40,13 @@ def source_runs(reference_root):
         face=reference_root/'multi_lane_fixed_three_view_test_v0.1/fixed_three_view_seed012_test_20260909_213052/face_sources/fixed_three_view_seed012_test_20260909_213052_seed1_face')
 
 
-def flags(args,kind,view,smoke=False):
+def flags(args,kind,view,smoke=False,*,seed=1):
     src=source_runs(args.reference_root)[view];c=read(src/'config.json')
     if c['seed']!=1 or c['adapter_residual_scale']!=.1 or c['parameter_group_loss_routing']!='adapter_asl':
         raise ValueError('Historical R1 recipe changed')
     result=['--data-root',str(args.data_root),'--clip-checkpoint',str(args.clip_checkpoint),
         '--output-root',str(args.output/kind/view/'train'),
-        '--seed','1','--epochs','30','--max-tasks','2' if smoke else '8',
+        '--seed',str(seed),'--epochs','30','--max-tasks','2' if smoke else '8',
         '--train-batch-size','64','--eval-batch-size','64','--workers','2',
         '--source-learning-rate','0.05','--source-reference-batch-size','256','--weight-decay','0',
         '--temperature','1','--scheduler-mode','cosine','--scheduler-min-lr-ratio','0','--scheduler-warmup-ratio','0',
@@ -96,8 +96,8 @@ def single_thread_worker(_):torch.set_num_threads(1)
 
 
 def validation(args):
-    set_seed(1,True)
     train=args.training_root;c=read(train/'config.json');complete=read(train/'seed_summary.json')
+    set_seed(c['seed'],True)
     if complete['status']!='complete':raise ValueError('Incomplete training source')
     model=model_from_config(c,args.clip_checkpoint);torch.set_num_threads(2)
     _,transform=build_transforms(c['input_normalization'],c['train_crop_scale'],input_mode=c['input_mode'],
@@ -124,7 +124,7 @@ def validation(args):
         rows.append(row);write(args.output/'progress.json',dict(tasks_completed=[r.task_id for r in rows]))
         print('R1_VALIDATION',c['r1_kind'],c['r1_receiver'],task,row.mAP,flush=True)
     write(args.output/'result.json',dict(status='complete',kind=c['r1_kind'],view=c['r1_receiver'],split='val',
-        seed=1,tasks=list(range(c['max_tasks'])),metrics=[asdict(r) for r in rows],summary=summarize_tasks(rows),
+        seed=c['seed'],tasks=list(range(c['max_tasks'])),metrics=[asdict(r) for r in rows],summary=summarize_tasks(rows),
         evaluation_scope='samples_intersect_seen_classes'))
 
 

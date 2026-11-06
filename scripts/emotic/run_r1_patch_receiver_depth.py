@@ -88,7 +88,7 @@ def free_memory():
 
 
 def dispatch(jobs, root, logs, reference, budgets, smoke, *, reserve_peak=False,
-             worker_command=None):
+             worker_command=None, capacity_limit=None):
     pending = list(jobs)
     running = {}
     finished = {}
@@ -103,6 +103,7 @@ def dispatch(jobs, root, logs, reference, budgets, smoke, *, reserve_peak=False,
                 finished[job.name] = 'complete' if code == 0 else 'failed'
 
         free = free_memory()
+        usable = capacity_limit() if capacity_limit is not None else capacity
         for gpu in (0, 1):
             # During CUDA initialization, reserve the job's peak until the first
             # epoch is saved. Afterwards the card's actual free memory applies.
@@ -114,7 +115,7 @@ def dispatch(jobs, root, logs, reference, budgets, smoke, *, reserve_peak=False,
             if reserve_peak:
                 # Several jobs can reach the eight-lane checkpoint evaluation together.
                 peak = sum(budgets[item.name] for item in running if item.gpu == gpu)
-                if peak + budgets[job.name] + 512 > capacity[gpu]:
+                if peak + budgets[job.name] + 512 > usable[gpu]:
                     continue
             if worker_command is not None:
                 command = worker_command(job, root, smoke)
@@ -138,7 +139,7 @@ def dispatch(jobs, root, logs, reference, budgets, smoke, *, reserve_peak=False,
             running[job] = process, log
             print('START', phase, job.name, f'gpu={gpu}', f'pid={process.pid}', flush=True)
 
-        write(root / 'queue.json', dict(phase=phase, memory_free_mib=free, budgets_mib=budgets,
+        write(root / 'queue.json', dict(phase=phase, memory_free_mib=free, capacity_mib=usable, budgets_mib=budgets,
                                        pending=[job.name for job in pending], finished=finished,
                                        running={job.name: dict(gpu=job.gpu, pid=process.pid)
                                                 for job, (process, _) in running.items()}))

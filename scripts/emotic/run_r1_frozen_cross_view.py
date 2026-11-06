@@ -114,8 +114,9 @@ def restore(model, train, task):
 
 def preflight(train, inputs, output):
     """Real-CLIP zero identity, old-path replay, masks, gradients and eight-lane shape."""
-    set_seed(1,True)
-    model = model_from_config(read(train/'config.json'),inputs.clip_checkpoint)
+    config = read(train/'config.json')
+    set_seed(config['seed'],True)
+    model = model_from_config(config,inputs.clip_checkpoint)
     torch.set_num_threads(2)
     source = load_source(train,inputs,'val')
     data = dataset_view(source,seen_indices(1),include_sample_id=True)
