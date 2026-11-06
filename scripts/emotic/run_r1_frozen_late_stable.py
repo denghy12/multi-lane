@@ -77,13 +77,14 @@ def copy_prefix(old, new):
             if not target.exists():shutil.copy2(source,target)
 
 
-def summarize_family(root, reference, manifest, paths, destination):
+def summarize_family(root, reference, manifest, paths, destination, *,
+                     modes=MODES, directions=('face_only', 'person_only', 'person_face')):
     """Only report groups whose two branch score streams really exist."""
     output={}
     for split in ('val','test'):
         relmap=load_face_reliability(manifest,split);output[split]={}
-        for mode in MODES:
-            for direction in ('face_only','person_only','person_face'):
+        for mode in modes:
+            for direction in directions:
                 metrics={p:[] for p in ('all','reliable','unreliable')};missing=[]
                 for t in range(8):
                     suffix=Path('val/scores' if split=='val' else 'train/test_scores')/f'task{t}.npz'

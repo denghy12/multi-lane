@@ -1,3 +1,7 @@
+## 2026-11-06 Frozen Forward 单层 patch 双接收层位对照
+
+按用户授权在独立实验分支执行。固定 Full，Face/Person 各自从头训练，发送方为另外两视图的未交互同层冻结 patch，Person 读取时屏蔽不可靠 Face。第6/11层在GPU0，第8/10层在GPU1，每层两路径，复用第9层双接收、原R1及Face-only Pool。统一seed1、EMOTIC八任务、30轮、B64、AMP固定4096、原BCE/Adapter-ASL及5%限幅，按固定logits融合。新增脚本仅编排训练、预检和汇总，不改交互模型。入口与路径见docs/r1_patch_receiver_depth_20261106.md。真实预检、正式训练与结果状态以后续记录为准。
+
 ## 2026-11-05 第6层有效恢复与第9层六组对照实现
 
 用户授权补齐原两配置并将Attention后移。新分支exp/frozen-cross-view-late-stable-20261105（基于24b34d6），第6层CLS Person仅从task3 epoch18恢复model/Adam/scheduler/scaler/RNG，task0–2完整边界及预测只读复用，拒绝epoch19跳步记录和训练配置/优化器顺序变化。补跑仍30轮完整预算，新增固定loss scale4096、禁增长；此为数值策略变化，明确记录，不当作旧轨迹完全重放。
