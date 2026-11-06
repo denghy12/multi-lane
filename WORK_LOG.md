@@ -1,6 +1,6 @@
 ## 2026-11-06 第8＋9层 patch 双接收对照
 
-以第9层为单层参照，按相邻层Validation选择第8层。共享/独立交互各训练Person与Face，两处各2.5%，Full复用原R1。第8层注入的Face/Person空间证据进入第9层Summarize与后续冻结块，再以更新后的patch查询第9层外部证据。固定seed1/8任务/30轮/B64/AMP4096，原R1 BCE+Adapter-ASL及固定logits读出。自动全8 Val/Test和task0/2/7开关归因。配置见docs/r1_patch_two_layer_20261106.md，正式状态以后续记录为准。
+以第9层为单层参照，按相邻层Validation先选第8＋9层，按用户追加请求同时做第9＋10层。每对共享/独立交互各训练Person与Face，共八条路径，两处各2.5%，Full复用原R1。固定seed1/8任务/30轮/B64/AMP4096，原R1 BCE+Adapter-ASL及固定logits读出。自动全8 Val/Test和task0/2/7开关归因。统一显存准入并为八路任务评估保留余量。已修复Linux Python3.9的入口类型注解，配置见docs/r1_patch_two_layer_20261106.md，正式状态以后续记录为准。
 
 ## 2026-11-06 Frozen Forward 单层 patch 双接收层位对照
 

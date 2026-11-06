@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 from types import SimpleNamespace
+from typing import Optional
 
 import torch
 
@@ -29,12 +30,14 @@ class Job:
     layer: int
     view: str
     gpu: int
-    second_layer: int | None = None
+    second_layer: Optional[int] = None
     sharing: str = 'shared'
 
     @property
     def family(self):
-        return f'layer{self.layer}' if self.second_layer is None else f'dual_{self.sharing}'
+        if self.second_layer is None:
+            return f'layer{self.layer}'
+        return f'dual_{self.layer}_{self.second_layer}_{self.sharing}'
 
     @property
     def name(self):
@@ -84,11 +87,12 @@ def free_memory():
     return {int(gpu): int(free) for gpu, free in (line.split(',') for line in raw.splitlines())}
 
 
-def dispatch(jobs, root, logs, reference, budgets, smoke):
+def dispatch(jobs, root, logs, reference, budgets, smoke, *, reserve_peak=False):
     pending = list(jobs)
     running = {}
     finished = {}
     phase = 'smoke' if smoke else 'formal'
+    capacity = free_memory()
     while pending or running:
         for job, (process, log) in list(running.items()):
             code = process.poll()
@@ -106,6 +110,11 @@ def dispatch(jobs, root, logs, reference, budgets, smoke):
             job = next((job for job in pending if job.gpu == gpu), None)
             if job is None or free[gpu] - starting < budgets[job.name] + 512:
                 continue
+            if reserve_peak:
+                # Several jobs can reach the eight-lane checkpoint evaluation together.
+                peak = sum(budgets[item.name] for item in running if item.gpu == gpu)
+                if peak + budgets[job.name] + 512 > capacity[gpu]:
+                    continue
             command = [sys.executable, '-u', '-m', 'scripts.emotic.run_r1_patch_receiver_depth',
                        'worker', '--root', str(root), '--reference', str(reference),
                        '--layer', str(job.layer), '--view', job.view, '--gpu', str(job.gpu)]
@@ -155,7 +164,8 @@ def run(args):
     inputs = input_paths()
     jobs = [Job(layer, view, gpu) for layer, gpu in ((6, 0), (8, 1), (10, 1), (11, 0)) for view in VIEWS]
     if args.two_layer:
-        jobs = [Job(8, view, gpu, 9, sharing)
+        jobs = [Job(early, view, gpu, late, sharing)
+                for early, late in ((8, 9), (9, 10))
                 for gpu, sharing, view in ((0, 'shared', 'person'), (0, 'independent', 'face'),
                                            (1, 'independent', 'person'), (1, 'shared', 'face'))]
     for view in VIEWS:
@@ -186,7 +196,8 @@ def run(args):
     budgets = {job.name: int(read(job.path(root / 'smoke') / 'preflight.json')['smoke_train_peak_reserved_mib'] + 1024)
                for job in passed}
     write(root / 'preflight_gate.json', dict(states=smoke, formal_budgets_mib=budgets))
-    formal = dispatch(passed, root, logs / 'formal', args.reference, budgets, smoke=False)
+    formal = dispatch(passed, root, logs / 'formal', args.reference, budgets, smoke=False,
+                      reserve_peak=args.two_layer)
     torch.set_num_threads(2)
     sources = dict(R1={'person': args.reference / 'native/person', 'face': args.reference / 'native/face'},
                    Face_only_Pool={'person': args.reference / 'native/person', 'face': args.reference / 'pool/face'},
@@ -223,7 +234,7 @@ def run(args):
         raise ValueError('A reference artifact changed')
     name = 'two_layer_patch_person_face_results.json' if args.two_layer else 'single_layer_patch_person_face_results.json'
     write(root / name, dict(results=results, source_hashes_verified=True))
-    expected = 5 if args.two_layer else 7
+    expected = 7
     write(root / 'completion.json', dict(status='complete' if len(sources) == expected else 'partial',
                                          smoke=smoke, formal=formal, attribution=attribution_status))
 
@@ -235,7 +246,7 @@ def main():
     parser.add_argument('--two-layer', action='store_true')
     parser.add_argument('--reference', type=Path, default=REFERENCE)
     parser.add_argument('--layer9', type=Path, default=LAYER9)
-    parser.add_argument('--layer', type=int, choices=(6, 8, 10, 11))
+    parser.add_argument('--layer', type=int, choices=(6, 8, 9, 10, 11))
     parser.add_argument('--second-layer', type=int)
     parser.add_argument('--sharing', choices=('shared', 'independent'), default='shared')
     parser.add_argument('--view', choices=VIEWS)
