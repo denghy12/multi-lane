@@ -1366,6 +1366,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--r1-query-mode',choices=('cls','selector_mean','selectors'),default='cls')
     parser.add_argument('--r1-frozen-mode', choices=('image_cls', 'patch'))
     parser.add_argument('--r1-exchange-layer', type=int, default=5)
+    parser.add_argument('--r1-exchange-second-layer', type=int)
+    parser.add_argument('--r1-exchange-sharing', choices=('shared', 'independent'), default='shared')
     parser.add_argument('--r1-fixed-loss-scale', type=float)
     parser.add_argument('--r1-recovery-source', type=Path)
     parser.add_argument('--r1-fusion-readout',choices=('probability','logit'),default='probability')
@@ -1451,6 +1453,10 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if args.r1_exchange_second_layer is not None and args.r1_frozen_mode != 'patch':
+        raise ValueError('A second exchange site requires Frozen Forward patch Attention')
+    if args.r1_exchange_sharing == 'independent' and args.r1_exchange_second_layer is None:
+        raise ValueError('Independent exchange parameters require a second site')
     if args.r1_fixed_loss_scale is not None and (
             args.r1_frozen_mode is None or not math.isfinite(args.r1_fixed_loss_scale)
             or args.r1_fixed_loss_scale <= 0):
@@ -1618,6 +1624,8 @@ def main() -> None:
             extra['frozen_cross_mode'] = args.r1_frozen_mode
             extra['r1_layer'] = args.r1_exchange_layer
             extra['recovery_source'] = args.r1_recovery_source
+            extra['frozen_cross_second_layer'] = args.r1_exchange_second_layer
+            extra['frozen_cross_sharing'] = args.r1_exchange_sharing
     model = model_class(
         visual_encoder=visual,
         task_sizes=TASK_SIZES,
@@ -2035,6 +2043,12 @@ def main() -> None:
                 r1_cap_reference='0.05 * detached_pre_injection_image_CLS_norm; total_Frobenius_budget',
                 r1_task_private_visual_suffix=True, r1_evaluation_threads=2)
             config['total_method_parameters'] += config['r1_exchange_parameters']
+            if args.r1_exchange_second_layer is not None:
+                config.update(r1_exchange_second_layer=args.r1_exchange_second_layer,
+                    r1_exchange_sharing=args.r1_exchange_sharing,
+                    r1_exchange_layers=list(model.frozen_cross_layers),
+                    r1_cap_reference='0.025 * detached_pre_injection_image_CLS_norm at each site',
+                    r1_exchange_site='after each configured Frozen block, before the next Summarize')
             if args.r1_fixed_loss_scale is not None:
                 config.update(r1_fixed_loss_scale=args.r1_fixed_loss_scale,
                     r1_loss_scale_growth_interval=1000000000)

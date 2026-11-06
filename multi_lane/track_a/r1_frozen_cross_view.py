@@ -81,6 +81,7 @@ class FrozenCrossAgent(nn.Module):
 
 class FrozenR1Receiver(R1Receiver):
     def __init__(self, *args, frozen_cross_mode='image_cls', frozen_cross_cap=.05,
+                 frozen_cross_second_layer=None, frozen_cross_sharing='shared',
                  recovery_source=None, **kwargs):
         if kwargs.get('r1_view') not in ('person', 'face'):
             raise ValueError('Full is protected; only Person and Face may receive')
@@ -90,13 +91,37 @@ class FrozenR1Receiver(R1Receiver):
         super().__init__(*args, **kwargs)
         if self.r1_layer >= len(self.visual_encoder.transformer.resblocks) - 1:
             raise ValueError('A later Summarize block is required after visual injection')
+        if frozen_cross_sharing not in ('shared', 'independent'):
+            raise ValueError('Unknown cross-view parameter sharing')
+        if frozen_cross_second_layer is not None:
+            if (frozen_cross_mode != 'patch' or not self.r1_layer < frozen_cross_second_layer
+                    < len(self.visual_encoder.transformer.resblocks) - 1):
+                raise ValueError('Two distinct ordered patch sites must precede a later Summarize block')
+        elif frozen_cross_sharing == 'independent':
+            raise ValueError('Independent site parameters require two sites')
         self.frozen_cross_mode, self.frozen_cross_cap = frozen_cross_mode, frozen_cross_cap
+        self.frozen_cross_layers = ((self.r1_layer,) if frozen_cross_second_layer is None
+                                    else (self.r1_layer, frozen_cross_second_layer))
+        self.frozen_cross_sharing = frozen_cross_sharing
+        self.frozen_cross_active_layers = self.frozen_cross_layers
         self.r1_kind = 'attention'
         self.recovery_source = Path(recovery_source) if recovery_source else None
+        def new_agent():
+            return FrozenCrossAgent(self.width, kwargs.get('r1_dim', 64), kwargs.get('r1_heads', 4),
+                                    frozen_cross_mode, frozen_cross_cap / len(self.frozen_cross_layers))
         with torch.random.fork_rng(devices=list(range(torch.cuda.device_count()))):
             torch.manual_seed(20261105)
-            self.r1_bank.extend(FrozenCrossAgent(self.width, kwargs.get('r1_dim', 64),
-                kwargs.get('r1_heads', 4), frozen_cross_mode, frozen_cross_cap) for _ in self.task_sizes)
+            first = [new_agent() for _ in self.task_sizes]
+            if frozen_cross_sharing == 'shared':
+                self.r1_bank.extend(first)
+            else:
+                self.r1_bank.extend(nn.ModuleList((agent, new_agent())) for agent in first)
+
+    def cross_agent(self, task, layer):
+        task_bank = self.r1_bank[task]
+        if self.frozen_cross_sharing == 'shared':
+            return task_bank
+        return task_bank[self.frozen_cross_layers.index(layer)]
 
     def _load_external(self, path, task, training=False):
         saved = torch.load(path, map_location='cpu', weights_only=False)
@@ -164,15 +189,20 @@ class FrozenR1Receiver(R1Receiver):
             raise ValueError('Cross-view evidence is required')
         lanes = self._lane_ids(all_seen_lanes)
         blocks = list(self.visual_encoder.transformer.resblocks)
-        memories, masks = [], []
+        sites = self.frozen_cross_active_layers
+        if not sites or any(site not in self.frozen_cross_layers for site in sites):
+            raise ValueError('Use the receiver switch to disable all sites')
+        memories = {site: [] for site in sites}
+        masks = []
         with torch.no_grad():
             for view in VIEWS:
                 if view == self.r1_view:
                     continue
                 source = self._visual_tokens(images['evidence_' + view])
-                for block in blocks[:self.r1_layer+1]:
+                for layer, block in enumerate(blocks[:max(sites)+1]):
                     source = block(source.permute(1, 0, 2)).permute(1, 0, 2)
-                memories.append(source[:, 1:].detach())
+                    if layer in memories:
+                        memories[layer].append(source[:, 1:].detach())
                 masks.append(images['evidence_face_reliable'].bool() if view == 'face'
                              else torch.ones(len(own), dtype=torch.bool, device=own.device))
             tokens = self._visual_tokens(own)
@@ -185,13 +215,19 @@ class FrozenR1Receiver(R1Receiver):
         # `tokens` is a shared read-only prefix, never overwritten in place.
         outputs = []
         for i, task in enumerate(lanes):
-            stream = self.r1_bank[task](tokens, memories, masks)
+            stream = tokens
+            if self.r1_layer in memories:
+                stream = self.cross_agent(task, self.r1_layer)(stream, memories[self.r1_layer], masks)
             lane = state[i:i+1]
             for layer in range(self.r1_layer+1, len(blocks)):
                 block = blocks[layer]
                 lane = self._lane_block(block, stream, lane, [task], layer,
                                         preserve_image_gradient=True)
-                stream = block(stream.permute(1, 0, 2)).permute(1, 0, 2)
+                # The last visual block has no later Task Forward reader.
+                if len(self.frozen_cross_layers) == 1 or layer < len(blocks) - 1:
+                    stream = block(stream.permute(1, 0, 2)).permute(1, 0, 2)
+                if layer in memories:
+                    stream = self.cross_agent(task, layer)(stream, memories[layer], masks)
             outputs.append(lane)
         state = self.visual_encoder.ln_post(torch.cat(outputs, 0))
         if self.visual_encoder.proj is not None:

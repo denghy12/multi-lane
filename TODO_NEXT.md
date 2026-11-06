@@ -1,3 +1,7 @@
+## 2026-11-06 第8＋9层 patch 双接收对照
+
+以第9层为单层参照，按相邻层Validation选择第8层。共享/独立交互各训练Person与Face，两处各2.5%，Full复用原R1。第8层注入的Face/Person空间证据进入第9层Summarize与后续冻结块，再以更新后的patch查询第9层外部证据。固定seed1/8任务/30轮/B64/AMP4096，原R1 BCE+Adapter-ASL及固定logits读出。自动全8 Val/Test和task0/2/7开关归因。配置见docs/r1_patch_two_layer_20261106.md，正式状态以后续记录为准。
+
 ## 2026-11-06 Frozen Forward 单层 patch 双接收层位对照
 
 按用户授权在独立实验分支执行。固定 Full，Face/Person 各自从头训练，发送方为另外两视图的未交互同层冻结 patch，Person 读取时屏蔽不可靠 Face。第6/11层在GPU0，第8/10层在GPU1，每层两路径，复用第9层双接收、原R1及Face-only Pool。统一seed1、EMOTIC八任务、30轮、B64、AMP固定4096、原BCE/Adapter-ASL及5%限幅，按固定logits融合。新增脚本仅编排训练、预检和汇总，不改交互模型。入口与路径见docs/r1_patch_receiver_depth_20261106.md。真实预检、正式训练与结果状态以后续记录为准。

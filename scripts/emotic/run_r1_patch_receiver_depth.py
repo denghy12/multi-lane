@@ -17,8 +17,10 @@ from scripts.emotic.run_r1_frozen_late_stable import summarize_family
 
 
 DEFAULT_ROOT = Path('output/r1_patch_receiver_depth/seed1_20261106')
+TWO_LAYER_ROOT = Path('output/r1_patch_two_layer/seed1_20261106')
 REFERENCE = Path('../multi-lane-main-r1-crossvit-20261101/output/r1_crossvit/seed1_20261101_02')
 LAYER9 = Path('../multi-lane-main-r1-frozen-late-stable-20261105/output/r1_frozen_late_stable/seed1_20261105/layer9')
+DEPTH_RESULTS = Path('../multi-lane-main-r1-patch-receiver-depth-20261106') / DEFAULT_ROOT / 'single_layer_patch_person_face_results.json'
 VIEWS = ('person', 'face')
 
 
@@ -27,24 +29,33 @@ class Job:
     layer: int
     view: str
     gpu: int
+    second_layer: int | None = None
+    sharing: str = 'shared'
+
+    @property
+    def family(self):
+        return f'layer{self.layer}' if self.second_layer is None else f'dual_{self.sharing}'
 
     @property
     def name(self):
-        return f'layer{self.layer}_{self.view}'
+        return f'{self.family}_{self.view}'
 
     def path(self, root):
-        return root / f'layer{self.layer}' / 'patch' / 'attention' / self.view
+        return root / self.family / 'patch' / 'attention' / self.view
 
 
 def worker(root, reference, job, smoke):
     inputs = input_paths()
-    base = root / f'layer{job.layer}' / 'patch'
+    base = root / job.family / 'patch'
     path = job.path(root)
     train = path / 'train'
     command = [sys.executable, '-u', '-m', 'multi_lane.track_a.runner',
                *flags(SimpleNamespace(output=base, **vars(inputs)), 'attention', job.view, smoke),
                '--r1-frozen-mode', 'patch', '--r1-exchange-layer', str(job.layer - 1),
                '--r1-fixed-loss-scale', '4096', '--r1-fusion-readout', 'logit']
+    if job.second_layer is not None:
+        command += ['--r1-exchange-second-layer', str(job.second_layer - 1),
+                    '--r1-exchange-sharing', job.sharing]
     if smoke:
         command += ['--r1-smoke-eval-samples', '64']
     env = dict(os.environ, OMP_NUM_THREADS='72', MKL_NUM_THREADS='72', OPENBLAS_NUM_THREADS='1')
@@ -60,6 +71,11 @@ def worker(root, reference, job, smoke):
                '--face-manifest-root', str(inputs.face_manifest_root)]
         subprocess.run(val, check=True)
     write(path / 'completion.json', dict(status='complete', training=counts, gpu=job.gpu))
+    if not smoke and job.second_layer is not None:
+        attribution = subprocess.run([sys.executable, '-u', '-m', 'scripts.emotic.r1_two_layer_attribution',
+                                      '--training-root', str(train), '--output', str(path / 'attribution')])
+        if attribution.returncode != 0:
+            write(path / 'attribution_failure.json', dict(exit_code=attribution.returncode))
 
 
 def free_memory():
@@ -95,6 +111,8 @@ def dispatch(jobs, root, logs, reference, budgets, smoke):
                        '--layer', str(job.layer), '--view', job.view, '--gpu', str(job.gpu)]
             if smoke:
                 command.append('--smoke')
+            if job.second_layer is not None:
+                command += ['--second-layer', str(job.second_layer), '--sharing', job.sharing]
             env = dict(os.environ, CUDA_VISIBLE_DEVICES=str(job.gpu), OMP_NUM_THREADS='2',
                        MKL_NUM_THREADS='2', OPENBLAS_NUM_THREADS='1')
             log = (logs / f'{job.name}.log').open('x')
@@ -130,12 +148,16 @@ def source_paths(reference, layer9, manifest):
 
 def run(args):
     root = args.root
-    logs = Path('logs/r1_patch_receiver_depth') / root.name
+    logs = Path('logs') / ('r1_patch_two_layer' if args.two_layer else 'r1_patch_receiver_depth') / root.name
     git = git_metadata(Path.cwd())
     if git['dirty']:
         raise ValueError('Clean experiment worktree required')
     inputs = input_paths()
     jobs = [Job(layer, view, gpu) for layer, gpu in ((6, 0), (8, 1), (10, 1), (11, 0)) for view in VIEWS]
+    if args.two_layer:
+        jobs = [Job(8, view, gpu, 9, sharing)
+                for gpu, sharing, view in ((0, 'shared', 'person'), (0, 'independent', 'face'),
+                                           (1, 'independent', 'person'), (1, 'shared', 'face'))]
     for view in VIEWS:
         train = args.layer9 / 'patch' / 'attention' / view / 'train'
         check_training(train, args.reference, view, 8, False)
@@ -143,6 +165,8 @@ def run(args):
         if (cfg['r1_exchange_layer'], cfg['r1_frozen_mode'], cfg['r1_fixed_loss_scale']) != (8, 'patch', 4096):
             raise ValueError('Mismatched layer9 reference')
     hashes = {str(path): sha(path) for path in source_paths(args.reference, args.layer9, inputs.face_manifest_root)}
+    if args.two_layer:
+        hashes[str(DEPTH_RESULTS)] = sha(DEPTH_RESULTS)
     root.mkdir(parents=True, exist_ok=False)
     for sub in ('smoke', 'formal'):
         (logs / sub).mkdir(parents=True, exist_ok=False)
@@ -152,10 +176,12 @@ def run(args):
                                       paired_readout='patch_person_face', same_depth_sender=True,
                                       layer9=str(args.layer9), reference=str(args.reference),
                                       jobs=[vars(job) for job in jobs], reliable=[.64, .16, .20],
+                                      site_caps=[.025, .025] if args.two_layer else [.05],
+                                      attribution_tasks=[0, 2, 7] if args.two_layer else [],
                                       fallback=[.8, .2, 0]))
     write(root / 'source_hashes.json', hashes)
     smoke = dispatch(jobs, root / 'smoke', logs / 'smoke', args.reference,
-                     {job.name: 5500 for job in jobs}, smoke=True)
+                     {job.name: 9500 if args.two_layer else 5500 for job in jobs}, smoke=True)
     passed = [job for job in jobs if smoke[job.name] == 'complete']
     budgets = {job.name: int(read(job.path(root / 'smoke') / 'preflight.json')['smoke_train_peak_reserved_mib'] + 1024)
                for job in passed}
@@ -165,14 +191,15 @@ def run(args):
     sources = dict(R1={'person': args.reference / 'native/person', 'face': args.reference / 'native/face'},
                    Face_only_Pool={'person': args.reference / 'native/person', 'face': args.reference / 'pool/face'},
                    layer9={view: args.layer9 / 'patch' / 'attention' / view for view in VIEWS})
-    results = {}
-    for layer in (6, 8, 10, 11):
-        selected = [job for job in jobs if job.layer == layer]
+    results = read(DEPTH_RESULTS)['results'] if args.two_layer else {}
+    attribution_status = {}
+    for family in dict.fromkeys(job.family for job in jobs):
+        selected = [job for job in jobs if job.family == family]
         if all(formal.get(job.name) == 'complete' for job in selected):
-            sources[f'layer{layer}'] = {job.view: job.path(root) for job in selected}
+            sources[family] = {job.view: job.path(root) for job in selected}
         else:
-            results[f'layer{layer}'] = dict(status='incomplete', paths={job.name: formal.get(job.name, 'blocked')
-                                                                     for job in selected})
+            results[family] = dict(status='incomplete', paths={job.name: formal.get(job.name, 'blocked')
+                                                              for job in selected})
     for name, paths in sources.items():
         destination = root / 'fusion' / f'{name}.json'
         summarize_family(root, args.reference, inputs.face_manifest_root,
@@ -182,28 +209,44 @@ def run(args):
         if any(value['status'] != 'complete' for value in result.values()):
             raise ValueError(f'Incomplete score sources for {name}')
         results[name] = result
+        if args.two_layer and name.startswith('dual_'):
+            from scripts.emotic.r1_two_layer_attribution import TASKS, VARIANTS
+            complete = all((path / 'attribution/completion.json').is_file() for path in paths.values())
+            attribution_status[name] = 'complete' if complete else 'partial'
+            if complete:
+                for variant in VARIANTS:
+                    summarize_family(root, args.reference, inputs.face_manifest_root,
+                        {('patch', view): path / 'attribution' / variant for view, path in paths.items()},
+                        root / 'attribution' / name / f'{variant}.json',
+                        modes=('patch',), directions=('person_face',), tasks=TASKS)
     if any(sha(Path(path)) != digest for path, digest in hashes.items()):
         raise ValueError('A reference artifact changed')
-    write(root / 'single_layer_patch_person_face_results.json', dict(results=results, source_hashes_verified=True))
-    write(root / 'completion.json', dict(status='complete' if len(sources) == 7 else 'partial',
-                                         smoke=smoke, formal=formal))
+    name = 'two_layer_patch_person_face_results.json' if args.two_layer else 'single_layer_patch_person_face_results.json'
+    write(root / name, dict(results=results, source_hashes_verified=True))
+    expected = 5 if args.two_layer else 7
+    write(root / 'completion.json', dict(status='complete' if len(sources) == expected else 'partial',
+                                         smoke=smoke, formal=formal, attribution=attribution_status))
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', nargs='?', default='run', choices=('run', 'worker'))
-    parser.add_argument('--root', type=Path, default=DEFAULT_ROOT)
+    parser.add_argument('--root', type=Path)
+    parser.add_argument('--two-layer', action='store_true')
     parser.add_argument('--reference', type=Path, default=REFERENCE)
     parser.add_argument('--layer9', type=Path, default=LAYER9)
     parser.add_argument('--layer', type=int, choices=(6, 8, 10, 11))
+    parser.add_argument('--second-layer', type=int)
+    parser.add_argument('--sharing', choices=('shared', 'independent'), default='shared')
     parser.add_argument('--view', choices=VIEWS)
     parser.add_argument('--gpu', type=int, choices=(0, 1))
     parser.add_argument('--smoke', action='store_true')
     args = parser.parse_args()
+    args.root = args.root or (TWO_LAYER_ROOT if args.two_layer else DEFAULT_ROOT)
     if args.action == 'worker':
         if args.layer is None or args.view is None or os.environ.get('CUDA_VISIBLE_DEVICES') != str(args.gpu):
             parser.error('worker requires a layer, view and matching CUDA device')
-        worker(args.root, args.reference, Job(args.layer, args.view, args.gpu), args.smoke)
+        worker(args.root, args.reference, Job(args.layer, args.view, args.gpu, args.second_layer, args.sharing), args.smoke)
     else:
         run(args)
 

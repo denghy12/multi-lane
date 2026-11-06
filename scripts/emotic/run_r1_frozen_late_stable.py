@@ -78,7 +78,8 @@ def copy_prefix(old, new):
 
 
 def summarize_family(root, reference, manifest, paths, destination, *,
-                     modes=MODES, directions=('face_only', 'person_only', 'person_face')):
+                     modes=MODES, directions=('face_only', 'person_only', 'person_face'),
+                     tasks=tuple(range(8))):
     """Only report groups whose two branch score streams really exist."""
     output={}
     for split in ('val','test'):
@@ -86,7 +87,7 @@ def summarize_family(root, reference, manifest, paths, destination, *,
         for mode in modes:
             for direction in directions:
                 metrics={p:[] for p in ('all','reliable','unreliable')};missing=[]
-                for t in range(8):
+                for t in tasks:
                     suffix=Path('val/scores' if split=='val' else 'train/test_scores')/f'task{t}.npz'
                     full=load_evaluation_scores(reference/'native/full'/suffix,64)
                     ids=full.sample_ids;y=full.targets

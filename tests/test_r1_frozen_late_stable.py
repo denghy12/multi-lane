@@ -16,12 +16,12 @@ class LateStableTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):torch.set_num_threads(1)
 
-    def model(self,layer=8):
+    def model(self,layer=8, **kwargs):
         torch.manual_seed(99);v=FakeVisual()
         v.transformer.resblocks.extend(copy.deepcopy(v.transformer.resblocks[0]) for _ in range(11))
         m=FrozenR1Receiver(v,TASK_SIZES,num_selectors=3,num_prompts=2,num_prompt_layers=1,
             adapter_mode='image_token',adapter_bottleneck_dim=4,adapter_layer_indices=(0,),
-            r1_view='person',r1_layer=layer,r1_dim=8,r1_heads=2)
+            r1_view='person',r1_layer=layer,r1_dim=8,r1_heads=2, **kwargs)
         m.activate_task(0)
         x=torch.randn(4,3,4,4)
         inputs=dict(full=x,evidence_full=x*.7,evidence_face=x*.6,
@@ -36,6 +36,38 @@ class LateStableTests(unittest.TestCase):
         m.current_all_logits(x).square().mean().backward()
         self.assertGreater(float(m.r1_bank[0].out.weight.grad.norm()),0)
         self.assertTrue(all(p.grad is None for p in m.visual_encoder.parameters()))
+
+    def test_two_patch_sites_share_only_when_requested_and_second_reads_updated_stream(self):
+        for sharing in ('shared', 'independent'):
+            with self.subTest(sharing=sharing):
+                model, images = self.model(7, frozen_cross_mode='patch',
+                    frozen_cross_second_layer=8, frozen_cross_sharing=sharing)
+                early = model.cross_agent(0, 7)
+                late = model.cross_agent(0, 8)
+                self.assertEqual(early is late, sharing == 'shared')
+                self.assertEqual((early.cap, late.cap), (.025, .025))
+                model.r1_enabled = False
+                native = model.current_all_logits(images)
+                model.r1_enabled = True
+                torch.testing.assert_close(model.current_all_logits(images), native)
+                with torch.no_grad():
+                    early.out.weight.normal_(std=.2)
+                queries = []
+                hook = late.register_forward_pre_hook(lambda _, args: queries.append(args[0].detach().clone()))
+                model.current_all_logits(images)
+                full_query = queries[-1]
+                queries.clear()
+                model.frozen_cross_active_layers = (8,)
+                model.current_all_logits(images)
+                self.assertEqual(len(queries), 1)
+                self.assertFalse(torch.equal(queries[0], full_query))
+                hook.remove()
+                model.frozen_cross_active_layers = (7, 8)
+                model.current_all_logits(images).square().mean().backward()
+                self.assertGreater(float(early.out.weight.grad.norm()), 0)
+                self.assertGreater(float(late.out.weight.grad.norm()), 0)
+                model.activate_task(1)
+                self.assertFalse(any(p.requires_grad for p in model.r1_bank[0].parameters()))
 
     def test_external_state_accepts_only_numerical_metadata_changes(self):
         m,_=self.model();m.r1_config={'recipe':'a','git':2,'r1_fixed_loss_scale':4096}

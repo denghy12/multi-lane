@@ -18,7 +18,7 @@ from multi_lane.continual_datasets.continual_datasets import EMOTIC
 from multi_lane.track_a.r1_crossvit import attach_evidence
 from multi_lane.track_a.r1_crossvit_experiment import (
     flags, read, write, validation, model_from_config, single_thread_worker)
-from multi_lane.track_a.r1_frozen_cross_view import MODES
+from multi_lane.track_a.r1_frozen_cross_view import MODES, FrozenCrossAgent
 from multi_lane.track_a.evaluation_scores import load_evaluation_scores, align_evaluation_scores
 from multi_lane.track_a.fuse_face_endpoint_validation import load_face_reliability
 from multi_lane.track_a.fuse_fixed_three_view_test import LOCKED_RELIABLE_WEIGHTS, LOCKED_FALLBACK_WEIGHTS
@@ -145,9 +145,10 @@ def preflight(train, inputs, output):
         and torch.equal(old_head[1],model.head.bias[:5].cpu()))
     if not immutable or drift > 2e-5:
         raise AssertionError(f'Old task changed: immutable={immutable}, same-shape drift={drift}')
-    saved_out = [m.out.weight.detach().clone() for m in model.r1_bank]
+    agents = [m for m in model.r1_bank.modules() if isinstance(m, FrozenCrossAgent)]
+    saved_out = [m.out.weight.detach().clone() for m in agents]
     with torch.no_grad():
-        for module in model.r1_bank:
+        for module in agents:
             module.out.weight.zero_()
     with torch.no_grad(),torch.autocast('cuda'):
         zero = model.seen_logits(images).float()
@@ -169,7 +170,7 @@ def preflight(train, inputs, output):
     if fp32_identity_error > 2e-5:
         raise AssertionError(f'FP32 zero identity failed: {fp32_identity_error}')
     with torch.no_grad():
-        for module,value in zip(model.r1_bank,saved_out):
+        for module,value in zip(agents,saved_out):
             module.out.weight.copy_(value)
     if model.r1_view == 'person':
         images['evidence_face_reliable'].zero_()
@@ -179,11 +180,12 @@ def preflight(train, inputs, output):
             b = model.seen_logits(bad)
         if not torch.equal(a,b):
             raise AssertionError('Invalid Face evidence influenced Person')
-    for module in model.r1_bank:
+    for module in agents:
         module.diagnostic_enabled=True
     with torch.no_grad(),torch.autocast('cuda'):
         probe_logits = model.seen_logits(images)
-    diagnostics = {str(t):model.r1_bank[t].last_diagnostic for t in range(2)}
+    diagnostics = {str(t): model.cross_agent(t, model.frozen_cross_layers[-1]).last_diagnostic
+                   for t in range(2)}
     # Gradient check uses trained smoke state, so Q/K/V must all participate.
     model.zero_grad(set_to_none=True)
     for k in images:
