@@ -1,3 +1,7 @@
+## 2026-11-06 Frozen9 patch 后接 Task10 Pool 的双接收对照
+
+按用户授权，Person/Face各自先在Frozen9接受空间patch交互，经Task10 Summarize/MSA后再写Task CLS。Pool取两发送方原Frozen9 patch，和patch阶段共用冻结发送前向；Person屏蔽不可靠Face。Patch上限为5%图像CLS，所有新Pool上限2.5% Task CLS，统一初始化、原BCE/Adapter-ASL、seed1/8任务/30轮/B64/AMP4096。四条新路径形成Face加Pool、两路加Pool及仅Pool三个正式组合，复用原Frozen9双接收/R1/历史Face Pool。配置见docs/r1_frozen9_task10_pool_20261106.md，实际状态以启动核验为准。
+
 ## 2026-11-06 Face Task Pool 与 Frozen patch 组合
 
 用户授权执行。新Face接收路从头自训，Task6后原Pool更新Task CLS，Frozen9后patch更新图像tokens，Task10起同一任务表示合并两种证据。固定原Full/Person，八阶段对照R1、原Pool、L9 Face patch及共训组合。自动task0/2/7两split开关，原Pool无限幅，patch限5%。另在旧源只读补Pool Face＋L9 Person的八阶段OFF。配置见docs/r1_face_pool_patch_20261106.md，实际状态以启动记录为准。

@@ -82,7 +82,8 @@ class FrozenCrossAgent(nn.Module):
 class FrozenR1Receiver(R1Receiver):
     def __init__(self, *args, frozen_cross_mode='image_cls', frozen_cross_cap=.05,
                  frozen_cross_second_layer=None, frozen_cross_sharing='shared',
-                 task_pool_layer=None, recovery_source=None, **kwargs):
+                 task_pool_layer=None, task_pool_source_layer=None, task_pool_cap=None,
+                 frozen_patch_enabled=True, recovery_source=None, **kwargs):
         if kwargs.get('r1_view') not in ('person', 'face'):
             raise ValueError('Full is protected; only Person and Face may receive')
         if kwargs.get('r1_sender_root') is not None or kwargs.get('r1_query_mode', 'cls') != 'cls':
@@ -99,38 +100,58 @@ class FrozenR1Receiver(R1Receiver):
                 raise ValueError('Two distinct ordered patch sites must precede a later Summarize block')
         elif frozen_cross_sharing == 'independent':
             raise ValueError('Independent site parameters require two sites')
-        if task_pool_layer is not None and (
-                self.r1_view != 'face' or frozen_cross_mode != 'patch'
-                or frozen_cross_second_layer is not None
-                or not 0 <= task_pool_layer < self.r1_layer):
-            raise ValueError('Task Pool requires Face, one later frozen patch site, and ordered layers')
+        block_count = len(self.visual_encoder.transformer.resblocks)
+        if task_pool_layer is None:
+            if not frozen_patch_enabled or task_pool_source_layer is not None or task_pool_cap is not None:
+                raise ValueError('Pool settings require a Task Pool site')
+        elif (frozen_cross_mode != 'patch' or frozen_cross_second_layer is not None
+              or not 0 <= task_pool_layer < block_count):
+            raise ValueError('Task Pool requires patch mode and at most one frozen patch site')
+        if task_pool_source_layer is None:
+            task_pool_source_layer = task_pool_layer
+        if task_pool_layer is not None and not 0 <= task_pool_source_layer <= task_pool_layer:
+            raise ValueError('Pool sender depth must precede or match the Task Pool block')
         self.frozen_cross_mode, self.frozen_cross_cap = frozen_cross_mode, frozen_cross_cap
         self.frozen_cross_layers = ((self.r1_layer,) if frozen_cross_second_layer is None
                                     else (self.r1_layer, frozen_cross_second_layer))
+        if not frozen_patch_enabled:
+            self.frozen_cross_layers = ()
         self.frozen_cross_sharing = frozen_cross_sharing
         self.frozen_cross_active_layers = self.frozen_cross_layers
         self.task_pool_layer = task_pool_layer
+        self.task_pool_source_layer = task_pool_source_layer
         self.task_pool_enabled = task_pool_layer is not None
         self.r1_kind = 'attention'
         self.recovery_source = Path(recovery_source) if recovery_source else None
         def new_agent():
             return FrozenCrossAgent(self.width, kwargs.get('r1_dim', 64), kwargs.get('r1_heads', 4),
                                     frozen_cross_mode, frozen_cross_cap / len(self.frozen_cross_layers))
-        with torch.random.fork_rng(devices=list(range(torch.cuda.device_count()))):
-            torch.manual_seed(20261105)
-            first = [new_agent() for _ in self.task_sizes]
-            if frozen_cross_sharing == 'shared':
-                self.r1_bank.extend(first)
-            else:
-                self.r1_bank.extend(nn.ModuleList((agent, new_agent())) for agent in first)
+        if self.frozen_cross_layers:
+            with torch.random.fork_rng(devices=list(range(torch.cuda.device_count()))):
+                torch.manual_seed(20261105)
+                first = [new_agent() for _ in self.task_sizes]
+                if frozen_cross_sharing == 'shared':
+                    self.r1_bank.extend(first)
+                else:
+                    self.r1_bank.extend(nn.ModuleList((agent, new_agent())) for agent in first)
         if task_pool_layer is not None:
             with torch.random.fork_rng(devices=list(range(torch.cuda.device_count()))):
                 torch.manual_seed(20261102)
-                self.r1_bank = nn.ModuleList(
-                    nn.ModuleList((agent, CLSAgent(self.width, kwargs.get('r1_dim', 64),
-                                                  kwargs.get('r1_heads', 4), pool=True)))
-                    for agent in self.r1_bank
-                )
+                pools = [CLSAgent(self.width, kwargs.get('r1_dim', 64), kwargs.get('r1_heads', 4),
+                                  pool=True, pool_cap=task_pool_cap) for _ in self.task_sizes]
+            if self.frozen_cross_layers:
+                self.r1_bank = nn.ModuleList(nn.ModuleList((patch, pool))
+                                             for patch, pool in zip(self.r1_bank, pools))
+            else:
+                self.r1_bank.extend(pools)
+
+    def task_pool_agent(self, task):
+        task_bank = self.r1_bank[task]
+        return task_bank[1] if self.frozen_cross_layers else task_bank
+
+    def _apply_task_pool(self, lane, task, memories, masks):
+        cls = self.task_pool_agent(task)(lane[:, :1], memories[self.task_pool_source_layer], masks)
+        return torch.cat((cls, lane[:, 1:]), dim=1)
 
     def cross_agent(self, task, layer):
         task_bank = self.r1_bank[task]
@@ -210,7 +231,7 @@ class FrozenR1Receiver(R1Receiver):
         pool_site = self.task_pool_layer if self.task_pool_enabled else None
         evidence_sites = set(sites)
         if pool_site is not None:
-            evidence_sites.add(pool_site)
+            evidence_sites.add(self.task_pool_source_layer)
         if not evidence_sites or any(site not in self.frozen_cross_layers for site in sites):
             raise ValueError('Use the receiver switch to disable all sites')
         memories = {site: [] for site in evidence_sites}
@@ -236,8 +257,7 @@ class FrozenR1Receiver(R1Receiver):
                 tokens = block(tokens.permute(1, 0, 2)).permute(1, 0, 2)
             if layer == pool_site:
                 state = torch.stack([
-                    torch.cat((self.r1_bank[task][1](state[i, :, :1], memories[layer], masks),
-                               state[i, :, 1:]), dim=1)
+                    self._apply_task_pool(state[i], task, memories, masks)
                     for i, task in enumerate(lanes)
                 ])
         # `tokens` is a shared read-only prefix, never overwritten in place.
@@ -256,6 +276,8 @@ class FrozenR1Receiver(R1Receiver):
                     stream = block(stream.permute(1, 0, 2)).permute(1, 0, 2)
                 if layer in sites:
                     stream = self.cross_agent(task, layer)(stream, memories[layer], masks)
+                if layer == pool_site:
+                    lane = self._apply_task_pool(lane[0], task, memories, masks).unsqueeze(0)
             outputs.append(lane)
         state = self.visual_encoder.ln_post(torch.cat(outputs, 0))
         if self.visual_encoder.proj is not None:

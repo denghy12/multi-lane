@@ -101,6 +101,32 @@ class LateStableTests(unittest.TestCase):
         self.assertGreater(float(patch.out.weight.grad.norm()), 0)
         self.assertGreater(float(pool.out.weight.grad.norm()), 0)
 
+    def test_late_task_pool_reads_after_patch_and_masks_unreliable_face(self):
+        options = dict(frozen_cross_mode='patch', task_pool_layer=9,
+                       task_pool_source_layer=8, task_pool_cap=.025)
+        both, images = self.model(8, **options)
+        control, _ = self.model(8, frozen_patch_enabled=False, **options)
+        self.assertEqual(control.frozen_cross_layers, ())
+        patch, pool = both.r1_bank[0]
+        for n, t in pool.state_dict().items():
+            torch.testing.assert_close(t, control.task_pool_agent(0).state_dict()[n])
+        with torch.no_grad():
+            patch.out.weight.normal_(std=.5)
+            pool.out.weight.normal_(std=1)
+        images['evidence_face_reliable'].zero_()
+        seen = []
+        h = pool.register_forward_hook(lambda _, args, out: seen.append((args[0].detach(), out.detach())))
+        a = both.current_all_logits(images)
+        cls, out = seen[-1]
+        self.assertTrue(((out - cls).norm(dim=-1) <= .025 * cls.norm(dim=-1) + 1e-6).all())
+        bad = dict(images, evidence_face=torch.randn_like(images['evidence_face']) * 10)
+        torch.testing.assert_close(a, both.current_all_logits(bad), rtol=0, atol=0)
+        both.frozen_cross_active_layers = ()
+        both.current_all_logits(images)
+        self.assertFalse(torch.equal(cls, seen[-1][0]))
+        h.remove()
+        self.assertTrue(torch.isfinite(control.current_all_logits(images)).all())
+
     def test_external_state_accepts_only_numerical_metadata_changes(self):
         m,_=self.model();m.r1_config={'recipe':'a','git':2,'r1_fixed_loss_scale':4096}
         payload=dict(task=0,config={'recipe':'a','git':1},history=[{'skipped_optimizer_steps':0}],

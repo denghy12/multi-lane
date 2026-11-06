@@ -39,13 +39,16 @@ def compact(model):
 
 
 class CLSAgent(nn.Module):
-    def __init__(self,width,dim=64,heads=4,pool=False,query_mode='cls'):
+    def __init__(self,width,dim=64,heads=4,pool=False,query_mode='cls',pool_cap=None):
         super().__init__();self.dim,self.heads,self.pool=dim,heads,pool
         if dim%heads:raise ValueError('Invalid head width')
         if query_mode not in ('cls','selector_mean','selectors'):
             raise ValueError('Unknown query source')
         if pool and query_mode != 'cls':
             raise ValueError('Pool has no query-source ablation')
+        if pool_cap is not None and (not pool or not 0 < pool_cap <= 1):
+            raise ValueError('Pool residual cap must be in (0, 1]')
+        self.pool_cap = pool_cap
         self.query_mode=query_mode
         self.diagnostic_enabled=False
         self.last_diagnostic=None
@@ -68,6 +71,9 @@ class CLSAgent(nn.Module):
             if self.pool:
                 parts=[self.v(x).mean(1)*m[:,None].float() for x,m in zip(sources,masks)]
                 delta=self.out(F.gelu(self.mlp(torch.cat([c[:,0],*parts],-1))))[:,None]
+                if self.pool_cap is not None:
+                    cap = self.pool_cap * cls.detach().float().norm(dim=-1, keepdim=True)
+                    delta = delta * (cap / delta.norm(dim=-1, keepdim=True).clamp_min(1e-8)).clamp(max=1)
                 if self.diagnostic_enabled:
                     with torch.no_grad():
                         self.last_diagnostic = {

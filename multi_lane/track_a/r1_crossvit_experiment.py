@@ -79,7 +79,10 @@ def model_from_config(c,clip):
         extra = dict(frozen_cross_mode=c['r1_frozen_mode'], frozen_cross_cap=c['r1_frozen_cap'],
                      frozen_cross_second_layer=c.get('r1_exchange_second_layer'),
                      frozen_cross_sharing=c.get('r1_exchange_sharing', 'shared'),
-                     task_pool_layer=c.get('r1_task_pool_layer'))
+                     task_pool_layer=c.get('r1_task_pool_layer'),
+                     task_pool_source_layer=c.get('r1_task_pool_source_layer'),
+                     task_pool_cap=c.get('r1_task_pool_cap'),
+                     frozen_patch_enabled=c.get('r1_frozen_patch_enabled', True))
     return model_class(load_openai_clip_visual(clip),TASK_SIZES,
         num_selectors=c['num_selectors'],num_prompts=c['num_prompts'],num_prompt_layers=c['num_prompt_layers'],
         normalize=c['normalize'],adapter_mode='image_token',adapter_bottleneck_dim=32,

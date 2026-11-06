@@ -1369,6 +1369,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--r1-exchange-second-layer', type=int)
     parser.add_argument('--r1-exchange-sharing', choices=('shared', 'independent'), default='shared')
     parser.add_argument('--r1-task-pool-layer', type=int)
+    parser.add_argument('--r1-task-pool-source-layer', type=int)
+    parser.add_argument('--r1-task-pool-cap', type=float)
+    parser.add_argument('--r1-disable-frozen-patch', action='store_true')
     parser.add_argument('--r1-fixed-loss-scale', type=float)
     parser.add_argument('--r1-recovery-source', type=Path)
     parser.add_argument('--r1-fusion-readout',choices=('probability','logit'),default='probability')
@@ -1454,6 +1457,9 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if (args.r1_disable_frozen_patch or args.r1_task_pool_source_layer is not None
+            or args.r1_task_pool_cap is not None) and args.r1_task_pool_layer is None:
+        raise ValueError('Pool settings require --r1-task-pool-layer')
     if args.r1_task_pool_layer is not None and args.r1_frozen_mode != 'patch':
         raise ValueError('Task Pool combination requires Frozen Forward patch Attention')
     if args.r1_exchange_second_layer is not None and args.r1_frozen_mode != 'patch':
@@ -1630,6 +1636,9 @@ def main() -> None:
             extra['frozen_cross_second_layer'] = args.r1_exchange_second_layer
             extra['frozen_cross_sharing'] = args.r1_exchange_sharing
             extra['task_pool_layer'] = args.r1_task_pool_layer
+            extra['task_pool_source_layer'] = args.r1_task_pool_source_layer
+            extra['task_pool_cap'] = args.r1_task_pool_cap
+            extra['frozen_patch_enabled'] = not args.r1_disable_frozen_patch
     model = model_class(
         visual_encoder=visual,
         task_sizes=TASK_SIZES,
@@ -2049,7 +2058,16 @@ def main() -> None:
             config['total_method_parameters'] += config['r1_exchange_parameters']
             if args.r1_task_pool_layer is not None:
                 config.update(r1_task_pool_layer=args.r1_task_pool_layer,
-                              r1_task_pool_cap=None, r1_task_pool_sender='same_depth_frozen_patch')
+                              r1_task_pool_cap=args.r1_task_pool_cap,
+                              r1_task_pool_sender='same_depth_frozen_patch')
+                if args.r1_task_pool_source_layer is not None:
+                    config.update(r1_task_pool_source_layer=args.r1_task_pool_source_layer,
+                                  r1_task_pool_sender='explicit_depth_frozen_patch')
+                if args.r1_disable_frozen_patch:
+                    config.update(r1_frozen_patch_enabled=False, r1_task_private_visual_suffix=False,
+                                  r1_exchange_site='Task Pool only', r1_query_count=None,
+                                  r1_query_reduction='mean_pool_of_external_patch_values',
+                                  r1_query_normalization=None, r1_cap_reference='Task CLS norm')
             if args.r1_exchange_second_layer is not None:
                 config.update(r1_exchange_second_layer=args.r1_exchange_second_layer,
                     r1_exchange_sharing=args.r1_exchange_sharing,

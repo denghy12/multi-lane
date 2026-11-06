@@ -87,7 +87,8 @@ def free_memory():
     return {int(gpu): int(free) for gpu, free in (line.split(',') for line in raw.splitlines())}
 
 
-def dispatch(jobs, root, logs, reference, budgets, smoke, *, reserve_peak=False):
+def dispatch(jobs, root, logs, reference, budgets, smoke, *, reserve_peak=False,
+             worker_command=None):
     pending = list(jobs)
     running = {}
     finished = {}
@@ -115,13 +116,16 @@ def dispatch(jobs, root, logs, reference, budgets, smoke, *, reserve_peak=False)
                 peak = sum(budgets[item.name] for item in running if item.gpu == gpu)
                 if peak + budgets[job.name] + 512 > capacity[gpu]:
                     continue
-            command = [sys.executable, '-u', '-m', 'scripts.emotic.run_r1_patch_receiver_depth',
-                       'worker', '--root', str(root), '--reference', str(reference),
-                       '--layer', str(job.layer), '--view', job.view, '--gpu', str(job.gpu)]
-            if smoke:
-                command.append('--smoke')
-            if job.second_layer is not None:
-                command += ['--second-layer', str(job.second_layer), '--sharing', job.sharing]
+            if worker_command is not None:
+                command = worker_command(job, root, smoke)
+            else:
+                command = [sys.executable, '-u', '-m', 'scripts.emotic.run_r1_patch_receiver_depth',
+                           'worker', '--root', str(root), '--reference', str(reference),
+                           '--layer', str(job.layer), '--view', job.view, '--gpu', str(job.gpu)]
+                if smoke:
+                    command.append('--smoke')
+                if job.second_layer is not None:
+                    command += ['--second-layer', str(job.second_layer), '--sharing', job.sharing]
             env = dict(os.environ, CUDA_VISIBLE_DEVICES=str(job.gpu), OMP_NUM_THREADS='2',
                        MKL_NUM_THREADS='2', OPENBLAS_NUM_THREADS='1')
             log = (logs / f'{job.name}.log').open('x')

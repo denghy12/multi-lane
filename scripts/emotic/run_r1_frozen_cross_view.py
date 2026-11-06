@@ -184,11 +184,13 @@ def preflight(train, inputs, output):
         module.diagnostic_enabled=True
     with torch.no_grad(),torch.autocast('cuda'):
         probe_logits = model.seen_logits(images)
-    diagnostics = {str(t): model.cross_agent(t, model.frozen_cross_layers[-1]).last_diagnostic
-                   for t in range(2)}
+    diagnostics = {
+        str(t): model.cross_agent(t, model.frozen_cross_layers[-1]).last_diagnostic
+        if model.frozen_cross_layers else {} for t in range(2)
+    }
     if model.task_pool_layer is not None:
         for t in range(2):
-            diagnostics[str(t)]['pool'] = model.r1_bank[t][1].last_diagnostic
+            diagnostics[str(t)]['pool'] = model.task_pool_agent(t).last_diagnostic
     # Gradient check uses trained smoke state, so Q/K/V must all participate.
     model.zero_grad(set_to_none=True)
     for k in images:
