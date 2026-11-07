@@ -1239,7 +1239,10 @@ def summarize_tasks(rows: Sequence[TaskMetrics]) -> Dict[str, object]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser("MULTI-LANE EMOTIC Track-A reproduction")
-    parser.add_argument("--seed", type=int, required=True, choices=(0, 1, 2, 3, 4))
+    parser.add_argument(
+        "--seed", type=int, required=True,
+        choices=(0, 1, 2, 3, 4, 42, 123, 1024, 3047),
+    )
     parser.add_argument("--data-root", type=Path, required=True)
     parser.add_argument("--clip-checkpoint", type=Path, required=True)
     parser.add_argument("--output-root", type=Path, required=True)

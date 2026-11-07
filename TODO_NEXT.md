@@ -1,3 +1,8 @@
+## 2026-11-07 指定四seed的第9/10层对照
+
+- 运行既有R1回归并确认20路预检通过，再按GPU0/1容量启动正式路径。
+- 等待output/r1_patch_seed_search/20261107下八组完整Val/Test、零跳步记录和patch_seed_search_results.json。Full按seed共享，分别报告各层排名和统计。
+
 ## 2026-11-06 Frozen9 Person＋Face 多 seed 扫描
 
 用户要求新增seed0/2并多测seed。预先固定追加seed3/4，共四个新seed各从头训练Full/Person/Face，复用seed1完整结果。原seed0/2 Full Test存档配方相同，Val存档有校准训练排除，故统一训练同seed Full并对历史Test预测核验。新实验不改变正在运行Task10，按其峰值预算预留后使用GPU0/1。八阶段Val/Test及各指标排名、均值/样本std自动输出。配置见docs/r1_frozen9_seed_sweep_20261106.md。
