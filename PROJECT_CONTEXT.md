@@ -1,3 +1,7 @@
+## 2026-11-07 非对称真实前向与配对控制
+
+用户授权四seed的Person10/Face9真实八阶段Val/Test、双9/双10/非对称task0/2/7 ON/OFF及同seed原R1/Face-only Pool。新增批次级三分路推理及调度入口。旧Full/P9/P10/F9/F10源checkpoint和预测保留并SHA记录，ON逐值重放。新增12条原生P/F/Pool F控制、复用同seed Full，保留原30轮/B64/8任务及历史动态AMP，GPU0/1按预检峰值并行。详情docs/r1_asymmetric_verify_20261107.md。
+
 ## 2026-11-07 第9/10层四个指定seed执行
 
 按两个独立单层配置执行seed3047/1024/42/123，共8组。新增run_r1_patch_seed_search入口，扩展指定seed白名单。每seed一条Full、两层各Person/Face共20路径，原30轮/B64/8任务及固定logits融合。GPU0/1按真实预检峰值加余量并行准入，保留完整恢复状态，跳步停止，自动8阶段Val/Test和排名/统计。配置见docs/r1_patch_seed_search_20261107.md。

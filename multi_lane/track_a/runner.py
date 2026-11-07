@@ -653,7 +653,7 @@ def receiver_evaluation_threads(function):
     @wraps(function)
     def wrapped(model, *args, **kwargs):
         original = torch.get_num_threads()
-        target = 2 if hasattr(model, 'frozen_cross_mode') else original
+        target = 2 if hasattr(model, 'r1_kind') else original
         if target != original:
             torch.set_num_threads(target)
         try:
