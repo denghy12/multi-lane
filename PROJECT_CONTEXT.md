@@ -2,6 +2,8 @@
 
 以seed1原Frozen9双接收为D组。新增Full-only证据mask，保留所有参数和证据槽位。先做原checkpoint完整八阶段Val/Test四组屏蔽归因，再训练Full-only Person/Face两条同预算路径，形成A仅Full、B加Person→Face、C加Face→Person、D双边的四组真实前向。GPU0/1，原30轮/B64/固定AMP4096/5%cap和固定logits融合。详情docs/r1_frozen9_edges_20261108.md。
 
+51项回归通过，入口初始化改为允许已有测试日志父目录，输出目录仅允许全新或空目录，已有实验产物仍受保护。
+
 ## 2026-11-07 非对称真实前向与配对控制
 
 用户授权四seed的Person10/Face9真实八阶段Val/Test、双9/双10/非对称task0/2/7 ON/OFF及同seed原R1/Face-only Pool。新增批次级三分路推理及调度入口。旧Full/P9/P10/F9/F10源checkpoint和预测保留并SHA记录，ON逐值重放。新增12条原生P/F/Pool F控制、复用同seed Full，保留原30轮/B64/8任务及历史动态AMP，GPU0/1按预检峰值并行。详情docs/r1_asymmetric_verify_20261107.md。

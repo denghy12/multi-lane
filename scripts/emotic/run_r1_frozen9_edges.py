@@ -114,9 +114,11 @@ def run(root):
         for split in ("train", "val", "test")
     )
     hashes = {str(path): sha(path) for path in sources}
-    root.mkdir(parents=True, exist_ok=False)
+    if root.exists() and any(root.iterdir()):
+        raise FileExistsError(f"Experiment output already contains artifacts: {root}")
+    root.mkdir(parents=True, exist_ok=True)
     logs = Path("logs/r1_frozen9_edges") / root.name
-    logs.mkdir(parents=True, exist_ok=False)
+    logs.mkdir(parents=True, exist_ok=True)
     for phase in ("smoke", "formal"):
         (logs / phase).mkdir()
     write(root / "protocol.json", {

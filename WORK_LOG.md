@@ -2,6 +2,8 @@
 
 从eb6851f创建exp/r1-frozen9-edges-20261108。FrozenR1Receiver新增all/full证据策略，在softmax前mask非Full外部视图，旧config默认all，参数/RNG/槽位一致。runner与checkpoint加载记录该设置。新增完整四组前向、源重放、只读后训练的编排及mask/梯度/初始化回归。保留全部旧checkpoint和预测。
 
+51项回归通过。首次启动因测试日志父目录已存在而提前退出，输出根目录仍为空。修复入口允许复用日志父目录和空输出目录，非空实验输出仍拒绝覆盖，保留首次失败日志后重新启动。
+
 ## 2026-11-07 非对称归因与同seed控制实现
 
 从b7d8464创建exp/r1-asymmetric-verify-20261107。新增r1_asymmetric_forward.py与run_r1_asymmetric_verify.py，批次级三路前向、原输出重放、同权重开关和12条配对控制。评估线程限制扩展至原生及Pool R1路径，并在训练前恢复。新增输入映射、原融合算术、开关隔离、ID重放和线程恢复回归。
