@@ -82,7 +82,8 @@ def model_from_config(c,clip):
                      task_pool_layer=c.get('r1_task_pool_layer'),
                      task_pool_source_layer=c.get('r1_task_pool_source_layer'),
                      task_pool_cap=c.get('r1_task_pool_cap'),
-                     frozen_patch_enabled=c.get('r1_frozen_patch_enabled', True))
+                     frozen_patch_enabled=c.get('r1_frozen_patch_enabled', True),
+                     frozen_cross_evidence=c.get('r1_frozen_evidence', 'all'))
     return model_class(load_openai_clip_visual(clip),TASK_SIZES,
         num_selectors=c['num_selectors'],num_prompts=c['num_prompts'],num_prompt_layers=c['num_prompt_layers'],
         normalize=c['normalize'],adapter_mode='image_token',adapter_bottleneck_dim=32,

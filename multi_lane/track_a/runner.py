@@ -1368,6 +1368,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--r1-view',choices=('full','person','face'))
     parser.add_argument('--r1-query-mode',choices=('cls','selector_mean','selectors'),default='cls')
     parser.add_argument('--r1-frozen-mode', choices=('image_cls', 'patch'))
+    parser.add_argument('--r1-frozen-evidence', choices=('all', 'full'), default='all')
     parser.add_argument('--r1-exchange-layer', type=int, default=5)
     parser.add_argument('--r1-exchange-second-layer', type=int)
     parser.add_argument('--r1-exchange-sharing', choices=('shared', 'independent'), default='shared')
@@ -1463,6 +1464,8 @@ def main() -> None:
     if (args.r1_disable_frozen_patch or args.r1_task_pool_source_layer is not None
             or args.r1_task_pool_cap is not None) and args.r1_task_pool_layer is None:
         raise ValueError('Pool settings require --r1-task-pool-layer')
+    if args.r1_frozen_evidence != 'all' and args.r1_frozen_mode is None:
+        raise ValueError('Full-only evidence requires a Frozen Forward receiver')
     if args.r1_task_pool_layer is not None and args.r1_frozen_mode != 'patch':
         raise ValueError('Task Pool combination requires Frozen Forward patch Attention')
     if args.r1_exchange_second_layer is not None and args.r1_frozen_mode != 'patch':
@@ -1634,6 +1637,7 @@ def main() -> None:
             from .r1_frozen_cross_view import FrozenR1Receiver
             model_class = FrozenR1Receiver
             extra['frozen_cross_mode'] = args.r1_frozen_mode
+            extra['frozen_cross_evidence'] = args.r1_frozen_evidence
             extra['r1_layer'] = args.r1_exchange_layer
             extra['recovery_source'] = args.r1_recovery_source
             extra['frozen_cross_second_layer'] = args.r1_exchange_second_layer
@@ -2051,6 +2055,7 @@ def main() -> None:
             r1_evidence='deterministic_native_eval_crops_of_same_TRAIN_person',r1_interaction_precision='FP32')
         if args.r1_frozen_mode is not None:
             config.update(r1_frozen_mode=args.r1_frozen_mode, r1_frozen_cap=.05,
+                r1_frozen_evidence=args.r1_frozen_evidence,
                 r1_exchange_layer=args.r1_exchange_layer,
                 r1_exchange_site=f'after_Frozen_block{args.r1_exchange_layer+1}_before_Task_block{args.r1_exchange_layer+2}_Summarize',
                 r1_query_count=1 if args.r1_frozen_mode == 'image_cls' else int(visual.positional_embedding.shape[0]-1),

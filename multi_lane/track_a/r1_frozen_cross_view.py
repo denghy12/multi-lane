@@ -83,7 +83,11 @@ class FrozenR1Receiver(R1Receiver):
     def __init__(self, *args, frozen_cross_mode='image_cls', frozen_cross_cap=.05,
                  frozen_cross_second_layer=None, frozen_cross_sharing='shared',
                  task_pool_layer=None, task_pool_source_layer=None, task_pool_cap=None,
-                 frozen_patch_enabled=True, recovery_source=None, **kwargs):
+                 frozen_patch_enabled=True, recovery_source=None,
+                 frozen_cross_evidence='all', **kwargs):
+        if frozen_cross_evidence not in ('all', 'full'):
+            raise ValueError('Frozen evidence must be all views or Full only')
+        self.frozen_cross_evidence = frozen_cross_evidence
         if kwargs.get('r1_view') not in ('person', 'face'):
             raise ValueError('Full is protected; only Person and Face may receive')
         if kwargs.get('r1_sender_root') is not None or kwargs.get('r1_query_mode', 'cls') != 'cls':
@@ -245,8 +249,11 @@ class FrozenR1Receiver(R1Receiver):
                     source = block(source.permute(1, 0, 2)).permute(1, 0, 2)
                     if layer in memories:
                         memories[layer].append(source[:, 1:].detach())
-                masks.append(images['evidence_face_reliable'].bool() if view == 'face'
-                             else torch.ones(len(own), dtype=torch.bool, device=own.device))
+                valid = (images['evidence_face_reliable'].bool() if view == 'face'
+                         else torch.ones(len(own), dtype=torch.bool, device=own.device))
+                if self.frozen_cross_evidence == 'full' and view != 'full':
+                    valid = torch.zeros_like(valid)
+                masks.append(valid)
             tokens = self._visual_tokens(own)
         self.adapter_bank.reset_auxiliary_metrics()
         state = self._initial_lane_tokens(len(own), lanes)
