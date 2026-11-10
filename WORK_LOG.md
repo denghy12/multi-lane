@@ -1,3 +1,7 @@
+## 2026-11-10 Frozen9 两参数共享融合完成
+
+实验提交 `7be461a`，分支 `exp/r1-frozen9-shared-fusion-20261110`，GPU0 反传、CPU 硬 AP。13 项回归及 task0/1 的真实三折预检通过。原固定 16 阶段预测逐值重放，历史固定和有界结果在各 Val 折、合并 OOF 和 Test 精确重放。完整 Val 重拟合后锁定权重再评 Test。9 份输出及 4 份日志已同步至本地 `output/r1_frozen9_shared_fusion/seed1_20261110/` 和同名 `logs/`，逐文件 SHA-256 一致。
+
 ## 2026-11-10 Frozen9 两参数融合实现
 
 新增 `scripts/emotic/run_r1_frozen9_shared_fusion.py`，复用原图三折、历史 mAP 与锁定 Test 路径。Smooth-AP 采用 GPU0 FP32 Adam LR 0.02、300 步、温度 0.5，按任务等权平均，前缀组使用上次参数初始化。硬 AP 全域两维步长 0.025，CPU 共 1681 组，以等权初始化距离打破并列。当前只读使用 Frozen9 EMOTIC seed1 八阶段归档。
