@@ -1,3 +1,7 @@
+## 2026-11-10 Frozen9 融合反向传播实现
+
+新增 `scripts/emotic/run_r1_frozen9_fusion_backprop.py`，扩展现有跨折和锁定评估入口以保存逐人物门控。回归覆盖分块 Smooth-AP 梯度、等权初始化、不可用 Face 和旧任务类别隔离。输入为已归档 Frozen9 logits，原三路模型保持冻结。配置与首轮方案一致，GPU0 执行任务 0/6/7 预检后评估八阶段 Validation/Test。
+
 ## 2026-11-08 第9层证据边消融实现
 
 从eb6851f创建exp/r1-frozen9-edges-20261108。FrozenR1Receiver新增all/full证据策略，在softmax前mask非Full外部视图，旧config默认all，参数/RNG/槽位一致。runner与checkpoint加载记录该设置。新增完整四组前向、源重放、只读后训练的编排及mask/梯度/初始化回归。保留全部旧checkpoint和预测。

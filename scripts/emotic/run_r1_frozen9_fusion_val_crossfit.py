@@ -128,7 +128,8 @@ def compare_folds(fold_reports, methods=METHODS):
     return results
 
 
-def run(root, smoke, *, methods=METHODS, fitter=fit_fold, fit_config=None):
+def run(root, smoke, *, methods=METHODS, fitter=fit_fold, fit_config=None,
+        predict=stage_logits, encode=np.ndarray.tolist):
     if root.exists() and any(smoke or path.name != "smoke" for path in root.iterdir()):
         raise FileExistsError(f"Output directory already contains a run: {root}")
     torch.set_num_threads(2)
@@ -176,7 +177,7 @@ def run(root, smoke, *, methods=METHODS, fitter=fit_fold, fit_config=None):
             banks[fold][task], support = fitter(rows, ~holdout, classes)
             held = Rows(rows.ids[holdout], rows.logits[holdout], rows.targets[holdout],
                         rows.reliable[holdout])
-            fused = {name: stage_logits(held, banks[fold], task, name) for name in methods}
+            fused = {name: predict(held, banks[fold], task, name) for name in methods}
             for name in methods:
                 pooled[name][holdout] = fused[name]
             record(fold_records[fold], task, fused, held.targets, held.reliable, classes)
@@ -195,7 +196,7 @@ def run(root, smoke, *, methods=METHODS, fitter=fit_fold, fit_config=None):
     verify_hashes(hashes)
     fold_reports = {fold: summarize(records, smoke) for fold, records in fold_records.items()}
     write(root / "weights.json", {
-        "weights": {fold: {task: {name: matrix.tolist() for name, matrix in by_method.items()}
+        "weights": {fold: {task: {name: encode(model) for name, model in by_method.items()}
                             for task, by_method in bank.items()} for fold, bank in banks.items()},
         "fit_support": fit_stats,
     })

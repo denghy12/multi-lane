@@ -1,3 +1,9 @@
+## 2026-11-10 Frozen9 无锚点反向传播融合
+
+基于 `fbb144b` 新建 `exp/r1-frozen9-fusion-backprop-20261110`。冻结 EMOTIC seed1 的八阶段 Frozen9 三视图输出，对比任务常量与逐人物线性权重，各用 BCE 与 Smooth-AP。Face 可靠时三路 softmax，否则仅 Full/Person 两路。等权初始化，样本门控只读取当前任务可用 logits 的幅度与分歧，旧类沿用各自任务参数。
+
+沿用按原图三折与完整 Validation 拟合后锁定再评 Test。FP32 Adam，LR 0.02，300 步，排序温度 0.5，样本斜率 L2 0.001。保持整校准群体共同排序，按 128 个正例分块反传。重放固定、无锚点 BCE、10% 有界 BCE、直接 AP；动态组另测拟合人群均值权重。
+
 ## 2026-11-08 第9层辅助视图证据边
 
 以seed1原Frozen9双接收为D组。新增Full-only证据mask，保留所有参数和证据槽位。先做原checkpoint完整八阶段Val/Test四组屏蔽归因，再训练Full-only Person/Face两条同预算路径，形成A仅Full、B加Person→Face、C加Face→Person、D双边的四组真实前向。GPU0/1，原30轮/B64/固定AMP4096/5%cap和固定logits融合。详情docs/r1_frozen9_edges_20261108.md。

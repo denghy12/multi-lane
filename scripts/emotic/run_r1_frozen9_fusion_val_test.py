@@ -24,7 +24,8 @@ PREVIOUS_VAL = (Path("../multi-lane-main-r1-frozen9-fusion-val-crossfit-20261110
                 / CROSSFIT_ROOT / "result.json")
 
 
-def lock_test_weights(root, validation, *, fitter=fit_fold, methods=METHODS):
+def lock_test_weights(root, validation, *, fitter=fit_fold, methods=METHODS,
+                      encode=np.ndarray.tolist):
     reliable = load_face_reliability(VAL_MANIFEST, "val")
     weights, support = {}, {}
     for task in range(len(TASK_SIZES)):
@@ -32,7 +33,7 @@ def lock_test_weights(root, validation, *, fitter=fit_fold, methods=METHODS):
         matrix, support[task] = fitter(
             rows, np.ones(len(rows.ids), dtype=np.bool_), list(task_indices(task)),
         )
-        weights[task] = {method: value.tolist() for method, value in matrix.items()}
+        weights[task] = {method: encode(value) for method, value in matrix.items()}
     eligible = [name for name, comparison in validation["comparison"].items()
                 if comparison["passes"]]
     write(root / "test_weights.json", {
@@ -42,11 +43,13 @@ def lock_test_weights(root, validation, *, fitter=fit_fold, methods=METHODS):
     })
 
 
-def evaluate_locked_test(root):
+def evaluate_locked_test(root, *, predict=stage_logits, decode=None):
     lock_path = root / "test_weights.json"
     lock = read(lock_path)
     lock_hash = sha(lock_path)
-    bank = {int(task): {method: np.asarray(values, dtype=np.float32)
+    if decode is None:
+        decode = lambda values: np.asarray(values, dtype=np.float32)
+    bank = {int(task): {method: decode(values)
                        for method, values in weights.items()}
             for task, weights in lock["weights"].items()}
     manifest = input_paths().face_manifest_root
@@ -59,7 +62,7 @@ def evaluate_locked_test(root):
     records, replays = make_records(methods), []
     for task in tasks:
         rows = archived_rows("test", task, reliable)
-        fused = {name: stage_logits(rows, bank, task, name) for name in methods}
+        fused = {name: predict(rows, bank, task, name) for name in methods}
         reference = ARCHIVE / "fusion_scores/D_both_edges" / score_suffix("test", task)
         replays.append(verify_replay(reference, rows.ids, torch.from_numpy(rows.targets),
                                      torch.from_numpy(fused["fixed"])))
