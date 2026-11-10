@@ -106,7 +106,7 @@ def rank_support(labels):
             if bool(y.any()) and not bool(y.all())]
 
 
-def smooth_ap_backward(logits, support, chunk=CHUNK, *, gradient_scale=1.0):
+def smooth_ap_backward(logits, support, chunk=CHUNK, *, gradient_scale=1.0, temperature=TEMPERATURE):
     """Accumulate full-list AP gradients in chunks and backpropagate once through the gate."""
     if not support:
         raise ValueError("Smooth-AP needs a class with positive and negative people")
@@ -116,7 +116,7 @@ def smooth_ap_backward(logits, support, chunk=CHUNK, *, gradient_scale=1.0):
     for col, positives, targets in support:
         values = scores[:, col]
         for anchors in positives.split(chunk):
-            ahead = ((values[None] - values[anchors, None]) / TEMPERATURE).sigmoid()
+            ahead = ((values[None] - values[anchors, None]) / temperature).sigmoid()
             ahead = ahead.masked_fill(anchors[:, None] == people, 0)
             precision = (1 + (ahead * targets).sum(dim=1)) / (1 + ahead.sum(dim=1))
             contribution = -precision.sum() / (len(positives) * len(support))

@@ -69,15 +69,16 @@ def fused_scores(shares, logits, reliable):
     return torch.where(reliable[:, None], with_face, fallback)
 
 
-def fit_smooth_ap(tasks, initial, steps):
+def fit_smooth_ap(tasks, initial, steps, *, temperature_at=None):
     raw = torch.nn.Parameter(initial.clone())
     optimizer = torch.optim.Adam([raw], lr=LR)
     diagnostics = []
     for step in range(steps + 1):
         optimizer.zero_grad(set_to_none=True)
+        temperature = TEMPERATURE if temperature_at is None else temperature_at(step)
         objectives = [
             smooth_ap_backward(fused_scores(raw.sigmoid(), logits, reliable), support,
-                               gradient_scale=1 / len(tasks))
+                               gradient_scale=1 / len(tasks), temperature=temperature)
             for logits, reliable, support in tasks
         ]
         if step in (0, 29, 99, steps):
@@ -85,7 +86,8 @@ def fit_smooth_ap(tasks, initial, steps):
             norm = float(raw.grad.norm())
             if not np.isfinite(objective) or not np.isfinite(norm):
                 raise ValueError("Nonfinite shared fusion objective or gradient")
-            diagnostics.append({"step": step, "objective": objective, "gradient_norm": norm})
+            diagnostics.append({"step": step, "objective": objective, "gradient_norm": norm,
+                                "temperature": temperature})
         if step < steps:
             optimizer.step()
     return raw.detach(), diagnostics
@@ -99,6 +101,20 @@ class History:
     frozen: dict = field(default_factory=dict)
 
 
+def calibration_fold(rows, mask, *, full_val):
+    if full_val:
+        if not mask.all():
+            raise AssertionError("Full Validation fit received a held-out image")
+        return None
+    excluded = {image_fold(image_key(person)) for person in rows.ids[~mask]}
+    if len(excluded) != 1:
+        raise AssertionError("Exactly one image fold must be excluded")
+    fold = next(iter(excluded))
+    if any(image_fold(image_key(person)) == fold for person in rows.ids[mask]):
+        raise AssertionError("A held-out image entered the fitting cohort")
+    return fold
+
+
 class ChronologicalFit:
     def __init__(self, device, *, full_val=False, steps=STEPS):
         self.device = device
@@ -107,18 +123,7 @@ class ChronologicalFit:
         self.histories = {fold: History() for fold in ((None,) if full_val else FOLDS)}
 
     def __call__(self, rows, mask, classes):
-        if self.full_val:
-            if not mask.all():
-                raise AssertionError("Full Validation fit received a held-out image")
-            fold = None
-        else:
-            excluded = {image_fold(image_key(person)) for person in rows.ids[~mask]}
-            if len(excluded) != 1:
-                raise AssertionError("Exactly one image fold must be excluded")
-            fold = next(iter(excluded))
-            if any(image_fold(image_key(person)) == fold for person in rows.ids[mask]):
-                raise AssertionError("A held-out image entered the fitting cohort")
-
+        fold = calibration_fold(rows, mask, full_val=self.full_val)
         history = self.histories[fold]
         task = len(history.cohorts)
         if tuple(classes) != task_indices(task):

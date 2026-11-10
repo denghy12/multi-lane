@@ -1,3 +1,7 @@
+## 2026-11-10 Frozen9 Smooth-AP 温度实现
+
+新增 `scripts/emotic/run_r1_frozen9_temperature_fusion.py`，复用共享融合的原图三折和锁定 Test。Smooth-AP 支持传入温度，保留既有默认。回归检查温度边界、梯度和首任务校准锁定，记录拟合硬 mAP 与优化轨迹。逐类温度留待温度消融结果后评估。
+
 ## 2026-11-10 Frozen9 两参数共享融合完成
 
 实验提交 `7be461a`，分支 `exp/r1-frozen9-shared-fusion-20261110`，GPU0 反传、CPU 硬 AP。13 项回归及 task0/1 的真实三折预检通过。原固定 16 阶段预测逐值重放，历史固定和有界结果在各 Val 折、合并 OOF 和 Test 精确重放。完整 Val 重拟合后锁定权重再评 Test。9 份输出及 4 份日志已同步至本地 `output/r1_frozen9_shared_fusion/seed1_20261110/` 和同名 `logs/`，逐文件 SHA-256 一致。

@@ -1,3 +1,7 @@
+## 2026-11-10 Frozen9 Smooth-AP 温度验证
+
+完成同批八阶段 Validation/Test 和历史组重放，比较固定低温与退火。以最终及阶段平均真实 mAP 判断对原 Smooth-AP、固定比例、硬 AP 的差距，并同步 `output/r1_frozen9_temperature_fusion/seed1_20261110/` 和日志。
+
 ## 2026-11-10 Frozen9 两参数融合后续
 
 保留无原比例锚点的 task0 硬 AP 共享比例作为优先复验候选。seed1 的 Val 和 Test 两项均超过原固定，幅度较小，Test task1/2 仍下降；10% 有界 Test 阶段均值仍更高。若扩展，先做同源跨 seed 配对复验再考虑人物级偏移。前缀与 Smooth-AP 不晋级为当前主方案。
