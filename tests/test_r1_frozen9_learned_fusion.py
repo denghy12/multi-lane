@@ -35,7 +35,7 @@ class Frozen9LearnedFusionTests(unittest.TestCase):
         rows.reliable[:] = False
         weights, report = fit_task(rows)
         assert report["reliable"]["fallback_empty_group"]
-        for matrix in weights.values(self):
+        for matrix in weights.values():
             np.testing.assert_array_equal(matrix[1], FIXED[1])
 
 
