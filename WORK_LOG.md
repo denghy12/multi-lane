@@ -1,3 +1,7 @@
+## 2026-11-10 Frozen9 Smooth-AP 温度实验完成
+
+分支 `exp/r1-frozen9-temperature-fusion-20261110`，运行提交 `9ef3acd`。16 项回归和 task0/1 真数据预检通过，原固定 16 阶段逐值重放，固定、10% 有界、硬 AP 和原 .5 反传的历史权重与各折/合并 Val、Test 指标精确一致。新权重只在 task0 拟合，按折/完整 Val 分别锁定和复用。9 份输出及 4 份日志同步并逐文件 SHA-256 核验，位于 `output/r1_frozen9_temperature_fusion/seed1_20261110/` 和同名 `logs/`。
+
 ## 2026-11-10 Frozen9 Smooth-AP 温度实现
 
 新增 `scripts/emotic/run_r1_frozen9_temperature_fusion.py`，复用共享融合的原图三折和锁定 Test。Smooth-AP 支持传入温度，保留既有默认。回归检查温度边界、梯度和首任务校准锁定，记录拟合硬 mAP 与优化轨迹。逐类温度留待温度消融结果后评估。

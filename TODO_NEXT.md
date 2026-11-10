@@ -1,3 +1,7 @@
+## 2026-11-10 Frozen9 可微温度对照结论
+
+本轮低温固定与退火均达到原固定和硬 AP 网格的 Val/Test 双指标，保留简单的固定低温作为可微参照。退火优势不足以单独归因。后续若扩，需同源跨 seed 配对复验并关注 task1/2，逐类温度本轮未执行。
+
 ## 2026-11-10 Frozen9 Smooth-AP 温度验证
 
 完成同批八阶段 Validation/Test 和历史组重放，比较固定低温与退火。以最终及阶段平均真实 mAP 判断对原 Smooth-AP、固定比例、硬 AP 的差距，并同步 `output/r1_frozen9_temperature_fusion/seed1_20261110/` 和日志。
