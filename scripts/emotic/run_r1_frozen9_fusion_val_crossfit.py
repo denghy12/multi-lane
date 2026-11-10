@@ -73,8 +73,8 @@ def fit_fold(rows, fit_mask, classes):
     return weights, support
 
 
-def make_records():
-    return {name: {pop: [] for pop in POPS} for name in METHODS}
+def make_records(methods=METHODS):
+    return {name: {pop: [] for pop in POPS} for name in methods}
 
 
 def record(records, task, logits, targets, reliable, classes):
@@ -105,9 +105,9 @@ def summarize(records, smoke):
     }
 
 
-def compare_folds(fold_reports):
+def compare_folds(fold_reports, methods=METHODS):
     results = {}
-    for method in METHODS[1:]:
+    for method in methods[1:]:
         rows = []
         for fold in FOLDS:
             source = fold_reports[fold]
@@ -128,7 +128,7 @@ def compare_folds(fold_reports):
     return results
 
 
-def run(root, smoke):
+def run(root, smoke, *, methods=METHODS, fitter=fit_fold, fit_config=None):
     if root.exists() and any(smoke or path.name != "smoke" for path in root.iterdir()):
         raise FileExistsError(f"Output directory already contains a run: {root}")
     torch.set_num_threads(2)
@@ -147,14 +147,15 @@ def run(root, smoke):
     hashes = {str(file): sha(file) for file in files}
     write(root / "protocol.json", {
         "split": "val", "seed": 1, "tasks": tasks, "folds": list(FOLDS), "fold_salt": FOLD_SALT,
-        "methods": METHODS, "rho": RHO, "optimizer": "CPU float64 SLSQP BCE", "options": OPTIONS,
+        "methods": methods, "rho": RHO, "optimizer": "CPU float64 SLSQP BCE", "options": OPTIONS,
+        **(fit_config or {}),
         "decision": "positive mean final/average fold deltas and both positive in >=2/3 folds",
         "git": git_metadata(Path.cwd()), "source_hashes": hashes,
     })
     reliable_lookup = load_face_reliability(VAL_MANIFEST, "val")
     banks = {fold: {} for fold in FOLDS}
-    fold_records = {fold: make_records() for fold in FOLDS}
-    pooled_records = make_records()
+    fold_records = {fold: make_records(methods) for fold in FOLDS}
+    pooled_records = make_records(methods)
     fit_stats = []
     replays = []
     previous_people = set()
@@ -167,16 +168,16 @@ def run(root, smoke):
         images = np.asarray([image_key(person) for person in rows.ids])
         folds = np.asarray([image_fold(image) for image in images])
         classes = list(task_indices(task))
-        pooled = {name: np.full_like(rows.targets, np.nan) for name in METHODS}
+        pooled = {name: np.full_like(rows.targets, np.nan) for name in methods}
         for fold in FOLDS:
             holdout = folds == fold
             if set(images[holdout]).intersection(images[~holdout]):
                 raise AssertionError("An image crosses the fitting and holdout groups")
-            banks[fold][task], support = fit_fold(rows, ~holdout, classes)
+            banks[fold][task], support = fitter(rows, ~holdout, classes)
             held = Rows(rows.ids[holdout], rows.logits[holdout], rows.targets[holdout],
                         rows.reliable[holdout])
-            fused = {name: stage_logits(held, banks[fold], task, name) for name in METHODS}
-            for name in METHODS:
+            fused = {name: stage_logits(held, banks[fold], task, name) for name in methods}
+            for name in methods:
                 pooled[name][holdout] = fused[name]
             record(fold_records[fold], task, fused, held.targets, held.reliable, classes)
             fit_stats.append({
@@ -200,7 +201,7 @@ def run(root, smoke):
     })
     write(root / "result.json", {
         "status": "complete", "smoke": smoke, "fixed_exact_replay": replays, "folds": fold_reports,
-        "comparison": compare_folds(fold_reports) if not smoke else None,
+        "comparison": compare_folds(fold_reports, methods) if not smoke else None,
         "pooled_oof": summarize(pooled_records, smoke),
     })
 

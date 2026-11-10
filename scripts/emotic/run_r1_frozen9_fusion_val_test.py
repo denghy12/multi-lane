@@ -24,12 +24,12 @@ PREVIOUS_VAL = (Path("../multi-lane-main-r1-frozen9-fusion-val-crossfit-20261110
                 / CROSSFIT_ROOT / "result.json")
 
 
-def lock_test_weights(root, validation):
+def lock_test_weights(root, validation, *, fitter=fit_fold, methods=METHODS):
     reliable = load_face_reliability(VAL_MANIFEST, "val")
     weights, support = {}, {}
     for task in range(len(TASK_SIZES)):
         rows = archived_rows("val", task, reliable)
-        matrix, support[task] = fit_fold(
+        matrix, support[task] = fitter(
             rows, np.ones(len(rows.ids), dtype=np.bool_), list(task_indices(task)),
         )
         weights[task] = {method: value.tolist() for method, value in matrix.items()}
@@ -38,7 +38,7 @@ def lock_test_weights(root, validation):
     write(root / "test_weights.json", {
         "fit_split": "full_val", "calibration_support": support, "weights": weights,
         "validation_eligible": eligible, "val_crossfit_sha256": sha(root / "result.json"),
-        "reported_methods": METHODS,
+        "reported_methods": methods,
     })
 
 
@@ -55,10 +55,11 @@ def evaluate_locked_test(root):
              manifest / "manifests/test.jsonl"]
     hashes = {str(path): sha(path) for path in paths}
     reliable = load_face_reliability(manifest, "test")
-    records, replays = make_records(), []
+    methods = tuple(lock.get("reported_methods", METHODS))
+    records, replays = make_records(methods), []
     for task in tasks:
         rows = archived_rows("test", task, reliable)
-        fused = {name: stage_logits(rows, bank, task, name) for name in METHODS}
+        fused = {name: stage_logits(rows, bank, task, name) for name in methods}
         reference = ARCHIVE / "fusion_scores/D_both_edges" / score_suffix("test", task)
         replays.append(verify_replay(reference, rows.ids, torch.from_numpy(rows.targets),
                                      torch.from_numpy(fused["fixed"])))
