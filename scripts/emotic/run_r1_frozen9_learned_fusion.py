@@ -327,7 +327,7 @@ def run(root, smoke):
         "batch_size": BATCH_SIZE, "workers": 2, "tasks": tasks, "smoke": smoke,
         "optimizer": "CPU float64 constrained SLSQP, unregularized BCEWithLogits",
         "optimizer_options": OPTIONS,
-        "fit_split": "TRAIN", "source": git_metadata(), "methods": METHODS,
+        "fit_split": "TRAIN", "source": git_metadata(Path.cwd()), "methods": METHODS,
         "hashes": source_files(paths, tasks, inputs.face_manifest_root),
     }
     protocol_path = root / "protocol.json"
