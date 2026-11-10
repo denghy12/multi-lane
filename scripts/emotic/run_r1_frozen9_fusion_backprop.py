@@ -106,7 +106,7 @@ def rank_support(labels):
             if bool(y.any()) and not bool(y.all())]
 
 
-def smooth_ap_backward(logits, support, chunk=CHUNK):
+def smooth_ap_backward(logits, support, chunk=CHUNK, *, gradient_scale=1.0):
     """Accumulate full-list AP gradients in chunks and backpropagate once through the gate."""
     if not support:
         raise ValueError("Smooth-AP needs a class with positive and negative people")
@@ -122,7 +122,7 @@ def smooth_ap_backward(logits, support, chunk=CHUNK):
             contribution = -precision.sum() / (len(positives) * len(support))
             contribution.backward()
             loss += contribution.detach()
-    logits.backward(scores.grad)
+    logits.backward(scores.grad * gradient_scale)
     return loss
 
 

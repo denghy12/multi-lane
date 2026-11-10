@@ -1,3 +1,7 @@
+## 2026-11-10 Frozen9 两参数融合实现
+
+新增 `scripts/emotic/run_r1_frozen9_shared_fusion.py`，复用原图三折、历史 mAP 与锁定 Test 路径。Smooth-AP 采用 GPU0 FP32 Adam LR 0.02、300 步、温度 0.5，按任务等权平均，前缀组使用上次参数初始化。硬 AP 全域两维步长 0.025，CPU 共 1681 组，以等权初始化距离打破并列。当前只读使用 Frozen9 EMOTIC seed1 八阶段归档。
+
 ## 2026-11-10 Frozen9 融合反向传播完成
 
 独立分支 `exp/r1-frozen9-fusion-backprop-20261110`，实验提交 `2c28764`，在 GPU0 完成。9 项测试及 task0/6/7 真实预检通过。此前首次 CUDA 预检因零输入 Linear 失败，改为任务级偏置广播后重跑。Validation 各折、合并 OOF 与 Test 中四项历史控制精确复现，原固定融合 16 个阶段预测逐值一致。权重在完整 Val 拟合后锁定，未用 Test 调参。7 份输出和 5 份日志已同步主项目的 `output/r1_frozen9_fusion_backprop/seed1_20261110/` 和同名 `logs/`，逐文件 SHA-256 一致。
