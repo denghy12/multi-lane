@@ -41,7 +41,8 @@ def logit_features(logits):
 class ConditionalWeights(nn.Module):
     def __init__(self, logits, reliable, sample):
         super().__init__()
-        self.groups = nn.ModuleList()
+        self.biases = nn.ParameterList()
+        self.slopes = nn.ParameterList()
         self.indices, self.inputs, self.means, self.scales = [], [], [], []
         for group, active in enumerate((2, 3)):
             idx = torch.where(reliable == bool(group))[0]
@@ -51,10 +52,9 @@ class ConditionalWeights(nn.Module):
             mean = features.mean(dim=0)
             scale = features.std(dim=0, unbiased=False).clamp_min(1e-6)
             normalized = (features - mean) / scale
-            layer = nn.Linear(features.shape[1], active - 1, device="meta").to_empty(device=logits.device)
-            nn.init.zeros_(layer.weight)
-            nn.init.zeros_(layer.bias)
-            self.groups.append(layer)
+            self.biases.append(nn.Parameter(logits.new_zeros(active - 1)))
+            if sample:
+                self.slopes.append(nn.Parameter(logits.new_zeros((active - 1, features.shape[1]))))
             self.indices.append(idx)
             self.inputs.append(normalized)
             self.means.append(mean)
@@ -62,16 +62,18 @@ class ConditionalWeights(nn.Module):
 
     def forward(self, logits):
         z = logits.new_zeros((len(logits), logits.shape[-1]))
-        for idx, features, layer in zip(self.indices, self.inputs, self.groups):
-            weights = available_weights(layer(features))
+        for group, (idx, features, bias) in enumerate(zip(self.indices, self.inputs, self.biases)):
+            scores = F.linear(features, self.slopes[group], bias) if self.slopes else bias.expand(len(idx), -1)
+            weights = available_weights(scores)
             z = z.index_copy(0, idx, fuse_group(logits[idx, :weights.shape[1]], weights))
         return z
 
     def export(self):
         return [
-            {"bias": layer.bias.detach().cpu().tolist(), "slopes": layer.weight.detach().cpu().tolist(),
+            {"bias": bias.detach().cpu().tolist(),
+             "slopes": self.slopes[group].detach().cpu().tolist() if self.slopes else [],
              "mean": mean.cpu().tolist(), "scale": scale.cpu().tolist()}
-            for layer, mean, scale in zip(self.groups, self.means, self.scales)
+            for group, (bias, mean, scale) in enumerate(zip(self.biases, self.means, self.scales))
         ]
 
 
@@ -138,7 +140,7 @@ def fit_gate(logits, labels, reliable, *, sample, ranking, steps):
             objective = F.binary_cross_entropy_with_logits(z, labels)
             objective.backward()
         if sample:
-            penalty = SLOPE_L2 * sum(layer.weight.square().sum() for layer in gate.groups)
+            penalty = SLOPE_L2 * sum(slope.square().sum() for slope in gate.slopes)
             penalty.backward()
         if step in (0, 1, 29, 99, steps):
             gradient = torch.cat([p.grad.flatten() for p in gate.parameters()]).norm()

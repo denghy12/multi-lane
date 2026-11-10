@@ -39,8 +39,8 @@ class FusionBackpropTests(unittest.TestCase):
         sample(logits).sum().backward()
         self.assertTrue(all(torch.isfinite(p.grad).all() for p in sample.parameters()))
         with torch.no_grad():
-            sample.groups[0].weight.fill_(.4)
-            sample.groups[1].weight.fill_(.4)
+            for slope in sample.slopes:
+                slope.fill_(.4)
         model = sample.export()
         weights = predict_weights(logits, reliable, model)
         changed = logits.clone()
@@ -60,8 +60,8 @@ class FusionBackpropTests(unittest.TestCase):
             gate = ConditionalWeights(torch.from_numpy(logits[:, :, columns]),
                                       torch.from_numpy(reliable), True)
             with torch.no_grad():
-                for layer in gate.groups:
-                    layer.weight.fill_(.4)
+                for slope in gate.slopes:
+                    slope.fill_(.4)
             models.append({"sample_bce": gate.export()})
         bank = dict(enumerate(models))
         rows = Rows(np.arange(4), logits, np.zeros((4, shape[-1]), dtype=np.float32), reliable)

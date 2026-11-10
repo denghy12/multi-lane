@@ -1,6 +1,6 @@
 ## 2026-11-10 Frozen9 融合反向传播实现
 
-新增 `scripts/emotic/run_r1_frozen9_fusion_backprop.py`，扩展现有跨折和锁定评估入口以保存逐人物门控。回归覆盖分块 Smooth-AP 梯度、等权初始化、不可用 Face 和旧任务类别隔离。输入为已归档 Frozen9 logits，原三路模型保持冻结。配置与首轮方案一致，GPU0 执行任务 0/6/7 预检后评估八阶段 Validation/Test。
+新增 `scripts/emotic/run_r1_frozen9_fusion_backprop.py`，扩展现有跨折和锁定评估入口以保存逐人物门控。首次 CUDA 预检发现 torch 2.0 的零列 Linear 输出维数不兼容，任务级改为直接广播可学习偏置。回归覆盖分块 Smooth-AP 梯度、等权初始化、不可用 Face 和旧任务类别隔离。输入为已归档 Frozen9 logits，原三路模型保持冻结。配置与首轮方案一致，GPU0 执行任务 0/6/7 预检后评估八阶段 Validation/Test。
 
 ## 2026-11-08 第9层证据边消融实现
 
