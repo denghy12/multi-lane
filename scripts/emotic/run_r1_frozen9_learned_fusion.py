@@ -336,8 +336,10 @@ def run(root, smoke):
             raise ValueError("Existing output protocol differs")
         if (root / "completion.json").exists():
             raise FileExistsError(f"Run already complete: {root}")
-    elif root.exists() and any(root.iterdir()):
-        raise FileExistsError(f"Output directory is not empty: {root}")
+    elif root.exists():
+        allowed = set() if smoke else {"smoke"}
+        if any(path.name not in allowed for path in root.iterdir()):
+            raise FileExistsError(f"Output directory contains another run: {root}")
     write(protocol_path, protocol)
     set_seed(1, True)
     torch.set_num_threads(2)
