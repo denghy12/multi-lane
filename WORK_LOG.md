@@ -1,3 +1,7 @@
+## 2026-11-11 TRAIN-only第一轮开发
+
+独立worktree从851406d创建codex/r1-train-only-fusion-20261111。新增融合nn.Module、TRAIN专用拟合/锁定后双split评估入口和7项单测，保留历史入口。源缓存task0–7共29580条记录、GPU0空闲。主树/test-only状态已检查并保留。Python编译及diff格式检查通过；本地缺torch，数值回归将在远程独立worktree运行，通过后自动smoke和正式评估。
+
 ## 2026-11-10 Frozen9 Smooth-AP 温度实验完成
 
 分支 `exp/r1-frozen9-temperature-fusion-20261110`，运行提交 `9ef3acd`。16 项回归和 task0/1 真数据预检通过，原固定 16 阶段逐值重放，固定、10% 有界、硬 AP 和原 .5 反传的历史权重与各折/合并 Val、Test 指标精确一致。新权重只在 task0 拟合，按折/完整 Val 分别锁定和复用。9 份输出及 4 份日志同步并逐文件 SHA-256 核验，位于 `output/r1_frozen9_temperature_fusion/seed1_20261110/` 和同名 `logs/`。

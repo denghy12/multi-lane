@@ -1,3 +1,7 @@
+## 2026-11-11 待完成TRAIN-only第一轮
+
+Git-only同步codex/r1-train-only-fusion-20261111，远程跑7新单测及历史融合回归、task0/1十步缓存与真实图像smoke；通过后GPU0原固定/等权/TRAIN Smooth-AP完整八阶段Val/Test。检查fit_split=train、验证集/Test不改参数、16份原固定逐值重放、旧融合参数冻结、checkpoint及源SHA。报告首轮后决定80/20分支重训，当前不可称该阶段已启动。
+
 ## 2026-11-10 Frozen9 可微温度对照结论
 
 本轮低温固定与退火均达到原固定和硬 AP 网格的 Val/Test 双指标，保留简单的固定低温作为可微参照。退火优势不足以单独归因。后续若扩，需同源跨 seed 配对复验并关注 task1/2，逐类温度本轮未执行。
