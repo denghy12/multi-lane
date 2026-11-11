@@ -1,4 +1,5 @@
 import unittest
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -6,12 +7,22 @@ from unittest.mock import patch
 import numpy as np
 
 from multi_lane.track_a.runner import fit_calibration_indices
+from scripts.emotic.run_r1_frozen9_learned_fusion import Rows
 from scripts.emotic.run_r1_train_holdout_fusion import (
-    fit_masks, heldout_id, image_key, training_command,
+    cached_rows, fit_masks, heldout_id, image_key, training_command,
 )
 
 
 class TrainHoldoutFusionTests(unittest.TestCase):
+    def test_train_ranking_smoke_retains_full_cohort(self):
+        rows = Rows(np.array(["train:image#person=0"]), np.zeros((1,3,5), dtype=np.float32),
+                    np.zeros((1,5), dtype=np.float32), np.array([True]))
+        with tempfile.TemporaryDirectory() as folder, patch(
+            "scripts.emotic.run_r1_train_holdout_fusion.export_rows", return_value=rows
+        ) as export:
+            cached_rows(Path(folder), {}, {}, None, "train", 0, True)
+            self.assertFalse(export.call_args.kwargs["smoke"])
+
     def test_image_partition_matches_actual_branch_exclusion(self):
         ids = np.array([f"train:image{i}.jpg#person={p}" for i in range(120) for p in range(2)])
         source = SimpleNamespace(sample_ids=ids.tolist(), targets=[(0,)]*len(ids))
