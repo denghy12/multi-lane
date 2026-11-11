@@ -1,3 +1,7 @@
+## 2026-11-11 执行第二轮TRAIN内部80/20
+
+首轮已完成且未胜固定，执行第二轮原图80/20从头训练三路，保留原30epoch/同批5读出，GPU0按smoke显存准入并行。先完整回归、两任务2更新三路训练、P/F preflight及两任务融合/双splitsmoke；通过再启动完整8任务，不用旧全TRAIN专家冒充留出未见模型，不用Val梯度或全Val重拟合。锁定后自动Test，零跳步为门禁。
+
 ## 2026-11-11 待完成TRAIN-only第一轮
 
 Git-only同步codex/r1-train-only-fusion-20261111，远程跑7新单测及历史融合回归、task0/1十步缓存与真实图像smoke；通过后GPU0原固定/等权/TRAIN Smooth-AP完整八阶段Val/Test。检查fit_split=train、验证集/Test不改参数、16份原固定逐值重放、旧融合参数冻结、checkpoint及源SHA。报告首轮后决定80/20分支重训，当前不可称该阶段已启动。

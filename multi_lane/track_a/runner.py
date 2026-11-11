@@ -1360,6 +1360,10 @@ def parse_args() -> argparse.Namespace:
         help="Save deterministic held-out train scores after every task.",
     )
     parser.add_argument(
+        "--train-only-fusion-holdout", action="store_true",
+        help="Explicit TRAIN-only fusion study: reserve 20% original-image groups before branch training.",
+    )
+    parser.add_argument(
         "--save-compact-checkpoints",
         action="store_true",
         help="Save per-task method state without the frozen CLIP visual tower.",
@@ -1518,7 +1522,8 @@ def main() -> None:
             raise ValueError("Face endpoint requires evaluation score dumps")
         if args.reporting_split == "test" and args.calibration_fraction != 0.0:
             raise ValueError("Locked Face test source must train on the complete fit split")
-        if args.calibration_fraction not in (0.0, 0.1):
+        allowed_fractions = (0.0, 0.1, 0.2) if args.train_only_fusion_holdout else (0.0, 0.1)
+        if args.calibration_fraction not in allowed_fractions:
             raise ValueError(
                 "Face endpoint supports only complete-fit validation/test or the "
                 "locked 90/10 validation source split"
@@ -1552,6 +1557,11 @@ def main() -> None:
         raise ValueError("A calibration holdout must save its score provenance")
     if args.calibration_fraction > 0 and args.reporting_split != "val":
         raise ValueError("Calibration holdout source training is validation-only")
+    if args.train_only_fusion_holdout and (
+        args.calibration_fraction != .2 or not args.save_calibration_scores
+        or args.reporting_split != "val" or args.r1_kind is None
+    ):
+        raise ValueError("TRAIN-only fusion requires the declared R1 80/20 TRAIN split and score provenance")
     if args.adapter_bottleneck_dims_per_task is not None:
         if len(args.adapter_bottleneck_dims_per_task) != len(TASK_SIZES):
             raise ValueError(
@@ -1620,7 +1630,7 @@ def main() -> None:
     if save_checkpoints:
         (output / "checkpoints").mkdir(exist_ok=args.r1_kind is not None)
     if args.save_calibration_scores:
-        (output / "calibration_scores").mkdir()
+        (output / "calibration_scores").mkdir(exist_ok=args.r1_kind is not None)
     if args.save_compact_checkpoints:
         (output / "compact_checkpoints").mkdir(exist_ok=args.r1_kind is not None)
 
@@ -1947,6 +1957,7 @@ def main() -> None:
             if args.save_evaluation_scores else None
         ),
         "calibration_fraction": args.calibration_fraction,
+        "train_only_fusion_holdout": args.train_only_fusion_holdout,
         "calibration_split": (
             "stable_sha256_image_group_v1"
             if args.calibration_fraction > 0
@@ -2104,6 +2115,8 @@ def main() -> None:
             train_source=attach_evidence(train_source,args.r1_view,dataset_parent,manifest)
             val_source=attach_evidence(val_source,args.r1_view,dataset_parent,manifest)
             reporting_source=attach_evidence(reporting_source,args.r1_view,dataset_parent,manifest)
+            if calibration_source is not None:
+                calibration_source=attach_evidence(calibration_source,args.r1_view,dataset_parent,manifest)
         if path.exists() and json.loads(path.read_text())!=config:raise ValueError('R1 recovery protocol changed')
     (output / "config.json").write_text(
         json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"

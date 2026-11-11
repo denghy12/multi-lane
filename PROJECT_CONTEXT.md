@@ -1,3 +1,9 @@
+## 2026-11-11 TRAIN-only第一轮完成，准备80/20对照
+
+首轮eaae912八任务仅TRAIN反传已完成：fixed Val44.0329/51.1335、Test33.1770/40.2083；equal42.7440/49.8807、32.0237/39.1104；TRAIN Smooth-AP40.5209/47.5329、29.9943/36.9996。八任务TRAIN目标与真实AP均改善，模型16参数、16份固定逐值重放、Val/Test参数变化0、源SHA不变。17回归通过；首次smoke TF32图像协议不一致已修正，smoke02六路图像重放及融合均逐值一致。
+
+按已授权计划新分支codex/r1-train-holdout-fusion-20261111，实现预先原图80%分支训练/20%融合训练、匹配已见人物Smooth-AP/留出BCE/留出Smooth-AP及固定和等权。Full/P/F从头训练，原配方不加载实验参数；GPU0先门禁后按显存尽量三路并行、自动8任务Val/Test。执行协议docs/r1_train_holdout_fusion_execution_20261111.md，当前待远程检查与smoke。
+
 ## 2026-11-11 TRAIN-only 融合第一轮实现
 
 用户要求执行docs/train_only_learnable_fusion_plan_20261111.md。新分支codex/r1-train-only-fusion-20261111实现任务私有两参数nn.Module，等权初始化，原Frozen9 checkpoint/TRAIN缓存上FP32 Adam .02/300步/温度.15，逐任务冻结。Val/Test只评估不拟合，无完整Val重估。先回归与真实smoke再GPU0跑完整8任务；80/20重训尚未启动。执行协议docs/r1_train_only_fusion_execution_20261111.md。
