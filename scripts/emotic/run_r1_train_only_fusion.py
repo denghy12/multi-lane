@@ -164,6 +164,18 @@ def select(validation, smoke):
 
 
 def verify_image_forward(model):
+    # Source image logits were produced by set_seed(1, True). The fusion optimizer
+    # uses FP32/TF32-off separately; keep the two numerical protocols explicit.
+    from multi_lane.track_a.runner import set_seed
+    flags = (torch.backends.cuda.matmul.allow_tf32, torch.backends.cudnn.allow_tf32)
+    try:
+        set_seed(1, True)
+        return _verify_image_forward(model)
+    finally:
+        torch.backends.cuda.matmul.allow_tf32, torch.backends.cudnn.allow_tf32 = flags
+
+
+def _verify_image_forward(model):
     """Smoke: real image forward replays archived branches and learned fusion."""
     from multi_lane.track_a.r1_crossvit_experiment import model_from_config
     from scripts.emotic.r1_frozen9_edge_forward import ROOT as EDGE_ROOT, branch_paths
@@ -195,7 +207,7 @@ def verify_image_forward(model):
                              torch.as_tensor(cached.reliable[indices], device=device), task)
         if not torch.equal(actual, expected):
             raise AssertionError("Real image learned fusion differs from cached forward")
-    return {"branch_replays": report, "learned_fusion_max_abs": 0.,
+    return {"branch_replays": report, "learned_fusion_max_abs": 0., "source_image_tf32": True,
             "peak_reserved_mib": torch.cuda.max_memory_reserved()/1024**2}
 
 

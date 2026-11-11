@@ -1,5 +1,7 @@
 ## 2026-11-11 TRAIN-only第一轮开发
 
+远程17项回归通过。首次smoke的TRAIN拟合、Val/Test缓存评估均通过，真实图像Person task0重放差0.015625；发现新融合入口关闭TF32而原图像导出set_seed(1,True)。预检图像部分恢复原数值协议，结束后恢复融合侧FP32/TF32-off。保留原失败日志/产物，修复后用新smoke02目录复验，正式尚未启动。
+
 独立worktree从851406d创建codex/r1-train-only-fusion-20261111。新增融合nn.Module、TRAIN专用拟合/锁定后双split评估入口和7项单测，保留历史入口。源缓存task0–7共29580条记录、GPU0空闲。主树/test-only状态已检查并保留。Python编译及diff格式检查通过；本地缺torch，数值回归将在远程独立worktree运行，通过后自动smoke和正式评估。
 
 ## 2026-11-10 Frozen9 Smooth-AP 温度实验完成
