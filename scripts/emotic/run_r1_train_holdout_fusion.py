@@ -114,7 +114,9 @@ def cached_rows(root, models, paths, source, split, task, smoke):
     if path.exists():
         with np.load(path, allow_pickle=False) as data:
             return Rows(data["ids"], data["logits"], data["targets"], data["reliable"])
-    rows = export_rows(models, paths, source, split, task, smoke=smoke)
+    # TRAIN ranking must retain enough positives after the original-image split.
+    # A first-64-person prefix may contain only one label even in a healthy task.
+    rows = export_rows(models, paths, source, split, task, smoke=smoke and split != "train")
     path.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(path, ids=rows.ids, logits=rows.logits, targets=rows.targets, reliable=rows.reliable)
     return rows
@@ -185,8 +187,16 @@ def evaluate_cached(root, split, banks, tasks, smoke):
     return summarize(records, smoke)
 
 
-def finish(root, smoke):
+def finish(root, smoke, *, output=None):
     inputs, paths = input_paths(), training_paths(root)
+    if output is not None:
+        root = output
+        if root.exists():
+            raise FileExistsError(f"Fusion retry requires fresh outputs: {root}")
+        write(root/"retry_protocol.json", {"branch_paths": {k: str(v) for k,v in paths.items()},
+            "smoke": smoke, "git": git_metadata(Path.cwd()),
+            "reason": "Reuse unchanged 2-update branch smoke; complete TRAIN cohorts for ranking support",
+            "fit_split": "train"})
     set_seed(1, True)
     models = {view: model_from_config(read(path/"config.json"), inputs.clip_checkpoint)
               for view, path in paths.items()}
@@ -303,7 +313,15 @@ if __name__ == "__main__":
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--logs", type=Path, default=LOGS)
     parser.add_argument("--smoke", action="store_true")
+    parser.add_argument("--finish-only", action="store_true",
+                        help="Retry fusion preflight with unchanged already-checked branch smoke checkpoints")
     args = parser.parse_args()
     torch.set_num_threads(2)
-    run(args.root.with_name(args.root.name+"_smoke") if args.smoke else args.root,
-        args.logs / "smoke" if args.smoke else args.logs, args.smoke)
+    root = args.root.with_name(args.root.name+"_smoke") if args.smoke else args.root
+    if args.finish_only:
+        if not args.smoke:
+            raise ValueError("Finish-only is restricted to existing branch smoke checkpoints")
+        check_training(root, True)
+        finish(root, True, output=root/"fusion_preflight02")
+    else:
+        run(root, args.logs / "smoke" if args.smoke else args.logs, args.smoke)
