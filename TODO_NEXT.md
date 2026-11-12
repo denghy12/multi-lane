@@ -1,3 +1,11 @@
+## 2026-11-12 单轨迹融合门禁通过，准备正式GPU0训练
+
+实现提交c69961d（此前64e659f/2d81cc5/525f10c逐步修正预检）。20项回归通过。smoke03两任务×3轮×每轮2batch、36次分支有效更新、零跳步；完整checkpoint两split真实前向通过。新增融合只在同一当前TRAIN输出反传，Full/P task0人群5353全部使用，Face原筛样4082；task1 Full/P4394、Face3454，无永久留出。
+
+补跑无额外观察控制，6条任务路径的模型/RNG逐值相同，18份epoch Adam/scheduler/scaler状态逐值相同，证明小规模下观察未改变分支训练轨迹。两融合日程预算/冻结、旧任务参数、可靠性mask、恢复状态单测均通过。训练完成前不宣称mAP提升。
+
+预检保留失败日志：smoke01被原runner显式更新预算校验挡住（无更新）；smoke02因旧atomic_save禁止覆盖latest停止，改每轮不可覆盖完整恢复文件＋latest.json索引；smoke03训练完成后布尔mask被输入搬运转float导致评估拒绝，修复为bool后只补真实前向与控制，retry_exit=0，不重训、不改smoke模型。准备启动正式seed1完整8任务GPU0，根output/r1_single_trajectory_fusion/seed1_20261112，C0/C1/C2同期三个预定义读出，共用一次本轮全TRAIN三路轨迹，不使用跨实验参数。
+
 ## 2026-11-12 单一训练轨迹融合开始实施
 
 用户授权执行C0固定、C1持续学习、C2中期冻结方案。独立分支codex/r1-single-trajectory-fusion-20261112，基于2d0202a；主树及服务器test-only未修改。新增single_trajectory_fusion模块和run_r1_single_trajectory_fusion入口，不修改原runner的训练损失或优化循环，通过其现有epoch保存钩子同步三路。
