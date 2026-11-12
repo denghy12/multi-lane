@@ -43,7 +43,7 @@ def run(root, holdout, smoke):
     weights = locked_weights(read(fit_path))
     # Lock TRAIN-derived parameters and protocol before any Val/Test forward.
     write(root/'locked_protocol.json', {
-        'source': git_metadata(), 'seed': 1, 'tasks': tasks, 'smoke': smoke,
+        'source': git_metadata(Path.cwd()), 'seed': 1, 'tasks': tasks, 'smoke': smoke,
         'fit_split': 'train', 'optimization': False, 'source_step': 99,
         'batch_size': 64, 'workers': 2, 'cpu_threads': 2,
         'weights': [v.tolist() for v in weights], 'source_sha256': hashes,
