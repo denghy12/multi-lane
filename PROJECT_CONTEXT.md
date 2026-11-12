@@ -1,3 +1,11 @@
+## 2026-11-12 单一训练轨迹融合开始实施
+
+用户授权执行C0固定、C1持续学习、C2中期冻结方案。独立分支codex/r1-single-trajectory-fusion-20261112，基于2d0202a；主树及服务器test-only未修改。新增single_trajectory_fusion模块和run_r1_single_trajectory_fusion入口，不修改原runner的训练损失或优化循环，通过其现有epoch保存钩子同步三路。
+
+三路从CLIP起点按原全TRAIN配方自行训练；同一轮当前输出训练两个独立融合日程，停止梯度保证三组共享的分支轨迹相同。因此只训练一次三路、同期保留三个预定义读出，节省重复训练；不是跨实验组装。每轮保存三路模型/Adam/scheduler/scaler/RNG与融合参数/Adam的完整checkpoint，任务末封存。C1第6–30轮每轮4次，C2第6–15轮每轮10次；两组均100次/任务，FP32 BCE/Adam .02、等权初始化。30轮/64/seed1/8任务、主LR .0125、Adapter/交互LR .0004、scale .1、P/F AMP4096、训练72线程保留；观察前向2线程且恢复RNG/模式。
+
+GPU0，output/r1_single_trajectory_fusion/seed1_20261112；logs/r1_single_trajectory_fusion/seed1_20261112。先远程单测、两任务三轮每轮2batch smoke及无观测控制的模型/优化器/RNG逐值对照；通过后正式全TRAIN8任务、Val/Test完整模型前向。当前代码编写中，尚未通过远程检查或启动正式训练。未合并main，无已有checkpoint改动。
+
 ## 2026-11-11 TRAIN-only第一轮完成，准备80/20对照
 
 首轮eaae912八任务仅TRAIN反传已完成：fixed Val44.0329/51.1335、Test33.1770/40.2083；equal42.7440/49.8807、32.0237/39.1104；TRAIN Smooth-AP40.5209/47.5329、29.9943/36.9996。八任务TRAIN目标与真实AP均改善，模型16参数、16份固定逐值重放、Val/Test参数变化0、源SHA不变。17回归通过；首次smoke TF32图像协议不一致已修正，smoke02六路图像重放及融合均逐值一致。

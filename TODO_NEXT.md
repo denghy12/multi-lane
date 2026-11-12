@@ -1,3 +1,11 @@
+## 2026-11-12 单一训练轨迹融合开始实施
+
+用户授权执行C0固定、C1持续学习、C2中期冻结方案。独立分支codex/r1-single-trajectory-fusion-20261112，基于2d0202a；主树及服务器test-only未修改。新增single_trajectory_fusion模块和run_r1_single_trajectory_fusion入口，不修改原runner的训练损失或优化循环，通过其现有epoch保存钩子同步三路。
+
+三路从CLIP起点按原全TRAIN配方自行训练；同一轮当前输出训练两个独立融合日程，停止梯度保证三组共享的分支轨迹相同。因此只训练一次三路、同期保留三个预定义读出，节省重复训练；不是跨实验组装。每轮保存三路模型/Adam/scheduler/scaler/RNG与融合参数/Adam的完整checkpoint，任务末封存。C1第6–30轮每轮4次，C2第6–15轮每轮10次；两组均100次/任务，FP32 BCE/Adam .02、等权初始化。30轮/64/seed1/8任务、主LR .0125、Adapter/交互LR .0004、scale .1、P/F AMP4096、训练72线程保留；观察前向2线程且恢复RNG/模式。
+
+GPU0，output/r1_single_trajectory_fusion/seed1_20261112；logs/r1_single_trajectory_fusion/seed1_20261112。先远程单测、两任务三轮每轮2batch smoke及无观测控制的模型/优化器/RNG逐值对照；通过后正式全TRAIN8任务、Val/Test完整模型前向。当前代码编写中，尚未通过远程检查或启动正式训练。未合并main，无已有checkpoint改动。
+
 ## 2026-11-11 执行第二轮TRAIN内部80/20
 
 首轮已完成且未胜固定，执行第二轮原图80/20从头训练三路，保留原30epoch/同批5读出，GPU0按smoke显存准入并行。先完整回归、两任务2更新三路训练、P/F preflight及两任务融合/双splitsmoke；通过再启动完整8任务，不用旧全TRAIN专家冒充留出未见模型，不用Val梯度或全Val重拟合。锁定后自动Test，零跳步为门禁。
