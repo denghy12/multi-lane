@@ -94,7 +94,7 @@ def export_live(model, source, view, task, split, smoke=False):
             z = model.seen_logits(AsymmetricReceivers.receiver_inputs(images, view))[:, classes]
         zs.append(z.float().cpu().numpy())
         ys.append(targets.numpy().astype(np.float32))
-        masks.append(images["evidence_face_reliable"].cpu().numpy())
+        masks.append(images["evidence_face_reliable"].bool().cpu().numpy())
         ids.extend(names)
     result = dict(ids=np.asarray(ids, dtype=str), logits=np.concatenate(zs),
                   targets=np.concatenate(ys), reliable=np.concatenate(masks))
@@ -392,7 +392,7 @@ def run(root, logs, smoke):
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("action", choices=("run", "worker", "evaluate"))
+    p.add_argument("action", choices=("run", "worker", "evaluate", "smoke-check"))
     p.add_argument("--root", type=Path, default=ROOT)
     p.add_argument("--logs", type=Path, default=LOGS)
     p.add_argument("--view", choices=VIEWS)
@@ -403,6 +403,10 @@ if __name__ == "__main__":
         run(a.root, a.logs, a.smoke)
     elif a.action == "worker":
         worker(a.root, a.view, a.smoke, a.control)
+    elif a.action == "smoke-check":
+        if not a.smoke:
+            raise ValueError("Replay controls are only for smoke")
+        smoke_replay(a.root, a.logs)
     else:
         torch.set_num_threads(2)
         runner.set_seed(1, True)
