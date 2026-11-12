@@ -8,6 +8,7 @@ readout controls over the SAME live branch parameters (fusion is detached).
 import argparse
 import copy
 import itertools
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -177,7 +178,9 @@ def complete_checkpoint(root, task, epoch, schedules, run_id):
              "task": task, "epoch": epoch, "branches": branches,
              "fusion": schedules.state_dict(), "fit_split": "train",
              "source_git": runner.git_metadata(Path.cwd()), "pretrained": str(input_paths().clip_checkpoint)}
-    atomic_save(state, root/"checkpoints/latest.pth")
+    recovery = root/"recovery"/f"task{task}"/f"epoch{epoch:02d}.pth"
+    atomic_save(state, recovery)
+    write(root/"checkpoints/latest.json", {"path": str(recovery), "task": task, "epoch": epoch})
     if epoch == (3 if schedules.smoke else 30):
         atomic_save(state, root/"checkpoints"/f"task{task}.pth")
     return {v: int(p["training"]["completed_task_updates"]) for v, p in branches.items()}
@@ -245,6 +248,24 @@ def finish(root, smoke):
     """Real image forwards load each WHOLE same-run task checkpoint."""
     paths, inputs = branch_paths(root), input_paths()
     tasks = range(2 if smoke else 8)
+    budget_report = {}
+    for view, path in paths.items():
+        config, summary = read(path/"config.json"), read(path/"seed_summary.json")
+        if config["calibration_fraction"] != 0 or summary["status"] != "complete":
+            raise AssertionError("Training excluded data or did not complete")
+        history = read(path/"training_history.json")
+        budget_report[view] = []
+        for task in tasks:
+            rows, counts = history[str(task)], summary["calibration_counts"][str(task)]
+            expected = 6 if smoke else 30*math.ceil(counts["fit"]/64)
+            actual = int(sum(r["optimizer_steps"] for r in rows))
+            if (len(rows) != (3 if smoke else 30) or actual != expected
+                    or any(r["skipped_optimizer_steps"] for r in rows)
+                    or counts["calibration"] != 0
+                    or counts["fit"]+counts["face_filter_removed"] != counts["eligible"]):
+                raise AssertionError(f"TRAIN/update budget mismatch {view}/{task}")
+            budget_report[view].append({"task": task, "updates": actual, **counts})
+    write(root/"training_budget_checks.json", budget_report)
     models = {v: model_from_config(read(p/"config.json"), inputs.clip_checkpoint) for v, p in paths.items()}
     records = {s: make_records(METHODS) for s in ("val", "test")}
     hashes = {str(root/"checkpoints"/f"task{t}.pth"): sha(root/"checkpoints"/f"task{t}.pth") for t in tasks}
