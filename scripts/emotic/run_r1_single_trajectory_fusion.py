@@ -48,7 +48,7 @@ def branch_flags(root, view, smoke):
                  "native" if view == "full" else "attention", view, smoke)
     if smoke:
         i = args.index("--optimizer-updates-per-task")
-        del args[i:i+2]
+        args[i+1] = "6"
         args[args.index("--epochs")+1] = "3"
         args += ["--r1-smoke-eval-samples", "64"]
     if view != "full":
@@ -118,6 +118,10 @@ def worker(root, view, smoke, control=False):
 
     def train_with_barrier(model, loader, *args, **kwargs):
         epoch_save = model.save_training_epoch
+        if smoke:
+            # The runner guard requires an explicit capped budget. Execute the
+            # same six updates as 3 epochs x 2 batches to exercise both schedules.
+            kwargs["optimizer_updates_per_task"] = None
         if not control:
             def observe(task, epoch, history, optimizer, scheduler, scaler, updates):
                 # Save optimizer/RNG BEFORE any observation; every accepted epoch is resumable.
