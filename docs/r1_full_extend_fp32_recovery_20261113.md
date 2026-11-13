@@ -11,3 +11,15 @@
 输入相对路径沿既有EMOTIC/CLIP/Face manifest。源恢复state仍旧worktree `output/r1_fusion_return_train/seed1_20261113/full_extend/recovery/task3/epoch13.pth`，SHA15d570f6d928854312d473ccdf0a41de3110ce111fc964581feeadcbcceedfd8。
 
 新输出位于output/r1_full_extend_fp32_recovery/seed1_20261113，日志logs/r1_full_extend_fp32_recovery/seed1_20261113。源码和测试完成后先验安全状态/配置/FP32与probe边界，所有源文件SHA需保持。不是改融合人群实验，也不从其他实验导入分类头或比例。
+
+## 实施门禁
+
+09d6a1f代码已通过远程18项恢复/FP32测试，prepare复制977份安全文件并校验原source及copy SHA一致。运行前锁定最终提交；先仅Person真实epoch14 probe，再由独立队列等待人群对照结束后启动完整三路。probe及后续控制使用同一固定源码，不改变训练配置中的git来源。
+
+FP32安全检查涵盖loss/梯度/参数/Adam，不将关闭GradScaler造成的“无跳步”误当成有限更新证明。原AMP32失败记录保留；FP32数值策略边界需在结果报告中明确。
+
+## 自动队列
+
+入口`python -m scripts.emotic.launch_r1_fp32_recovery`。要求真实Person FP32 e14 probe通过；等待正在运行的人群实验训练、8阶段Validation/Test完成且进程退出。随后GPU0连续三次空闲显存至少20480 MiB才启动本恢复的Full/Person/Face三路并行。队列锁定clean HEAD，失败明确停止，不自动接续含跳步状态。
+
+状态`output/r1_fp32_recovery_queue/seed1_20261113/status.json`，训练日志`logs/r1_full_extend_fp32_recovery/seed1_20261113`。同一源码先probe后queue，避免config.git来源不匹配；运行后只在规范本地仓库更新文档，不修改运行工作树。

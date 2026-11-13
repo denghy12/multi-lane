@@ -1,3 +1,11 @@
+## 2026-11-13 FP32控制恢复代码与门禁检查完成
+
+独立FP32恢复脚本已完成并通过18项远程测试（原恢复8项＋FP3210项）。仅Person禁用AMP；每次Adam更新前检查loss、梯度、参数，更新后检查参数和Adam。probe必须在原safe task3e13之后准确完成156次有效更新、零跳步，并核对Adam计数，再保存合法e14供同一控制继续；否则立即停止。
+
+安全前缀977文件、11,360,654,884字节已复制至新的output/r1_full_extend_fp32_recovery/seed1_20261113，逐文件SHA核验；原源不变。尚未运行真实FP32probe，不能宣称稳定问题已解决。下一步锁定源码后先probe，成功后自动等待GPU0人群对照结束，再完整恢复控制并评估8阶段Validation/Test。正式评估仍用原历史AMP口径。
+
+人群对照保持c957d66独立运行，task0第14轮已完成、零跳步；不修改其工作树。配置、同轨迹双人群融合和历史TRAIN访问成本详见docs/r1_fusion_population_recovery_execution_20261113.md。
+
 ## 2026-11-13 AMP32控制恢复仍失败；人群对照已开始，准备Person FP32复验
 
 GPU0正式队列c957d66已启动。full_extend AMP32从safe3e13恢复的首轮再次Person149有效＋7跳步，末scale0.25，证明策略生效但不足；Full156/Face119零跳步，失败已记录并停止，未当作完整控制。独立population新训练随后自动启动PID2054838，源码worktree必须保持c957d66不变。

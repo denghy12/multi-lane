@@ -1,7 +1,7 @@
 """Explicit numerical recovery of the same full-TRAIN control from a clean boundary.
 
 Copies an immutable safe prefix into a fresh output. No failed epoch is imported.
-Only Person loss-scale policy changes after the boundary; data, Adam, scheduler,
+Only the declared Person precision/scale policy changes after the boundary; data, Adam, scheduler,
 RNG, heads and all branch model tensors are inherited from this SAME trajectory.
 """
 import argparse
