@@ -964,9 +964,16 @@ def train_task(
     if loss_routing in {"adapter_asl", "both_asl"} and not adapter_parameters:
         raise ValueError("Adapter ASL routing requires an enabled Adapter")
     optimizer = torch.optim.Adam(optimizer_groups, lr=learning_rate)
+    return_training = getattr(model, "r1_return_training", None)
+    if return_training is not None:
+        from .fusion_return_training import validate_return_training, reset_return_scheduler
+        validate_return_training(return_training, epochs, optimizer_updates_per_task)
+        if scheduler_mode != "cosine" or scheduler_min_lr_ratio or scheduler_warmup_ratio:
+            raise ValueError("Return training preserves the original plain cosine phase")
+    original_peak_lrs = [group["lr"] for group in optimizer.param_groups]
     scheduler = build_learning_rate_scheduler(
         optimizer=optimizer,
-        epochs=epochs,
+        epochs=(int(return_training["initial_epochs"]) if return_training is not None else epochs),
         optimizer_updates_per_task=optimizer_updates_per_task,
         mode=scheduler_mode,
         min_lr_ratio=scheduler_min_lr_ratio,
@@ -987,7 +994,15 @@ def train_task(
     regularization_weight: Optional[float] = None
     epoch = 0
     resume=getattr(model,'r1_resume',None)
+    return_phase_active = False
     if resume is not None:
+        # Epoch N checkpoints are saved after N completed epochs. At the phase
+        # boundary the saved scheduler is still the first-stage scheduler;
+        # strictly later checkpoints already contain the return scheduler.
+        if return_training is not None and resume["next_epoch"] > int(return_training["initial_epochs"]):
+            scheduler = reset_return_scheduler(optimizer, original_peak_lrs, return_training)
+            loader = return_training["loader"]
+            return_phase_active = True
         optimizer.load_state_dict(resume['optimizer'])
         scheduler.load_state_dict(resume['scheduler'])
         scaler.load_state_dict(resume['scaler'])
@@ -1003,6 +1018,13 @@ def train_task(
         if optimizer_updates_per_task is not None
         else epoch < epochs
     ):
+        if (return_training is not None and not return_phase_active
+                and epoch == int(return_training["initial_epochs"])):
+            # Runs only after the preceding save_training_epoch callback (and
+            # its fusion-fitting barrier) has returned. No moment/state reset.
+            scheduler = reset_return_scheduler(optimizer, original_peak_lrs, return_training)
+            loader = return_training["loader"]
+            return_phase_active = True
         model.train()
         loss_total = 0.0
         adapter_loss_total = 0.0
@@ -1160,6 +1182,10 @@ def train_task(
             "next_learning_rate": float(optimizer.param_groups[0]["lr"]),
             "elapsed_seconds": time.time() - epoch_start,
         }
+        if return_training is not None:
+            row["data_phase"] = "return_full_train" if return_phase_active else "initial_train"
+            row["phase_epoch"] = float(epoch - int(return_training["initial_epochs"]) + 1 if return_phase_active else epoch + 1)
+            row["optimizer_continued_without_reset"] = True
         if adapter_parameters:
             row["adapter_learning_rate"] = epoch_adapter_lr
             row["next_adapter_learning_rate"] = float(
