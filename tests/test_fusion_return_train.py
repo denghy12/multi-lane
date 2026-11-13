@@ -160,6 +160,17 @@ class ReturnFusionTests(unittest.TestCase):
         self.assertEqual(phase_sizes(False), (30, 5))
         self.assertEqual(phase_sizes(True), (2, 1))
 
+    def test_formal_fit_completes_exactly_one_hundred_updates(self):
+        fusion = ReturnFusion((2,))
+        fusion.begin_task(0)
+        report = fusion.fit(*self.rows())
+        self.assertEqual(fusion.updates[0], 100)
+        self.assertEqual(report['steps'], 100)
+        self.assertEqual(len(report['trajectory']), 100)
+        self.assertEqual(report['trajectory'][-1]['step'], 100)
+        for value in fusion.snapshot()['optimizers'][0]['state'].values():
+            self.assertEqual(int(value['step']), 100)
+
     def test_fit_detaches_branches_and_seals_gate(self):
         fusion = ReturnFusion((2,), steps=2)
         fusion.begin_task(0)
@@ -212,7 +223,7 @@ class ReturnFusionTests(unittest.TestCase):
             self.assertTrue(torch.equal(value, restored.bank.state_dict()[name]), name)
 
     def test_invalid_observations_are_rejected(self):
-        for invalid in ('duplicate', 'nonfinite', 'shape'):
+        for invalid in ('duplicate', 'nonfinite', 'shape', 'float_mask', 'nonbinary'):
             fusion = ReturnFusion((2,), steps=2)
             fusion.begin_task(0)
             ids, z, y, mask = self.rows()
@@ -220,6 +231,10 @@ class ReturnFusionTests(unittest.TestCase):
                 ids[-1] = ids[0]
             elif invalid == 'nonfinite':
                 z = z.detach().clone(); z[0, 0, 0] = float('nan')
+            elif invalid == 'float_mask':
+                mask = mask.float()
+            elif invalid == 'nonbinary':
+                y[0, 0] = .5
             else:
                 y = y[:, :1]
             with self.assertRaises((ValueError, FloatingPointError)):

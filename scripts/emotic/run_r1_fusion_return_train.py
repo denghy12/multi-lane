@@ -202,6 +202,12 @@ def worker(root, view, smoke, condition):
     original = runner.train_task
     initial, returned = phase_sizes(smoke)
     source_cache = {}
+    write(branch_paths(root)[view]/"return_data_provenance.json", {
+        "initial_calibration_exclusion_only": condition == "holdout_return",
+        "all_legal_train_return_epoch": initial+1,
+        "fusion_fit_source": "observations/task*/VIEW.npz at the initial-phase barrier only",
+        "legacy_calibration_scores": "exported after return; already seen by branch; diagnostic only, never used to fit fusion",
+        "official_validation_and_test_updates": 0})
 
     def train_with_return(model, loader, *args, **kwargs):
         # runner passes validation_loader, device, task_id, epochs positionally.
@@ -397,6 +403,8 @@ def run_one(root, logs, smoke, condition, resume=False):
                 "split_salt": "emotic-reliability-calibration-v1",
                 "train_group_fraction": .2 if condition == "holdout_return" else 0.,
                 "full_parameter_trajectory": True, "fusion_updates_after_return": 0,
+                "calibration_exclusion": "initial phase only; all legal TRAIN returned before final checkpoint",
+                "fusion_fit_source": "observations at initial phase barrier; never legacy post-return calibration_scores",
                 "branch_commands": {v: branch_flags(root, v, smoke, condition) for v in VIEWS},
                 "evaluation": "both Val/Test; final and task0/2/7 pre-return diagnostic; no fitting"}
     if (root/"protocol.json").exists() and read(root/"protocol.json") != protocol:
