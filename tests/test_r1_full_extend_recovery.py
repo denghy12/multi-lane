@@ -161,6 +161,10 @@ class RecoveryContracts(unittest.TestCase):
             torch.save(tiny_whole(3, 13), boundary)
             digest = recovery.sha(boundary)
             diagnostic = Path(directory)/"scan.json"
+            wrong_source_root = Path(directory)/"wrong_source_digest"
+            with patch.object(recovery, "BOUNDARY_SHA", "not-this-checkpoint"), self.assertRaises(ValueError):
+                recovery.prepare(source, wrong_source_root, diagnostic, 32.)
+            self.assertFalse(wrong_source_root.exists())
             valid = {"status": "complete", "all_expected_batches_scanned": True,
                      "source_sha256": digest, "view": "person",
                      "mode_nonfinite_batches": {"amp32": 0, "amp4096": 1},
