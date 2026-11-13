@@ -1,3 +1,11 @@
+## 2026-11-13 AMP32控制恢复仍失败；人群对照已开始，准备Person FP32复验
+
+GPU0正式队列c957d66已启动。full_extend AMP32从safe3e13恢复的首轮再次Person149有效＋7跳步，末scale0.25，证明策略生效但不足；Full156/Face119零跳步，失败已记录并停止，未当作完整控制。独立population新训练随后自动启动PID2054838，源码worktree必须保持c957d66不变。
+
+另建codex/r1-full-extend-fp32-recovery-20261113独立工作树，准备仅Person完整FP32，从原安全e13及Adam/RNG恢复，先真实单Person e14probe检查156更新零skip，再自动排队完整三路控制及Val/Test。不从任何失败e14继续，原源checkpoint不动。静态156batch全finite的限制仍保留；尚未证明动态FP32成功。
+
+新方案docs/r1_full_extend_fp32_recovery_20261113.md。population对照不会被新恢复代码影响；历史TRAIN全阴性新增协议不变。当前原始控制仍未完成，不能给出正式结果。
+
 ## 2026-11-13 融合人群与控制恢复门禁通过，准备正式队列
 
 43项测试通过；population真实smoke36次有效更新零跳步、8组双split前向完成。与旧holdout smoke18份分支模型/Adam/scheduler/scaler/RNG及8组输出逐值重放，原H/原融合一致；新增观察未改变θ轨迹。恢复smoke正在完成最后Test前向，正式尚未启动。
