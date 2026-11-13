@@ -1,3 +1,11 @@
+## 2026-11-13 全TRAIN控制恢复与融合人群对照开始实施
+
+用户授权执行。新独立分支codex/r1-fusion-population-recovery-20261113基于a6a5140。GPU0空闲，其余卡有其他任务。先从full_extend task3e13无跳步完整状态做不更新的AMP/FP32梯度诊断，再决定独立输出恢复，禁止从有7次跳步的e14继续。
+
+并行实现从头同轨迹融合人群对照：seed1/8任务/B64，80%TRAIN30轮→两套phi各BCE100步→全TRAIN5轮；原current_positive H vs seen_population H，后者补当前类全阴性已见TRAIN人物，禁止未来独占人物、Val/Test拟合。保留两个标量、等权、LR.02、原分支LR/损失/结构；历史TRAIN只作融合专用读取并公开成本，不称无回放。三个固定/学习读出共用同一θ，不导入旧实验头或比例。
+
+先数据边界/参数封存/RNG/恢复测试与真实smoke，之后正式双split；当前尚未部署或启动新正式训练。新输出output/r1_fusion_population_train与output/r1_full_extend_recovery，logs对应。计划docs/r1_fusion_population_recovery_execution_20261113.md。原worktree、checkpoint和test-only保持。
+
 ## 2026-11-13 回填融合门禁通过，准备启动正式8任务
 
 源码798fcd9完成预检：13项新契约测试＋2项实际runner恢复测试＋6项既有融合隔离测试共21项通过。smoke01_20261113两条件各2任务×3路×3轮×2batch，共72次有效分支更新零跳步，两个完整流程exit0。完整模型回填前/后Val/Test共16组前向通过；Adam阶段计数连续、phi封存、原图划分与Face筛样检查通过。初次单测仅因浮点LR末位严格等号失败，修复精度断言后通过，参数/Adam逐值要求未放宽。
