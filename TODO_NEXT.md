@@ -1,3 +1,9 @@
+## 2026-11-13 回填融合门禁通过，准备启动正式8任务
+
+源码798fcd9完成预检：13项新契约测试＋2项实际runner恢复测试＋6项既有融合隔离测试共21项通过。smoke01_20261113两条件各2任务×3路×3轮×2batch，共72次有效分支更新零跳步，两个完整流程exit0。完整模型回填前/后Val/Test共16组前向通过；Adam阶段计数连续、phi封存、原图划分与Face筛样检查通过。初次单测仅因浮点LR末位严格等号失败，修复精度断言后通过，参数/Adam逐值要求未放宽。
+
+正式seed1/8任务/GPU0将按holdout_return→full_extend依次，每条三路并行执行，自动双split评估；同一holdout分支轨迹比较fixed和learned，原强参照复用。output/r1_fusion_return_train/seed1_20261113，logs同目录。当前尚未有正式效果；不自动加入SAM或新Attention。历史calibration_scores在回填后属于已见诊断，唯一融合拟合源是回填前observations，协议和perbranch provenance已明确。
+
 预检补记：修复仅浮点LR精度断言，保留参数与Adam严格重放；明确回填前observations是唯一融合拟合来源，回填后calibration_scores仅已见诊断。正式训练未启动。
 
 ## 2026-11-13 TRAIN临时分工→同轨迹回填开始实施
