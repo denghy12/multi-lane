@@ -118,7 +118,8 @@ class ReturnOptimizerTests(unittest.TestCase):
                 self.assertTrue(torch.equal(val, optimizer.state[p][k]))
         self.assertAlmostEqual(optimizer.param_groups[0]['lr'], .00125)
         self.assertAlmostEqual(optimizer.param_groups[1]['lr'], .00004)
-        self.assertEqual(new_schedule.base_lrs, [.00125, .00004])
+        for actual, expected in zip(new_schedule.base_lrs, [.00125, .00004]):
+            self.assertAlmostEqual(actual, expected, places=14)
         self.step(params, optimizer, new_schedule)
         self.assertEqual(int(optimizer.state[params[0]]['step']), 3)
 

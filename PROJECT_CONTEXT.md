@@ -1,3 +1,5 @@
+预检补记：修复仅浮点LR精度断言，保留参数与Adam严格重放；明确回填前observations是唯一融合拟合来源，回填后calibration_scores仅已见诊断。正式训练未启动。
+
 ## 2026-11-13 TRAIN临时分工→同轨迹回填开始实施
 
 用户授权执行主候选，暂不加入辅助泛化正则。新独立分支codex/r1-fusion-return-train-20261113基于aa8dbd3；两条自行训练轨迹full_extend(全TRAIN30+5固定)、holdout_return(80%30→20%学两标量100step→全TRAIN5)，后者同期固定/学习读出。seed1/8任务/B64/GPU0，保留Frozen9与原损失/增强/Face筛样，恢复5轮保留Adam动量并将峰值LR降至0.1倍。日志/产物位于logs和output/r1_fusion_return_train/seed1_20261113。原强固定参照复用。计划每轨迹三路并行、两轨迹依次，完整Val/Test及task0/2/7回填前后归因自动完成。
