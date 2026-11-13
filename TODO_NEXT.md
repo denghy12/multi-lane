@@ -1,3 +1,13 @@
+## 2026-11-13 融合人群与控制恢复门禁通过，准备正式队列
+
+43项测试通过；population真实smoke36次有效更新零跳步、8组双split前向完成。与旧holdout smoke18份分支模型/Adam/scheduler/scaler/RNG及8组输出逐值重放，原H/原融合一致；新增观察未改变θ轨迹。恢复smoke正在完成最后Test前向，正式尚未启动。
+
+safe task3e13静态156batch AMP4096/32/FP32均有限，未重现动态e14故障；采用Person AMP32作为数值稳定复验候选，其他scaler字段/Adam/RNG保持，首个真实e14须156有效0skip。正式安全前缀已复制到output/r1_full_extend_recovery/seed1_20261113/recovered，旧源不修改。
+
+TRAIN人口审计：t0–7原H=1031/817/160/1966/847/444/102/278；新增全阴性=0/774/1513/665/2034/2514/2893/2815。task6仅26新增人在当前图像，其余2867需历史图像；明确为融合专用历史TRAIN访问。新正式全程从头，fixed/current_positive/seen_population三个读出共用一条θ，仍无外部模型或比例导入。
+
+准备使用launch_r1_population_recovery，仅GPU0，先控制恢复再population，各自三路并行，首组失败也继续第二独立组并记录失败。状态output/r1_population_recovery_batch/seed1_20261113/status.json。原强参照与旧产物保留，暂不扩Attention/门控/seed。
+
 ## 2026-11-13 全TRAIN控制恢复与融合人群对照开始实施
 
 用户授权执行。新独立分支codex/r1-fusion-population-recovery-20261113基于a6a5140。GPU0空闲，其余卡有其他任务。先从full_extend task3e13无跳步完整状态做不更新的AMP/FP32梯度诊断，再决定独立输出恢复，禁止从有7次跳步的e14继续。

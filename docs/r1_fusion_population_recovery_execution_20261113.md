@@ -46,3 +46,28 @@ GPU0；seed1，8任务，batch64，原EMOTIC划分，Frozen9 patch Person＋Face
 正式同批报告8阶段Validation／Test、最终与阶段平均、可靠／不可靠Face子群和task6/7新类AP。固定和两学习读出来自每阶段同一个完整模型；输出各bank与来源元数据。预检应验证TRAIN/已见类/原图边界，负例与Face mask，100步与封存，观察不改变分支参数或RNG，恢复状态完整；smoke含2任务及两split真实前向。
 
 仅通过实现检查和真实smoke后启动正式实验。候选须优于同流程固定且达到原强参照Test33.1770/40.2083，才考虑扩seed；不以Test选步数或补入人群。
+
+## 预检结果与数值策略（正式启动前）
+
+代码已按Git-only流程部署独立远程worktree。43项单元／恢复检查通过（35项融合与既有回归，8项安全恢复）。population smoke两任务三轮三路共36次有效更新、零跳步，8组回填前后Val/Test真实前向完成。与原holdout smoke的18份分支epoch模型/Adam/scheduler/scaler/RNG逐值一致；原H预测、原融合与8组前向精确重放，源SHA不变。
+
+安全e13状态的156batch静态梯度扫描完成：AMP4096、AMP32、FP32均无非有限梯度，模型/Adam/源SHA未变化。此结果未重现真实e14动态更新后的故障，不能写成已定位到具体模块。采用AMP32作为增加数值余量的恢复复验，仅Person改变scale，Full/Face及其scaler计数、Adam/RNG保持；必须再检验首个实际恢复epoch的156次有效更新零跳步。
+
+正式安全前缀已复制至 `output/r1_full_extend_recovery/seed1_20261113/recovered`，原checkpoint不改。恢复smoke从原full_extend smoke的task0e1继续，待完整双split通过后与population门禁一同触发正式队列。
+
+TRAIN元数据审计如下，未读取Val/Test标签来拟合或选人：
+
+| 任务 | 原H人数 | 新增全阴性人物 | 扩大后人数 | 新增中同当前图像人数 |
+|---|---:|---:|---:|---:|
+| 0 | 1031 | 0 | 1031 | 0 |
+| 1 | 817 | 774 | 1591 | 78 |
+| 2 | 160 | 1513 | 1673 | 36 |
+| 3 | 1966 | 665 | 2631 | 132 |
+| 4 | 847 | 2034 | 2881 | 147 |
+| 5 | 444 | 2514 | 2958 | 127 |
+| 6 | 102 | 2893 | 2995 | 26 |
+| 7 | 278 | 2815 | 3093 | 116 |
+
+新增人物多数需要历史TRAIN图像；这些人物仅增加融合监督，三路θ仍按原当前任务数据学习。不会把这项变化称为无回放协议。
+
+正式队列入口：`python -m scripts.emotic.launch_r1_population_recovery`。仅GPU0，两条轨迹依次、每条三路并行；先安全恢复full_extend，再从头训练population。首项若受零跳步保护停止，记录失败，独立的人群对照仍继续执行，避免一项故障让其他已授权实验永远不启动。队列状态为 `output/r1_population_recovery_batch/seed1_20261113/status.json`。
