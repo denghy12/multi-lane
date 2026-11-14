@@ -61,10 +61,11 @@ def census(native, source):
     return result
 
 
-def sensitivity(source, device):
-    from scripts.emotic.evaluate_r1_early_fusion import train_folds, fit_matrix, current_ap
+def sensitivity(source, device, output):
+    from scripts.emotic.evaluate_r1_early_fusion import (train_folds, fit_matrix, current_ap, stage_evaluation, replay, lock_weights)
     from scripts.emotic.run_r1_frozen9_learned_fusion import blend
     tasks = {}
+    banks = {"nested_10": [], "e30_bce": []}
     for t in range(8):
         rows = []
         for v in ("full", "person", "face"):
@@ -79,6 +80,8 @@ def sensitivity(source, device):
         tasks[t] = {}
         for pct in (10,20):
             subset = holdout(ids, pct/100)
+            banks["nested_10" if pct == 10 else "e30_bce"].append(
+                fit_matrix(z[subset], y[subset], r[subset], "bce", device))
             pred = np.zeros_like(y)
             weights, counts = [], []
             for f in range(3):
@@ -92,6 +95,17 @@ def sensitivity(source, device):
                 pred[test] = blend(z[test], r[test], w)
             tasks[t][pct] = {"oof":current_ap(pred,y), "fold_weights":weights, "fold_counts":counts,
                             "b_reliable_min_max":[float(np.min(np.asarray(weights)[:,1,2])),float(np.max(np.asarray(weights)[:,1,2]))]}
+    # Both support levels were specified from TRAIN, with identical final branch predictions.
+    locked = output.with_name("split_full_fit_weights.json")
+    digest = lock_weights(locked, banks)
+    by_split = {}
+    for split in ("val", "test"):
+        metrics, anchor = stage_evaluation(source, split, banks)
+        replay(source, split, metrics, anchor)
+        by_split[split] = {name: row["all"]["summary"] for name, row in metrics.items()}
+    save(output.with_name("split_generalization.json"), {
+        "weights_sha256": digest, "training_fractions": {"nested_10": .1, "e30_bce": .2},
+        "branch_training_fraction_for_both": .8, "metrics": by_split})
     return tasks
 
 
@@ -105,7 +119,7 @@ def main():
     args = p.parse_args()
     if args.action == "counts" and args.native is None:
         p.error("--native supplies the archived TRAIN-only label census")
-    result = census(args.native,args.source) if args.action=="counts" else sensitivity(args.source,args.device)
+    result = census(args.native,args.source) if args.action=="counts" else sensitivity(args.source,args.device,args.out)
     save(args.out, {"action":args.action, "train_only":True, "task_results":result,
          "interpretation":"Counts are sample support, not model scores. Sensitivity uses the same 80%-trained branches and identical three held-out evaluation folds; it tests fusion sample size only."})
 
