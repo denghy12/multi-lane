@@ -36,11 +36,30 @@ from scripts.emotic.run_r1_single_trajectory_fusion import (
 
 ROOT = Path("output/r1_fusion_population_train/seed1_20261113")
 LOGS = Path("logs/r1_fusion_population_train/seed1_20261113")
-CONDITIONS = ("holdout_return",)
+CONDITIONS = ("holdout_return", "early_return")
 
 
-def phase_sizes(smoke=False):
-    return (2, 1) if smoke else (30, 5)
+def phase_sizes(smoke=False, condition="holdout_return"):
+    if condition not in CONDITIONS:
+        raise ValueError(f"Unknown training condition: {condition}")
+    if smoke:
+        return (2, 1)
+    return (15, 15) if condition == "early_return" else (30, 5)
+
+
+def branch_gpu_map(spec, visible_devices):
+    """Map each branch's visible-device ordinal to a one-device child environment."""
+    slots = [int(value) for value in spec.split(",")]
+    if len(slots) != len(VIEWS) or any(slot < 0 for slot in slots):
+        raise ValueError("Specify three non-negative device ordinals in Full, Person, Face order")
+    if visible_devices is None:
+        tokens = [str(i) for i in range(torch.cuda.device_count())]
+    else:
+        tokens = [token.strip() for token in visible_devices.split(",") if token.strip()]
+    if max(slots) >= len(tokens):
+        raise ValueError("Branch device ordinal lies outside CUDA_VISIBLE_DEVICES")
+    return {view: tokens[slot] for view, slot in zip(VIEWS, slots)}
+
 
 
 def branch_flags(root, view, smoke=False, condition="holdout_return"):
@@ -49,11 +68,10 @@ def branch_flags(root, view, smoke=False, condition="holdout_return"):
     args = original_branch_flags(root, view, smoke)
     # Retain the explicit tiny budget for the runner's bounded-smoke guard;
     # the worker replaces it with the identical 3 epochs x 2 batches budget.
-    args[args.index("--epochs")+1] = str(sum(phase_sizes(smoke)))
+    args[args.index("--epochs")+1] = str(sum(phase_sizes(smoke, condition)))
     args[args.index("--reporting-split")+1] = "val"
     args[args.index("--evaluation-score-purpose")+1] = "validation_search"
-    if condition == "holdout_return":
-        args += ["--calibration-fraction", ".2", "--save-calibration-scores", "--train-only-fusion-holdout"]
+    args += ["--calibration-fraction", ".2", "--save-calibration-scores", "--train-only-fusion-holdout"]
     return args
 
 
@@ -79,16 +97,16 @@ def exposure_record(root, loader, view, task, condition, smoke=False):
     for previous in range(task):
         prior.update(read(root/"exposure"/view/f"task{previous}.json")["returned_groups"])
     result = {"task": task, "view": view, "condition": condition, "eligible": len(eligible),
-              "fit": len(actual_a), "holdout": len(h) if condition == "holdout_return" else 0,
+              "fit": len(actual_a), "holdout": len(h),
               "returned": len(returned), "returned_groups": sorted({group(i) for i in returned}),
-              "heldout_ids": [str(source.sample_ids[i]) for i in h] if condition == "holdout_return" else [],
+              "heldout_ids": [str(source.sample_ids[i]) for i in h],
               "initial_ids": [str(source.sample_ids[i]) for i in actual_a],
-              "heldout_prior_seen_people": sum(group(i) in prior for i in h) if condition == "holdout_return" else 0,
-              "heldout_prior_seen_groups": len({group(i) for i in h}&prior) if condition == "holdout_return" else 0,
-              "heldout_whole_trajectory_unseen_claim": task == 0 and condition == "holdout_return",
-              "initial_return_exposures": list(phase_sizes(smoke)),
+              "heldout_prior_seen_people": sum(group(i) in prior for i in h),
+              "heldout_prior_seen_groups": len({group(i) for i in h}&prior),
+              "heldout_whole_trajectory_unseen_claim": task == 0,
+              "initial_return_exposures": list(phase_sizes(smoke, condition)),
               "smoke_capped_batches": smoke}
-    if condition == "holdout_return" and ({group(i) for i in actual_a}&{group(i) for i in h}):
+    if {group(i) for i in actual_a} & {group(i) for i in h}:
         raise AssertionError("Image group leaked across initial/heldout roles")
     path = root/"exposure"/view/f"task{task}.json"
     if path.exists() and read(path) != result:
@@ -161,10 +179,10 @@ def audit_population(config_source, output):
 
 def worker(root, view, smoke, condition):
     original = runner.train_task
-    initial, returned = phase_sizes(smoke)
+    initial, returned = phase_sizes(smoke, condition)
     source_cache = {}
     write(branch_paths(root)[view]/"return_data_provenance.json", {
-        "initial_calibration_exclusion_only": condition == "holdout_return",
+        "initial_calibration_exclusion_only": True,
         "all_legal_train_return_epoch": initial+1,
         "fusion_fit_source": "observations and population_observations at the initial-phase barrier only",
         "historical_train_access_for_fusion": True, "branch_history_replay": False,
@@ -177,12 +195,16 @@ def worker(root, view, smoke, condition):
         exposure_record(root, loader, view, task, condition, smoke)
         if smoke:
             kwargs["optimizer_updates_per_task"] = None
-        model.r1_return_training = {"initial_epochs": initial, "return_epochs": returned,
-            "lr_factor": .1, "loader": full_loader_like(loader, view, task, smoke)}
+        model.r1_return_training = {
+            "initial_epochs": initial, "return_epochs": returned,
+            "restart_scheduler": condition != "early_return",
+            "lr_factor": 1. if condition == "early_return" else .1,
+            "loader": full_loader_like(loader, view, task, smoke),
+        }
         original_save = model.save_training_epoch
 
         def publish(task, epoch, updates):
-            if epoch == initial and condition == "holdout_return":
+            if epoch == initial:
                 wait_for(branch_paths(root)["person"]/"config.json", root)
                 versions = [(p, p._version) for p in model.parameters()]
                 with isolated_observation(model):
@@ -258,7 +280,7 @@ def complete_checkpoint(root, task, epoch, fusion, smoke, condition):
         branches[view] = value
     state = {"format": "single_trajectory_train_population_v1", "run_id": str(root),
              "condition": condition, "task": task, "epoch": epoch, "branches": branches,
-             "fusion": fusion.snapshot(), "fit_split": "train", "phase_sizes": phase_sizes(smoke),
+             "fusion": fusion.snapshot(), "fit_split": "train", "phase_sizes": phase_sizes(smoke, condition),
              "source_git": runner.git_metadata(Path.cwd()), "pretrained": str(input_paths().clip_checkpoint)}
     recovery = root/"recovery"/f"task{task}"/f"epoch{epoch:02d}.pth"
     if recovery.exists():
@@ -268,15 +290,15 @@ def complete_checkpoint(root, task, epoch, fusion, smoke, condition):
     else:
         atomic_save(state, recovery)
     write(root/"checkpoints/latest.json", {"path": str(recovery), "task": task, "epoch": epoch})
-    if epoch == sum(phase_sizes(smoke)):
+    if epoch == sum(phase_sizes(smoke, condition)):
         final = root/"checkpoints"/f"task{task}.pth"
         if not final.exists():
             atomic_save(state, final)
     return {v: int(p["training"]["completed_task_updates"]) for v, p in branches.items()}
 
 
-def check_budget(root, smoke):
-    initial, returned = phase_sizes(smoke)
+def check_budget(root, smoke, condition="holdout_return"):
+    initial, returned = phase_sizes(smoke, condition)
     result = {}
     for view, path in branch_paths(root).items():
         if read(path/"seed_summary.json")["status"] != "complete":
@@ -293,9 +315,19 @@ def check_budget(root, smoke):
             if (len(rows) != initial+returned or (a, b) != (expected_a, expected_b)
                     or any(r["skipped_optimizer_steps"] for r in rows)):
                 raise AssertionError(f"Phase update budget mismatch: {view}/{task}")
+            if condition == "early_return":
+                total = initial + returned
+                for cycle, row in enumerate(rows):
+                    for field in ("learning_rate", "adapter_learning_rate"):
+                        expected = rows[0][field]*(1+math.cos(math.pi*cycle/total))/2
+                        if not math.isclose(row[field], expected, abs_tol=1e-12):
+                            raise AssertionError(f"Broken continuous cosine: {view}/{task}/{cycle}/{field}")
+                expected_return_lr = rows[initial-1]["next_learning_rate"]
+            else:
+                expected_return_lr = .1*rows[0]["learning_rate"]
             if (any(r.get("data_phase") != "initial_train" for r in rows[:initial])
                     or any(r.get("data_phase") != "return_full_train" for r in rows[initial:])
-                    or not math.isclose(rows[initial]["learning_rate"], .1*rows[0]["learning_rate"], abs_tol=1e-12)):
+                    or not math.isclose(rows[initial]["learning_rate"], expected_return_lr, abs_tol=1e-12)):
                 raise AssertionError(f"Phase scheduler/loader metadata mismatch: {view}/{task}")
             before = torch.load(path/"epoch_recovery"/f"task{task}"/f"epoch{initial:02d}.pth", map_location="cpu")
             after = torch.load(path/"epoch_recovery"/f"task{task}"/f"epoch{initial+1:02d}.pth", map_location="cpu")
@@ -309,26 +341,25 @@ def check_budget(root, smoke):
     write(root/"training_budget_checks.json", result)
 
 
-def evaluate(root, smoke, condition):
+def _evaluate_splits(root, smoke, condition, splits, destination):
     """Both splits use immutable complete same-trajectory checkpoints."""
     torch.set_num_threads(2)
     runner.set_seed(1, True)
-    check_budget(root, smoke)
-    initial, returned = phase_sizes(smoke)
+    initial, returned = phase_sizes(smoke, condition)
     paths, inputs = branch_paths(root), input_paths()
-    methods = ("fixed", *METHODS)
+    methods = ("fixed", "seen_population") if condition == "early_return" else ("fixed", *METHODS)
     models = {v: model_from_config(read(p/"config.json"), inputs.clip_checkpoint) for v, p in paths.items()}
-    records = {s: make_records(methods) for s in ("val", "test")}
-    diagnostics = {s: make_records(methods) for s in ("val", "test")}
+    records = {s: make_records(methods) for s in splits}
+    diagnostics = {s: make_records(methods) for s in splits}
     tasks = range(2 if smoke else 8)
     todo = [(t, initial+returned, "final") for t in tasks]
     todo += [(t, initial, "pre_return") for t in tasks if smoke or t in (0, 2, 7)]
     hashes = {str(root/"recovery"/f"task{t}"/f"epoch{e:02d}.pth"):
               sha(root/"recovery"/f"task{t}"/f"epoch{e:02d}.pth") for t, e, _ in todo}
-    write(root/"locked_evaluation.json", {"whole_checkpoints": hashes, "methods": methods,
+    write(destination/"locked_evaluation.json", {"whole_checkpoints": hashes, "methods": methods,
           "gradient_updates": False, "official_validation_and_test_fitting": False})
     progress = []
-    for split in ("val", "test"):
+    for split in splits:
         source = load_source(paths["person"], inputs, split)
         for task, epoch, phase in todo:
             state = torch.load(root/"recovery"/f"task{task}"/f"epoch{epoch:02d}.pth", map_location="cpu")
@@ -346,38 +377,86 @@ def evaluate(root, smoke, condition):
             z = np.stack([r["logits"] for r in observed], axis=1)
             with torch.no_grad():
                 fused = {"fixed": blend(z, first["reliable"], FIXED)}
-                if condition == "holdout_return":
-                    fusion = DualPopulationFusion(runner.TASK_SIZES, "cuda", 2 if smoke else 100)
-                    fusion.load_snapshot(state["fusion"])
-                    for method, bank in fusion.banks.items():
-                        fused[method] = bank.bank(torch.as_tensor(z, device="cuda"),
+                fusion = DualPopulationFusion(runner.TASK_SIZES, "cuda", 2 if smoke else 100, expanded_only=condition == "early_return")
+                fusion.load_snapshot(state["fusion"])
+                for method, bank in fusion.banks.items():
+                    fused[method] = bank.bank(torch.as_tensor(z, device="cuda"),
                             torch.as_tensor(first["reliable"], device="cuda"), task).cpu().numpy()
-            destination = records if phase == "final" else diagnostics
-            record(destination[split], task, fused, first["targets"], first["reliable"], list(runner.task_indices(task)))
+            split_records = records if phase == "final" else diagnostics
+            record(split_records[split], task, fused, first["targets"], first["reliable"], list(runner.task_indices(task)))
             save_npz(root/"predictions"/phase/split/f"task{task}.npz", **{**first, "branch_logits": z, **fused})
             progress.append({"split": split, "task": task, "epoch": epoch, "phase": phase})
-            write(root/"evaluation_progress.json", progress)
+            write(destination/"evaluation_progress.json", progress)
             print("WHOLE_MODEL_FORWARD", condition, split, task, epoch, len(first["ids"]), flush=True)
     if any(sha(Path(path)) != digest for path, digest in hashes.items()):
         raise AssertionError("Evaluation modified checkpoint")
     result = {s: summarize(r, smoke) for s, r in records.items()}
-    write(root/"result.json", result)
+    write(destination/"result.json", result)
     # Sparse task0/2/7 diagnostics must not be advertised as an eight-stage mean.
-    write(root/"pre_return_diagnostic.json", {s: summarize(r, True) for s, r in diagnostics.items()})
+    write(destination/"pre_return_diagnostic.json", {s: summarize(r, True) for s, r in diagnostics.items()})
+
+
+def evaluate(root, smoke, condition, eval_devices=()):
+    check_budget(root, smoke, condition)
+    splits = ("val", "test")
+    if len(eval_devices) >= 2:
+        jobs = []
+        try:
+            for split, device in zip(splits, eval_devices):
+                command = [sys.executable, "-u", "-m", "scripts.emotic.run_r1_fusion_population_train",
+                           "evaluate", "--root", str(root), "--condition", condition, "--eval-split", split]
+                if smoke:
+                    command.append("--smoke")
+                env = dict(os.environ, CUDA_VISIBLE_DEVICES=device, OMP_NUM_THREADS="2", MKL_NUM_THREADS="2")
+                jobs.append(subprocess.Popen(command, env=env))
+            for split, proc in zip(splits, jobs):
+                if proc.wait():
+                    raise RuntimeError(f"{split} evaluation failed")
+        finally:
+            for proc in jobs:
+                if proc.poll() is None:
+                    proc.terminate()
+                proc.wait()
+
+        parts = {s: root/"evaluation"/s for s in splits}
+        locks = [read(parts[s]/"locked_evaluation.json") for s in splits]
+        if locks[0] != locks[1]:
+            raise ValueError("Split evaluations used different checkpoint locks")
+        write(root/"locked_evaluation.json", locks[0])
+        progress = [row for s in splits for row in read(parts[s]/"evaluation_progress.json")]
+        write(root/"evaluation_progress.json", progress)
+        for name in ("result.json", "pre_return_diagnostic.json"):
+            write(root/name, {s: read(parts[s]/name)[s] for s in splits})
+    else:
+        _evaluate_splits(root, smoke, condition, splits, root)
+    result = read(root/"result.json")
+    if condition == "early_return" and not smoke:
+        classes = list(runner.task_indices(6))
+        task6 = {}
+        for split in splits:
+            task6[split] = {}
+            for method, populations in result[split].items():
+                metrics = populations["all"]["metrics"]
+                task6[split][method] = {}
+                for stage in (6, 7):
+                    class_ap = [metrics[stage]["per_class_ap"][i] for i in classes]
+                    task6[split][method][str(stage)] = {"class_indices": classes, "per_class_ap": class_ap,
+                                                       "mean_new_class_ap": float(np.mean(class_ap))}
+        write(root/"task6_new_classes.json", task6)
     write(root/"completion.json", {"status": "complete", "condition": condition, "smoke": smoke,
           "training_sources": 1, "all_legal_train_eventually_used": not smoke,
           "validation_parameter_updates": 0, "whole_checkpoint_forward": True,
           "historical_train_access_for_fusion": True, "results": result})
 
 
-def run_one(root, logs, smoke, condition, resume=False):
+def run_one(root, logs, smoke, condition, resume=False, branch_devices="0,0,0"):
     if root.exists() and not resume:
         raise FileExistsError("Fresh output required; use explicit --resume for this same trajectory")
     if (root/"completion.json").exists():
         return
     root.mkdir(parents=True, exist_ok=resume)
     logs.mkdir(parents=True, exist_ok=True)
-    initial, returned = phase_sizes(smoke)
+    initial, returned = phase_sizes(smoke, condition)
     inputs = input_paths()
     protocol = {"run_id": str(root), "condition": condition, "seed": 1, "smoke": smoke, "population_methods": list(METHODS),
                 "historical_train_access_for_fusion": True, "future_only_fit": False,
@@ -386,23 +465,33 @@ def run_one(root, logs, smoke, condition, resume=False):
                 "initial_epochs": initial, "return_epochs": returned, "return_lr_factor": .1,
                 "train_batch": 64, "fusion_lr": .02, "fusion_steps": 2 if smoke else 100,
                 "split_salt": "emotic-reliability-calibration-v1",
-                "train_group_fraction": .2 if condition == "holdout_return" else 0.,
+                "train_group_fraction": .2,
                 "full_parameter_trajectory": True, "fusion_updates_after_return": 0,
                 "calibration_exclusion": "initial phase only; all legal TRAIN returned before final checkpoint",
                 "fusion_fit_source": "positive H and added current-negative seen-class H at same live epoch30; no imported bank",
                 "observation_order": "original positive exporter unchanged; extra negatives separately exported and concatenated",
                 "branch_commands": {v: branch_flags(root, v, smoke, condition) for v in VIEWS},
                 "evaluation": "both Val/Test; final and task0/2/7 pre-return diagnostic; no fitting"}
+    devices = branch_gpu_map(branch_devices, os.environ.get("CUDA_VISIBLE_DEVICES"))
+    if condition == "early_return":
+        protocol.update(
+            branch_cuda_visible_devices=devices,
+            population_methods=["seen_population"],
+            return_lr_factor=1.,
+            scheduler="single cosine over entire per-task epoch budget",
+            fusion_fit_source=f"same trajectory expanded TRAIN holdout at epoch {initial}",
+        )
     if (root/"protocol.json").exists() and read(root/"protocol.json") != protocol:
         raise AssertionError("Resume protocol changed")
     write(root/"protocol.json", protocol)
+    eval_devices = list(dict.fromkeys(devices.values())) if condition == "early_return" else []
     if (root/"training_complete.json").exists():
-        evaluate(root, smoke, condition)
+        evaluate(root, smoke, condition, eval_devices)
         return
     if (root/"abort.json").exists():
         (root/"abort.json").rename(root/f"abort_previous_{time.time_ns()}.json")
     jobs, handles = {}, []
-    env = dict(os.environ, CUDA_VISIBLE_DEVICES="0", OMP_NUM_THREADS="72", MKL_NUM_THREADS="72")
+    env = dict(os.environ, OMP_NUM_THREADS="72", MKL_NUM_THREADS="72")
     try:
         for view in VIEWS:
             handle = (logs/f"{view}.log").open("a" if resume else "w")
@@ -411,11 +500,11 @@ def run_one(root, logs, smoke, condition, resume=False):
                        "--root", str(root), "--view", view, "--condition", condition]
             if smoke:
                 command.append("--smoke")
-            jobs[view] = subprocess.Popen(command, env=env, stdout=handle, stderr=subprocess.STDOUT)
+            jobs[view] = subprocess.Popen(command, env=dict(env, CUDA_VISIBLE_DEVICES=devices[view]), stdout=handle, stderr=subprocess.STDOUT)
         write(root/"workers.json", {v: p.pid for v, p in jobs.items()})
         torch.set_num_threads(2)
         runner.set_seed(1, True)
-        fusion = DualPopulationFusion(runner.TASK_SIZES, "cuda", 2 if smoke else 100)
+        fusion = DualPopulationFusion(runner.TASK_SIZES, "cuda", 2 if smoke else 100, expanded_only=condition == "early_return")
         for task in range(2 if smoke else 8):
             fusion.begin_task(task)
             sealed = None
@@ -423,7 +512,7 @@ def run_one(root, logs, smoke, condition, resume=False):
                 accepted = root/"barriers"/f"task{task}"/f"epoch{epoch:02d}_accepted.json"
                 if accepted.exists():
                     state = torch.load(root/"recovery"/f"task{task}"/f"epoch{epoch:02d}.pth", map_location="cpu")
-                    fusion = DualPopulationFusion(runner.TASK_SIZES, "cuda", 2 if smoke else 100)
+                    fusion = DualPopulationFusion(runner.TASK_SIZES, "cuda", 2 if smoke else 100, expanded_only=condition == "early_return")
                     fusion.load_snapshot(state["fusion"])
                     if epoch == initial:
                         sealed = copy.deepcopy(fusion.snapshot()["banks"])
@@ -436,8 +525,7 @@ def run_one(root, logs, smoke, condition, resume=False):
                         raise RuntimeError(f"Branch barrier failed {task}/{epoch}: {failed}")
                     time.sleep(2)
                 if epoch == initial:
-                    if condition == "holdout_return":
-                        fusion.fit({m: aligned(root, task, m) for m in METHODS})
+                    fusion.fit({m: aligned(root, task, m) for m in METHODS})
                     sealed = copy.deepcopy(fusion.snapshot()["banks"])
                 if epoch > initial:
                     assert_same(sealed, fusion.snapshot()["banks"], "fusion_sealed_during_return")
@@ -452,7 +540,7 @@ def run_one(root, logs, smoke, condition, resume=False):
             if process.wait(timeout=5400):
                 raise RuntimeError(f"Branch exited unsuccessfully: {view}")
         write(root/"training_complete.json", {"status": "complete", "condition": condition})
-        evaluate(root, smoke, condition)
+        evaluate(root, smoke, condition, eval_devices)
     except BaseException as error:
         write(root/"abort.json", {"error": repr(error)})
         for process in jobs.values():
@@ -477,8 +565,10 @@ def main():
     parser.add_argument("--condition", choices=CONDITIONS, default="holdout_return")
     parser.add_argument("--config-source", type=Path)
     parser.add_argument("--view", choices=VIEWS)
+    parser.add_argument("--eval-split", choices=("val", "test"))
     parser.add_argument("--smoke", action="store_true")
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--branch-devices", default="0,0,0", help="Visible-device ordinals in Full,Person,Face order")
     args = parser.parse_args()
     if args.action == "audit":
         if args.config_source is None:
@@ -493,9 +583,12 @@ def main():
     if args.action == "evaluate":
         if args.condition == "both":
             raise ValueError("Evaluation needs one condition")
-        evaluate(args.root, args.smoke, args.condition)
+        if args.eval_split:
+            _evaluate_splits(args.root, args.smoke, args.condition, (args.eval_split,), args.root/"evaluation"/args.eval_split)
+        else:
+            evaluate(args.root, args.smoke, args.condition)
         return
-    run_one(args.root, args.logs, args.smoke, args.condition, args.resume)
+    run_one(args.root, args.logs, args.smoke, args.condition, args.resume, args.branch_devices)
     torch.cuda.empty_cache()
 
 

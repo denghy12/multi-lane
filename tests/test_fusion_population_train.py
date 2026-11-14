@@ -61,6 +61,31 @@ def observations(classes=3, seed=193):
     return {"current_positive": (ids, z, y, reliable), "seen_population": combined}
 
 
+class EarlyReturnProtocolTests(unittest.TestCase):
+    def test_device_ordinals_follow_parent_visibility(self):
+        from scripts.emotic.run_r1_fusion_population_train import branch_gpu_map, phase_sizes
+        self.assertEqual(branch_gpu_map("0,1,0", "1,0"),
+                         {"full": "1", "person": "0", "face": "1"})
+        with self.assertRaises(ValueError):
+            branch_gpu_map("0,1,0", "1")
+        self.assertEqual(phase_sizes(False, "early_return"), (15, 15))
+        self.assertEqual(phase_sizes(False), (30, 5))
+
+    def test_expanded_only_snapshot_resumes_equivalent_heldout_fitter(self):
+        data = observations()
+        paired = DualPopulationFusion((3,), steps=6)
+        single = DualPopulationFusion((3,), steps=6, expanded_only=True)
+        for model in (paired, single):
+            model.begin_task(0)
+            model.fit(data)
+        self.assertEqual(set(single.reports), {"seen_population"})
+        self.assertEqual(single.reports["seen_population"], paired.reports["seen_population"])
+        restored = DualPopulationFusion((3,), steps=6, expanded_only=True)
+        restored.load_snapshot(single.snapshot())
+        self.assertEqual(restored.reports, single.reports)
+        self.assertEqual(restored.updates, single.updates)
+
+
 class PopulationSelectionTests(unittest.TestCase):
     def test_exact_original_positive_holdout_and_only_seen_negative_people(self):
         source = MixedPeople()

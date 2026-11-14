@@ -67,12 +67,13 @@ class RunnerReturnResumeTests(unittest.TestCase):
              torch.tensor([[0., 1., 0., 0., 1.], [1., 0., 1., 1., 0.]]))]
         self.origin = copy.deepcopy(TinyTask().state_dict())
 
-    def run_training(self, initial_state, resume=None, phases=True, epochs=5):
+    def run_training(self, initial_state, resume=None, phases=True, epochs=5, restart_scheduler=True):
         model = TinyTask()
         model.load_state_dict(initial_state)
         if phases:
             model.r1_return_training = dict(initial_epochs=2, return_epochs=3,
-                lr_factor=.1, loader=self.returned)
+                lr_factor=.1 if restart_scheduler else 1., loader=self.returned,
+                restart_scheduler=restart_scheduler)
         if resume is not None:
             model.r1_resume = copy.deepcopy(resume)
         runner.train_task(model, self.initial, self.returned, torch.device("cpu"),
@@ -98,6 +99,23 @@ class RunnerReturnResumeTests(unittest.TestCase):
             ["initial_train", "initial_train", "return_full_train", "return_full_train", "return_full_train"])
         self.assertEqual(whole.snapshots[2]["training"]["scheduler"]["T_max"], 2)
         self.assertEqual(whole.snapshots[5]["training"]["completed_task_updates"], 8)
+
+    def test_continuous_cosine_uses_original_schedule_and_restores_at_boundary(self):
+        staged = self.run_training(self.origin, restart_scheduler=False)
+        default = self.run_training(self.origin, phases=False)
+        last = staged.snapshots[5]["training"]
+        for epoch in (1, 2):
+            assert_nested_equal(self, staged.snapshots[epoch]["model"], default.snapshots[epoch]["model"])
+        self.assertEqual(last["scheduler"], default.snapshots[5]["training"]["scheduler"])
+        self.assertEqual([r["learning_rate"] for r in last["history"]],
+                         [r["learning_rate"] for r in default.snapshots[5]["training"]["history"]])
+        self.assertEqual([r["optimizer_steps"] for r in last["history"]], [1, 1, 2, 2, 2])
+        for cutoff in (2, 3):
+            saved = staged.snapshots[cutoff]
+            resumed = self.run_training(saved["model"], saved["training"], restart_scheduler=False)
+            assert_nested_equal(self, staged.state_dict(), resumed.state_dict())
+            for key in ("optimizer", "scheduler", "scaler", "completed_task_updates"):
+                assert_nested_equal(self, last[key], resumed.snapshots[5]["training"][key])
 
     def test_initial_phase_exactly_matches_unmodified_default_loop(self):
         staged = self.run_training(self.origin)

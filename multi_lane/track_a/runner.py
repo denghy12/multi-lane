@@ -965,6 +965,7 @@ def train_task(
         raise ValueError("Adapter ASL routing requires an enabled Adapter")
     optimizer = torch.optim.Adam(optimizer_groups, lr=learning_rate)
     return_training = getattr(model, "r1_return_training", None)
+    restart_at_return = return_training is not None and return_training.get("restart_scheduler", True)
     if return_training is not None:
         from .fusion_return_training import validate_return_training, reset_return_scheduler
         validate_return_training(return_training, epochs, optimizer_updates_per_task)
@@ -973,7 +974,7 @@ def train_task(
     original_peak_lrs = [group["lr"] for group in optimizer.param_groups]
     scheduler = build_learning_rate_scheduler(
         optimizer=optimizer,
-        epochs=(int(return_training["initial_epochs"]) if return_training is not None else epochs),
+        epochs=(int(return_training["initial_epochs"]) if restart_at_return else epochs),
         optimizer_updates_per_task=optimizer_updates_per_task,
         mode=scheduler_mode,
         min_lr_ratio=scheduler_min_lr_ratio,
@@ -1000,7 +1001,8 @@ def train_task(
         # boundary the saved scheduler is still the first-stage scheduler;
         # strictly later checkpoints already contain the return scheduler.
         if return_training is not None and resume["next_epoch"] > int(return_training["initial_epochs"]):
-            scheduler = reset_return_scheduler(optimizer, original_peak_lrs, return_training)
+            if restart_at_return:
+                scheduler = reset_return_scheduler(optimizer, original_peak_lrs, return_training)
             loader = return_training["loader"]
             return_phase_active = True
         optimizer.load_state_dict(resume['optimizer'])
@@ -1009,7 +1011,10 @@ def train_task(
         history=resume['history']
         epoch=resume['next_epoch']
         completed_task_updates=resume['completed_task_updates']
-    if amp and fixed_scale is not None:
+    # Keep the saved scale and growth counter when resuming the continuous-cosine run.
+    if amp and fixed_scale is not None and not (
+        resume is not None and return_training is not None and not restart_at_return
+    ):
         state = scaler.state_dict()
         state.update(scale=float(fixed_scale), growth_interval=1000000000, _growth_tracker=0)
         scaler.load_state_dict(state)
@@ -1022,7 +1027,8 @@ def train_task(
                 and epoch == int(return_training["initial_epochs"])):
             # Runs only after the preceding save_training_epoch callback (and
             # its fusion-fitting barrier) has returned. No moment/state reset.
-            scheduler = reset_return_scheduler(optimizer, original_peak_lrs, return_training)
+            if restart_at_return:
+                scheduler = reset_return_scheduler(optimizer, original_peak_lrs, return_training)
             loader = return_training["loader"]
             return_phase_active = True
         model.train()

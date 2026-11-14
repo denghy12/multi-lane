@@ -87,10 +87,11 @@ def population_manifest(source, task, prior_returned_groups=()):
 
 class DualPopulationFusion:
     """Two independent detached readouts learned at the same branch barrier."""
-    def __init__(self, task_sizes, device="cpu", steps=100):
+    def __init__(self, task_sizes, device="cpu", steps=100, *, expanded_only=False):
         # Lazy import avoids a module cycle and preserves the historical fitter.
         from scripts.emotic.run_r1_fusion_return_train import ReturnFusion
-        self.banks = {m: ReturnFusion(task_sizes, device, steps) for m in METHODS}
+        methods = ("seen_population",) if expanded_only else METHODS
+        self.banks = {m: ReturnFusion(task_sizes, device, steps) for m in methods}
         self.steps, self.device, self.task = steps, device, -1
 
     @property
@@ -127,7 +128,7 @@ class DualPopulationFusion:
         # Validate BOTH complete inputs before either bank mutates.
         for ids, z, y, mask in observations.values():
             ids = list(ids); z, y, mask = as_numpy(z), as_numpy(y), as_numpy(mask)
-            classes = self.banks[METHODS[0]].bank.task_sizes[self.task]
+            classes = self.banks["seen_population"].bank.task_sizes[self.task]
             if (not ids or len(set(ids)) != len(ids) or any(not str(i).startswith("train:") for i in ids)
                     or z.shape != (len(ids), 3, classes) or y.shape != (len(ids), classes)
                     or mask.shape != (len(ids),) or mask.dtype != np.bool_):
@@ -136,7 +137,7 @@ class DualPopulationFusion:
                 raise FloatingPointError("Nonfinite fusion input")
             if not np.isin(y, [0, 1]).all():
                 raise ValueError("Expected binary current-task labels")
-        return {m: self.banks[m].fit(*observations[m]) for m in METHODS}
+        return {m: bank.fit(*observations[m]) for m, bank in self.banks.items()}
 
     def snapshot(self):
         return {"format": "dual_population_fusion_v1", "task": self.task, "steps": self.steps,
@@ -145,9 +146,9 @@ class DualPopulationFusion:
     def load_snapshot(self, state):
         if (self.task != -1 or state["format"] != "dual_population_fusion_v1"
                 or state["fit_split"] != "train" or state["steps"] != self.steps
-                or set(state["banks"]) != set(METHODS)):
+                or set(state["banks"]) != set(self.banks)):
             raise ValueError("Fresh matching paired fusion required for restore")
-        for method in METHODS:
+        for method in self.banks:
             self.banks[method].load_snapshot(copy.deepcopy(state["banks"][method]))
         if any(b.task != state["task"] for b in self.banks.values()):
             raise ValueError("Paired bank task mismatch")

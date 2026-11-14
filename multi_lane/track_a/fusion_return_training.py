@@ -1,6 +1,6 @@
 """Opt-in two-phase schedule for a single, continuously trained task model.
 
-The return phase replaces the data loader and LR schedule, never the optimizer,
+The return phase replaces the data loader and optionally restarts the LR schedule, preserving the optimizer,
 parameters, optimizer moments, scaler, or training history. No default runner
 path imports this module unless the experiment explicitly opts in.
 """
@@ -20,6 +20,8 @@ def validate_return_training(config: Mapping, epochs: int, update_budget) -> Non
         raise ValueError("Return training requires explicit phase epochs, not a fixed-update cap")
     if not 0 < float(config["lr_factor"]) <= 1:
         raise ValueError("Return LR factor must be in (0, 1]")
+    if not config.get("restart_scheduler", True) and config["lr_factor"] != 1:
+        raise ValueError("Continuous cosine requires a unit return LR factor")
     if config["loader"] is None:
         raise ValueError("Return training needs a complete legal TRAIN loader")
 
