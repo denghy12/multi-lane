@@ -1,3 +1,7 @@
+## 2026-11-14 提前学习融合与原图比例检验启动
+
+新实验分支codex/r1-early-fusion-20261114，基于c957d66。GPU0/1先读八个epoch15状态，对同人群做按原图三折TRAIN检验、后期分支迁移与完整Val/Test。达到预定TRAIN/Val条件才执行单轨迹15+15，否则同源epoch30缓存上比较BCE与按类正负对排序。70/80/90初阶段分支比例审计逐类支持与同源融合样本量，不预设80%最优。详细配置见docs/r1_early_fusion_protocol_20261114.md。
+
 ## 2026-11-13 融合人群与控制恢复门禁通过，准备正式队列
 
 43项测试通过；population真实smoke36次有效更新零跳步、8组双split前向完成。与旧holdout smoke18份分支模型/Adam/scheduler/scaler/RNG及8组输出逐值重放，原H/原融合一致；新增观察未改变θ轨迹。恢复smoke正在完成最后Test前向，正式尚未启动。
