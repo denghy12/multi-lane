@@ -1,6 +1,7 @@
 """Paired branch-only refinements of the historical seed1 Frozen9 D model."""
 import argparse
 from dataclasses import dataclass
+import fcntl
 import os
 from pathlib import Path
 import subprocess
@@ -67,6 +68,24 @@ def execute(module, args, threads=2):
 def worker(job, root, smoke):
     if os.environ.get('CUDA_VISIBLE_DEVICES') != str(job.gpu):
         raise RuntimeError(f'{job.name} was assigned GPU {job.gpu}')
+    if job.view == 'full' and not smoke:
+        locks = root / '.worker-locks'
+        locks.mkdir(exist_ok=True)
+        with (locks / f'{job.name}.lock').open('a') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            marker = job.path(root) / 'completion.json'
+            if marker.is_file():
+                result = read(marker)
+                if (result['status'], result['branch'], result['seed']) != ('complete', job.name, 1):
+                    raise ValueError(f'Unexpected completion record: {marker}')
+                print('Reusing completed Full training and both evaluations:', marker, flush=True)
+                return
+            run_branch(job, root, smoke)
+        return
+    run_branch(job, root, smoke)
+
+
+def run_branch(job, root, smoke):
     path = job.path(root)
     train = path / 'train'
     inputs = input_paths()
@@ -126,6 +145,10 @@ def launch(root):
                 if job.kind == 'attention':
                     probe = read(job.path(destination) / 'preflight.json')
                     sizes[job.name] = max(5500, int(probe['admission_memory_mib']))
+                else:
+                    history = read(job.path(destination) / 'train/training_history.json')
+                    peak = max(row['cuda_peak_reserved_mib'] for rows in history.values() for row in rows)
+                    sizes[job.name] = max(5000, int(peak * 1.25 + 1536))
             write(root / 'preflight_gate.json', {'states': outcomes, 'formal_budgets_mib': sizes})
     write(root / 'stage.json', {'stage':'summarize'})
     execute('scripts.emotic.summarize_d9_refinement', ['--root', root, '--anchor', ANCHOR, '--manifest',inputs.face_manifest_root])
