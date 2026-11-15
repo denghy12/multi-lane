@@ -1,3 +1,7 @@
+## 2026-11-15 Face 迁入 GPU0
+
+使用 finish_d9_on_gpu0 和 gpu0_queue.json 跟踪剩余单卡调度。独立翻转 Face 从自己的恢复点自动续跑；所有六条路径、Full 换框及八阶段双 split 完成后再汇总。
+
 ## 2026-11-15 Full 在 GPU0 提前并行
 
 六条路径现已并行。Full 优先运行会话 d9_box_full_gpu0_20261115，进度以 box/native/full/train/progress.json、完成以同路径上级 completion.json 为准；主会话仍负责全批汇总。
