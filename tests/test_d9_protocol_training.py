@@ -109,7 +109,10 @@ class D9BenchmarkTrainingTests(unittest.TestCase):
                 rows.append(compute_metrics(task, scores, scores.round(), .5))
             result = summarize_tasks(rows, sizes)
             self.assertEqual(len(result['per_class_forgetting']), 26-sizes[-1])
-            self.assertEqual(result['final_mAP'], result['average_mAP'])
+            self.assertAlmostEqual(result['final_mAP'], result['average_mAP'], places=10)
+            if len(sizes) == 1:
+                self.assertEqual(result['final_mAP'], result['average_mAP'])
+                self.assertEqual(result['forgetting'], 0.)
 
 
 if __name__ == '__main__':
