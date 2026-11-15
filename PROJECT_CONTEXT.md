@@ -1,3 +1,7 @@
+## 2026-11-15 原 D 的三套 benchmark 协议
+
+原 D（c0ac3de）扩展到 benchmark 的 B10-C4（5阶段）、B4-C2（12阶段）和 Joint-26（单阶段）。执行 seed 0/1/2，完整 Validation 和 Test，冻结骨干第9层只向 Person、Face 写回，沿用固定 R1 logits 及30轮最终权重。B5-C3 复用原三 seed。
+
 ## 2026-11-08 第9层辅助视图证据边
 
 以seed1原Frozen9双接收为D组。新增Full-only证据mask，保留所有参数和证据槽位。先做原checkpoint完整八阶段Val/Test四组屏蔽归因，再训练Full-only Person/Face两条同预算路径，形成A仅Full、B加Person→Face、C加Face→Person、D双边的四组真实前向。GPU0/1，原30轮/B64/固定AMP4096/5%cap和固定logits融合。详情docs/r1_frozen9_edges_20261108.md。

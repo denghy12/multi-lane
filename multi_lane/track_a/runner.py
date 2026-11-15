@@ -44,6 +44,12 @@ CLASS_ORDER: Tuple[str, ...] = (
     "Sympathy", "Yearning",
 )
 TASK_SIZES: Tuple[int, ...] = (5, 3, 3, 3, 3, 3, 3, 3)
+TASK_PROTOCOLS = {
+    "b5c3": TASK_SIZES,
+    "b10c4": (10, 4, 4, 4, 4),
+    "b4c2": (4,) + (2,) * 11,
+    "joint26": (26,),
+}
 PROTOCOL_ID = "emotic_b5c3_v0.1"
 METHOD_NAME = "MULTI-LANE"
 TRACK = "A"
@@ -59,13 +65,29 @@ CLIP_IMAGE_STD: Tuple[float, ...] = (
 )
 
 
-def task_indices(task_id: int) -> Tuple[int, ...]:
-    start = sum(TASK_SIZES[:task_id])
-    return tuple(range(start, start + TASK_SIZES[task_id]))
+def task_indices(task_id: int, task_sizes: Sequence[int] = TASK_SIZES) -> Tuple[int, ...]:
+    start = sum(task_sizes[:task_id])
+    return tuple(range(start, start + task_sizes[task_id]))
 
 
-def seen_indices(task_id: int) -> Tuple[int, ...]:
-    return tuple(range(sum(TASK_SIZES[: task_id + 1])))
+def seen_indices(task_id: int, task_sizes: Sequence[int] = TASK_SIZES) -> Tuple[int, ...]:
+    return tuple(range(sum(task_sizes[: task_id + 1])))
+
+
+def config_task_sizes(config: dict) -> Tuple[int, ...]:
+    """Resolve and check the schedule stored with an archived R1 run."""
+    sizes = tuple(config.get("task_sizes", TASK_SIZES))
+    protocols = [name for name, schedule in TASK_PROTOCOLS.items() if sizes == schedule]
+    if len(protocols) != 1:
+        raise ValueError(f"Unknown EMOTIC task schedule: {sizes}")
+    expected_id = f"emotic_{protocols[0]}_v0.1"
+    if config.get("protocol_id", expected_id) != expected_id:
+        raise ValueError("Protocol ID and task sizes disagree")
+    if tuple(config.get("class_order", CLASS_ORDER)) != CLASS_ORDER:
+        raise ValueError("Archived EMOTIC class order differs")
+    if not 1 <= config.get("max_tasks", len(sizes)) <= len(sizes):
+        raise ValueError("Invalid number of completed protocol stages")
+    return sizes
 
 
 class LabelView(Dataset):
@@ -978,7 +1000,7 @@ def train_task(
     )
     scaler = torch.cuda.amp.GradScaler(enabled=amp)
     fixed_scale = getattr(model, 'r1_fixed_loss_scale', None)
-    current = list(task_indices(task_id))
+    current = list(task_indices(task_id, model.task_sizes))
     history: List[Dict[str, float]] = []
     completed_task_updates = 0
     regularization_metric_calibration_total = 0.0
@@ -1207,14 +1229,16 @@ def git_metadata(root: Path) -> Dict[str, object]:
     }
 
 
-def summarize_tasks(rows: Sequence[TaskMetrics]) -> Dict[str, object]:
+def summarize_tasks(
+    rows: Sequence[TaskMetrics], task_sizes: Sequence[int] = TASK_SIZES
+) -> Dict[str, object]:
     final = rows[-1]
     forgetting_by_class: Dict[str, float] = {}
     final_task = len(rows) - 1
     for class_id, class_name in enumerate(CLASS_ORDER):
         introduction = next(
-            task_id for task_id in range(len(TASK_SIZES))
-            if class_id in task_indices(task_id)
+            task_id for task_id in range(len(task_sizes))
+            if class_id in task_indices(task_id, task_sizes)
         )
         if introduction >= final_task:
             continue
@@ -1452,15 +1476,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--adapter-regularization-calibration-updates", type=int, default=30
     )
-    parser.add_argument("--max-tasks", type=int, default=len(TASK_SIZES))
+    parser.add_argument("--task-protocol", choices=tuple(TASK_PROTOCOLS), default="b5c3")
+    parser.add_argument("--max-tasks", type=int, help="Number of stages to run (default: the entire protocol)")
     parser.add_argument(
         "--reporting-split", choices=("val", "test"), default="test"
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.max_tasks is None:
+        args.max_tasks = len(TASK_PROTOCOLS[args.task_protocol])
+    return args
 
 
 def main() -> None:
     args = parse_args()
+    task_sizes = TASK_PROTOCOLS[args.task_protocol]
+    protocol_id = f"emotic_{args.task_protocol}_v0.1"
     if (args.r1_disable_frozen_patch or args.r1_task_pool_source_layer is not None
             or args.r1_task_pool_cap is not None) and args.r1_task_pool_layer is None:
         raise ValueError('Pool settings require --r1-task-pool-layer')
@@ -1477,7 +1507,7 @@ def main() -> None:
             or args.r1_fixed_loss_scale <= 0):
         raise ValueError('Fixed loss scaling requires a positive finite frozen-receiver scale')
     if args.r1_recovery_source is not None and (
-            args.r1_frozen_mode != 'image_cls' or args.r1_view != 'person'
+            args.task_protocol != 'b5c3' or args.r1_frozen_mode != 'image_cls' or args.r1_view != 'person'
             or args.r1_exchange_layer != 5 or args.r1_fixed_loss_scale is None):
         raise ValueError('External recovery is restricted to the original layer6 CLS Person path')
     if args.r1_frozen_mode is not None and (
@@ -1501,8 +1531,8 @@ def main() -> None:
         raise ValueError("Frozen Track-A protocol requires train batch size 64")
     if args.threshold != 0.5:
         raise ValueError("Frozen Track-A protocol requires threshold 0.5")
-    if not 1 <= args.max_tasks <= len(TASK_SIZES):
-        raise ValueError(f"max-tasks must be between 1 and {len(TASK_SIZES)}")
+    if not 1 <= args.max_tasks <= len(task_sizes):
+        raise ValueError(f"max-tasks must be between 1 and {len(task_sizes)}")
     if args.loss_routing in {"adapter_asl", "both_asl"} and args.adapter_mode == "disabled":
         raise ValueError("Adapter ASL routing requires an enabled Adapter")
     if not math.isfinite(args.person_crop_margin) or not 0 <= args.person_crop_margin <= 1:
@@ -1553,10 +1583,10 @@ def main() -> None:
     if args.calibration_fraction > 0 and args.reporting_split != "val":
         raise ValueError("Calibration holdout source training is validation-only")
     if args.adapter_bottleneck_dims_per_task is not None:
-        if len(args.adapter_bottleneck_dims_per_task) != len(TASK_SIZES):
+        if len(args.adapter_bottleneck_dims_per_task) != len(task_sizes):
             raise ValueError(
                 "adapter-bottleneck-dims-per-task must provide one value for "
-                f"each of the {len(TASK_SIZES)} protocol tasks"
+                f"each of the {len(task_sizes)} protocol tasks"
             )
         if any(value <= 0 for value in args.adapter_bottleneck_dims_per_task):
             raise ValueError("Per-task Adapter bottleneck dimensions must be positive")
@@ -1648,7 +1678,7 @@ def main() -> None:
             extra['frozen_patch_enabled'] = not args.r1_disable_frozen_patch
     model = model_class(
         visual_encoder=visual,
-        task_sizes=TASK_SIZES,
+        task_sizes=task_sizes,
         num_selectors=10,
         num_prompts=10,
         num_prompt_layers=5,
@@ -1764,8 +1794,8 @@ def main() -> None:
     face_counts = None
     if args.input_mode == "face_crop":
         face_counts = {}
-        for task_id in range(len(TASK_SIZES)):
-            current = task_indices(task_id)
+        for task_id in range(len(task_sizes)):
+            current = task_indices(task_id, task_sizes)
             train_eligible = [
                 index for index, target in enumerate(train_source.targets)
                 if _intersects(target, current)
@@ -1795,12 +1825,12 @@ def main() -> None:
         args.train_batch_size / args.source_reference_batch_size
     )
     config = {
-        "protocol_id": PROTOCOL_ID,
+        "protocol_id": protocol_id,
         "track": TRACK,
         "method": METHOD_NAME,
         "seed": args.seed,
         "class_order": list(CLASS_ORDER),
-        "task_sizes": list(TASK_SIZES),
+        "task_sizes": list(task_sizes),
         "train_split": "train",
         "validation_split": "val",
         "reporting_split": args.reporting_split,
@@ -1833,7 +1863,7 @@ def main() -> None:
             else "all_26_with_zeroed_hidden_logits"
         ),
         "training_loss_current_only_gradient_multiplier_vs_legacy": (
-            [len(CLASS_ORDER) / size for size in TASK_SIZES]
+            [len(CLASS_ORDER) / size for size in task_sizes]
             if args.training_loss_mode == "current_only" else None
         ),
         "training_loss_optimizer_scale_note": (
@@ -1981,7 +2011,7 @@ def main() -> None:
         "adapter_bottleneck_dims_per_task": (
             list(args.adapter_bottleneck_dims_per_task)
             if args.adapter_bottleneck_dims_per_task is not None
-            else [args.adapter_bottleneck_dim] * len(TASK_SIZES)
+            else [args.adapter_bottleneck_dim] * len(task_sizes)
         ),
         "adapter_layer_indices": list(args.adapter_layer_indices),
         "adapter_residual_scale": args.adapter_residual_scale,
@@ -2124,17 +2154,19 @@ def main() -> None:
                 print('R1_RESUME_COMPLETED',task_id,flush=True)
                 continue
         model.activate_task(task_id)
+        current = task_indices(task_id, task_sizes)
+        seen = seen_indices(task_id, task_sizes)
         fit_indices, calibration_indices = fit_calibration_indices(
-            train_source, task_indices(task_id), args.calibration_fraction
+            train_source, current, args.calibration_fraction
         )
         unfiltered_fit_count = len(fit_indices)
         if args.input_mode == "face_crop":
             fit_indices = filter_face_training_indices(train_source, fit_indices)
-        train_view = LabelView(train_source, fit_indices, task_indices(task_id))
+        train_view = LabelView(train_source, fit_indices, current)
         if args.input_mode == "face_crop":
             face_val_indices = [
                 index for index, target in enumerate(val_source.targets)
-                if _intersects(target, task_indices(task_id))
+                if _intersects(target, current)
                 and val_source.face_training_valid[index]
             ]
             if not face_val_indices:
@@ -2142,13 +2174,13 @@ def main() -> None:
                     f"Task {task_id} has no valid non-ambiguous Face validation samples"
                 )
             val_view = LabelView(
-                val_source, face_val_indices, task_indices(task_id)
+                val_source, face_val_indices, current
             )
         else:
-            val_view = dataset_view(val_source, task_indices(task_id))
+            val_view = dataset_view(val_source, current)
         reporting_view = dataset_view(
             reporting_source,
-            seen_indices(task_id),
+            seen,
             include_sample_id=args.save_evaluation_scores,
         )
         if args.r1_smoke_eval_samples is not None:
@@ -2173,7 +2205,7 @@ def main() -> None:
             calibration_view = LabelView(
                 calibration_source,
                 calibration_indices,
-                seen_indices(task_id),
+                seen,
                 include_sample_id=True,
             )
             calibration_loader = DataLoader(
@@ -2259,6 +2291,7 @@ def main() -> None:
                     "model": compact_model_state_dict(model),
                     "task_id": task_id,
                     "source_git": metadata,
+                    "task_sizes": list(task_sizes),
                 },
                 output / "compact_checkpoints" / f"task{task_id}.pth",
             )
@@ -2293,7 +2326,7 @@ def main() -> None:
         "schema_version": 1,
         "status": "complete",
         "method": METHOD_NAME,
-        "protocol_id": PROTOCOL_ID,
+        "protocol_id": protocol_id,
         "track": TRACK,
         "seed": args.seed,
         "elapsed_seconds": time.time() - start,
@@ -2305,7 +2338,7 @@ def main() -> None:
             for history in training_history.values()
             for row in history
         )),
-        "metrics": summarize_tasks(task_rows),
+        "metrics": summarize_tasks(task_rows, task_sizes),
         "task_metrics": [asdict(item) for item in task_rows],
         "calibration_metrics": [asdict(item) for item in calibration_rows],
         "calibration_counts": calibration_counts,

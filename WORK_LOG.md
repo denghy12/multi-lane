@@ -1,3 +1,7 @@
+## 2026-11-15 原 D 的三套 benchmark 协议
+
+在独立分支 exp/d9-benchmark-protocols-20261115 将分阶段类别索引、模型初始化、checkpoint、验证重放和融合汇总接入三份协议。历史 MULTI-LANE 方法固定训练30轮；分类阈值严格大于0.5。新增每协议真实数据 smoke、GPU0 队列和分阶段结果，输出 output/d9_benchmark_protocols/20261115，日志 logs/d9_benchmark_protocols/20261115。
+
 ## 2026-11-08 第9层证据边消融实现
 
 从eb6851f创建exp/r1-frozen9-edges-20261108。FrozenR1Receiver新增all/full证据策略，在softmax前mask非Full外部视图，旧config默认all，参数/RNG/槽位一致。runner与checkpoint加载记录该设置。新增完整四组前向、源重放、只读后训练的编排及mask/梯度/初始化回归。保留全部旧checkpoint和预测。

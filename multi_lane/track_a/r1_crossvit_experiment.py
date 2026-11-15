@@ -11,8 +11,8 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader,Subset
 
-from .runner import (TASK_SIZES,TaskMetrics,build_transforms,compute_metrics,dataset_view,
-    evaluate,git_metadata,seen_indices,set_seed,summarize_tasks)
+from .runner import (TASK_PROTOCOLS,TASK_SIZES,TaskMetrics,build_transforms,compute_metrics,config_task_sizes,dataset_view,
+    evaluate,git_metadata,seen_indices,set_seed,summarize_tasks,validate_classes)
 from .r1_crossvit import R1Receiver,attach_evidence
 from .openai_clip_loader import load_openai_clip_visual
 from .evaluation_scores import load_evaluation_scores,align_evaluation_scores
@@ -44,9 +44,11 @@ def flags(args,kind,view,smoke=False,*,seed=1):
     src=source_runs(args.reference_root)[view];c=read(src/'config.json')
     if c['seed']!=1 or c['adapter_residual_scale']!=.1 or c['parameter_group_loss_routing']!='adapter_asl':
         raise ValueError('Historical R1 recipe changed')
+    protocol = getattr(args, 'task_protocol', 'b5c3')
+    stages = len(TASK_PROTOCOLS[protocol])
     result=['--data-root',str(args.data_root),'--clip-checkpoint',str(args.clip_checkpoint),
         '--output-root',str(args.output/kind/view/'train'),
-        '--seed',str(seed),'--epochs','30','--max-tasks','2' if smoke else '8',
+        '--seed',str(seed),'--epochs','30','--task-protocol',protocol,'--max-tasks',str(min(2,stages) if smoke else stages),
         '--train-batch-size','64','--eval-batch-size','64','--workers','2',
         '--source-learning-rate','0.05','--source-reference-batch-size','256','--weight-decay','0',
         '--temperature','1','--scheduler-mode','cosine','--scheduler-min-lr-ratio','0','--scheduler-warmup-ratio','0',
@@ -84,7 +86,7 @@ def model_from_config(c,clip):
                      task_pool_cap=c.get('r1_task_pool_cap'),
                      frozen_patch_enabled=c.get('r1_frozen_patch_enabled', True),
                      frozen_cross_evidence=c.get('r1_frozen_evidence', 'all'))
-    return model_class(load_openai_clip_visual(clip),TASK_SIZES,
+    return model_class(load_openai_clip_visual(clip),config_task_sizes(c),
         num_selectors=c['num_selectors'],num_prompts=c['num_prompts'],num_prompt_layers=c['num_prompt_layers'],
         normalize=c['normalize'],adapter_mode='image_token',adapter_bottleneck_dim=32,
         adapter_layer_indices=(1,),adapter_residual_scale=.1,adapter_activation='relu',
@@ -93,13 +95,27 @@ def model_from_config(c,clip):
         r1_query_mode=c.get('r1_query_mode','cls'), **extra).float().cuda()
 
 
+def restore_compact_stage(model, payload, task, task_sizes):
+    # Archived checkpoints predate embedded schedules and used the B5-C3 split.
+    if payload.get('task_id') != task or tuple(payload.get('task_sizes', TASK_SIZES)) != tuple(task_sizes):
+        raise ValueError('Compact checkpoint does not match the requested protocol stage')
+    missing = model.load_state_dict(payload['model'], strict=False)
+    if missing.unexpected_keys or any(not name.startswith('visual_encoder.') for name in missing.missing_keys):
+        raise ValueError('Missing state')
+    model.restore_task(task)
+    model.requires_grad_(False).eval()
+
+
 def single_thread_worker(_):torch.set_num_threads(1)
 
 
 def validation(args):
     train=args.training_root;c=read(train/'config.json');complete=read(train/'seed_summary.json')
     set_seed(c['seed'],True)
-    if complete['status']!='complete':raise ValueError('Incomplete training source')
+    sizes = config_task_sizes(c)
+    if (complete['status'] != 'complete' or config_task_sizes(complete['config']) != sizes
+            or len(complete['task_metrics']) != c['max_tasks']):
+        raise ValueError('Incomplete or inconsistent training source')
     model=model_from_config(c,args.clip_checkpoint);torch.set_num_threads(2)
     _,transform=build_transforms(c['input_normalization'],c['train_crop_scale'],input_mode=c['input_mode'],
         person_transform_mode=c['person_transform_mode'],person_color_jitter_strength=c['person_color_jitter_strength'],
@@ -108,15 +124,14 @@ def validation(args):
     source=EMOTIC(str(parent),train=False,eval_splits=('val',),transform=transform,
         input_mode=c['input_mode'],person_crop_margin=c['person_crop_margin'],
         face_manifest_root=args.face_manifest_root if c['input_mode']=='face_crop' else None)
+    validate_classes(source)
     if c['r1_kind']!='native':source=attach_evidence(source,c['r1_receiver'],parent,args.face_manifest_root)
     rows=[]
     for task in range(c['max_tasks']):
         path=train/'compact_checkpoints'/f'task{task}.pth'
         payload=torch.load(path,map_location='cpu',weights_only=False)
-        missing=model.load_state_dict(payload['model'],strict=False)
-        if missing.unexpected_keys or any(not n.startswith('visual_encoder.') for n in missing.missing_keys):raise ValueError('Missing state')
-        model.restore_task(task);model.requires_grad_(False).eval()
-        dataset=dataset_view(source,seen_indices(task),include_sample_id=True)
+        restore_compact_stage(model, payload, task, sizes)
+        dataset=dataset_view(source,seen_indices(task, sizes),include_sample_id=True)
         if args.smoke:dataset=Subset(dataset,range(min(64,len(dataset))))
         loader=DataLoader(dataset,batch_size=64,shuffle=False,num_workers=2,prefetch_factor=1,
             worker_init_fn=single_thread_worker,generator=torch.Generator().manual_seed(77191+task))
@@ -125,7 +140,8 @@ def validation(args):
         rows.append(row);write(args.output/'progress.json',dict(tasks_completed=[r.task_id for r in rows]))
         print('R1_VALIDATION',c['r1_kind'],c['r1_receiver'],task,row.mAP,flush=True)
     write(args.output/'result.json',dict(status='complete',kind=c['r1_kind'],view=c['r1_receiver'],split='val',
-        seed=c['seed'],tasks=list(range(c['max_tasks'])),metrics=[asdict(r) for r in rows],summary=summarize_tasks(rows),
+        seed=c['seed'],tasks=list(range(c['max_tasks'])),metrics=[asdict(r) for r in rows],summary=summarize_tasks(rows,sizes),
+        task_sizes=list(sizes),protocol_id=c['protocol_id'],
         evaluation_scope='samples_intersect_seen_classes'))
 
 
