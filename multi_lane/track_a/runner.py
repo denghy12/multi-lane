@@ -1487,10 +1487,12 @@ def main() -> None:
             args.r1_frozen_mode is None or not math.isfinite(args.r1_fixed_loss_scale)
             or args.r1_fixed_loss_scale <= 0):
         raise ValueError('Fixed loss scaling requires a positive finite frozen-receiver scale')
-    if args.r1_recovery_source is not None and (
-            args.r1_frozen_mode != 'image_cls' or args.r1_view != 'person'
-            or args.r1_exchange_layer != 5 or args.r1_fixed_loss_scale is None):
-        raise ValueError('External recovery is restricted to the original layer6 CLS Person path')
+    if args.r1_recovery_source is not None:
+        original_cls = args.r1_frozen_mode == 'image_cls' and args.r1_exchange_layer == 5
+        cap035 = (args.r1_frozen_mode == 'patch' and args.r1_exchange_layer == 8
+                  and args.r1_frozen_cap == .035 and args.r1_fixed_loss_scale == 32)
+        if args.r1_view != 'person' or args.r1_fixed_loss_scale is None or not (original_cls or cap035):
+            raise ValueError('Unrecognized Person external recovery configuration')
     if args.r1_frozen_mode is not None and (
             args.r1_kind != 'attention' or args.r1_view not in ('person', 'face')
             or args.r1_sender_root is not None or args.r1_query_mode != 'cls'):

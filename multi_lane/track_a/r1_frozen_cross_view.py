@@ -178,9 +178,11 @@ class FrozenR1Receiver(R1Receiver):
         history = saved['training']['history'] if training else saved['history']
         if any(r['skipped_optimizer_steps'] for r in history):
             raise ValueError('External recovery contains skipped updates')
-        if training and (saved['training']['next_epoch'] != 18
-                         or saved['training']['completed_task_updates'] != 2808):
-            raise ValueError('Only the complete task3 epoch18 boundary is allowed')
+        epoch = self._recovery_epoch()
+        if training and (saved['training']['next_epoch'] != epoch
+                         or len(history) != epoch
+                         or saved['training']['completed_task_updates'] != 156 * epoch):
+            raise ValueError(f'Expected the complete task3 epoch{epoch} boundary')
         missing = self.load_state_dict(saved['model'], strict=False)
         if missing.unexpected_keys or any(not n.startswith('visual_encoder.') for n in missing.missing_keys):
             raise ValueError('Incomplete external state')
@@ -198,8 +200,12 @@ class FrozenR1Receiver(R1Receiver):
             from .r1_crossvit_experiment import write
             write(self.r1_root/f'external_task{task}_provenance.json', dict(
                 source=str(path), sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
-                source_config=original, numerical_policy_only_change=True, epoch18=training))
+                source_config=original, numerical_policy_only_change=True,
+                completed_training_epoch=epoch if training else None, epoch18=training and epoch == 18))
         return saved
+
+    def _recovery_epoch(self):
+        return 14 if self.frozen_cross_mode == 'patch' else 18
 
     def restore_completed_task(self, task):
         own = super().restore_completed_task(task)
@@ -212,7 +218,7 @@ class FrozenR1Receiver(R1Receiver):
     def activate_task(self, task):
         super().activate_task(task)
         if self.recovery_source is not None and task == 3 and self.r1_resume is None:
-            self._load_external(self.recovery_source/'epoch_recovery/task3/epoch18.pth', task, True)
+            self._load_external(self.recovery_source/'epoch_recovery/task3'/f'epoch{self._recovery_epoch():02d}.pth', task, True)
 
     def save_training_epoch(self, task, epoch, history, optimizer, scheduler, scaler, updates):
         history[-1]['cross_view_last_gradient_norms'] = {

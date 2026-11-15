@@ -1642,3 +1642,5 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   scale0.1/ReLU/independent、main BCE+Adapter ASL9.8/0/0.05、AMP/TF32、无checkpoint。
 - 本分支新增test Face manifest、固定三视图审计融合器及三GPU launcher。完整说明见
   `docs/fixed_three_view_seed012_test.md`。
+
+Person 第9层 patch 的3.5%限幅训练在 task3 epoch15 出现3次跳步。原预算结果标记未完成。单独的数值复验从 epoch14 无跳步状态恢复，仅将 AMP loss scale 从4096改为32。

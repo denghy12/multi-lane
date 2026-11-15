@@ -101,10 +101,14 @@ def finish_metrics(records):
     return result
 
 
-def run(root, anchor, manifest, anchor_only=False):
+def run(root, anchor, manifest, anchor_only=False, group_names=None):
     archived = anchor / 'evaluation/trained'
     paths = branch_paths(root, archived, anchor_only)
     groups = fusion_groups(anchor_only)
+    if group_names is not None:
+        groups = {name: groups[name] for name in group_names}
+        needed = {view for views in groups.values() for view in views}
+        paths = {name: path for name, path in paths.items() if name in needed}
     anchor_results = read(archived / 'result.json')['results']
     splits = {}
     for split in ('val', 'test'):
