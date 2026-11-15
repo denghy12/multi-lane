@@ -161,7 +161,7 @@ class PairedFullPersonTransform:
             mask = torch.flip(mask, dims=(1,))
         return mask.reshape(-1)
 
-    def __call__(self, image, bbox):
+    def full_with_geometry(self, image, bbox):
         width, height = image.size
         box = self.target_box(bbox, width, height)
         if self.train:
@@ -197,6 +197,10 @@ class PairedFullPersonTransform:
             full = self.to_tensor(TF.crop(resized, *crop))
             flip = False
 
+        return full, geometry, flip
+
+    def __call__(self, image, bbox):
+        full, geometry, flip = self.full_with_geometry(image, bbox)
         # Reuse the legacy crop implementation, including its exact rounding
         # and margin behavior. Invalid boxes fall back to Full but are masked.
         from multi_lane.continual_datasets.continual_datasets import EMOTIC

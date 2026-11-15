@@ -1,3 +1,7 @@
+## 2026-11-15 D 的分支对照
+
+D 为全 TRAIN、seed1 八任务参照。Val 最终/阶段平均 44.0329/51.1335，Test 33.1770/40.2083。仅改变 Full 任务摘要读取或 Person/Face 接收端训练，沿用原固定 logit 读出及可靠性规则。
+
 ## 2026-11-08 第9层辅助视图证据边
 
 以seed1原Frozen9双接收为D组。新增Full-only证据mask，保留所有参数和证据槽位。先做原checkpoint完整八阶段Val/Test四组屏蔽归因，再训练Full-only Person/Face两条同预算路径，形成A仅Full、B加Person→Face、C加Face→Person、D双边的四组真实前向。GPU0/1，原30轮/B64/固定AMP4096/5%cap和固定logits融合。详情docs/r1_frozen9_edges_20261108.md。

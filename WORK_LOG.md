@@ -1,3 +1,7 @@
+## 2026-11-15 D 的分支对照
+
+从历史 D 的 c0ac3de 创建独立实验分支。新增六条从头训练的分支路径、两种翻转、Full 真框及同图可见人物换框评估，以及 Person 3.5% 限幅。正式入口 python -m scripts.emotic.run_d9_branch_refinement，记录真实 D 基线重放、真实数据预检、训练步数和双 split 八阶段分支/融合成绩。
+
 ## 2026-11-08 第9层证据边消融实现
 
 从eb6851f创建exp/r1-frozen9-edges-20261108。FrozenR1Receiver新增all/full证据策略，在softmax前mask非Full外部视图，旧config默认all，参数/RNG/槽位一致。runner与checkpoint加载记录该设置。新增完整四组前向、源重放、只读后训练的编排及mask/梯度/初始化回归。保留全部旧checkpoint和预测。

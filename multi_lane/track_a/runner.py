@@ -1368,7 +1368,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--r1-view',choices=('full','person','face'))
     parser.add_argument('--r1-query-mode',choices=('cls','selector_mean','selectors'),default='cls')
     parser.add_argument('--r1-frozen-mode', choices=('image_cls', 'patch'))
+    parser.add_argument('--r1-frozen-cap', type=float, default=.05)
     parser.add_argument('--r1-frozen-evidence', choices=('all', 'full'), default='all')
+    parser.add_argument('--r1-evidence-flip', choices=('none', 'sync', 'independent'), default='none',
+                        help='Training-only donor horizontal flip, relative to the receiver.')
     parser.add_argument('--r1-exchange-layer', type=int, default=5)
     parser.add_argument('--r1-exchange-second-layer', type=int)
     parser.add_argument('--r1-exchange-sharing', choices=('shared', 'independent'), default='shared')
@@ -1452,6 +1455,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--adapter-regularization-calibration-updates", type=int, default=30
     )
+    parser.add_argument("--d9-full-box", action="store_true",
+                        help="Bias the last two selectors at Full Task block 10 toward the target box")
     parser.add_argument("--max-tasks", type=int, default=len(TASK_SIZES))
     parser.add_argument(
         "--reporting-split", choices=("val", "test"), default="test"
@@ -1461,11 +1466,17 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if args.r1_frozen_cap != .05 and (args.r1_frozen_mode != 'patch'
+            or args.r1_exchange_second_layer is not None or args.r1_disable_frozen_patch
+            or not 0 < args.r1_frozen_cap <= 1):
+        raise ValueError('A custom residual cap requires a single patch site and a fraction in (0, 1]')
     if (args.r1_disable_frozen_patch or args.r1_task_pool_source_layer is not None
             or args.r1_task_pool_cap is not None) and args.r1_task_pool_layer is None:
         raise ValueError('Pool settings require --r1-task-pool-layer')
     if args.r1_frozen_evidence != 'all' and args.r1_frozen_mode is None:
         raise ValueError('Full-only evidence requires a Frozen Forward receiver')
+    if args.r1_evidence_flip != 'none' and args.r1_frozen_mode != 'patch':
+        raise ValueError('Evidence flip controls require Frozen Forward patch Attention')
     if args.r1_task_pool_layer is not None and args.r1_frozen_mode != 'patch':
         raise ValueError('Task Pool combination requires Frozen Forward patch Attention')
     if args.r1_exchange_second_layer is not None and args.r1_frozen_mode != 'patch':
@@ -1491,6 +1502,9 @@ def main() -> None:
         or args.selector_conditioning != "disabled"
         or args.full_crop_mode == "target_aware"
     )
+    if args.d9_full_box and (args.r1_kind != "native" or args.r1_view != "full"
+                             or args.input_mode != "full" or paired_inputs):
+        raise ValueError("Target-box Summarize requires the native full branch and legacy Full crop")
     if paired_inputs and args.input_mode != "full":
         raise ValueError("Selector conditioning/paired inputs require input-mode full")
     if paired_inputs and args.person_transform_mode != "letterbox":
@@ -1637,6 +1651,7 @@ def main() -> None:
             from .r1_frozen_cross_view import FrozenR1Receiver
             model_class = FrozenR1Receiver
             extra['frozen_cross_mode'] = args.r1_frozen_mode
+            extra['frozen_cross_cap'] = args.r1_frozen_cap
             extra['frozen_cross_evidence'] = args.r1_frozen_evidence
             extra['r1_layer'] = args.r1_exchange_layer
             extra['recovery_source'] = args.r1_recovery_source
@@ -1662,6 +1677,7 @@ def main() -> None:
         adapter_bottleneck_dims_per_task=args.adapter_bottleneck_dims_per_task,
         adapter_residual_gate_mode=args.adapter_residual_gate_mode,
         adapter_auxiliary_metric_mode=args.adapter_regularization,
+        d9_full_box=args.d9_full_box,
         selector_conditioning=args.selector_conditioning,
         selector_condition_layers=args.selector_condition_layers,
         selector_condition_hidden_dim=args.selector_condition_hidden_dim,
@@ -1756,6 +1772,16 @@ def main() -> None:
         validate_classes(train_source, val_source)
     if calibration_source is not None:
         validate_classes(train_source, calibration_source)
+
+    if args.d9_full_box:
+        from .d9_full import attach_full_box
+        options = (args.input_normalization, args.train_crop_scale)
+        train_source = attach_full_box(train_source, *options, training=True)
+        val_source = attach_full_box(val_source, *options, training=False)
+        reporting_source = (val_source if args.reporting_split == "val" else
+                            attach_full_box(reporting_source, *options, training=False))
+        if calibration_source is not None:
+            calibration_source = attach_full_box(calibration_source, *options, training=False)
 
     face_manifest_provenance = (
         load_face_manifest_provenance(args.face_manifest_root)
@@ -2043,6 +2069,9 @@ def main() -> None:
         "adapter_parameters_per_task": adapter_parameters_per_task,
         "adapter_parameter_counts_per_task": adapter_parameter_counts_per_task,
     }
+    if args.d9_full_box:
+        config.update(d9_full_box=True, d9_box_layer_index=9, d9_box_selector_count=2,
+                      d9_box_log_odds_bias="ln(2)*visible_patch_area_fraction")
     if args.r1_kind is not None:
         config.update(r1_kind=args.r1_kind,r1_receiver=args.r1_view,r1_supervision='own_view_BCE_and_Adapter_ASL_no_fused_objective',
             r1_primary_fusion='locked_R1_'+args.r1_fusion_readout,
@@ -2053,15 +2082,18 @@ def main() -> None:
             r1_exchange_layer=5 if args.r1_kind!='native' else None,r1_exchange_dim=64,r1_exchange_heads=4,
             r1_exchange_parameters=sum(p.numel() for p in model.r1_bank.parameters()),
             r1_evidence='deterministic_native_eval_crops_of_same_TRAIN_person',r1_interaction_precision='FP32')
+        if args.r1_evidence_flip != 'none':
+            config.update(r1_evidence_flip=args.r1_evidence_flip,
+                          r1_evidence='native_eval_crops_of_same_TRAIN_person_with_paired_donor_flip')
         if args.r1_frozen_mode is not None:
-            config.update(r1_frozen_mode=args.r1_frozen_mode, r1_frozen_cap=.05,
+            config.update(r1_frozen_mode=args.r1_frozen_mode, r1_frozen_cap=args.r1_frozen_cap,
                 r1_frozen_evidence=args.r1_frozen_evidence,
                 r1_exchange_layer=args.r1_exchange_layer,
                 r1_exchange_site=f'after_Frozen_block{args.r1_exchange_layer+1}_before_Task_block{args.r1_exchange_layer+2}_Summarize',
                 r1_query_count=1 if args.r1_frozen_mode == 'image_cls' else int(visual.positional_embedding.shape[0]-1),
                 r1_query_reduction='none; each query updates its own visual token',
                 r1_query_normalization='input_LN_and_post_projection_per_head_QK_LN_no_affine',
-                r1_cap_reference='0.05 * detached_pre_injection_image_CLS_norm; total_Frobenius_budget',
+                r1_cap_reference=f'{args.r1_frozen_cap} * detached_pre_injection_image_CLS_norm; total_Frobenius_budget',
                 r1_task_private_visual_suffix=True, r1_evaluation_threads=2)
             config['total_method_parameters'] += config['r1_exchange_parameters']
             if args.r1_task_pool_layer is not None:
@@ -2101,7 +2133,8 @@ def main() -> None:
             manifest=args.r1_evidence_manifest_root
             if manifest is None:raise ValueError('R1 interactions require an evidence manifest')
             config['r1_evidence_face_manifest']=load_face_manifest_provenance(manifest)
-            train_source=attach_evidence(train_source,args.r1_view,dataset_parent,manifest)
+            train_source=attach_evidence(train_source,args.r1_view,dataset_parent,manifest,
+                                         train_flip=args.r1_evidence_flip)
             val_source=attach_evidence(val_source,args.r1_view,dataset_parent,manifest)
             reporting_source=attach_evidence(reporting_source,args.r1_view,dataset_parent,manifest)
         if path.exists() and json.loads(path.read_text())!=config:raise ValueError('R1 recovery protocol changed')

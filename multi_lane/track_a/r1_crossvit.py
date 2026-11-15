@@ -209,6 +209,8 @@ class R1Receiver(MultiLaneModel):
 
     def encode_lanes(self,images,all_seen_lanes):
         own=images['full'] if isinstance(images,dict) else images
+        if self.d9_full_box:
+            return super().encode_lanes(images, all_seen_lanes)
         if not self.r1_bank or not self.r1_enabled:return super().encode_lanes(own,all_seen_lanes)
         if not isinstance(images,dict):raise ValueError('Cross-view evidence missing')
         others=[v for v in VIEWS if v!=self.r1_view]
@@ -271,10 +273,43 @@ class R1Receiver(MultiLaneModel):
                 history=history,row=row),self.r1_root/'task_recovery'/f'task{task}.pth')
 
 
+class ReceiverEvidenceFlip:
+    """Expose a donor flip without changing the receiver's pixels or RNG stream."""
+
+    def __init__(self, transform, mode):
+        from torchvision import transforms
+
+        if mode not in ('sync', 'independent'):
+            raise ValueError('Unknown TRAIN evidence flip mode')
+        steps = transform.transforms
+        positions = [i for i, step in enumerate(steps)
+                     if type(step) is transforms.RandomHorizontalFlip]
+        if len(positions) != 1 or steps[positions[0]].p != 0.5:
+            raise ValueError('Expected one native 50% receiver horizontal flip')
+        index = positions[0]
+        self.before = transforms.Compose(steps[:index])
+        self.after = transforms.Compose(steps[index + 1:])
+        self.mode = mode
+
+    def __call__(self, image):
+        from torchvision.transforms.functional import hflip
+
+        image = self.before(image)
+        # Use the same torch.rand(1) draw as torchvision.RandomHorizontalFlip.
+        # Its two highest fractional bits are independent fair Bernoulli bits.
+        draw = torch.rand(1).item()
+        receiver_flip = draw < 0.5
+        donor_flip = receiver_flip if self.mode == 'sync' else int(4 * draw) % 2 == 1
+        if receiver_flip:
+            image = hflip(image)
+        return self.after(image), donor_flip
+
+
 class EvidenceSource:
-    """Native receiver augmentation first; deterministic TRAIN evidence afterward."""
-    def __init__(self,source,auxiliary,receiver):
+    """Apply the native receiver augmentation and pair it with same-person donors."""
+    def __init__(self,source,auxiliary,receiver,with_flip=False):
         self.source,self.auxiliary,self.receiver=source,auxiliary,receiver
+        self.with_flip = with_flip
         for a in auxiliary.values():
             if source.sample_ids!=a.sample_ids:raise ValueError('Evidence sample alignment differs')
     def __getattr__(self,name):
@@ -283,17 +318,27 @@ class EvidenceSource:
     def __len__(self):return len(self.source)
     def __getitem__(self,index):
         own,y=self.source[index]
+        donor_flip = False
+        if self.with_flip:
+            own, donor_flip = own
         evidence={'full':own}
         for view,source in self.auxiliary.items():
-            evidence['evidence_'+view]=source[index][0]
+            donor = source[index][0]
+            evidence['evidence_'+view] = donor.flip((-1,)) if donor_flip else donor
         f=self.source if self.receiver=='face' else self.auxiliary['face']
         evidence['evidence_face_reliable']=torch.tensor(f.face_reliable[index],dtype=torch.bool)
         return evidence,y
 
 
-def attach_evidence(source,receiver,dataset_parent,manifest_root):
+def attach_evidence(source,receiver,dataset_parent,manifest_root,train_flip='none'):
     from multi_lane.continual_datasets.continual_datasets import EMOTIC
     from .runner import build_transforms
+    if train_flip != 'none':
+        if tuple(source.splits) != ('train',) or receiver not in ('person', 'face'):
+            raise ValueError('Evidence flips apply to TRAIN Person/Face receivers only')
+        # Some callers retain the native dataset for evaluation or comparisons.
+        source = copy.copy(source)
+        source.transform = ReceiverEvidenceFlip(source.transform, train_flip)
     auxiliary={}
     for v in VIEWS:
         if v==receiver:continue
@@ -305,4 +350,4 @@ def attach_evidence(source,receiver,dataset_parent,manifest_root):
             input_mode={'full':'full','person':'person_crop','face':'face_crop'}[v],
             person_crop_margin=.15 if v=='person' else 0.,
             face_manifest_root=manifest_root if v=='face' else None)
-    return EvidenceSource(source,auxiliary,receiver)
+    return EvidenceSource(source,auxiliary,receiver,with_flip=train_flip != 'none')

@@ -44,6 +44,7 @@ class MultiLaneModel(nn.Module):
         selector_condition_layers: Sequence[int] = (1,),
         selector_condition_hidden_dim: int = 32,
         selector_condition_scale: float = 0.1,
+        d9_full_box: bool = False,
     ) -> None:
         super().__init__()
         if not task_sizes or any(int(size) <= 0 for size in task_sizes):
@@ -105,6 +106,9 @@ class MultiLaneModel(nn.Module):
             if block_width != width or int(block.attn.num_heads) != num_heads:
                 raise ValueError("CLIP visual residual blocks are inconsistent")
 
+        if d9_full_box and (len(blocks) < 10 or num_selectors < 2):
+            raise ValueError("Target-box Summarize requires 10 layers and at least 2 selectors")
+        self.d9_full_box = d9_full_box
         self.visual_encoder = visual_encoder
         self.visual_encoder.requires_grad_(False)
         self.width = width
@@ -337,6 +341,7 @@ class MultiLaneModel(nn.Module):
         condition_valid: Optional[torch.Tensor] = None,
         summary_only: bool = False,
         preserve_image_gradient: bool = False,
+        patch_coverage: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         # The released block applies its first LayerNorm before both selector
         # aggregation and prompt attention.  Keep the residual stream itself
@@ -368,6 +373,9 @@ class MultiLaneModel(nn.Module):
             similarity = torch.einsum(
                 "tbsc,tbnc->tbsn", queries, selector_image_tokens
             ) * (self.width**-0.5)
+            if patch_coverage is not None:
+                from .d9_full import bias_selector_scores
+                similarity = bias_selector_scores(similarity, patch_coverage)
             selected = torch.einsum(
                 "tbnc,tbsn->tbsc",
                 selector_image_tokens,
@@ -379,6 +387,9 @@ class MultiLaneModel(nn.Module):
             similarity = torch.einsum(
                 "tbsc,bnc->tbsn", queries, frozen_normalized_image
             ) * (self.width**-0.5)
+            if patch_coverage is not None:
+                from .d9_full import bias_selector_scores
+                similarity = bias_selector_scores(similarity, patch_coverage)
             selected = torch.einsum(
                 "bnc,tbsn->tbsc",
                 frozen_normalized_image,
@@ -416,6 +427,8 @@ class MultiLaneModel(nn.Module):
         paired = images if isinstance(images, dict) else None
         if paired is not None:
             images = paired["full"]
+        if self.d9_full_box and (paired is None or "patch_coverage" not in paired):
+            raise ValueError("Missing transformed Full target-box patch coverage")
         if condition_enabled:
             required = {"person", "bbox", "condition_valid"}
             if self.selector_conditioning == "person_patches":
@@ -462,6 +475,7 @@ class MultiLaneModel(nn.Module):
                 person_tokens,
                 paired["person_patch_mask"] if person_tokens is not None else None,
                 paired["condition_valid"] if person_tokens is not None else None,
+                patch_coverage=paired["patch_coverage"] if self.d9_full_box and layer_id == 9 else None,
             )
             with torch.no_grad():
                 image_tokens = block(image_tokens.permute(1, 0, 2)).permute(

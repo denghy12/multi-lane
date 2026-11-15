@@ -86,6 +86,7 @@ def model_from_config(c,clip):
                      frozen_cross_evidence=c.get('r1_frozen_evidence', 'all'))
     return model_class(load_openai_clip_visual(clip),TASK_SIZES,
         num_selectors=c['num_selectors'],num_prompts=c['num_prompts'],num_prompt_layers=c['num_prompt_layers'],
+        d9_full_box=c.get('d9_full_box', False),
         normalize=c['normalize'],adapter_mode='image_token',adapter_bottleneck_dim=32,
         adapter_layer_indices=(1,),adapter_residual_scale=.1,adapter_activation='relu',
         r1_kind=c['r1_kind'],r1_view=c['r1_receiver'],r1_sender_root=c.get('r1_sender_root'),
@@ -105,10 +106,19 @@ def validation(args):
         person_transform_mode=c['person_transform_mode'],person_color_jitter_strength=c['person_color_jitter_strength'],
         person_color_jitter_probability=c['person_color_jitter_probability'])
     parent=args.data_root.parent if args.data_root.name=='EMOTIC' else args.data_root
-    source=EMOTIC(str(parent),train=False,eval_splits=('val',),transform=transform,
+    split = getattr(args, 'split', 'val')
+    score_dir = getattr(args, 'score_dir', None) or args.output/'scores'
+    source=EMOTIC(str(parent),train=False,eval_splits=(split,),transform=transform,
         input_mode=c['input_mode'],person_crop_margin=c['person_crop_margin'],
         face_manifest_root=args.face_manifest_root if c['input_mode']=='face_crop' else None)
+    if c.get('d9_full_box'):
+        from .d9_full import attach_full_box
+        source = attach_full_box(source, c['input_normalization'], c['train_crop_scale'], training=False,
+                                 mode=getattr(args, 'd9_box_mode', 'true'))
+        if getattr(args, 'd9_box_mode', 'true') == 'swapped':
+            write(args.output/'swapped_source_ids.json', source.d9_swap_source_ids)
     if c['r1_kind']!='native':source=attach_evidence(source,c['r1_receiver'],parent,args.face_manifest_root)
+    workers = getattr(args, 'workers', 2)
     rows=[]
     for task in range(c['max_tasks']):
         path=train/'compact_checkpoints'/f'task{task}.pth'
@@ -118,13 +128,13 @@ def validation(args):
         model.restore_task(task);model.requires_grad_(False).eval()
         dataset=dataset_view(source,seen_indices(task),include_sample_id=True)
         if args.smoke:dataset=Subset(dataset,range(min(64,len(dataset))))
-        loader=DataLoader(dataset,batch_size=64,shuffle=False,num_workers=2,prefetch_factor=1,
+        loader=DataLoader(dataset,batch_size=64,shuffle=False,num_workers=workers,prefetch_factor=1 if workers else None,
             worker_init_fn=single_thread_worker,generator=torch.Generator().manual_seed(77191+task))
         row=evaluate(model,loader,torch.device('cuda'),task,.5,True,
-            score_output_path=args.output/'scores'/f'task{task}.npz')
+            score_output_path=score_dir/f'task{task}.npz')
         rows.append(row);write(args.output/'progress.json',dict(tasks_completed=[r.task_id for r in rows]))
         print('R1_VALIDATION',c['r1_kind'],c['r1_receiver'],task,row.mAP,flush=True)
-    write(args.output/'result.json',dict(status='complete',kind=c['r1_kind'],view=c['r1_receiver'],split='val',
+    write(args.output/'result.json',dict(status='complete',kind=c['r1_kind'],view=c['r1_receiver'],split=split,
         seed=c['seed'],tasks=list(range(c['max_tasks'])),metrics=[asdict(r) for r in rows],summary=summarize_tasks(rows),
         evaluation_scope='samples_intersect_seen_classes'))
 
