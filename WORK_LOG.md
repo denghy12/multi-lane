@@ -1,3 +1,7 @@
+## 2026-11-16 D benchmark 仅运行 seed1
+
+本批三协议正式训练限定为 seed1，队列仅在 GPU0 上执行 B4-C2、B10-C4 和 Joint-26 的九条分支，优先 B4-C2。旧批次的 seed0 产物保存在原处，seed2 不再排队。使用原30轮配方和完整双划分评估。单次 seed 的标准差留空。新批次输出 output/d9_benchmark_protocols/seed1_20261116。
+
 ## 2026-11-15 原 D 的三套 benchmark 协议
 
 在独立分支 exp/d9-benchmark-protocols-20261115 将分阶段类别索引、模型初始化、checkpoint、验证重放和融合汇总接入三份协议。历史 MULTI-LANE 方法固定训练30轮；分类阈值严格大于0.5。新增每协议真实数据 smoke、GPU0 队列和分阶段结果，输出 output/d9_benchmark_protocols/20261115，日志 logs/d9_benchmark_protocols/20261115。

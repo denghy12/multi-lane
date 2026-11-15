@@ -1,3 +1,7 @@
+## 2026-11-16 D benchmark 仅运行 seed1
+
+本批三协议正式训练限定为 seed1，队列仅在 GPU0 上执行 B4-C2、B10-C4 和 Joint-26 的九条分支，优先 B4-C2。旧批次的 seed0 产物保存在原处，seed2 不再排队。使用原30轮配方和完整双划分评估。单次 seed 的标准差留空。新批次输出 output/d9_benchmark_protocols/seed1_20261116。
+
 ## 2026-11-15 原 D 的三套 benchmark 协议
 
 原 D（c0ac3de）扩展到 benchmark 的 B10-C4（5阶段）、B4-C2（12阶段）和 Joint-26（单阶段）。执行 seed 0/1/2，完整 Validation 和 Test，冻结骨干第9层只向 Person、Face 写回，沿用固定 R1 logits 及30轮最终权重。B5-C3 复用原三 seed。

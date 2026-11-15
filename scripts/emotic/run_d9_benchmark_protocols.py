@@ -104,10 +104,13 @@ def summarize(path, protocol, seed, smoke):
     subprocess.run(command, check=True)
 
 
-def run_phase(root, logs, smoke, slots):
+def run_phase(root, logs, smoke, slots, selected_seeds=SEEDS):
     phase = 'smoke' if smoke else 'formal'
-    seeds = (1,) if smoke else SEEDS
-    groups = [(p, s) for s in seeds for p in PROTOCOLS]
+    seeds = (1,) if smoke else selected_seeds
+    protocols = PROTOCOLS
+    if tuple(selected_seeds) == (1,) and not smoke:
+        protocols = ('b4c2', 'b10c4', 'joint26')
+    groups = [(p, s) for s in seeds for p in protocols]
     pending = []
     running, failed, fused = {}, {}, set()
     for p, s in groups:
@@ -163,11 +166,11 @@ def run_phase(root, logs, smoke, slots):
         raise RuntimeError(f'{phase} incomplete; inspect {phase}_queue.json: {failed}')
 
 
-def summarize_seeds(formal, destination):
+def summarize_seeds(formal, destination, selected_seeds=SEEDS):
     results = {}
     for protocol in PROTOCOLS:
         seeds = {}
-        for seed in SEEDS:
+        for seed in selected_seeds:
             data = load(formal / protocol / f'seed{seed}' / 'benchmark_summary.json')
             seeds[seed] = {split: data['splits'][split]['summary'] for split in ('val', 'test')}
         aggregate = {}
@@ -178,7 +181,7 @@ def summarize_seeds(formal, destination):
                 metrics.append('average_mAP')
             for metric in metrics:
                 values = [record[split][metric] for record in seeds.values()]
-                aggregate[split][metric] = dict(mean=statistics.mean(values), sample_sd=statistics.stdev(values))
+                aggregate[split][metric] = dict(mean=statistics.mean(values), sample_sd=statistics.stdev(values) if len(values) > 1 else None)
         results[protocol] = dict(seeds=seeds, aggregate=aggregate)
     save(destination, results)
 
@@ -194,9 +197,11 @@ def controller(args):
         git = git_metadata(Path.cwd())
         if git['dirty']:
             raise ValueError('Run from the clean experiment worktree')
+        if len(set(args.seeds)) != len(args.seeds):
+            raise ValueError("Seeds must be unique")
         paths = input_paths()
         manifest = dict(git=git, task_sizes={p: list(TASK_PROTOCOLS[p]) for p in PROTOCOLS},
-                seeds=list(SEEDS), branches=list(VIEWS), pretrained=str(paths.clip_checkpoint),
+                seeds=args.seeds, branches=list(VIEWS), pretrained=str(paths.clip_checkpoint),
                 data=str(paths.data_root), face_manifest=str(paths.face_manifest_root), gpu=os.environ['CUDA_VISIBLE_DEVICES'],
                 epochs=30, batch=64, optimizer='Adam', schedule='cosine', weight_decay=0, learning_rate=.0125,
                 adapter_lr=.0004, cross_view_lr=.0004, adapter_scale=.1, patch_layer=9, patch_cap=.05,
@@ -208,10 +213,10 @@ def controller(args):
             raise ValueError('Refusing to mix incompatible runs')
         save(protocol_file, manifest)
         logs = Path('logs/d9_benchmark_protocols') / root.name
-        run_phase(root, logs, True, args.slots)
-        run_phase(root, logs, False, args.slots)
-        summarize_seeds(root / 'formal', root / 'benchmark_results.json')
-        save(root / 'completion.json', dict(status='complete', seeds=list(SEEDS), protocols=list(PROTOCOLS)))
+        run_phase(root, logs, True, args.slots, args.seeds)
+        run_phase(root, logs, False, args.slots, args.seeds)
+        summarize_seeds(root / 'formal', root / 'benchmark_results.json', args.seeds)
+        save(root / 'completion.json', dict(status='complete', seeds=args.seeds, protocols=list(PROTOCOLS)))
 
 
 if __name__ == '__main__':
@@ -220,6 +225,7 @@ if __name__ == '__main__':
     parser.add_argument('--worker', choices=VIEWS)
     parser.add_argument('--protocol', choices=PROTOCOLS)
     parser.add_argument('--seed', type=int, choices=SEEDS)
+    parser.add_argument('--seeds', nargs='+', type=int, choices=SEEDS, default=list(SEEDS))
     parser.add_argument('--slots', type=int, choices=(1,2,3), default=3)
     parser.add_argument('--smoke', action='store_true')
     args = parser.parse_args()
