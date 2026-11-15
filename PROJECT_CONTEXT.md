@@ -1644,3 +1644,5 @@ EMOTIC。当前工作分支以最初的 `feature/clip-vit-b16` 代码为基线�
   `docs/fixed_three_view_seed012_test.md`。
 
 Person 第9层 patch 的3.5%限幅训练在 task3 epoch15 出现3次跳步。原预算结果标记未完成。单独的数值复验从 epoch14 无跳步状态恢复，仅将 AMP loss scale 从4096改为32。
+
+固定e14参数的156批三种精度梯度均有限；AMP32真实第15轮仍只完成154/156步，登记为第二条失败配置。

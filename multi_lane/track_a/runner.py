@@ -978,6 +978,16 @@ def train_task(
     )
     scaler = torch.cuda.amp.GradScaler(enabled=amp)
     fixed_scale = getattr(model, 'r1_fixed_loss_scale', None)
+    require_finite = getattr(model, 'r1_training_fp32', False)
+    if require_finite:
+        parameter_names = {id(p): name for name, p in model.named_parameters()}
+
+    def reject_nonfinite(kind, names):
+        record = dict(task=task_id, epoch=epoch+1, batch_index=optimizer_steps,
+                      completed_updates=completed_task_updates, first_failing_stage=kind, names=names)
+        (model.r1_root / 'nonfinite.json').write_text(json.dumps(record, indent=2))
+        raise FloatingPointError(f'FP32 recovery detected nonfinite values before updating: {record}')
+
     current = list(task_indices(task_id))
     history: List[Dict[str, float]] = []
     completed_task_updates = 0
@@ -1040,6 +1050,8 @@ def train_task(
             optimizer.zero_grad(set_to_none=True)
             with torch.cuda.amp.autocast(enabled=amp):
                 logits = model.current_all_logits(images)
+                if require_finite and not torch.isfinite(logits).all():
+                    reject_nonfinite('forward logits', [])
                 bce_loss = compute_training_loss(
                     logits,
                     current_targets,
@@ -1092,6 +1104,8 @@ def train_task(
                             regularization_metric * regularization_weight
                         )
                 adapter_loss = adapter_base_loss + regularization_loss
+            if require_finite and not (torch.isfinite(model_loss) & torch.isfinite(adapter_loss)):
+                reject_nonfinite('loss', [])
             scale_before = float(scaler.get_scale())
             backward_routed_training_losses(
                 model_loss=model_loss,
@@ -1104,6 +1118,12 @@ def train_task(
                     and adapter_regularization == "none"
                 ),
             )
+            if require_finite:
+                parameters = (*model_parameters, *adapter_parameters)
+                good = torch.stack([torch.isfinite(p.grad).all() for p in parameters])
+                if not good.all():
+                    bad = [parameter_names[id(p)] for p, finite in zip(parameters, good.tolist()) if not finite]
+                    reject_nonfinite('gradient', bad)
             scaler.step(optimizer)
             scaler.update()
             if float(scaler.get_scale()) >= scale_before:
@@ -1380,6 +1400,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--r1-task-pool-cap', type=float)
     parser.add_argument('--r1-disable-frozen-patch', action='store_true')
     parser.add_argument('--r1-fixed-loss-scale', type=float)
+    parser.add_argument('--r1-training-fp32', action='store_true')
     parser.add_argument('--r1-recovery-source', type=Path)
     parser.add_argument('--r1-fusion-readout',choices=('probability','logit'),default='probability')
     parser.add_argument('--r1-smoke-eval-samples',type=int)
@@ -1487,11 +1508,15 @@ def main() -> None:
             args.r1_frozen_mode is None or not math.isfinite(args.r1_fixed_loss_scale)
             or args.r1_fixed_loss_scale <= 0):
         raise ValueError('Fixed loss scaling requires a positive finite frozen-receiver scale')
+    if args.r1_training_fp32 and (args.r1_recovery_source is None or args.r1_fixed_loss_scale is not None
+                                  or args.r1_frozen_mode != 'patch' or args.no_amp):
+        raise ValueError('D9 FP32 recovery uses unscaled training and standard AMP evaluation')
     if args.r1_recovery_source is not None:
         original_cls = args.r1_frozen_mode == 'image_cls' and args.r1_exchange_layer == 5
         cap035 = (args.r1_frozen_mode == 'patch' and args.r1_exchange_layer == 8
-                  and args.r1_frozen_cap == .035 and args.r1_fixed_loss_scale == 32)
-        if args.r1_view != 'person' or args.r1_fixed_loss_scale is None or not (original_cls or cap035):
+                  and args.r1_frozen_cap == .035
+                  and (args.r1_fixed_loss_scale == 32 or args.r1_training_fp32))
+        if args.r1_view != 'person' or not (original_cls or cap035) or (original_cls and args.r1_fixed_loss_scale is None):
             raise ValueError('Unrecognized Person external recovery configuration')
     if args.r1_frozen_mode is not None and (
             args.r1_kind != 'attention' or args.r1_view not in ('person', 'face')
@@ -1688,6 +1713,7 @@ def main() -> None:
     ).float().to(device)
     model.visual_encoder.requires_grad_(False)
     model.r1_fixed_loss_scale = args.r1_fixed_loss_scale
+    model.r1_training_fp32 = args.r1_training_fp32
     model.assert_visual_frozen()
     lane_parameters = model.selectors.numel() + sum(p.numel() for p in model.prompts)
     classifier_parameters = sum(p.numel() for p in model.head.parameters())
@@ -2116,6 +2142,8 @@ def main() -> None:
                     r1_exchange_layers=list(model.frozen_cross_layers),
                     r1_cap_reference='0.025 * detached_pre_injection_image_CLS_norm at each site',
                     r1_exchange_site='after each configured Frozen block, before the next Summarize')
+            if args.r1_training_fp32:
+                config['r1_training_precision'] = 'fp32_from_task3_epoch15_amp_evaluation'
             if args.r1_fixed_loss_scale is not None:
                 config.update(r1_fixed_loss_scale=args.r1_fixed_loss_scale,
                     r1_loss_scale_growth_interval=1000000000)
@@ -2228,7 +2256,7 @@ def main() -> None:
         history = train_task(
             model, train_loader, val_loader, device, task_id,
             args.epochs, learning_rate, args.weight_decay,
-            args.temperature, amp,
+            args.temperature, amp and not args.r1_training_fp32,
             adapter_learning_rate=args.adapter_learning_rate,
             adapter_weight_decay=args.adapter_weight_decay,
             selector_condition_learning_rate=args.selector_condition_learning_rate,
