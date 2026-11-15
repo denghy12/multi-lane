@@ -1,3 +1,7 @@
+## 2026-11-16 seed1 跨协议并行
+
+原GPU0主队列继续运行，另调度待跑的轻量Full和交互分支，复用同一输出及每分支独占锁。GPU1–7仅在持续30秒没有计算进程且低占用时接收新分支。检查 formal_queue.json 和 backfill_queue.json 以及三个协议的双划分结果。
+
 ## 2026-11-16 D benchmark 仅运行 seed1
 
 本批三协议正式训练限定为 seed1，队列仅在 GPU0 上执行 B4-C2、B10-C4 和 Joint-26 的九条分支，优先 B4-C2。旧批次的 seed0 产物保存在原处，seed2 不再排队。使用原30轮配方和完整双划分评估。单次 seed 的标准差留空。新批次输出 output/d9_benchmark_protocols/seed1_20261116。

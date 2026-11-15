@@ -92,6 +92,20 @@ def branch_run(root, protocol, seed, view, smoke):
          epochs_per_task=None if smoke else 30, updates=updates, skips=0, smoke=smoke))
 
 
+def locked_branch(root, protocol, seed, view, smoke):
+    directory = root / view
+    directory.mkdir(parents=True, exist_ok=True)
+    with (directory / 'worker.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        done = directory / 'complete.json'
+        if done.exists():
+            record = load(done)
+            if (record['protocol'], record['seed'], record['view'], record['smoke']) != (protocol, seed, view, smoke):
+                raise ValueError(f'Completion marker does not match worker: {done}')
+            return
+        branch_run(root, protocol, seed, view, smoke)
+
+
 def seed_dir(root, protocol, seed, smoke):
     return root / ('smoke' if smoke else 'formal') / protocol / f'seed{seed}'
 
@@ -230,6 +244,6 @@ if __name__ == '__main__':
     parser.add_argument('--smoke', action='store_true')
     args = parser.parse_args()
     if args.worker:
-        branch_run(args.root, args.protocol, args.seed, args.worker, args.smoke)
+        locked_branch(args.root, args.protocol, args.seed, args.worker, args.smoke)
     else:
         controller(args)
