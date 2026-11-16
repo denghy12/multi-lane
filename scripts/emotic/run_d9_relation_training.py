@@ -224,13 +224,15 @@ def train_epoch(model, source, indices, task, epoch, config, primary, adapters, 
 
 def train(args):
     root = args.output
+    os.environ.setdefault('CUBLAS_WORKSPACE_CONFIG', ':4096:8')
+    torch.use_deterministic_algorithms(True)
     inputs = input_paths()
     precision = args.precision
     if precision == 'auto':
         precision = 'bf16' if torch.cuda.is_bf16_supported() else 'fp32'
     if precision == 'bf16' and not torch.cuda.is_bf16_supported():
         raise ValueError('This GPU does not support BF16')
-    config = dict(version=1, mode=args.mode, seed=1, epochs=1 if args.smoke else 30,
+    config = dict(version=2, deterministic_algorithms=True, mode=args.mode, seed=1, epochs=1 if args.smoke else 30,
                   tasks=2 if args.smoke else len(TASK_SIZES), batch_size=4 if args.smoke else 64,
                   micro_batch_size=args.micro_batch_size, workers=args.workers, gate_lr=.0004,
                   precision=precision, smoke=args.smoke, clip_checkpoint=str(inputs.clip_checkpoint),

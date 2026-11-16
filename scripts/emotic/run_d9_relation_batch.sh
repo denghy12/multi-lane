@@ -6,6 +6,7 @@ device=${2:?supply physical GPU number}
 shift 2
 if [[ "$phase" != smoke && "$phase" != formal ]] || (( $# == 0 )); then exit 2; fi
 export CUDA_VISIBLE_DEVICES="$device"
+export CUBLAS_WORKSPACE_CONFIG=:4096:8 PYTHONHASHSEED=1
 export OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 OPENBLAS_NUM_THREADS=1
 py=${PYTHON:-python}
 root=output/d9_relation_logit/seed1_20261116

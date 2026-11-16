@@ -120,6 +120,8 @@ def write_json(path, payload):
 
 
 def evaluate(root, split, batch_size, workers, smoke, device):
+    os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+    torch.use_deterministic_algorithms(True)
     from multi_lane.track_a.d9_joint_data import build_joint_source
     from scripts.emotic.run_d9_relation_training import load_evaluation_model
     from scripts.emotic.run_r1_frozen_cross_view import input_paths

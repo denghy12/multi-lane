@@ -17,3 +17,5 @@ Full 的相对分数为零。两个可学习组从相同固定比例出发，经
 Linux 入口为 `bash scripts/emotic/run_d9_relation_batch.sh smoke|formal GPU MODE...`，各模式见表。输入为 `../multi-lane-main/datasets/EMOTIC`、`../CODE_DDP/pretrained/clip/ViT-B-16.pt` 和 `../emotic_benchmark_runs` 中原配方及人脸 manifest。输出为 `output/d9_relation_logit/seed1_20261116`，日志为 `logs/d9_relation_logit/seed1_20261116`。训练产物按阶段保存，先验收两任务快速运行及真实数据读出。
 
 GPU0 真实 64 人训练批的预检中，微批 16、32、64 的第二次更新时间约 0.88、0.50、0.35 秒。正式使用整批 64，三组同时运行；该测速没有包含整轮读取数据、存盘和两进程同时占用同一卡的时间。两接收分支复用同次前向的 Full 冻结发送 patch。
+
+复现检查发现，相同 seed 和完全相同图像仍可能得到不同的 BF16 初始预测。三组正式训练统一使用 PyTorch 确定性算法、CUBLAS_WORKSPACE_CONFIG=:4096:8、PYTHONHASHSEED=1。相互独立进程的真实快测在 task0、task1 得到逐值相同的三路和融合模块参数。
