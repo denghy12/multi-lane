@@ -4,6 +4,7 @@ Only the receiving stream retains input gradients. The CLIP weights and the
 two sending streams remain frozen. Old task modules never change.
 """
 from pathlib import Path
+import math
 import hashlib
 import torch
 from torch import nn
@@ -29,7 +30,9 @@ class FrozenCrossAgent(nn.Module):
         self.diagnostic_enabled = False
         self.last_diagnostic = None
 
-    def forward(self, tokens, memories, masks):
+    def forward(self, tokens, memories, masks, *, return_full_relation=False):
+        """Optionally return a differentiable relation to the first (Full) sender."""
+
         with torch.autocast(device_type=tokens.device.type, enabled=False):
             own = tokens.float()
             cls = F.layer_norm(own[:, :1], (own.shape[-1],))
@@ -48,6 +51,20 @@ class FrozenCrossAgent(nn.Module):
                 *[mask[:, None].expand(-1, src.shape[1]) for mask, src in zip(masks, sources)]], 1)
             scores = (q @ k.transpose(-2, -1)) * head_width ** -.5
             attention = scores.masked_fill(~valid[:, None, None], float('-inf')).softmax(-1)
+            if return_full_relation:
+                # Full is always the first sender of a Person/Face receiver.
+                # Condition on Full patches to measure alignment separately
+                # from Full's mass relative to the other memory sources.
+                full = slice(1, 1 + sources[0].shape[1])
+                full_scores = scores[..., full]
+                within_full = full_scores.softmax(-1)
+                entropy = -(within_full * within_full.clamp_min(1e-30).log()).sum(-1)
+                concentration = 1.0 - entropy / math.log(max(sources[0].shape[1], 2))
+                key_alignment = F.cosine_similarity(q, within_full @ k[:, :, full], dim=-1, eps=1e-6)
+                value_alignment = F.cosine_similarity(
+                    split(self.v(query)), within_full @ v[:, :, full], dim=-1, eps=1e-6)
+                per_patch = (attention[..., full].sum(-1), concentration, key_alignment, value_alignment)
+                relation = torch.stack([item.mean(dim=(1, 2)) for item in per_patch], dim=-1)
             context = (attention @ v).transpose(1, 2).reshape(batch, -1, self.dim)
             raw = self.out(context)
             reference = own[:, :1].detach().norm(dim=(1, 2)).clamp_min(1e-8)
@@ -76,7 +93,8 @@ class FrozenCrossAgent(nn.Module):
                         sequence_relative_change=float((delta.norm(dim=(1, 2))/own.detach().norm(dim=(1, 2)).clamp_min(1e-8)).mean()),
                         max_token_relative_change=float(token_ratio.max()),
                         mean_token_relative_change=float(token_ratio.mean()))
-        return tokens + delta.to(tokens.dtype)
+        updated = tokens + delta.to(tokens.dtype)
+        return (updated, relation) if return_full_relation else updated
 
 
 class FrozenR1Receiver(R1Receiver):
@@ -223,8 +241,12 @@ class FrozenR1Receiver(R1Receiver):
             history[-1]['cuda_peak_reserved_mib'] = torch.cuda.max_memory_reserved()/1024**2
         super().save_training_epoch(task, epoch, history, optimizer, scheduler, scaler, updates)
 
-    def encode_lanes(self, images, all_seen_lanes):
+    def encode_lanes(self, images, all_seen_lanes, *, full_relations=None):
         own = images['full'] if isinstance(images, dict) else images
+        if full_relations is not None and (
+                not self.r1_enabled or self.frozen_cross_mode != 'patch'
+                or self.frozen_cross_active_layers != (self.r1_layer,)):
+            raise ValueError('Full relation readout requires an active single patch site')
         if not self.r1_enabled:
             return super().encode_lanes(own, all_seen_lanes)
         if not isinstance(images, dict):
@@ -272,7 +294,12 @@ class FrozenR1Receiver(R1Receiver):
         for i, task in enumerate(lanes):
             stream = tokens
             if self.r1_layer in sites:
-                stream = self.cross_agent(task, self.r1_layer)(stream, memories[self.r1_layer], masks)
+                agent = self.cross_agent(task, self.r1_layer)
+                if full_relations is None:
+                    stream = agent(stream, memories[self.r1_layer], masks)
+                else:
+                    stream, full_relations[task] = agent(
+                        stream, memories[self.r1_layer], masks, return_full_relation=True)
             lane = state[i:i+1]
             for layer in range(prefix_end+1, len(blocks)):
                 block = blocks[layer]
