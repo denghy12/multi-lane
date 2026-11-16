@@ -1,5 +1,6 @@
 import copy
 import unittest
+from unittest.mock import patch
 
 import torch
 
@@ -87,6 +88,26 @@ class RelationTests(unittest.TestCase):
         w = torch.repeat_interleave(xx['weights'], torch.tensor([2, 1]), dim=1)
         torch.testing.assert_close(xx['fused'], (torch.stack(ys, dim=-1) * w).sum(dim=-1))
         torch.testing.assert_close(model(inputs)['fused'], xx['fused'][:, -1:])
+
+        with torch.no_grad():
+            for view in ('person', 'face'):
+                model.gates[1].scorers[view][-1].weight.fill_(.1)
+                model.branches[view].cross_agent(1, 0).out.weight.uniform_(-.3, .3)
+        # Equal weights in two distinct CLIP instances: the first run can't reuse.
+        ys = model(inputs)['fused']
+        ys.sum().backward()
+        gradients = {n: p.grad.clone() for n, p in model.named_parameters() if p.grad is not None}
+        model.zero_grad(set_to_none=True)
+        model.branches['face'].visual_encoder = model.branches['person'].visual_encoder
+        face = model.branches['face']
+        with patch.object(face, '_sender_patches', wraps=face._sender_patches) as encode:
+            replay = model(inputs)['fused']
+            self.assertEqual(encode.call_count, 1)  # Face only computes its Person sender.
+        self.assertTrue(torch.equal(replay, ys))
+        replay.sum().backward()
+        for n, p in model.named_parameters():
+            if n in gradients:
+                self.assertTrue(torch.equal(p.grad, gradients[n]), n)
 
 
 if __name__ == '__main__':

@@ -15,3 +15,5 @@ Full 的相对分数为零。两个可学习组从相同固定比例出发，经
 8×30 轮，batch 64（同一批人物可拆为多个微批累计），Adam，cosine，衰减 0；主参数学习率 0.0125，Adapter、跨视图交互、比例网络学习率 0.0004。微批内 FP32 计算关联及损失，主前向 BF16 autocast。完整协议和实际状态以各组 config、日志和 checkpoint 为准。固定评估两 split 的 8 阶段最终 mAP 和阶段平均 mAP、可靠／不可靠人群、单路表现和同群人物的比例置换。历史参考为 Validation 44.0329／51.1335、Test 33.1770／40.2083。
 
 Linux 入口为 `bash scripts/emotic/run_d9_relation_batch.sh smoke|formal GPU MODE...`，各模式见表。输入为 `../multi-lane-main/datasets/EMOTIC`、`../CODE_DDP/pretrained/clip/ViT-B-16.pt` 和 `../emotic_benchmark_runs` 中原配方及人脸 manifest。输出为 `output/d9_relation_logit/seed1_20261116`，日志为 `logs/d9_relation_logit/seed1_20261116`。训练产物按阶段保存，先验收两任务快速运行及真实数据读出。
+
+GPU0 真实 64 人训练批的预检中，微批 16、32、64 的第二次更新时间约 0.88、0.50、0.35 秒。正式使用整批 64，三组同时运行；该测速没有包含整轮读取数据、存盘和两进程同时占用同一卡的时间。两接收分支复用同次前向的 Full 冻结发送 patch。

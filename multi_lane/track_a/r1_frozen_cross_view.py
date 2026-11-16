@@ -241,7 +241,17 @@ class FrozenR1Receiver(R1Receiver):
             history[-1]['cuda_peak_reserved_mib'] = torch.cuda.max_memory_reserved()/1024**2
         super().save_training_epoch(task, epoch, history, optimizer, scheduler, scaler, updates)
 
-    def encode_lanes(self, images, all_seen_lanes, *, full_relations=None):
+    @torch.no_grad()
+    def _sender_patches(self, image, blocks, sites):
+        source = self._visual_tokens(image)
+        patches = {}
+        for layer, block in enumerate(blocks[:max(sites) + 1]):
+            source = block(source.permute(1, 0, 2)).permute(1, 0, 2)
+            if layer in sites:
+                patches[layer] = source[:, 1:].detach()
+        return patches
+
+    def encode_lanes(self, images, all_seen_lanes, *, full_relations=None, full_sender_cache=None):
         own = images['full'] if isinstance(images, dict) else images
         if full_relations is not None and (
                 not self.r1_enabled or self.frozen_cross_mode != 'patch'
@@ -266,11 +276,15 @@ class FrozenR1Receiver(R1Receiver):
             for view in VIEWS:
                 if view == self.r1_view:
                     continue
-                source = self._visual_tokens(images['evidence_' + view])
-                for layer, block in enumerate(blocks[:max(evidence_sites)+1]):
-                    source = block(source.permute(1, 0, 2)).permute(1, 0, 2)
-                    if layer in memories:
-                        memories[layer].append(source[:, 1:].detach())
+                if view == 'full' and full_sender_cache is not None:
+                    if not evidence_sites.issubset(full_sender_cache):
+                        full_sender_cache.update(self._sender_patches(
+                            images['evidence_full'], blocks, evidence_sites))
+                    patches = full_sender_cache
+                else:
+                    patches = self._sender_patches(images['evidence_' + view], blocks, evidence_sites)
+                for site in evidence_sites:
+                    memories[site].append(patches[site])
                 valid = (images['evidence_face_reliable'].bool() if view == 'face'
                          else torch.ones(len(own), dtype=torch.bool, device=own.device))
                 if self.frozen_cross_evidence == 'full' and view != 'full':

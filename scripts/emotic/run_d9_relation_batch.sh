@@ -11,7 +11,7 @@ py=${PYTHON:-python}
 root=output/d9_relation_logit/seed1_20261116
 logs=logs/d9_relation_logit/seed1_20261116
 extra=()
-micro=${D9_MICRO_BATCH:-8}
+micro=${D9_MICRO_BATCH:-64}
 workers=${D9_WORKERS:-2}
 if [[ "$phase" == smoke ]]; then
     root="$root/smoke"

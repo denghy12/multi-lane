@@ -85,6 +85,10 @@ class D9RelationFusion(nn.Module):
         lanes = list(range(current + 1)) if all_seen else [current]
         reliable = inputs['evidence_face_reliable'].reshape(-1).bool()
         lane_logits, relations = {}, {'person': {}, 'face': {}}
+        # The same batch's deterministic Full sender passes through the same
+        # frozen CLIP in both receivers. Share only raw detached sender patches.
+        shared_tower = self.branches['person'].visual_encoder is self.branches['face'].visual_encoder
+        full_sender_cache = {} if shared_tower else None
         for view in VIEWS:
             branch = self.branches[view]
             if view == 'full':
@@ -93,7 +97,8 @@ class D9RelationFusion(nn.Module):
                 # Receivers use "full" as the historical key for their own pixels.
                 own_inputs = {**inputs, 'full': inputs[view]}
                 capture = relations[view] if self.mode == 'person' else None
-                features = branch.encode_lanes(own_inputs, all_seen, full_relations=capture)
+                features = branch.encode_lanes(own_inputs, all_seen, full_relations=capture,
+                                               full_sender_cache=full_sender_cache)
                 lane_logits[view] = branch.head(features)
 
         weights, fused = [], []
