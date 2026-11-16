@@ -1,3 +1,7 @@
+## 2026-11-16 第9层中间关联预测最终 logits 比例，正式启动
+
+从三组各自 evaluation/{val,test}/result.json 比较八阶段最终和阶段平均，以及可靠／不可靠人群、权重置换和同模型换回固定比例。完成后将正式结果与日志同步到本地。 分支 exp/d9-person-relation-logit-20261116，输出 output/d9_relation_logit/seed1_20261116/。
+
 ## 2026-11-16 第9层关联驱动最终融合比例
 
 验收可靠性屏蔽、同任务梯度和旧任务冻结；运行三组并比较同流程固定、任务级和样本级结果，检查同群比例置换。 见 docs/d9_relation_logit_protocol_20261116.md。

@@ -1,3 +1,7 @@
+## 2026-11-16 第9层中间关联预测最终 logits 比例，正式启动
+
+三组共用同一完整 TRAIN 联合训练协议、同一融合 BCE、有效 batch64。fixed 固定；static 学每任务相对分数；person 从第9层两条与 Full 的关联预测目标人物权重。推理时加权三路原始 logits。正式训练代码 2f1e9c8，独立训练的历史 D9 作为外部参照。 分支 exp/d9-person-relation-logit-20261116，输出 output/d9_relation_logit/seed1_20261116/。
+
 ## 2026-11-16 第9层关联驱动最终融合比例
 
 基于 674b647 开发固定、任务级、样本级三种共同训练读出。独立 Frozen9 强参照复用，三组从 CLIP 起步，完整 TRAIN 更新，8 阶段双 split 评价。 见 docs/d9_relation_logit_protocol_20261116.md。

@@ -1,3 +1,7 @@
+## 2026-11-16 第9层中间关联预测最终 logits 比例，正式启动
+
+GPU0 同时启动 fixed、person，GPU1 启动 static。两任务小样本训练和 Validation／Test 已完成，不可靠 Face 权重严格为零。两独立进程复核了确定性策略修复，task0／1 的三路和融合参数逐值一致。 分支 exp/d9-person-relation-logit-20261116，输出 output/d9_relation_logit/seed1_20261116/。
+
 ## 2026-11-16 第9层关联驱动最终融合比例
 
 实现同一人物三视图载入、第 9 层关联到最终 logits 的比例学习和联合训练／评估。快测和正式训练分目录记录。 见 docs/d9_relation_logit_protocol_20261116.md。
