@@ -64,7 +64,7 @@ def deranged_targets(target, valid, reliable, seed):
     for condition in (False, True):
         rows = torch.where(reliable == condition)[0]
         if len(rows) < 2:
-            usable[rows] = False
+            usable = usable & (reliable != condition)[:, None]
             continue
         order = torch.randperm(len(rows), generator=generator).to(rows.device)
         shuffled = rows[order]

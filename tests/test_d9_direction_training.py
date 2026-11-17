@@ -76,6 +76,21 @@ class DirectionTrainingTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             deranged_targets(targets[:2], valid[:2], torch.tensor([True, False]), 54)
 
+    @unittest.skipUnless(torch.cuda.is_available(), 'CUDA determinism regression')
+    def test_singleton_mask_on_deterministic_cuda(self):
+        with torch.random.fork_rng():
+            original = torch.are_deterministic_algorithms_enabled()
+            torch.use_deterministic_algorithms(True)
+            try:
+                for bits in ([True, True, True, False], [False] * 4):
+                    reliable = torch.tensor(bits, device='cuda')
+                    valid = torch.stack((torch.ones_like(reliable), reliable), 1)
+                    labels = valid.float()
+                    _, used, _ = deranged_targets(labels, valid, reliable, 12)
+                    self.assertEqual(used.sum().item(), 6 if bits[0] else 4)
+            finally:
+                torch.use_deterministic_algorithms(original)
+
     def test_direction_adam_clock_resume_and_microbatch(self):
         torch.manual_seed(23)
         model = nn.Linear(4, 2, bias=False)
