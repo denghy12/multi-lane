@@ -1,3 +1,7 @@
+## 2026-11-17 同轨迹四读出实验
+
+比较固定、任务常量、D9 关联、Task10 摘要。全量 TRAIN 同期更新三路及三个互不影响的门控；严格核验保护组重放。 见 docs/d9_protected_gates_protocol_20261117.md。
+
 ## 2026-11-17 三视图固定比例保护对照在 GPU0 启动
 
 独立分支 exp/d9-protected-fixed-20261117，训练代码 3166b13。复用原共同组批 fixed；唯一配置差异为 protect_branches=True。 结果 output/d9_protected_fixed/seed1_20261117/fixed。

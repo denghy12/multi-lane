@@ -1,3 +1,7 @@
+## 2026-11-17 同轨迹四读出实验
+
+检查真实两任务快测、分支与固定 logits 重放；八阶段 Validation/Test 同时报本人、组均值及置换结果。 见 docs/d9_protected_gates_protocol_20261117.md。
+
 ## 2026-11-17 三视图固定比例保护对照在 GPU0 启动
 
 等八阶段两 split 正式结果，检查 Person、融合减 Full、固定比例强基线。第二阶段候选为截断两条融合梯度的同期训练，再比较中间三视图内容、关联统计和任务常量。 结果 output/d9_protected_fixed/seed1_20261117/fixed。
