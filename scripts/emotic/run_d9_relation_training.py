@@ -118,10 +118,11 @@ def optimizer_for_task(model, config, task):
     return primary, adapters, optimizer, scheduler
 
 
-def losses(outputs, labels, valid, total_rows, valid_rows, classes):
+def losses(outputs, labels, valid, total_rows, valid_rows, classes, *, protect_branches=False):
     # Normalize each loss by its cohort over the entire logical batch. Gradients
     # of the accumulated microbatches then equal gradients of the unsplit batch.
-    fused = F.binary_cross_entropy_with_logits(outputs['fused'].float(), labels) * (len(labels) / total_rows)
+    fused_logits = outputs['fused'].detach() if protect_branches else outputs['fused']
+    fused = F.binary_cross_entropy_with_logits(fused_logits.float(), labels) * (len(labels) / total_rows)
     branch_bce, adapter_asl = [], []
     for view in VIEWS:
         logits, target = outputs['all_columns'][view], labels
@@ -153,7 +154,10 @@ def update_batch(model, batch, classes, config, primary, adapters, optimizer, pr
         target = labels[start:stop].cuda(non_blocking=True).float()
         with torch.autocast('cuda', dtype=dtype) if precision != 'fp32' else nullcontext():
             outputs = model(piece)
-            fused, bce, asl = losses(outputs, target, piece['face_training_valid'], count, valid_count, classes)
+            fused, bce, asl = losses(
+                outputs, target, piece['face_training_valid'], count, valid_count, classes,
+                protect_branches=config.get('protect_branches', False),
+            )
         # backward(inputs=...) accumulates into .grad across all microbatches.
         torch.autograd.backward((bce + fused) * scale, inputs=primary, retain_graph=True)
         torch.autograd.backward((asl + fused) * scale, inputs=adapters)
@@ -237,6 +241,8 @@ def train(args):
                   micro_batch_size=args.micro_batch_size, workers=args.workers, gate_lr=.0004,
                   precision=precision, smoke=args.smoke, clip_checkpoint=str(inputs.clip_checkpoint),
                   branches=branch_configs(inputs))
+    if args.protect_branches:
+        config['protect_branches'] = True
     if (root/'config.json').exists() and read(root/'config.json') != config:
         raise ValueError('Existing experiment has a different configuration')
     write(root/'config.json', config)
@@ -299,12 +305,16 @@ def train(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--mode', required=True, choices=('fixed', 'static', 'person'))
+    parser.add_argument('--protect-branches', action='store_true',
+                        help='Fixed readout control: record fused BCE without training the branches on it.')
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--micro-batch-size', type=int, default=8)
     parser.add_argument('--workers', type=int, default=4)
     parser.add_argument('--precision', choices=('auto', 'bf16', 'fp32', 'fp16'), default='auto')
     parser.add_argument('--smoke', action='store_true')
     args = parser.parse_args()
+    if args.protect_branches and args.mode != 'fixed':
+        parser.error('--protect-branches requires the fixed readout')
     if args.micro_batch_size < 1 or args.workers < 0:
         parser.error('micro-batch-size must be positive; workers must be nonnegative')
     args.output.mkdir(parents=True, exist_ok=True)

@@ -11,6 +11,13 @@ export OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 OPENBLAS_NUM_THREADS=1
 py=${PYTHON:-python}
 root=output/d9_relation_logit/seed1_20261116
 logs=logs/d9_relation_logit/seed1_20261116
+train_options=()
+if [[ $# == 1 && $1 == fixed_protected ]]; then
+    root=output/d9_protected_fixed/seed1_20261117
+    logs=logs/d9_protected_fixed/seed1_20261117
+    train_options+=(--protect-branches)
+    set -- fixed
+fi
 extra=()
 micro=${D9_MICRO_BATCH:-64}
 workers=${D9_WORKERS:-2}
@@ -26,7 +33,7 @@ for mode in "$@"; do
     (
         echo "Starting $mode ($phase), GPU=$device, git=$(git rev-parse HEAD), microbatch=$micro"
         "$py" -u -m scripts.emotic.run_d9_relation_training --mode "$mode" --output "$group" \
-            --micro-batch-size "$micro" --workers "$workers" --precision bf16 "${extra[@]}"
+            --micro-batch-size "$micro" --workers "$workers" --precision bf16 "${train_options[@]}" "${extra[@]}"
         for split in val test; do
             "$py" -u -m scripts.emotic.evaluate_d9_relation --root "$group" --split "$split" \
                 --batch-size "$micro" --workers "$workers" "${extra[@]}"

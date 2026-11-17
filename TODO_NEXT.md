@@ -1,3 +1,7 @@
+## 2026-11-17 固定读出下保护三分支的对照
+
+先比较 Person 单路与融合减自身 Full，再决定是否在分支受保护的同轨迹上比较任务级、关联量和三视图内容门控。 详见 docs/d9_protected_fusion_20261117.md。
+
 ## 2026-11-16 第9层中间关联预测最终 logits 比例，正式启动
 
 从三组各自 evaluation/{val,test}/result.json 比较八阶段最终和阶段平均，以及可靠／不可靠人群、权重置换和同模型换回固定比例。完成后将正式结果与日志同步到本地。 分支 exp/d9-person-relation-logit-20261116，输出 output/d9_relation_logit/seed1_20261116/。

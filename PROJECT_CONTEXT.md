@@ -1,3 +1,7 @@
+## 2026-11-17 固定读出下保护三分支的对照
+
+复用 20261116 fixed，新组共同组批、前向和固定读出相同，去除融合 BCE 对主参数和 Adapter 的梯度。 详见 docs/d9_protected_fusion_20261117.md。
+
 ## 2026-11-16 第9层中间关联预测最终 logits 比例，正式启动
 
 三组共用同一完整 TRAIN 联合训练协议、同一融合 BCE、有效 batch64。fixed 固定；static 学每任务相对分数；person 从第9层两条与 Full 的关联预测目标人物权重。推理时加权三路原始 logits。正式训练代码 2f1e9c8，独立训练的历史 D9 作为外部参照。 分支 exp/d9-person-relation-logit-20261116，输出 output/d9_relation_logit/seed1_20261116/。
