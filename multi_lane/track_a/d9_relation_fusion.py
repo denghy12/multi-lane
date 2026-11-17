@@ -8,6 +8,22 @@ from torch import nn
 from .r1_crossvit import VIEWS
 
 
+READOUTS = ('fixed', 'static', 'relation', 'summary')
+
+
+def view_weights(odds, reliable):
+    full = odds.new_zeros(len(reliable))
+    face = odds[:, 1].masked_fill(~reliable, -torch.inf)
+    return torch.stack((full, odds[:, 0], face), dim=-1).softmax(dim=-1)
+
+
+def fuse_view_logits(scores, weights, reliable):
+    # A missing Face can have a placeholder score. Exclude even a non-finite value.
+    face = torch.where(reliable[:, None], scores[:, 2], 0.0)
+    return (weights[:, 0:1] * scores[:, 0] + weights[:, 1:2] * scores[:, 1]
+            + weights[:, 2:3] * face)
+
+
 class RelationGate(nn.Module):
     """Native R1 priors plus optional task and per-person log-odds corrections."""
 
@@ -38,9 +54,35 @@ class RelationGate(nn.Module):
                 correction = torch.cat((self.scorers['person'](person_relation.float()),
                                         self.scorers['face'](face_relation.float())), dim=-1)
                 odds = odds + correction
-            full = odds.new_zeros(len(reliable))
-            face = odds[:, 1].masked_fill(~reliable, -torch.inf)
-            return torch.stack((full, odds[:, 0], face), dim=-1).softmax(dim=-1)
+            return view_weights(odds, reliable)
+
+
+class SummaryGate(nn.Module):
+    """Predict per-person view log-odds from the three actual Task10 summaries."""
+
+    def __init__(self, width):
+        super().__init__()
+        hidden = 8
+        self.projections = nn.ModuleDict({view: nn.Linear(width, hidden) for view in VIEWS})
+        self.readout = nn.Sequential(nn.Linear(len(VIEWS) * hidden + 1, hidden), nn.Tanh(),
+                                     nn.Linear(hidden, 2))
+        self.register_buffer('prior', torch.tensor([math.log(.16 / .64), math.log(.20 / .64)]))
+        nn.init.zeros_(self.readout[-1].weight)
+        nn.init.zeros_(self.readout[-1].bias)
+
+    def forward(self, reliable, summaries):
+        with torch.autocast(device_type=reliable.device.type, enabled=False):
+            projected = []
+            for view in VIEWS:
+                value = summaries[view].detach().float()
+                if view == 'face':
+                    value = torch.where(reliable[:, None], value, 0.0)
+                feature = self.projections[view](value).tanh()
+                if view == 'face':
+                    feature = torch.where(reliable[:, None], feature, 0.0)
+                projected.append(feature)
+            descriptor = torch.cat([*projected, reliable[:, None].float()], dim=1)
+            return view_weights(self.prior + self.readout(descriptor), reliable)
 
 
 class D9RelationFusion(nn.Module):
@@ -57,7 +99,19 @@ class D9RelationFusion(nn.Module):
             raise ValueError('View task partitions differ')
         # Constructing a scorer must not alter subsequent model or data RNG draws.
         with torch.random.fork_rng(devices=[]):
-            self.gates = nn.ModuleList(RelationGate(mode) for _ in self.task_sizes)
+            if mode == 'multi':
+                # Draw all relation scorers first to replay the original relation initialization.
+                relations = [RelationGate('person') for _ in self.task_sizes]
+                if any(self.branches[v].r1_layer != 8 for v in ('person', 'face')):
+                    raise ValueError('Protected multi readouts require both patch receivers at block 9')
+                if any(len(branch.visual_encoder.transformer.resblocks) < 10 for branch in branches.values()):
+                    raise ValueError('Protected multi readouts require a tenth Task Forward block')
+                self.gates = nn.ModuleList(nn.ModuleDict({
+                    'fixed': RelationGate('fixed'), 'static': RelationGate('static'),
+                    'relation': relation, 'summary': SummaryGate(self.branches['full'].width),
+                }) for relation in relations)
+            else:
+                self.gates = nn.ModuleList(RelationGate(mode) for _ in self.task_sizes)
         self._configure_gates(self.current_task_id)
 
     @property
@@ -85,35 +139,56 @@ class D9RelationFusion(nn.Module):
         lanes = list(range(current + 1)) if all_seen else [current]
         reliable = inputs['evidence_face_reliable'].reshape(-1).bool()
         lane_logits, relations = {}, {'person': {}, 'face': {}}
+        multi = self.mode == 'multi'
+        pooled = {v: {} for v in VIEWS} if multi else None
         # The same batch's deterministic Full sender passes through the same
         # frozen CLIP in both receivers. Share only raw detached sender patches.
         shared_tower = self.branches['person'].visual_encoder is self.branches['face'].visual_encoder
         full_sender_cache = {} if shared_tower else None
         for view in VIEWS:
             branch = self.branches[view]
+            summary_args = dict(summary_layer=9, pooled_summaries=pooled[view]) if multi else {}
             if view == 'full':
-                lane_logits[view] = branch.lane_logits(inputs['full'], all_seen)
+                if multi:
+                    lane_logits[view] = branch.head(branch.encode_lanes(inputs['full'], all_seen, **summary_args))
+                else:
+                    lane_logits[view] = branch.lane_logits(inputs['full'], all_seen)
             else:
                 # Receivers use "full" as the historical key for their own pixels.
                 own_inputs = {**inputs, 'full': inputs[view]}
-                capture = relations[view] if self.mode == 'person' else None
+                capture = relations[view] if multi or self.mode == 'person' else None
                 features = branch.encode_lanes(own_inputs, all_seen, full_relations=capture,
-                                               full_sender_cache=full_sender_cache)
+                                               full_sender_cache=full_sender_cache,
+                                               detach_relation=multi, **summary_args)
                 lane_logits[view] = branch.head(features)
 
-        weights, fused = [], []
+        names = READOUTS if multi else (self.mode,)
+        all_weights = {name: [] for name in names}
+        all_fused = {name: [] for name in names}
         outputs = {view: [] for view in VIEWS}
         for lane, task in enumerate(lanes):
             start = sum(self.task_sizes[:task])
             columns = slice(start, start + self.task_sizes[task])
             for view in VIEWS:
                 outputs[view].append(lane_logits[view][:, lane, columns])
-            w = self.gates[task](reliable, relations['person'].get(task), relations['face'].get(task))
             scores = torch.stack([outputs[view][-1].float() for view in VIEWS], dim=1)
-            # Unreliable Face may be a dummy crop. Exclude even a non-finite output.
-            face = torch.where(reliable[:, None], scores[:, 2], 0.0)
-            fused.append(w[:, 0:1] * scores[:, 0] + w[:, 1:2] * scores[:, 1] + w[:, 2:3] * face)
-            weights.append(w)
-        return dict(fused=torch.cat(fused, dim=1), weights=torch.stack(weights, dim=1),
-                    branches={v: torch.cat(parts, dim=1) for v, parts in outputs.items()},
-                    all_columns={v: scores[:, -1] for v, scores in lane_logits.items()})
+            for name in names:
+                gate = self.gates[task][name] if multi else self.gates[task]
+                if name == 'summary':
+                    w = gate(reliable, {v: pooled[v][task] for v in VIEWS})
+                elif name == 'relation':
+                    w = gate(reliable, relations['person'][task].detach(), relations['face'][task].detach())
+                else:
+                    w = gate(reliable, relations['person'].get(task), relations['face'].get(task))
+                readout_scores = scores.detach() if multi and name != 'fixed' else scores
+                all_fused[name].append(fuse_view_logits(readout_scores, w, reliable))
+                all_weights[name].append(w)
+
+        readouts = {name: dict(fused=torch.cat(all_fused[name], dim=1),
+                               weights=torch.stack(all_weights[name], dim=1)) for name in names}
+        result = dict(**readouts[names[0]],
+                      branches={v: torch.cat(parts, dim=1) for v, parts in outputs.items()},
+                      all_columns={v: scores[:, -1] for v, scores in lane_logits.items()})
+        if multi:
+            result['readouts'] = readouts
+        return result

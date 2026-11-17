@@ -105,7 +105,8 @@ def optimizer_for_task(model, config, task):
         primary.extend(base)
         adapters.extend(adapted)
         groups.extend(branch_groups)
-    gate = list(model.gates[task].parameters())
+    # In multi mode the branch optimizer must exactly match protected fixed.
+    gate = [] if config['mode'] == 'multi' else list(model.gates[task].parameters())
     if gate:
         groups.append({'params': gate, 'lr': config['gate_lr'], 'weight_decay': 0.})
         primary.extend(gate)
@@ -116,6 +117,46 @@ def optimizer_for_task(model, config, task):
     optimizer = torch.optim.Adam(groups, lr=.0125, weight_decay=0.)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config['epochs'])
     return primary, adapters, optimizer, scheduler
+
+
+class GateOptimizer:
+    """Private Adam and training diagnostics for one current-task readout."""
+
+    def __init__(self, gate, config):
+        self.params = list(gate.parameters())
+        self.optimizer = torch.optim.Adam(self.params, lr=config['gate_lr'], weight_decay=0.)
+        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=config['epochs'])
+
+    def reset_batch(self, device):
+        self.optimizer.zero_grad(set_to_none=True)
+        self.loss = torch.zeros((), device=device)
+        self.weight_sums = torch.zeros((2, 3), device=device)
+
+    def accumulate(self, output, target, reliable, total_rows, scale):
+        loss = F.binary_cross_entropy_with_logits(output['fused'].float(), target)
+        loss = loss * (len(target) / total_rows)
+        torch.autograd.backward(loss * scale, inputs=self.params)
+        self.loss += loss.detach()
+        weights = output['weights'][:, 0].detach()
+        self.weight_sums[0] += weights[~reliable].sum(0)
+        self.weight_sums[1] += weights[reliable].sum(0)
+
+    def check_gradients(self, scale):
+        if any(p.grad is None for p in self.params):
+            raise RuntimeError('Trainable gate parameter was disconnected')
+        grads = [p.grad for p in self.params]
+        if scale != 1.:
+            torch._foreach_mul_(grads, 1. / scale)
+        self.grad_norm = torch.stack(torch._foreach_norm(grads)).norm()
+        if not torch.isfinite(self.grad_norm) or not torch.isfinite(self.loss):
+            raise FloatingPointError('Nonfinite gate loss or gradient')
+
+    def state_dict(self):
+        return {'optimizer': self.optimizer.state_dict(), 'scheduler': self.scheduler.state_dict()}
+
+    def load_state_dict(self, state):
+        self.optimizer.load_state_dict(state['optimizer'])
+        self.scheduler.load_state_dict(state['scheduler'])
 
 
 def losses(outputs, labels, valid, total_rows, valid_rows, classes, *, protect_branches=False):
@@ -136,9 +177,11 @@ def losses(outputs, labels, valid, total_rows, valid_rows, classes, *, protect_b
     return fused, sum(branch_bce), sum(adapter_asl)
 
 
-def update_batch(model, batch, classes, config, primary, adapters, optimizer, precision):
+def update_batch(model, batch, classes, config, primary, adapters, optimizer, precision, gate_opts):
     images, labels = batch
     count = len(labels)
+    for gate in gate_opts.values():
+        gate.reset_batch('cuda')
     valid_count = int(images['face_training_valid'].sum())
     reliable_count = int(images['evidence_face_reliable'].sum())
     optimizer.zero_grad(set_to_none=True)
@@ -163,6 +206,8 @@ def update_batch(model, batch, classes, config, primary, adapters, optimizer, pr
         torch.autograd.backward((asl + fused) * scale, inputs=adapters)
         totals += torch.stack((fused.detach(), bce.detach(), asl.detach()))
         reliable = piece['evidence_face_reliable']
+        for name, gate in gate_opts.items():
+            gate.accumulate(outputs['readouts'][name], target, reliable, count, scale)
         weights = outputs['weights'][:, 0].detach()
         weight_sum[0] += weights[~reliable].sum(0)
         weight_sum[1] += weights[reliable].sum(0)
@@ -174,13 +219,20 @@ def update_batch(model, batch, classes, config, primary, adapters, optimizer, pr
     norms = torch.stack(torch._foreach_norm(grads))
     if not torch.isfinite(norms).all() or not torch.isfinite(totals).all():
         raise FloatingPointError('Nonfinite pre-update values')
-    gate_grad = [p.grad for p in model.gates[model.current_task_id].parameters() if p.grad is not None]
+    # Check every gradient before applying any of the optimizers. A retry
+    # starts with the original branch and gate states and the same input batch.
+    for gate in gate_opts.values():
+        gate.check_gradients(scale)
+    gate_grad = [] if gate_opts else [
+        p.grad for p in model.gates[model.current_task_id].parameters() if p.grad is not None]
     gate_norm = torch.stack(torch._foreach_norm(gate_grad)).norm().item() if gate_grad else 0.
     optimizer.step()
+    for gate in gate_opts.values():
+        gate.optimizer.step()
     return totals.tolist(), weight_sum.tolist(), count, valid_count, reliable_count, gate_norm
 
 
-def train_epoch(model, source, indices, task, epoch, config, primary, adapters, optimizer):
+def train_epoch(model, source, indices, task, epoch, config, primary, adapters, optimizer, gate_opts):
     classes = task_indices(task)
     seed = config['seed'] + task * 10_000 + epoch
     generator = torch.Generator().manual_seed(seed)
@@ -196,16 +248,23 @@ def train_epoch(model, source, indices, task, epoch, config, primary, adapters, 
     gate_sums = [[0., 0., 0.], [0., 0., 0.]]
     seen = valid = reliable = retries = updates = 0
     gate_grad_max = 0.
+    learned_losses = {name: 0. for name in gate_opts}
+    learned_grad_max = {name: 0. for name in gate_opts}
+    learned_sums = {name: torch.zeros((2, 3), dtype=torch.float64, device='cuda') for name in gate_opts}
     for batch in loader:
         try:
-            result = update_batch(model, batch, classes, config, primary, adapters, optimizer, config['precision'])
+            result = update_batch(model, batch, classes, config, primary, adapters, optimizer, config['precision'], gate_opts)
         except FloatingPointError:
             if config['precision'] == 'fp32':
                 raise
             optimizer.zero_grad(set_to_none=True)
             retries += 1
             print(f'task {task} epoch {epoch} update {updates}: replaying this batch in FP32', flush=True)
-            result = update_batch(model, batch, classes, config, primary, adapters, optimizer, 'fp32')
+            result = update_batch(model, batch, classes, config, primary, adapters, optimizer, 'fp32', gate_opts)
+        for name, gate in gate_opts.items():
+            learned_losses[name] += gate.loss.item()
+            learned_sums[name] += gate.weight_sums
+            learned_grad_max[name] = max(learned_grad_max[name], gate.grad_norm.item())
         batch_losses, weight_sum, n, v, r, gate_grad = result
         gate_grad_max = max(gate_grad_max, gate_grad)
         seen += n
@@ -218,12 +277,21 @@ def train_epoch(model, source, indices, task, epoch, config, primary, adapters, 
             gate_sums[i] = [a+b for a, b in zip(gate_sums[i], row)]
     if seen != len(indices):
         raise RuntimeError('Lost a training row')
-    return {'task': task, 'epoch': epoch, 'examples': seen, 'valid_face': valid, 'reliable_face': reliable,
+    report = {'task': task, 'epoch': epoch, 'examples': seen, 'valid_face': valid, 'reliable_face': reliable,
             'updates': updates, 'skipped': 0, 'fp32_retries': retries,
             'gate_gradient_max': gate_grad_max, 'mean_view_weights_by_reliability': [
                 [s/n for s in row] if n else None for row, n in zip(gate_sums, (seen-reliable, reliable))],
             'mean_batch_losses': dict(zip(('fused_bce', 'branch_bce_sum', 'adapter_asl_sum'), [s/updates for s in train_losses])),
             'seconds': time.monotonic()-start_time, 'peak_allocated_mib': torch.cuda.max_memory_allocated()/2**20}
+    if gate_opts:
+        report['train_readouts'] = {
+            name: {'mean_batch_bce': learned_losses[name] / updates,
+                   'gradient_max': learned_grad_max[name],
+                   'mean_preupdate_weights_by_reliability': [
+                       [s/n for s in row] if n else None
+                       for row, n in zip(learned_sums[name].tolist(), (seen-reliable, reliable))]}
+            for name in gate_opts}
+    return report
 
 
 def train(args):
@@ -241,7 +309,7 @@ def train(args):
                   micro_batch_size=args.micro_batch_size, workers=args.workers, gate_lr=.0004,
                   precision=precision, smoke=args.smoke, clip_checkpoint=str(inputs.clip_checkpoint),
                   branches=branch_configs(inputs))
-    if args.protect_branches:
+    if args.protect_branches or args.mode == 'multi':
         config['protect_branches'] = True
     if (root/'config.json').exists() and read(root/'config.json') != config:
         raise ValueError('Existing experiment has a different configuration')
@@ -263,6 +331,10 @@ def train(args):
     for task in range(len(completed), config['tasks']):
         model.activate_task(task)
         primary, adapters, optimizer, scheduler = optimizer_for_task(model, config, task)
+        gate_opts = {}
+        if config['mode'] == 'multi':
+            gate_opts = {name: GateOptimizer(model.gates[task][name], config)
+                         for name in ('static', 'relation', 'summary')}
         indices, _ = fit_calibration_indices(source, task_indices(task), 0.)
         if args.smoke:
             # Include both confidence cohorts when available.
@@ -280,17 +352,25 @@ def train(args):
                 restore(model, state, task)
                 optimizer.load_state_dict(state['optimizer'])
                 scheduler.load_state_dict(state['scheduler'])
+                for name, gate in gate_opts.items():
+                    gate.load_state_dict(state['gate_optimizers'][name])
                 restore_rng(state['rng'])
                 history = state['history']
             elif state['task'] != task - 1:
                 raise RuntimeError('Epoch recovery does not match completed task chain')
             del state
         for epoch in range(len(history)+1, config['epochs']+1):
-            row = train_epoch(model, source, indices, task, epoch, config, primary, adapters, optimizer)
+            row = train_epoch(model, source, indices, task, epoch, config, primary, adapters, optimizer, gate_opts)
             history.append(row)
             scheduler.step()
+            for gate in gate_opts.values():
+                gate.scheduler.step()
             state = dict(config=config, task=task, coverage=coverage, history=history, rng=rng_state(), **snapshot(model))
-            save_atomic(last, {**state, 'optimizer': optimizer.state_dict(), 'scheduler': scheduler.state_dict()})
+            recovery = {**state, 'optimizer': optimizer.state_dict(), 'scheduler': scheduler.state_dict()}
+            if gate_opts:
+                recovery['gate_optimizers'] = {name: gate.state_dict() for name, gate in gate_opts.items()}
+            save_atomic(last, recovery)
+            del recovery
             write(root/'progress.json', row)
             print(json.dumps(row), flush=True)
         # Also handles recovery after the last epoch was saved but before task publication.
@@ -304,17 +384,17 @@ def train(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--mode', required=True, choices=('fixed', 'static', 'person'))
+    parser.add_argument('--mode', required=True, choices=('fixed', 'static', 'person', 'multi'))
     parser.add_argument('--protect-branches', action='store_true',
-                        help='Fixed readout control: record fused BCE without training the branches on it.')
+                        help='Block fusion gradients into the three branches (automatic in multi mode).')
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--micro-batch-size', type=int, default=8)
     parser.add_argument('--workers', type=int, default=4)
     parser.add_argument('--precision', choices=('auto', 'bf16', 'fp32', 'fp16'), default='auto')
     parser.add_argument('--smoke', action='store_true')
     args = parser.parse_args()
-    if args.protect_branches and args.mode != 'fixed':
-        parser.error('--protect-branches requires the fixed readout')
+    if args.protect_branches and args.mode not in ('fixed', 'multi'):
+        parser.error('--protect-branches applies to fixed or multi mode')
     if args.micro_batch_size < 1 or args.workers < 0:
         parser.error('micro-batch-size must be positive; workers must be nonnegative')
     args.output.mkdir(parents=True, exist_ok=True)

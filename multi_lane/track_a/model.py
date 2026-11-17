@@ -337,6 +337,7 @@ class MultiLaneModel(nn.Module):
         condition_valid: Optional[torch.Tensor] = None,
         summary_only: bool = False,
         preserve_image_gradient: bool = False,
+        pooled_summaries=None,
     ) -> torch.Tensor:
         # The released block applies its first LayerNorm before both selector
         # aggregation and prompt attention.  Keep the residual stream itself
@@ -384,6 +385,10 @@ class MultiLaneModel(nn.Module):
                 frozen_normalized_image,
                 torch.softmax(similarity, dim=-1),
             )
+        if pooled_summaries is not None:
+            # Capture the exact selector summaries consumed by this task MSA.
+            pooled = selected.detach().float().mean(dim=2)
+            pooled_summaries.update(zip(lane_ids, pooled.unbind(0)))
         if summary_only:
             return selected
         summarized = torch.cat([task_cls, selected], dim=2)
@@ -406,7 +411,7 @@ class MultiLaneModel(nn.Module):
         return lane_tokens
 
     def encode_lanes(
-        self, images: ModelInputs, all_seen_lanes: bool
+        self, images: ModelInputs, all_seen_lanes: bool, *, summary_layer=None, pooled_summaries=None
     ) -> torch.Tensor:
         lane_ids = self._lane_ids(all_seen_lanes)
         person_descriptor = None
@@ -462,6 +467,7 @@ class MultiLaneModel(nn.Module):
                 person_tokens,
                 paired["person_patch_mask"] if person_tokens is not None else None,
                 paired["condition_valid"] if person_tokens is not None else None,
+                pooled_summaries=pooled_summaries if layer_id == summary_layer else None,
             )
             with torch.no_grad():
                 image_tokens = block(image_tokens.permute(1, 0, 2)).permute(

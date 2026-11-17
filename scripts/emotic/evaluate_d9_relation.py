@@ -95,8 +95,9 @@ def weight_statistics(weights, reliable):
     return stats
 
 
-def collect(model, loader, device):
-    ids, labels, validity, branches, weights, actual = [], [], [], [], [], []
+def collect_readouts(model, loader, device, *, multi=False):
+    ids, labels, validity, branches = [], [], [], []
+    weight_parts, score_parts = {}, {}
     model.requires_grad_(False).eval()
     with torch.inference_mode():
         for images, target, batch_ids in loader:
@@ -107,10 +108,27 @@ def collect(model, loader, device):
             labels.append(target.float().cpu())
             validity.append(images["evidence_face_reliable"].bool().reshape(-1))
             branches.append(torch.stack([output["branches"][v].float().cpu() for v in VIEWS], dim=-1))
-            weights.append(output["weights"].float().cpu())
-            actual.append(output["fused"].float().cpu())
-    return (ids, torch.cat(labels), torch.cat(validity), torch.cat(branches),
-            torch.cat(weights), torch.cat(actual))
+            for name, readout in (output["readouts"] if multi else {"model": output}).items():
+                weight_parts.setdefault(name, []).append(readout["weights"].float().cpu())
+                score_parts.setdefault(name, []).append(readout["fused"].float().cpu())
+    readouts = {name: (torch.cat(parts), torch.cat(score_parts[name]))
+                for name, parts in weight_parts.items()}
+    return ids, torch.cat(labels), torch.cat(validity), torch.cat(branches), readouts
+
+
+def collect(model, loader, device):
+    ids, targets, reliable, branches, outputs = collect_readouts(model, loader, device)
+    return ids, targets, reliable, branches, *outputs["model"]
+
+
+def stage_loader(source, task, smoke, batch_size, workers):
+    data = dataset_view(source, seen_indices(task), include_sample_id=True)
+    if smoke:
+        data = Subset(data, range(min(32, len(data))))
+    return DataLoader(data, batch_size=batch_size, num_workers=workers,
+                      worker_init_fn=single_thread_worker, shuffle=False,
+                      generator=torch.Generator().manual_seed(77191 + task),
+                      **({"prefetch_factor": 1} if workers else {}))
 
 
 def write_json(path, payload):
@@ -146,13 +164,7 @@ def evaluate(root, split, batch_size, workers, smoke, device):
             if cache["protocol"] == protocol and cache["scores_sha256"] == sha256_file(scores):
                 stages.append(cache)
                 continue
-        data = dataset_view(source, seen_indices(task), include_sample_id=True)
-        if smoke:
-            data = Subset(data, range(min(32, len(data))))
-        loader = DataLoader(data, batch_size=batch_size, num_workers=workers,
-                            worker_init_fn=single_thread_worker, shuffle=False,
-                            generator=torch.Generator().manual_seed(77191 + task),
-                            **({"prefetch_factor": 1} if workers else {}))
+        loader = stage_loader(source, task, smoke, batch_size, workers)
         model = load_evaluation_model(root, task, device=str(device))
         ids, targets, reliable, branch_logits, weights, actual = collect(model, loader, device)
         del model

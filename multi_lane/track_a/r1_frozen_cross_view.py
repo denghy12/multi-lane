@@ -30,7 +30,7 @@ class FrozenCrossAgent(nn.Module):
         self.diagnostic_enabled = False
         self.last_diagnostic = None
 
-    def forward(self, tokens, memories, masks, *, return_full_relation=False):
+    def forward(self, tokens, memories, masks, *, return_full_relation=False, detach_relation=False):
         """Optionally return a differentiable relation to the first (Full) sender."""
 
         with torch.autocast(device_type=tokens.device.type, enabled=False):
@@ -55,16 +55,17 @@ class FrozenCrossAgent(nn.Module):
                 # Full is always the first sender of a Person/Face receiver.
                 # Condition on Full patches to measure alignment separately
                 # from Full's mass relative to the other memory sources.
-                full = slice(1, 1 + sources[0].shape[1])
-                full_scores = scores[..., full]
-                within_full = full_scores.softmax(-1)
-                entropy = -(within_full * within_full.clamp_min(1e-30).log()).sum(-1)
-                concentration = 1.0 - entropy / math.log(max(sources[0].shape[1], 2))
-                key_alignment = F.cosine_similarity(q, within_full @ k[:, :, full], dim=-1, eps=1e-6)
-                value_alignment = F.cosine_similarity(
-                    split(self.v(query)), within_full @ v[:, :, full], dim=-1, eps=1e-6)
-                per_patch = (attention[..., full].sum(-1), concentration, key_alignment, value_alignment)
-                relation = torch.stack([item.mean(dim=(1, 2)) for item in per_patch], dim=-1)
+                with torch.set_grad_enabled(torch.is_grad_enabled() and not detach_relation):
+                    full = slice(1, 1 + sources[0].shape[1])
+                    full_scores = scores[..., full]
+                    within_full = full_scores.softmax(-1)
+                    entropy = -(within_full * within_full.clamp_min(1e-30).log()).sum(-1)
+                    concentration = 1.0 - entropy / math.log(max(sources[0].shape[1], 2))
+                    key_alignment = F.cosine_similarity(q, within_full @ k[:, :, full], dim=-1, eps=1e-6)
+                    value_alignment = F.cosine_similarity(
+                        split(self.v(query)), within_full @ v[:, :, full], dim=-1, eps=1e-6)
+                    per_patch = (attention[..., full].sum(-1), concentration, key_alignment, value_alignment)
+                    relation = torch.stack([item.mean(dim=(1, 2)) for item in per_patch], dim=-1)
             context = (attention @ v).transpose(1, 2).reshape(batch, -1, self.dim)
             raw = self.out(context)
             reference = own[:, :1].detach().norm(dim=(1, 2)).clamp_min(1e-8)
@@ -251,14 +252,16 @@ class FrozenR1Receiver(R1Receiver):
                 patches[layer] = source[:, 1:].detach()
         return patches
 
-    def encode_lanes(self, images, all_seen_lanes, *, full_relations=None, full_sender_cache=None):
+    def encode_lanes(self, images, all_seen_lanes, *, full_relations=None, full_sender_cache=None,
+                     summary_layer=None, pooled_summaries=None, detach_relation=False):
         own = images['full'] if isinstance(images, dict) else images
         if full_relations is not None and (
                 not self.r1_enabled or self.frozen_cross_mode != 'patch'
                 or self.frozen_cross_active_layers != (self.r1_layer,)):
             raise ValueError('Full relation readout requires an active single patch site')
         if not self.r1_enabled:
-            return super().encode_lanes(own, all_seen_lanes)
+            return super().encode_lanes(own, all_seen_lanes, summary_layer=summary_layer,
+                                        pooled_summaries=pooled_summaries)
         if not isinstance(images, dict):
             raise ValueError('Cross-view evidence is required')
         lanes = self._lane_ids(all_seen_lanes)
@@ -295,7 +298,8 @@ class FrozenR1Receiver(R1Receiver):
         state = self._initial_lane_tokens(len(own), lanes)
         prefix_end = self.r1_layer if sites else len(blocks) - 1
         for layer, block in enumerate(blocks[:prefix_end+1]):
-            state = self._lane_block(block, tokens, state, lanes, layer)
+            state = self._lane_block(block, tokens, state, lanes, layer,
+                                     pooled_summaries=pooled_summaries if layer == summary_layer else None)
             with torch.no_grad():
                 tokens = block(tokens.permute(1, 0, 2)).permute(1, 0, 2)
             if layer == pool_site:
@@ -313,12 +317,14 @@ class FrozenR1Receiver(R1Receiver):
                     stream = agent(stream, memories[self.r1_layer], masks)
                 else:
                     stream, full_relations[task] = agent(
-                        stream, memories[self.r1_layer], masks, return_full_relation=True)
+                        stream, memories[self.r1_layer], masks, return_full_relation=True,
+                        detach_relation=detach_relation)
             lane = state[i:i+1]
             for layer in range(prefix_end+1, len(blocks)):
                 block = blocks[layer]
                 lane = self._lane_block(block, stream, lane, [task], layer,
-                                        preserve_image_gradient=True)
+                                        preserve_image_gradient=True,
+                                        pooled_summaries=pooled_summaries if layer == summary_layer else None)
                 # The last visual block has no later Task Forward reader.
                 if len(self.frozen_cross_layers) == 1 or layer < len(blocks) - 1:
                     stream = block(stream.permute(1, 0, 2)).permute(1, 0, 2)
