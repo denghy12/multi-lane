@@ -1,3 +1,7 @@
+## 2026-11-17 三视图固定比例保护对照在 GPU0 启动
+
+独立分支 exp/d9-protected-fixed-20261117，训练代码 3166b13。复用原共同组批 fixed；唯一配置差异为 protect_branches=True。 结果 output/d9_protected_fixed/seed1_20261117/fixed。
+
 ## 2026-11-17 固定读出下保护三分支的对照
 
 复用 20261116 fixed，新组共同组批、前向和固定读出相同，去除融合 BCE 对主参数和 Adapter 的梯度。 详见 docs/d9_protected_fusion_20261117.md。

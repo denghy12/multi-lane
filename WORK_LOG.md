@@ -1,3 +1,7 @@
+## 2026-11-17 三视图固定比例保护对照在 GPU0 启动
+
+7 项测试、两任务真实训练和 Val/Test 快测通过。正式 task0 的 5,353 人清单哈希及两个 Face 掩码人数匹配原 fixed；前 3 轮 252 次更新，零跳步。 结果 output/d9_protected_fixed/seed1_20261117/fixed。
+
 ## 2026-11-17 固定读出下保护三分支的对照
 
 新增 fixed_protected 的训练开关与两路反传回归测试；首轮只跑一组，从头训练并评估两个 split。 详见 docs/d9_protected_fusion_20261117.md。
