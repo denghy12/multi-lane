@@ -26,3 +26,4 @@ for split in val test; do
     "$py" -u -m scripts.emotic.evaluate_d9_protected_gates --root "$root/direction" \
         --reference-root "$reference/fixed" --split "$split" --batch-size "$batch" --workers 2 "${extra[@]}"
 done
+"$py" -u -m scripts.emotic.d9_direction_permutation --root "$root/direction" "${extra[@]}"

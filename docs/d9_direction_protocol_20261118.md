@@ -16,3 +16,5 @@ A/B/C 使用相同的每视图4→1无偏线性读出，合计8参数；center_b
 预先固定六种读出及评估顺序。在 Validation 对每个任务头和 Face 可靠性组核对 B vs C 的方向 AUC、实际转移收益及本人 vs 同组均值／置换的 mAP。AUC 有利类或无利类缺失时记缺失。分别比较 B vs A/C、center_b vs center；随后看相对受保护固定组 Val 43.6272/51.1094、Test 33.2019/40.2847 的最终和八阶段平均。所有六种读出用同一组 checkpoint。Validation 同组平均仅使用无标签权重，再锁定到 Test。两套数据只评价，Test 不选择设置。
 
 真实两任务预检和正式训练入口分别为 `bash scripts/emotic/run_d9_direction.sh smoke 0` 及 `bash scripts/emotic/run_d9_direction.sh formal 0`。输入沿用 `run_r1_frozen_cross_view.input_paths()` 的 EMOTIC、Face manifest、CLIP。每个任务保存完整可恢复训练状态及 compact checkpoint。输出在 `output/d9_direction/seed1_20261118/`，日志在 `logs/d9_direction/seed1_20261118/`。在评估前与受保护固定组的训练人群、更新数及各分支状态比较，真实前向再逐人核对三路 logits 与固定读出。归档每个读出的 logits、权重、方向标签与诊断。
+
+归档后的只读稳定性检验固定100次同组置换，原置换 seed 20261116 及 1000–1098。四个人物读出共用每次置换的供体映射，先逐值重放正式置换，再分别报告两套数据本人减置换的最终与阶段平均差、范围与正差次数。分位数限于同一训练 seed 和评价人群。
