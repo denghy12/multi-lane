@@ -9,6 +9,7 @@ from .r1_crossvit import VIEWS
 
 
 READOUTS = ('fixed', 'static', 'relation', 'summary')
+DIRECTION_READOUTS = ('fixed', 'center', 'a', 'b', 'c', 'center_b')
 
 
 def view_weights(odds, reliable):
@@ -85,6 +86,27 @@ class SummaryGate(nn.Module):
             return view_weights(self.prior + self.readout(descriptor), reliable)
 
 
+class LinearDirectionGate(nn.Module):
+    """Read detached Full-association statistics into bounded auxiliary log-odds."""
+
+    def __init__(self):
+        super().__init__()
+        self.register_buffer('prior', torch.tensor([math.log(.16 / .64), math.log(.20 / .64)]))
+        self.scorers = nn.ModuleDict({view: nn.Linear(4, 1, bias=False)
+                                     for view in ('person', 'face')})
+        for scorer in self.scorers.values():
+            nn.init.zeros_(scorer.weight)
+
+    def forward(self, reliable, person_relation, face_relation, *, base_odds=None):
+        with torch.autocast(device_type=reliable.device.type, enabled=False):
+            reliable = reliable.reshape(-1).bool()
+            person = person_relation.detach().float()
+            face = torch.where(reliable[:, None], face_relation.detach().float(), 0.0)
+            raw = torch.cat((self.scorers['person'](person), self.scorers['face'](face)), dim=-1)
+            center = self.prior if base_odds is None else base_odds.detach().float()
+            return view_weights(center + raw.tanh(), reliable), raw
+
+
 class D9RelationFusion(nn.Module):
     """Independent native Full and patch-receiving Person/Face, one readout per task."""
 
@@ -110,6 +132,17 @@ class D9RelationFusion(nn.Module):
                     'fixed': RelationGate('fixed'), 'static': RelationGate('static'),
                     'relation': relation, 'summary': SummaryGate(self.branches['full'].width),
                 }) for relation in relations)
+            elif mode == 'direction':
+                if any(self.branches[v].r1_layer != 8 for v in ('person', 'face')):
+                    raise ValueError('Direction readouts require both patch receivers at block 9')
+                self.gates = nn.ModuleList(nn.ModuleDict({
+                    'fixed': RelationGate('fixed'), 'center': RelationGate('static'),
+                    'a': LinearDirectionGate(), 'b': LinearDirectionGate(), 'c': LinearDirectionGate(),
+                    'center_b': LinearDirectionGate(),
+                }) for _ in self.task_sizes)
+                for bank in self.gates:
+                    bank['center'].prior.zero_()
+                    bank['center_b'].prior.zero_()
             else:
                 self.gates = nn.ModuleList(RelationGate(mode) for _ in self.task_sizes)
         self._configure_gates(self.current_task_id)
@@ -140,6 +173,8 @@ class D9RelationFusion(nn.Module):
         reliable = inputs['evidence_face_reliable'].reshape(-1).bool()
         lane_logits, relations = {}, {'person': {}, 'face': {}}
         multi = self.mode == 'multi'
+        direction = self.mode == 'direction'
+        protected_readouts = multi or direction
         pooled = {v: {} for v in VIEWS} if multi else None
         # The same batch's deterministic Full sender passes through the same
         # frozen CLIP in both receivers. Share only raw detached sender patches.
@@ -156,15 +191,16 @@ class D9RelationFusion(nn.Module):
             else:
                 # Receivers use "full" as the historical key for their own pixels.
                 own_inputs = {**inputs, 'full': inputs[view]}
-                capture = relations[view] if multi or self.mode == 'person' else None
+                capture = relations[view] if protected_readouts or self.mode == 'person' else None
                 features = branch.encode_lanes(own_inputs, all_seen, full_relations=capture,
                                                full_sender_cache=full_sender_cache,
-                                               detach_relation=multi, **summary_args)
+                                               detach_relation=protected_readouts, **summary_args)
                 lane_logits[view] = branch.head(features)
 
-        names = READOUTS if multi else (self.mode,)
+        names = DIRECTION_READOUTS if direction else READOUTS if multi else (self.mode,)
         all_weights = {name: [] for name in names}
         all_fused = {name: [] for name in names}
+        direction_scores = {name: [] for name in ('a', 'b', 'c', 'center_b')} if direction else {}
         outputs = {view: [] for view in VIEWS}
         for lane, task in enumerate(lanes):
             start = sum(self.task_sizes[:task])
@@ -173,22 +209,36 @@ class D9RelationFusion(nn.Module):
                 outputs[view].append(lane_logits[view][:, lane, columns])
             scores = torch.stack([outputs[view][-1].float() for view in VIEWS], dim=1)
             for name in names:
-                gate = self.gates[task][name] if multi else self.gates[task]
-                if name == 'summary':
+                if name == 'center_b':
+                    center = self.gates[task]['center']
+                    gate = self.gates[task][name]
+                    w, raw = gate(reliable, relations['person'][task], relations['face'][task],
+                                  base_odds=center.prior + center.offset)
+                    direction_scores[name].append(raw)
+                elif direction and name in ('a', 'b', 'c'):
+                    gate = self.gates[task][name]
+                    w, raw = gate(reliable, relations['person'][task], relations['face'][task])
+                    direction_scores[name].append(raw)
+                elif name == 'summary':
+                    gate = self.gates[task][name]
                     w = gate(reliable, {v: pooled[v][task] for v in VIEWS})
                 elif name == 'relation':
+                    gate = self.gates[task][name]
                     w = gate(reliable, relations['person'][task].detach(), relations['face'][task].detach())
                 else:
+                    gate = self.gates[task][name] if protected_readouts else self.gates[task]
                     w = gate(reliable, relations['person'].get(task), relations['face'].get(task))
-                readout_scores = scores.detach() if multi and name != 'fixed' else scores
+                readout_scores = scores.detach() if protected_readouts and name != 'fixed' else scores
                 all_fused[name].append(fuse_view_logits(readout_scores, w, reliable))
                 all_weights[name].append(w)
 
         readouts = {name: dict(fused=torch.cat(all_fused[name], dim=1),
                                weights=torch.stack(all_weights[name], dim=1)) for name in names}
+        for name, raw in direction_scores.items():
+            readouts[name]['direction_scores'] = torch.stack(raw, dim=1)
         result = dict(**readouts[names[0]],
                       branches={v: torch.cat(parts, dim=1) for v, parts in outputs.items()},
                       all_columns={v: scores[:, -1] for v, scores in lane_logits.items()})
-        if multi:
+        if protected_readouts:
             result['readouts'] = readouts
         return result

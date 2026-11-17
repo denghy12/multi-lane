@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from multi_lane.track_a.d9_relation_fusion import READOUTS
+from multi_lane.track_a.d9_relation_fusion import READOUTS, DIRECTION_READOUTS
 from multi_lane.track_a.openai_clip_loader import sha256_file
 from multi_lane.track_a.runner import TASK_SIZES, TaskMetrics, set_seed, summarize_tasks
 from scripts.emotic.evaluate_d9_relation import (
@@ -66,9 +66,9 @@ def mean_readout(task, branches, weights, scores, reliable, means):
     return torch.where(same, scores, fused), valid
 
 
-def assess(task, batch, reference_file, validation_means):
+def assess(task, batch, reference_file, validation_means, names=READOUTS):
     ids, targets, reliable, branches, result = batch
-    if set(result) != set(READOUTS):
+    if set(result) != set(names):
         raise ValueError(f"Missing or unexpected readouts: {list(result)}")
     verify_reference(reference_file, task, ids, targets, reliable, branches, *result["fixed"])
     all_predictions = {v: branches[..., i] for i, v in enumerate(VIEWS)}
@@ -76,7 +76,7 @@ def assess(task, batch, reference_file, validation_means):
     arrays = dict(sample_ids=np.asarray(ids), targets=targets.numpy(), reliable=reliable.numpy(),
                   branch_logits=branches.numpy(), view_order=np.asarray(VIEWS),
                   task_sizes=np.asarray(TASK_SIZES[:task+1]))
-    for name in READOUTS:
+    for name in names:
         weights, scores = result[name]
         # Legacy recomputation verifies normalization, finite values, masking and score reconstruction.
         checked, donors = readouts(task, ids, reliable, branches, weights, scores)
@@ -117,8 +117,10 @@ def evaluate(root, reference_root, split, batch_size, workers, smoke):
     reference_config = json.loads((reference_root / "config.json").read_text())
     if any(c["smoke"] != smoke or not c.get("protect_branches") for c in (config, reference_config)):
         raise ValueError("Protected evaluation needs matching smoke/formal configurations")
-    if config["mode"] != "multi" or reference_config["mode"] != "fixed":
-        raise ValueError("Expected multi candidate, protected fixed reference")
+    if config["mode"] not in ("multi", "direction") or reference_config["mode"] != "fixed":
+        raise ValueError("Expected protected multi-readout candidate and fixed reference")
+    direction_mode = config["mode"] == "direction"
+    names = DIRECTION_READOUTS if direction_mode else READOUTS
     title = "smoke_evaluation" if smoke else "evaluation"
     directory = root / title / split
     directory.mkdir(parents=True, exist_ok=True)
@@ -138,7 +140,7 @@ def evaluate(root, reference_root, split, batch_size, workers, smoke):
         ref_report = json.loads(ref.with_suffix(".json").read_text())
         if ref_report["scores_sha256"] != ref_hash or ref_report["protocol"]["batch_size"] != batch_size:
             raise ValueError(f"Reference artifact hash or eval batch size mismatch for task {task}")
-        protocol = dict(schema=1, task=task, split=split, smoke=smoke, batch_size=batch_size,
+        protocol = dict(schema=2 if direction_mode else 1, task=task, split=split, smoke=smoke, batch_size=batch_size,
                         checkpoint_sha256=sha256_file(checkpoint), config_sha256=config_hash,
                         reference_scores_sha256=ref_hash, validation_result_sha256=val_hash,
                         shuffle_seed=SHUFFLE_SEED)
@@ -157,9 +159,18 @@ def evaluate(root, reference_root, split, batch_size, workers, smoke):
                 continue
         model = load_evaluation_model(root, task, device=str(device))
         data = stage_loader(source, task, smoke, batch_size, workers)
-        batch = collect_readouts(model, data, device, multi=True)
+        batch = collect_readouts(model, data, device, multi=True, include_direction=direction_mode)
         del model
-        row, arrays = assess(task, batch, ref, means)
+        directions = batch[-1] if direction_mode else None
+        if direction_mode:
+            batch = batch[:-1]
+        row, arrays = assess(task, batch, ref, means, names=names)
+        if direction_mode:
+            from scripts.emotic.d9_direction_metrics import direction_metrics
+            row["direction_selection"], selection_arrays = direction_metrics(
+                batch[1], batch[2], batch[3], directions, TASK_SIZES[:task + 1],
+                center_weights=batch[4]["center"][0])
+            arrays.update(selection_arrays)
         if sha256_file(checkpoint) != protocol["checkpoint_sha256"]:
             raise RuntimeError(f"Checkpoint changed during evaluation of task {task}")
         temp = scores.with_suffix(f".{os.getpid()}.tmp")
@@ -169,7 +180,7 @@ def evaluate(root, reference_root, split, batch_size, workers, smoke):
         row.update(protocol=protocol, scores_sha256=sha256_file(scores))
         write_json(report, row)
         stages.append(row)
-        maps = {key: round(row["metrics"][key]["all"]["mAP"], 4) for key in READOUTS}
+        maps = {key: round(row["metrics"][key]["all"]["mAP"], 4) for key in names}
         print(f"{split} task{task} people={len(batch[0])} exact_replay=True mAP={maps}", flush=True)
     summary = {}
     for method in stages[-1]["metrics"]:

@@ -10,7 +10,7 @@ from multi_lane.track_a.r1_crossvit_experiment import read, write
 def verify(root, reference, smoke):
     tasks = 2 if smoke else 8
     new, old = (read(p / 'config.json') for p in (root, reference))
-    if new['mode'] != 'multi' or old['mode'] != 'fixed':
+    if new['mode'] not in ('multi', 'direction') or old['mode'] != 'fixed':
         raise ValueError('Expected new multi-readout model and historical fixed model')
     for config in (new, old):
         if config['smoke'] != smoke or config['tasks'] != tasks or not config['protect_branches']:
@@ -40,7 +40,24 @@ def verify(root, reference, smoke):
         updates = sum(r['updates'] for r in a['history'])
         if updates != sum(r['updates'] for r in b['history']) or any(r['skipped'] for r in a['history']):
             raise ValueError(f'Update budget mismatch, task {task}')
-        result.append(dict(task=task, tensors=tensors, updates=updates, coverage=a['coverage']))
+        row = dict(task=task, tensors=tensors, updates=updates, coverage=a['coverage'])
+        if new['mode'] == 'direction':
+            budget = 2 if smoke else 300
+            expected_gates = {'center', 'a', 'b', 'c', 'center_b'}
+            for epoch, record in enumerate(a['history'], start=1):
+                gates = record['train_readouts']
+                expected_updates = budget // new['epochs']
+                if set(gates) != expected_gates or any(
+                    gate['gate_updates'] != expected_updates
+                    or gate['gate_total_updates'] != epoch * expected_updates
+                    for gate in gates.values()
+                ):
+                    raise ValueError(f'Direction update budget differs at task {task}, epoch {epoch}')
+                for key in ('direction_supervision_counts', 'direction_positive_counts'):
+                    if gates['b'][key] != gates['c'][key]:
+                        raise ValueError(f'Direction target counts differ at task {task}, epoch {epoch}')
+            row['updates_per_gate'] = budget
+        result.append(row)
         print(f'Exact branch state replay task {task}: {tensors} tensors, {updates} updates', flush=True)
     write(root / 'protected_replay.json', dict(reference=str(reference), smoke=smoke, tasks=result))
 

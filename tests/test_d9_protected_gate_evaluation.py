@@ -49,6 +49,18 @@ class ProtectedGateEvaluationTest(unittest.TestCase):
         np.testing.assert_array_equal(test_arrays["summary_val_mean_logits"], arrays["summary_val_mean_logits"])
         self.assertFalse(np.array_equal(test_arrays["summary_val_mean_logits"], test_arrays["summary_logits"]))
 
+    def test_direction_names_preserve_all_replay_controls(self):
+        from multi_lane.track_a.d9_relation_fusion import DIRECTION_READOUTS
+        outputs = {name: self.output['summary'] for name in DIRECTION_READOUTS}
+        outputs['fixed'] = self.output['fixed']
+        row, arrays = assess(0, (*self.batch[:-1], outputs), self.ref, None,
+                             names=DIRECTION_READOUTS)
+        self.assertTrue(row['exact_replay'])
+        self.assertEqual(set(row['weights']), set(DIRECTION_READOUTS))
+        for name in DIRECTION_READOUTS:
+            self.assertIn(name + '_val_mean_logits', arrays)
+            self.assertIn(name + '_shuffled_logits', arrays)
+
     def test_replay_rejects_one_subject_logit_change(self):
         self.logits[1, 3, 2] += .05
         with self.assertRaisesRegex(ValueError, "branch_logits differs for a"):

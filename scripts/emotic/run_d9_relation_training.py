@@ -15,6 +15,8 @@ from torch.utils.data import DataLoader
 
 from multi_lane.track_a.d9_joint_data import build_joint_source
 from multi_lane.track_a.d9_relation_fusion import D9RelationFusion
+from multi_lane.track_a.d9_direction_objective import (
+    deranged_targets, direction_benefits, gate_update_due)
 from multi_lane.track_a.r1_crossvit import VIEWS, compact, restore_rng, rng_state
 from multi_lane.track_a.r1_crossvit_experiment import (
     model_from_config, read, single_thread_worker, source_runs, write)
@@ -106,7 +108,7 @@ def optimizer_for_task(model, config, task):
         adapters.extend(adapted)
         groups.extend(branch_groups)
     # In multi mode the branch optimizer must exactly match protected fixed.
-    gate = [] if config['mode'] == 'multi' else list(model.gates[task].parameters())
+    gate = [] if config['mode'] in ('multi', 'direction') else list(model.gates[task].parameters())
     if gate:
         groups.append({'params': gate, 'lr': config['gate_lr'], 'weight_decay': 0.})
         primary.extend(gate)
@@ -125,21 +127,49 @@ class GateOptimizer:
     def __init__(self, gate, config):
         self.params = list(gate.parameters())
         self.optimizer = torch.optim.Adam(self.params, lr=config['gate_lr'], weight_decay=0.)
-        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=config['epochs'])
+        self.per_update_schedule = config.get('mode') == 'direction'
+        horizon = config['gate_updates'] if self.per_update_schedule else config['epochs']
+        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=horizon)
+        self.updates = 0
 
     def reset_batch(self, device):
         self.optimizer.zero_grad(set_to_none=True)
         self.loss = torch.zeros((), device=device)
         self.weight_sums = torch.zeros((2, 3), device=device)
+        self.raw_scores = []
+        self.supervision_counts = torch.zeros(2, device=device)
+        self.positive_counts = torch.zeros(2, device=device)
+
+    def record_weights(self, output, reliable):
+        weights = output['weights'][:, 0].detach()
+        self.weight_sums[0] += weights[~reliable].sum(0)
+        self.weight_sums[1] += weights[reliable].sum(0)
 
     def accumulate(self, output, target, reliable, total_rows, scale):
         loss = F.binary_cross_entropy_with_logits(output['fused'].float(), target)
         loss = loss * (len(target) / total_rows)
         torch.autograd.backward(loss * scale, inputs=self.params)
         self.loss += loss.detach()
-        weights = output['weights'][:, 0].detach()
-        self.weight_sums[0] += weights[~reliable].sum(0)
-        self.weight_sums[1] += weights[reliable].sum(0)
+        self.record_weights(output, reliable)
+
+    def accumulate_direction(self, output, reliable):
+        self.raw_scores.append(output['direction_scores'][:, 0])
+        self.record_weights(output, reliable)
+
+    def backward_direction(self, target, valid, scale):
+        scores = torch.cat(self.raw_scores)
+        loss = F.binary_cross_entropy_with_logits(scores[valid], target[valid])
+        torch.autograd.backward(loss * scale, inputs=self.params)
+        self.loss += loss.detach()
+        self.supervision_counts = valid.sum(0)
+        self.positive_counts = (target * valid).sum(0)
+        self.raw_scores.clear()
+
+    def step(self):
+        self.optimizer.step()
+        self.updates += 1
+        if self.per_update_schedule:
+            self.scheduler.step()
 
     def check_gradients(self, scale):
         if any(p.grad is None for p in self.params):
@@ -152,11 +182,13 @@ class GateOptimizer:
             raise FloatingPointError('Nonfinite gate loss or gradient')
 
     def state_dict(self):
-        return {'optimizer': self.optimizer.state_dict(), 'scheduler': self.scheduler.state_dict()}
+        return {'optimizer': self.optimizer.state_dict(), 'scheduler': self.scheduler.state_dict(),
+                'updates': self.updates}
 
     def load_state_dict(self, state):
         self.optimizer.load_state_dict(state['optimizer'])
         self.scheduler.load_state_dict(state['scheduler'])
+        self.updates = state.get('updates', 0)
 
 
 def losses(outputs, labels, valid, total_rows, valid_rows, classes, *, protect_branches=False):
@@ -177,7 +209,8 @@ def losses(outputs, labels, valid, total_rows, valid_rows, classes, *, protect_b
     return fused, sum(branch_bce), sum(adapter_asl)
 
 
-def update_batch(model, batch, classes, config, primary, adapters, optimizer, precision, gate_opts):
+def update_batch(model, batch, classes, config, primary, adapters, optimizer, precision, gate_opts,
+                 permutation_seed=0):
     images, labels = batch
     count = len(labels)
     for gate in gate_opts.values():
@@ -191,6 +224,8 @@ def update_batch(model, batch, classes, config, primary, adapters, optimizer, pr
     scale = 4096. if precision == 'fp16' else 1.
     totals = torch.zeros(3, device='cuda')
     weight_sum = torch.zeros((2, 3), device='cuda')
+    direction_inputs = []
+    direction_centers = []
     for start in range(0, count, config['micro_batch_size']):
         stop = start + config['micro_batch_size']
         piece = {k: value[start:stop].cuda(non_blocking=True) for k, value in images.items()}
@@ -207,10 +242,30 @@ def update_batch(model, batch, classes, config, primary, adapters, optimizer, pr
         totals += torch.stack((fused.detach(), bce.detach(), asl.detach()))
         reliable = piece['evidence_face_reliable']
         for name, gate in gate_opts.items():
-            gate.accumulate(outputs['readouts'][name], target, reliable, count, scale)
+            if config['mode'] == 'direction' and name in ('b', 'c', 'center_b'):
+                gate.accumulate_direction(outputs['readouts'][name], reliable)
+            else:
+                gate.accumulate(outputs['readouts'][name], target, reliable, count, scale)
+        if config['mode'] == 'direction' and gate_opts:
+            direction_inputs.append(torch.stack([outputs['branches'][v].detach() for v in VIEWS], -1))
+            direction_centers.append(outputs['readouts']['center']['weights'][:, 0].detach())
         weights = outputs['weights'][:, 0].detach()
         weight_sum[0] += weights[~reliable].sum(0)
         weight_sum[1] += weights[reliable].sum(0)
+    if config['mode'] == 'direction' and gate_opts:
+        all_reliable = images['evidence_face_reliable'].cuda().reshape(-1).bool()
+        benefits, valid = direction_benefits(torch.cat(direction_inputs), labels.cuda(), all_reliable,
+                                             config['direction_transfer'])
+        targets = (benefits > 0).float()
+        shuffled, usable, donors = deranged_targets(targets, valid, all_reliable, permutation_seed)
+        gate_opts['b'].backward_direction(targets, usable, scale)
+        gate_opts['c'].backward_direction(shuffled, usable, scale)
+        center_benefits, _ = direction_benefits(
+            torch.cat(direction_inputs), labels.cuda(), all_reliable, config['direction_transfer'],
+            torch.cat(direction_centers))
+        gate_opts['center_b'].backward_direction((center_benefits > 0).float(), valid, scale)
+        if not torch.equal(gate_opts['b'].positive_counts, gate_opts['c'].positive_counts):
+            raise RuntimeError('Shuffled direction targets changed label counts')
     grads = [p.grad for p in (*primary, *adapters) if p.grad is not None]
     if not grads:
         raise RuntimeError('No joint gradients')
@@ -223,12 +278,12 @@ def update_batch(model, batch, classes, config, primary, adapters, optimizer, pr
     # starts with the original branch and gate states and the same input batch.
     for gate in gate_opts.values():
         gate.check_gradients(scale)
-    gate_grad = [] if gate_opts else [
+    gate_grad = [] if config['mode'] in ('multi', 'direction') else [
         p.grad for p in model.gates[model.current_task_id].parameters() if p.grad is not None]
     gate_norm = torch.stack(torch._foreach_norm(gate_grad)).norm().item() if gate_grad else 0.
     optimizer.step()
     for gate in gate_opts.values():
-        gate.optimizer.step()
+        gate.step()
     return totals.tolist(), weight_sum.tolist(), count, valid_count, reliable_count, gate_norm
 
 
@@ -251,21 +306,39 @@ def train_epoch(model, source, indices, task, epoch, config, primary, adapters, 
     learned_losses = {name: 0. for name in gate_opts}
     learned_grad_max = {name: 0. for name in gate_opts}
     learned_sums = {name: torch.zeros((2, 3), dtype=torch.float64, device='cuda') for name in gate_opts}
-    for batch in loader:
+    learned_counts = {name: torch.zeros(2, device='cuda') for name in gate_opts}
+    learned_positives = {name: torch.zeros(2, device='cuda') for name in gate_opts}
+    gate_batches = gate_people = gate_reliable = 0
+    direction_mode = config['mode'] == 'direction'
+    selected_indices = []
+    for batch_index, batch in enumerate(loader):
+        due = not direction_mode or gate_update_due(
+            batch_index, len(loader), epoch, config['epochs'], config['gate_updates'])
+        active_gates = gate_opts if due else {}
+        permutation_seed = config['seed'] + task * 10_000_000 + epoch * 100_000 + batch_index
         try:
-            result = update_batch(model, batch, classes, config, primary, adapters, optimizer, config['precision'], gate_opts)
+            result = update_batch(model, batch, classes, config, primary, adapters, optimizer,
+                                  config['precision'], active_gates, permutation_seed)
         except FloatingPointError:
             if config['precision'] == 'fp32':
                 raise
             optimizer.zero_grad(set_to_none=True)
             retries += 1
             print(f'task {task} epoch {epoch} update {updates}: replaying this batch in FP32', flush=True)
-            result = update_batch(model, batch, classes, config, primary, adapters, optimizer, 'fp32', gate_opts)
-        for name, gate in gate_opts.items():
+            result = update_batch(model, batch, classes, config, primary, adapters, optimizer,
+                                  'fp32', active_gates, permutation_seed)
+        for name, gate in active_gates.items():
             learned_losses[name] += gate.loss.item()
             learned_sums[name] += gate.weight_sums
             learned_grad_max[name] = max(learned_grad_max[name], gate.grad_norm.item())
+            learned_counts[name] += gate.supervision_counts
+            learned_positives[name] += gate.positive_counts
         batch_losses, weight_sum, n, v, r, gate_grad = result
+        if active_gates:
+            gate_batches += 1
+            gate_people += n
+            gate_reliable += r
+            selected_indices.append(batch_index)
         gate_grad_max = max(gate_grad_max, gate_grad)
         seen += n
         valid += v
@@ -285,12 +358,19 @@ def train_epoch(model, source, indices, task, epoch, config, primary, adapters, 
             'seconds': time.monotonic()-start_time, 'peak_allocated_mib': torch.cuda.max_memory_allocated()/2**20}
     if gate_opts:
         report['train_readouts'] = {
-            name: {'mean_batch_bce': learned_losses[name] / updates,
+            name: {'mean_batch_bce': learned_losses[name] / gate_batches,
+                   'objective': 'direction_binary_bce' if direction_mode and name in ('b', 'c', 'center_b') else 'fusion_bce',
+                   'gate_updates': gate_batches, 'gate_total_updates': gate_opts[name].updates,
                    'gradient_max': learned_grad_max[name],
+                   'direction_supervision_counts': learned_counts[name].tolist(),
+                   'direction_positive_counts': learned_positives[name].tolist(),
                    'mean_preupdate_weights_by_reliability': [
                        [s/n for s in row] if n else None
-                       for row, n in zip(learned_sums[name].tolist(), (seen-reliable, reliable))]}
+                       for row, n in zip(learned_sums[name].tolist(), (gate_people-gate_reliable, gate_reliable))]}
             for name in gate_opts}
+        if direction_mode:
+            report['gate_schedule'] = {'batch_indices': selected_indices, 'people': gate_people,
+                                       'reliable_face': gate_reliable, 'updates_this_epoch': gate_batches}
     return report
 
 
@@ -309,8 +389,13 @@ def train(args):
                   micro_batch_size=args.micro_batch_size, workers=args.workers, gate_lr=.0004,
                   precision=precision, smoke=args.smoke, clip_checkpoint=str(inputs.clip_checkpoint),
                   branches=branch_configs(inputs))
-    if args.protect_branches or args.mode == 'multi':
+    if args.protect_branches or args.mode in ('multi', 'direction'):
         config['protect_branches'] = True
+    if args.mode == 'direction':
+        config.update(gate_updates=2 if args.smoke else 300, direction_transfer=.05,
+                      direction_tie='non-improvement', direction_singleton='exclude_both_b_c',
+                      direction_center='equal_available_views', direction_offset_cap=1.,
+                      gate_schedule='uniform_across_branch_batches', gate_lr_clock='per_update')
     if (root/'config.json').exists() and read(root/'config.json') != config:
         raise ValueError('Existing experiment has a different configuration')
     write(root/'config.json', config)
@@ -335,6 +420,9 @@ def train(args):
         if config['mode'] == 'multi':
             gate_opts = {name: GateOptimizer(model.gates[task][name], config)
                          for name in ('static', 'relation', 'summary')}
+        if config['mode'] == 'direction':
+            gate_opts = {name: GateOptimizer(model.gates[task][name], config)
+                         for name in ('center', 'a', 'b', 'c', 'center_b')}
         indices, _ = fit_calibration_indices(source, task_indices(task), 0.)
         if args.smoke:
             # Include both confidence cohorts when available.
@@ -343,6 +431,9 @@ def train(args):
         coverage = dict(count=len(indices), face_training_valid=sum(bool(source.face_training_valid[i]) for i in indices),
                         reliable_face=sum(bool(source.face_reliable[i]) for i in indices),
                         sample_id_sha256=hashlib.sha256('\n'.join(str(source.sample_ids[i]) for i in indices).encode()).hexdigest())
+        if config['mode'] == 'direction':
+            batches = (len(indices) + config['batch_size'] - 1) // config['batch_size']
+            gate_update_due(0, batches, 1, config['epochs'], config['gate_updates'])
         history = []
         if last.is_file():
             state = read_state(last, config)
@@ -356,6 +447,10 @@ def train(args):
                     gate.load_state_dict(state['gate_optimizers'][name])
                 restore_rng(state['rng'])
                 history = state['history']
+                if config['mode'] == 'direction':
+                    expected = sum(r['gate_schedule']['updates_this_epoch'] for r in history)
+                    if any(g.updates != expected or g.scheduler.last_epoch != expected for g in gate_opts.values()):
+                        raise ValueError('Recovered gate update clocks disagree with complete epochs')
             elif state['task'] != task - 1:
                 raise RuntimeError('Epoch recovery does not match completed task chain')
             del state
@@ -364,7 +459,8 @@ def train(args):
             history.append(row)
             scheduler.step()
             for gate in gate_opts.values():
-                gate.scheduler.step()
+                if not gate.per_update_schedule:
+                    gate.scheduler.step()
             state = dict(config=config, task=task, coverage=coverage, history=history, rng=rng_state(), **snapshot(model))
             recovery = {**state, 'optimizer': optimizer.state_dict(), 'scheduler': scheduler.state_dict()}
             if gate_opts:
@@ -374,6 +470,8 @@ def train(args):
             write(root/'progress.json', row)
             print(json.dumps(row), flush=True)
         # Also handles recovery after the last epoch was saved but before task publication.
+        if config['mode'] == 'direction' and any(g.updates != config['gate_updates'] for g in gate_opts.values()):
+            raise RuntimeError('Task did not complete the exact gate update budget')
         state = dict(config=config, task=task, coverage=coverage, history=history, rng=rng_state(), **snapshot(model))
         save_atomic(checkpoint_dir/f'task{task}.pth', state)
         write(root/'history'/f'task{task}.json', {'coverage': coverage, 'epochs': history})
@@ -384,7 +482,7 @@ def train(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--mode', required=True, choices=('fixed', 'static', 'person', 'multi'))
+    parser.add_argument('--mode', required=True, choices=('fixed', 'static', 'person', 'multi', 'direction'))
     parser.add_argument('--protect-branches', action='store_true',
                         help='Block fusion gradients into the three branches (automatic in multi mode).')
     parser.add_argument('--output', required=True, type=Path)
@@ -393,8 +491,8 @@ def main():
     parser.add_argument('--precision', choices=('auto', 'bf16', 'fp32', 'fp16'), default='auto')
     parser.add_argument('--smoke', action='store_true')
     args = parser.parse_args()
-    if args.protect_branches and args.mode not in ('fixed', 'multi'):
-        parser.error('--protect-branches applies to fixed or multi mode')
+    if args.protect_branches and args.mode not in ('fixed', 'multi', 'direction'):
+        parser.error('--protect-branches applies to fixed, multi or direction mode')
     if args.micro_batch_size < 1 or args.workers < 0:
         parser.error('micro-batch-size must be positive; workers must be nonnegative')
     args.output.mkdir(parents=True, exist_ok=True)

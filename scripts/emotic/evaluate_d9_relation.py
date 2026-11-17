@@ -95,9 +95,9 @@ def weight_statistics(weights, reliable):
     return stats
 
 
-def collect_readouts(model, loader, device, *, multi=False):
+def collect_readouts(model, loader, device, *, multi=False, include_direction=False):
     ids, labels, validity, branches = [], [], [], []
-    weight_parts, score_parts = {}, {}
+    weight_parts, score_parts, direction_parts = {}, {}, {}
     model.requires_grad_(False).eval()
     with torch.inference_mode():
         for images, target, batch_ids in loader:
@@ -111,9 +111,14 @@ def collect_readouts(model, loader, device, *, multi=False):
             for name, readout in (output["readouts"] if multi else {"model": output}).items():
                 weight_parts.setdefault(name, []).append(readout["weights"].float().cpu())
                 score_parts.setdefault(name, []).append(readout["fused"].float().cpu())
+                if include_direction and "direction_scores" in readout:
+                    direction_parts.setdefault(name, []).append(readout["direction_scores"].float().cpu())
     readouts = {name: (torch.cat(parts), torch.cat(score_parts[name]))
                 for name, parts in weight_parts.items()}
-    return ids, torch.cat(labels), torch.cat(validity), torch.cat(branches), readouts
+    result = ids, torch.cat(labels), torch.cat(validity), torch.cat(branches), readouts
+    if include_direction:
+        return (*result, {name: torch.cat(parts) for name, parts in direction_parts.items()})
+    return result
 
 
 def collect(model, loader, device):
