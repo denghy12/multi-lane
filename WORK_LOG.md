@@ -1,3 +1,7 @@
+## 三动作价值诊断完成（seed1）
+
+基于 seed1 的16份预测完成CPU复算、100次同群动作置换、组统一与Validation锁定对照；本地归档3份结果JSON和日志已与服务器核对。 见 docs/d9_three_action_results_20261118.md。
+
 ## 2026-11-18 三动作只读价值诊断
 
 CPU 入口 scripts/emotic/d9_three_actions.py；seed1八阶段，Full 向一个有效辅助视图转移5个百分点或保持固定。
