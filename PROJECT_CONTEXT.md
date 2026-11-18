@@ -1,6 +1,6 @@
 ## 2026-11-18 全 TRAIN 样本级 ASL
 
-第六组使用全部合法 TRAIN 人物，按原固定分支轨迹重放训练，使用 Frozen9 关联和 Task10 Selectors 汇总，ASL 学习各人物的融合权重。比较基准为同数据、中间特征的 BCE。详见 docs/d9_sample_fusion_20261118.md。
+GPU0 于北京时间 17:58 启动第六组，全 TRAIN 的 Task10 Selectors 汇总 Frozen9 关联，ASL 学习人物融合比例，分支和 logits 入口停止融合梯度。独立运行版本 d84dde5，完整 TRAIN 与留出 TRAIN 现在各有一对同输入 ASL/BCE。协议见 docs/d9_sample_fusion_20261118.md。
 
 ## 2026-11-18 样本级融合与 ASL 对照
 

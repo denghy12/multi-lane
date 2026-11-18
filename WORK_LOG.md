@@ -1,6 +1,6 @@
 ## 2026-11-18 全 TRAIN 样本级 ASL
 
-基于 22bcf69 创建 exp/d9-sample-full-asl-20261118，增加 sample_full_asl 独立模式。历史全量与 90/10 进程继续运行。
+50 项远程回归、两个真实小任务训练及 Validation/Test 通过，固定分支每任务203个张量、两 split 固定输出精确重放，跨运行预检汇总已同步并核对哈希。新进程会话 d9_full_train_asl_20261118，运行版本 d84dde5。正式 task0 前两轮约131/134秒，20次融合更新、零跳步；全 TRAIN BCE 与 ASL 的 task0 人群文件哈希相同。
 
 ## 2026-11-18 样本级融合与 ASL 对照
 

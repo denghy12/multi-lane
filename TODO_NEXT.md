@@ -1,6 +1,6 @@
 ## 2026-11-18 全 TRAIN 样本级 ASL
 
-先通过两个真实小任务的分支及固定读出重放，再启动 GPU0 全 TRAIN ASL。完成后对比全量/留出两对 ASL 与 BCE 的 Validation、Test 及同组置换结果。
+等待两套原读出与全 TRAIN ASL 的八阶段训练、Validation、Test、100次置换以及全 TRAIN 逐项重放。正式汇总 comparison_with_full_asl.json 将包含全量及留出两对 ASL−BCE 差值。结束后同步远程正式结果再判断两个 mAP 是否达到同轨迹固定读出。
 
 ## 2026-11-18 样本级融合与 ASL 对照
 
