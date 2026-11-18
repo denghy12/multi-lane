@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from multi_lane.track_a.d9_relation_fusion import READOUTS, DIRECTION_READOUTS
+from multi_lane.track_a.d9_relation_fusion import READOUTS, DIRECTION_READOUTS, SAMPLE_MODES, sample_readouts
 from multi_lane.track_a.openai_clip_loader import sha256_file
 from multi_lane.track_a.runner import TASK_SIZES, TaskMetrics, set_seed, summarize_tasks
 from scripts.emotic.evaluate_d9_relation import (
@@ -16,10 +16,6 @@ from scripts.emotic.evaluate_d9_relation import (
 )
 
 GROUPS = ("unreliable", "reliable")
-SAMPLE_READOUTS = {
-    "sample_full": ("fixed", "equal", "mid_bce", "late_bce"),
-    "sample_holdout": ("fixed", "equal", "mid_bce", "late_bce", "mid_asl"),
-}
 
 
 def verify_reference(path, task, ids, targets, reliable, branches, fixed_weights, fixed_logits):
@@ -133,7 +129,7 @@ def evaluate(root, reference_root, split, batch_size, workers, smoke):
     config_path = root / "config.json"
     config = json.loads(config_path.read_text())
     mode = config["mode"]
-    sample_mode = mode in SAMPLE_READOUTS
+    sample_mode = mode in SAMPLE_MODES
     if mode not in ("multi", "direction") and not sample_mode:
         raise ValueError(f"Unsupported protected evaluation mode: {mode}")
     if mode == "sample_holdout" and reference_root is not None:
@@ -148,7 +144,9 @@ def evaluate(root, reference_root, split, batch_size, workers, smoke):
     if config["smoke"] != smoke or not config.get("protect_branches"):
         raise ValueError("Protected evaluation needs matching smoke/formal configurations")
     direction_mode = config["mode"] == "direction"
-    names = SAMPLE_READOUTS[mode] if sample_mode else DIRECTION_READOUTS if direction_mode else READOUTS
+    names = DIRECTION_READOUTS if direction_mode else READOUTS
+    if sample_mode:
+        names = sample_readouts(mode)
     title = "smoke_evaluation" if smoke else "evaluation"
     directory = root / title / split
     directory.mkdir(parents=True, exist_ok=True)
@@ -170,7 +168,7 @@ def evaluate(root, reference_root, split, batch_size, workers, smoke):
             ref_report = json.loads(ref.with_suffix(".json").read_text())
             if ref_report["scores_sha256"] != ref_hash or ref_report["protocol"]["batch_size"] != batch_size:
                 raise ValueError(f"Reference artifact hash or eval batch size mismatch for task {task}")
-        protocol = dict(schema=3 if sample_mode else 2 if direction_mode else 1, task=task, split=split, smoke=smoke, batch_size=batch_size,
+        protocol = dict(schema={"direction": 2, "multi": 1}.get(mode, 3), task=task, split=split, smoke=smoke, batch_size=batch_size,
                         checkpoint_sha256=sha256_file(checkpoint), config_sha256=config_hash,
                         reference_scores_sha256=ref_hash, validation_result_sha256=val_hash,
                         shuffle_seed=SHUFFLE_SEED)

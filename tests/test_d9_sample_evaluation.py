@@ -2,7 +2,8 @@ import unittest
 
 import torch
 
-from scripts.emotic.evaluate_d9_protected_gates import SAMPLE_READOUTS, assess
+from multi_lane.track_a.d9_relation_fusion import sample_readouts
+from scripts.emotic.evaluate_d9_protected_gates import assess
 from scripts.emotic.evaluate_d9_relation import weighted_logits
 from scripts.emotic.evaluate_d9_sample_fusion import comparisons, PROTECTED_BASELINE
 
@@ -14,7 +15,7 @@ class SampleFusionEvaluationTests(unittest.TestCase):
         branches = torch.randn(4, 5, 3, generator=torch.Generator().manual_seed(22))
         fixed = torch.tensor([[.64, .16, .2], [.8, .2, 0.]])[(~reliable).long(), None]
         equal = torch.tensor([[1/3, 1/3, 1/3], [.5, .5, 0.]])[(~reliable).long(), None]
-        names = SAMPLE_READOUTS["sample_holdout"]
+        names = sample_readouts("sample_holdout")
         data = {}
         for name in names:
             w = fixed if name == "fixed" else equal

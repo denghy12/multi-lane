@@ -49,6 +49,22 @@ class SampleFusionTests(unittest.TestCase):
                                 for p in self.model.gates[1][key].parameters()))
             self.assertFalse(torch.equal(readout['weights'][0], readout['weights'][2]))
 
+    def test_restricted_training_forwards_preserve_outputs_and_gate_gradients(self):
+        all_outputs = self.model(self.inputs)
+        gate_only = self.model(self.inputs, sample_gate_only=True)
+        for view in ('full', 'person', 'face'):
+            self.assertFalse(gate_only['branches'][view].requires_grad)
+        for name in sample_readouts('sample_holdout'):
+            torch.testing.assert_close(gate_only['readouts'][name]['fused'], all_outputs['readouts'][name]['fused'],
+                                       rtol=0, atol=0)
+        gate_only['readouts']['mid_bce']['fused'].sum().backward()
+        self.assertTrue(self.model.gates[0]['mid_bce'].linear.grad.abs().sum() > 0)
+        self.assertTrue(all(p.grad is None for p in self.model.branches.parameters()))
+        branch_only = self.model(self.inputs, sample_branch_only=True)
+        self.assertEqual(tuple(branch_only['readouts']), ('fixed',))
+        torch.testing.assert_close(branch_only['fused'], all_outputs['fused'], rtol=0, atol=0)
+        self.assertTrue(all(v.requires_grad for v in branch_only['all_columns'].values()))
+
     def test_task10_selector_pool_reads_matching_frozen9_query_positions(self):
         person = self.model.branches['person']
         captured = {}

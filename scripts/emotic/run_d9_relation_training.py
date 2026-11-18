@@ -24,6 +24,8 @@ from multi_lane.track_a.runner import (
     LabelView, TASK_SIZES, build_optimizer_groups, compute_asymmetric_training_loss,
     compute_training_loss, fit_calibration_indices, git_metadata, set_seed, task_indices)
 from scripts.emotic.run_r1_frozen_cross_view import input_paths
+from scripts.emotic.d9_sample_training import (
+    FUSION_ASL, SAMPLE_MODES, describe_cohort, fusion_source, global_image_roles, task_cohorts, train_gate_sweep)
 
 
 def branch_configs(inputs):
@@ -108,7 +110,7 @@ def optimizer_for_task(model, config, task):
         adapters.extend(adapted)
         groups.extend(branch_groups)
     # In multi mode the branch optimizer must exactly match protected fixed.
-    gate = [] if config['mode'] in ('multi', 'direction') else list(model.gates[task].parameters())
+    gate = [] if config['mode'] in ('multi', 'direction', *SAMPLE_MODES) else list(model.gates[task].parameters())
     if gate:
         groups.append({'params': gate, 'lr': config['gate_lr'], 'weight_decay': 0.})
         primary.extend(gate)
@@ -127,7 +129,7 @@ class GateOptimizer:
     def __init__(self, gate, config):
         self.params = list(gate.parameters())
         self.optimizer = torch.optim.Adam(self.params, lr=config['gate_lr'], weight_decay=0.)
-        self.per_update_schedule = config.get('mode') == 'direction'
+        self.per_update_schedule = config.get('mode') in ('direction', *SAMPLE_MODES)
         horizon = config['gate_updates'] if self.per_update_schedule else config['epochs']
         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=horizon)
         self.updates = 0
@@ -231,7 +233,7 @@ def update_batch(model, batch, classes, config, primary, adapters, optimizer, pr
         piece = {k: value[start:stop].cuda(non_blocking=True) for k, value in images.items()}
         target = labels[start:stop].cuda(non_blocking=True).float()
         with torch.autocast('cuda', dtype=dtype) if precision != 'fp32' else nullcontext():
-            outputs = model(piece)
+            outputs = model(piece, sample_branch_only=True) if config['mode'] in SAMPLE_MODES else model(piece)
             fused, bce, asl = losses(
                 outputs, target, piece['face_training_valid'], count, valid_count, classes,
                 protect_branches=config.get('protect_branches', False),
@@ -278,7 +280,7 @@ def update_batch(model, batch, classes, config, primary, adapters, optimizer, pr
     # starts with the original branch and gate states and the same input batch.
     for gate in gate_opts.values():
         gate.check_gradients(scale)
-    gate_grad = [] if config['mode'] in ('multi', 'direction') else [
+    gate_grad = [] if config['mode'] in ('multi', 'direction', *SAMPLE_MODES) else [
         p.grad for p in model.gates[model.current_task_id].parameters() if p.grad is not None]
     gate_norm = torch.stack(torch._foreach_norm(gate_grad)).norm().item() if gate_grad else 0.
     optimizer.step()
@@ -389,17 +391,31 @@ def train(args):
                   micro_batch_size=args.micro_batch_size, workers=args.workers, gate_lr=.0004,
                   precision=precision, smoke=args.smoke, clip_checkpoint=str(inputs.clip_checkpoint),
                   branches=branch_configs(inputs))
-    if args.protect_branches or args.mode in ('multi', 'direction'):
+    if args.protect_branches or args.mode in ('multi', 'direction', *SAMPLE_MODES):
         config['protect_branches'] = True
     if args.mode == 'direction':
         config.update(gate_updates=2 if args.smoke else 300, direction_transfer=.05,
                       direction_tie='non-improvement', direction_singleton='exclude_both_b_c',
                       direction_center='equal_available_views', direction_offset_cap=1.,
                       gate_schedule='uniform_across_branch_batches', gate_lr_clock='per_update')
+    if args.mode in SAMPLE_MODES:
+        config.update(gate_updates=2 if args.smoke else 300, gate_lr_clock='per_update',
+                      fusion_preprocessing='deterministic_train_images', gate_schedule='full_sweep_before_each_branch_epoch',
+                      image_split='global_10pct_hash_rank' if args.mode == 'sample_holdout' else 'all_train',
+                      fusion_input='selector_weighted_frozen9_or_final_task_cls', fusion_init='equal_available_views',
+                      fusion_asl=FUSION_ASL if args.mode == 'sample_holdout' else None)
     if (root/'config.json').exists() and read(root/'config.json') != config:
         raise ValueError('Existing experiment has a different configuration')
     write(root/'config.json', config)
     source = build_joint_source(inputs, 'train')
+    sample_mode = args.mode in SAMPLE_MODES
+    if sample_mode:
+        roles = global_image_roles(source, args.mode, config['seed'])
+        split_path = root/'train_image_roles.json'
+        if split_path.is_file() and read(split_path) != roles:
+            raise ValueError('Original-image TRAIN split changed since previous launch')
+        write(split_path, roles)
+        gate_data = fusion_source(source)
     set_seed(config['seed'], tf32=True)
     model = make_model(config)
     last = root/'epoch_recovery'/'latest.pth'
@@ -424,7 +440,18 @@ def train(args):
             gate_opts = {name: GateOptimizer(model.gates[task][name], config)
                          for name in ('center', 'a', 'b', 'c', 'center_b')}
         indices, _ = fit_calibration_indices(source, task_indices(task), 0.)
-        if args.smoke:
+        if sample_mode:
+            names = ('mid_bce', 'late_bce', 'mid_asl') if args.mode == 'sample_holdout' else ('mid_bce', 'late_bce')
+            gate_opts = {name: GateOptimizer(model.gates[task][name], config) for name in names}
+            indices, fusion_indices = task_cohorts(source, indices, roles, args.smoke)
+            cohorts = {'branch': describe_cohort(source, indices, task_indices(task)),
+                       'fusion': describe_cohort(source, fusion_indices, task_indices(task))}
+            cohort_path = root/'cohorts'/f'task{task}.json'
+            if cohort_path.is_file() and read(cohort_path) != cohorts:
+                raise ValueError('Original-image cohorts changed since previous launch')
+            write(cohort_path, cohorts)
+            print(f'task {task}: branch people={len(indices)}, fusion people={len(fusion_indices)}', flush=True)
+        elif args.smoke:
             # Include both confidence cohorts when available.
             by_mask = [[i for i in indices if bool(source.face_reliable[i]) == m] for m in (False, True)]
             indices = list(dict.fromkeys([*by_mask[0][:4], *by_mask[1][:4], *indices[:8]]))[:8]
@@ -447,7 +474,7 @@ def train(args):
                     gate.load_state_dict(state['gate_optimizers'][name])
                 restore_rng(state['rng'])
                 history = state['history']
-                if config['mode'] == 'direction':
+                if config['mode'] == 'direction' or sample_mode:
                     expected = sum(r['gate_schedule']['updates_this_epoch'] for r in history)
                     if any(g.updates != expected or g.scheduler.last_epoch != expected for g in gate_opts.values()):
                         raise ValueError('Recovered gate update clocks disagree with complete epochs')
@@ -455,7 +482,13 @@ def train(args):
                 raise RuntimeError('Epoch recovery does not match completed task chain')
             del state
         for epoch in range(len(history)+1, config['epochs']+1):
-            row = train_epoch(model, source, indices, task, epoch, config, primary, adapters, optimizer, gate_opts)
+            if sample_mode:
+                gate_reports, gate_schedule = train_gate_sweep(
+                    model, gate_data, fusion_indices, task, epoch, config, gate_opts)
+            row = train_epoch(model, source, indices, task, epoch, config, primary, adapters, optimizer,
+                              {} if sample_mode else gate_opts)
+            if sample_mode:
+                row.update(train_readouts=gate_reports, gate_schedule=gate_schedule)
             history.append(row)
             scheduler.step()
             for gate in gate_opts.values():
@@ -470,7 +503,7 @@ def train(args):
             write(root/'progress.json', row)
             print(json.dumps(row), flush=True)
         # Also handles recovery after the last epoch was saved but before task publication.
-        if config['mode'] == 'direction' and any(g.updates != config['gate_updates'] for g in gate_opts.values()):
+        if (config['mode'] == 'direction' or sample_mode) and any(g.updates != config['gate_updates'] for g in gate_opts.values()):
             raise RuntimeError('Task did not complete the exact gate update budget')
         state = dict(config=config, task=task, coverage=coverage, history=history, rng=rng_state(), **snapshot(model))
         save_atomic(checkpoint_dir/f'task{task}.pth', state)
@@ -482,7 +515,7 @@ def train(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--mode', required=True, choices=('fixed', 'static', 'person', 'multi', 'direction'))
+    parser.add_argument('--mode', required=True, choices=('fixed', 'static', 'person', 'multi', 'direction', *SAMPLE_MODES))
     parser.add_argument('--protect-branches', action='store_true',
                         help='Block fusion gradients into the three branches (automatic in multi mode).')
     parser.add_argument('--output', required=True, type=Path)
@@ -491,7 +524,7 @@ def main():
     parser.add_argument('--precision', choices=('auto', 'bf16', 'fp32', 'fp16'), default='auto')
     parser.add_argument('--smoke', action='store_true')
     args = parser.parse_args()
-    if args.protect_branches and args.mode not in ('fixed', 'multi', 'direction'):
+    if args.protect_branches and args.mode not in ('fixed', 'multi', 'direction', *SAMPLE_MODES):
         parser.error('--protect-branches applies to fixed, multi or direction mode')
     if args.micro_batch_size < 1 or args.workers < 0:
         parser.error('micro-batch-size must be positive; workers must be nonnegative')

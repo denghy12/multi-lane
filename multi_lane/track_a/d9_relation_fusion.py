@@ -214,7 +214,7 @@ class D9RelationFusion(nn.Module):
             model.restore_task(task)
         self._configure_gates(task)
 
-    def forward(self, inputs, *, all_seen=False):
+    def forward(self, inputs, *, all_seen=False, sample_gate_only=False, sample_branch_only=False):
         current = self.current_task_id
         if current < 0:
             raise RuntimeError('Activate or restore a task before inference')
@@ -223,7 +223,12 @@ class D9RelationFusion(nn.Module):
         lane_logits, relations = {}, {'person': {}, 'face': {}}
         multi = self.mode == 'multi'
         direction = self.mode == 'direction'
-        sample = self.mode in SAMPLE_MODES
+        sample_mode = self.mode in SAMPLE_MODES
+        if (sample_gate_only or sample_branch_only) and not sample_mode:
+            raise ValueError('Selective sample forward requires a sample-level training protocol')
+        if sample_gate_only and sample_branch_only:
+            raise ValueError('Choose either the branch or the gate training forward')
+        sample = sample_mode and not sample_branch_only
         late_features = {}
         protected_readouts = multi or direction or sample
         pooled = {v: {} for v in VIEWS} if multi else None
@@ -231,33 +236,34 @@ class D9RelationFusion(nn.Module):
         # frozen CLIP in both receivers. Share only raw detached sender patches.
         shared_tower = self.branches['person'].visual_encoder is self.branches['face'].visual_encoder
         full_sender_cache = {} if shared_tower else None
-        for view in VIEWS:
-            branch = self.branches[view]
-            summary_args = dict(summary_layer=9, pooled_summaries=pooled[view]) if multi else {}
-            if view == 'full':
-                if multi or sample:
-                    features = branch.encode_lanes(inputs['full'], all_seen, **summary_args)
-                    lane_logits[view] = branch.head(features)
+        with torch.set_grad_enabled(torch.is_grad_enabled() and not sample_gate_only):
+            for view in VIEWS:
+                branch = self.branches[view]
+                summary_args = dict(summary_layer=9, pooled_summaries=pooled[view]) if multi else {}
+                if view == 'full':
+                    if multi or sample:
+                        features = branch.encode_lanes(inputs['full'], all_seen, **summary_args)
+                        lane_logits[view] = branch.head(features)
+                    else:
+                        lane_logits[view] = branch.lane_logits(inputs['full'], all_seen)
                 else:
-                    lane_logits[view] = branch.lane_logits(inputs['full'], all_seen)
-            else:
-                # Receivers use "full" as the historical key for their own pixels.
-                own_inputs = {**inputs, 'full': inputs[view]}
-                capture = relations[view] if protected_readouts or self.mode == 'person' else None
-                features = branch.encode_lanes(own_inputs, all_seen, full_relations=capture,
-                                               full_sender_cache=full_sender_cache,
-                                               detach_relation=protected_readouts,
-                                               selector_weight_relation=sample, **summary_args)
-                lane_logits[view] = branch.head(features)
-            if sample:
-                late_features[view] = features.detach()
+                    # Receivers use "full" as the historical key for their own pixels.
+                    own_inputs = {**inputs, 'full': inputs[view]}
+                    capture = relations[view] if protected_readouts or self.mode == 'person' else None
+                    features = branch.encode_lanes(own_inputs, all_seen, full_relations=capture,
+                                                   full_sender_cache=full_sender_cache,
+                                                   detach_relation=protected_readouts,
+                                                   selector_weight_relation=sample, **summary_args)
+                    lane_logits[view] = branch.head(features)
+                if sample:
+                    late_features[view] = features.detach()
 
         names = {
             'multi': READOUTS,
             'direction': DIRECTION_READOUTS,
         }.get(self.mode, (self.mode,))
-        if sample:
-            names = sample_readouts(self.mode)
+        if sample_mode:
+            names = ('fixed',) if sample_branch_only else sample_readouts(self.mode)
         all_weights = {name: [] for name in names}
         all_fused = {name: [] for name in names}
         direction_scores = {name: [] for name in ('a', 'b', 'c', 'center_b')} if direction else {}
@@ -293,7 +299,7 @@ class D9RelationFusion(nn.Module):
                     gate = self.gates[task][name]
                     w = gate(reliable, relations['person'][task].detach(), relations['face'][task].detach())
                 else:
-                    gate = self.gates[task][name] if protected_readouts else self.gates[task]
+                    gate = self.gates[task][name] if protected_readouts or sample_mode else self.gates[task]
                     w = gate(reliable, relations['person'].get(task), relations['face'].get(task))
                 readout_scores = scores.detach() if protected_readouts and name != 'fixed' else scores
                 all_fused[name].append(fuse_view_logits(readout_scores, w, reliable))
@@ -306,6 +312,6 @@ class D9RelationFusion(nn.Module):
         result = dict(**readouts[names[0]],
                       branches={v: torch.cat(parts, dim=1) for v, parts in outputs.items()},
                       all_columns={v: scores[:, -1] for v, scores in lane_logits.items()})
-        if protected_readouts:
+        if protected_readouts or sample_mode:
             result['readouts'] = readouts
         return result

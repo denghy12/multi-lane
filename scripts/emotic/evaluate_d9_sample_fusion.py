@@ -4,7 +4,8 @@ import json
 from pathlib import Path
 
 from scripts.emotic.d9_direction_permutation import evaluate as evaluate_permutations
-from scripts.emotic.evaluate_d9_protected_gates import SAMPLE_READOUTS, evaluate as evaluate_forward
+from multi_lane.track_a.d9_relation_fusion import SAMPLE_MODES, sample_readouts
+from scripts.emotic.evaluate_d9_protected_gates import evaluate as evaluate_forward
 from scripts.emotic.evaluate_d9_relation import write_json
 
 
@@ -38,13 +39,13 @@ def comparisons(summary, learned, split, smoke):
 def evaluate(root, reference_root, split, batch_size, workers, smoke):
     config = json.loads((root / "config.json").read_text())
     mode = config["mode"]
-    if mode not in SAMPLE_READOUTS:
+    if mode not in SAMPLE_MODES:
         raise ValueError(f"Expected from-scratch sample fusion, found {mode}")
     evaluate_forward(root, reference_root, split, batch_size, workers, smoke)
     directory = root / ("smoke_evaluation" if smoke else "evaluation") / split
     path = directory / "result.json"
     report = json.loads(path.read_text())
-    learned = [name for name in SAMPLE_READOUTS[mode] if name not in ("fixed", "equal")]
+    learned = [name for name in sample_readouts(mode) if name not in ("fixed", "equal")]
     report.update(mode=mode, learned_readouts=learned, comparisons=comparisons(report["summary"], learned, split, smoke),
                   historical_reference_supplied=reference_root is not None)
     write_json(path, report)
