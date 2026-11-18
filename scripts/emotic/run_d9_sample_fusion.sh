@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 phase=${1:?supply smoke or formal}
-mode=${2:?supply sample_full or sample_holdout}
-case "$mode" in sample_full|sample_holdout) ;; *) exit 2 ;; esac
+mode=${2:?supply sample_full, sample_holdout or sample_full_asl}
+case "$mode" in sample_full|sample_holdout|sample_full_asl) ;; *) exit 2 ;; esac
 export CUDA_VISIBLE_DEVICES=${3:-0} CUBLAS_WORKSPACE_CONFIG=:4096:8 PYTHONHASHSEED=1
 export OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 OPENBLAS_NUM_THREADS=1
 py=${PYTHON:-/opt/conda/envs/ddp/bin/python}
@@ -26,7 +26,7 @@ echo "phase=$phase mode=$mode gpu=$CUDA_VISIBLE_DEVICES $(git rev-parse HEAD) $(
 "$py" -u -m scripts.emotic.run_d9_relation_training --mode "$mode" --protect-branches \
    --output "$root" --precision bf16 --workers 2 --micro-batch-size "$batch" "${args[@]}"
 ref_args=()
-if [ "$mode" = sample_full ]; then
+if [[ "$mode" = sample_full || "$mode" = sample_full_asl ]]; then
     "$py" -u -m scripts.emotic.verify_d9_protected_replay --root "$root" --reference-root "$ref/fixed" "${args[@]}"
     ref_args=(--reference-root "$ref/fixed")
 fi

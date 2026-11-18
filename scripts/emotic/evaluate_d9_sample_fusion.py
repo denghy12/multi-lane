@@ -29,7 +29,7 @@ def comparisons(summary, learned, split, smoke):
         for label, ref in refs.items():
             delta = {key: scores[key] - ref[key] for key in MAP_KEYS}
             result[name][label] = dict(delta_mAP_points=delta, both_at_least_reference=min(delta.values()) >= 0)
-    if "mid_asl" in learned:
+    if "mid_asl" in learned and "mid_bce" in learned:
         result["mid_asl_minus_mid_bce"] = {
             key: summary["mid_asl"]["all"][key] - summary["mid_bce"]["all"][key] for key in MAP_KEYS
         }

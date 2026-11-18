@@ -134,8 +134,8 @@ def evaluate(root, reference_root, split, batch_size, workers, smoke):
         raise ValueError(f"Unsupported protected evaluation mode: {mode}")
     if mode == "sample_holdout" and reference_root is not None:
         raise ValueError("The 90% branches have a different TRAIN cohort from the historical fixed run")
-    if not sample_mode and reference_root is None:
-        raise ValueError("Historical reference required for legacy protected runs")
+    if (not sample_mode or mode == "sample_full_asl") and reference_root is None:
+        raise ValueError("Historical reference required to verify this protected run")
     if reference_root is not None:
         reference_config = json.loads((reference_root / "config.json").read_text())
         if (reference_config["mode"] != "fixed" or reference_config["smoke"] != smoke

@@ -1,3 +1,7 @@
+## 2026-11-18 全 TRAIN 样本级 ASL
+
+第六组使用全部合法 TRAIN 人物，按原固定分支轨迹重放训练，使用 Frozen9 关联和 Task10 Selectors 汇总，ASL 学习各人物的融合权重。比较基准为同数据、中间特征的 BCE。详见 docs/d9_sample_fusion_20261118.md。
+
 ## 2026-11-18 样本级融合与 ASL 对照
 
 五个样本级融合读出已在 GPU0 的两条 TRAIN 轨迹上运行，执行版本 0589fbb。全 TRAIN 比较中间和末层 BCE，原图永久 90/10 比较相同两个 BCE 及中间 ASL。task0 全量为 5,353 人，划分组为 4,795 人训练分支、558 人训练比例。协议见 docs/d9_sample_fusion_20261118.md。

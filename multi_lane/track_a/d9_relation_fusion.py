@@ -25,14 +25,18 @@ def fuse_view_logits(scores, weights, reliable):
             + weights[:, 2:3] * face)
 
 
-SAMPLE_MODES = ('sample_full', 'sample_holdout')
+SAMPLE_GATES = {
+    'sample_full': ('mid_bce', 'late_bce'),
+    'sample_holdout': ('mid_bce', 'late_bce', 'mid_asl'),
+    'sample_full_asl': ('mid_asl',),
+}
+SAMPLE_MODES = tuple(SAMPLE_GATES)
 
 
 def sample_readouts(mode):
     if mode not in SAMPLE_MODES:
         raise ValueError(f'Unknown sample-level protocol: {mode}')
-    names = ('fixed', 'equal', 'mid_bce', 'late_bce')
-    return names + ('mid_asl',) if mode == 'sample_holdout' else names
+    return ('fixed', 'equal', *SAMPLE_GATES[mode])
 
 
 class SampleFusionGate(nn.Module):
@@ -166,9 +170,9 @@ class D9RelationFusion(nn.Module):
                 if any(self.branches[v].r1_layer != 8 for v in ('person', 'face')):
                     raise ValueError('Sample fusion requires Frozen9 patch receivers')
                 self.gates = nn.ModuleList(nn.ModuleDict({
-                    'fixed': RelationGate('fixed'), 'mid_bce': SampleFusionGate(),
-                    'late_bce': SampleFusionGate(self.branches['full'].output_dim),
-                    **({'mid_asl': SampleFusionGate()} if mode == 'sample_holdout' else {}),
+                    'fixed': RelationGate('fixed'),
+                    **{name: SampleFusionGate(self.branches['full'].output_dim if name == 'late_bce' else None)
+                       for name in SAMPLE_GATES[mode]},
                 }) for _ in self.task_sizes)
             elif mode == 'multi':
                 # Draw all relation scorers first to replay the original relation initialization.

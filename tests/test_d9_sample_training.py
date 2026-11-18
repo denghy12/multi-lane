@@ -34,6 +34,7 @@ class TestSampleTraining(unittest.TestCase):
     def test_full_uses_all_rows_and_matches_legacy_smoke(self):
         source = self.source()
         roles = global_image_roles(source, 'sample_full', 1)
+        self.assertEqual(roles, global_image_roles(source, 'sample_full_asl', 1))
         ids = list(range(len(source.sample_ids)))
         self.assertEqual(task_cohorts(source, ids, roles, False), (ids, ids))
         sample = smoke_rows(source, ids)

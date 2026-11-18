@@ -11,7 +11,6 @@ from multi_lane.track_a.r1_crossvit_experiment import single_thread_worker
 from multi_lane.track_a.runner import LabelView, compute_asymmetric_training_loss, task_indices
 
 
-SAMPLE_MODES = ('sample_full', 'sample_holdout')
 FUSION_ASL = dict(gamma_neg=9.8, gamma_pos=0., clip=.05, eps=1e-8)
 
 
@@ -24,7 +23,7 @@ def image_key(value):
 
 def global_image_roles(source, mode, seed):
     images = sorted({image_key(person) for person in source.sample_ids})
-    if mode == 'sample_full':
+    if mode in ('sample_full', 'sample_full_asl'):
         return {img: 'both' for img in images}
     if mode != 'sample_holdout':
         raise ValueError(f'Unexpected sample strategy {mode!r}')

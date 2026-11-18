@@ -37,6 +37,9 @@ class SampleFusionEvaluationTests(unittest.TestCase):
         table = {"fixed": metric(-.2, -.5), "equal": metric(-1., -1.),
                  "mid_bce": metric(-.1, .1), "mid_asl": metric(0., .1)}
         row = comparisons(table, ("mid_asl", "mid_bce"), "test", False)
+        single = comparisons({name: table[name] for name in ("fixed", "equal", "mid_asl")},
+                             ("mid_asl",), "test", False)
+        self.assertEqual(set(single), {"mid_asl"})
         self.assertTrue(row["mid_bce"]["same_branches_fixed"]["both_at_least_reference"])
         self.assertFalse(row["mid_bce"]["historical_protected_full_train"]["both_at_least_reference"])
         self.assertTrue(row["mid_asl"]["historical_protected_full_train"]["both_at_least_reference"])

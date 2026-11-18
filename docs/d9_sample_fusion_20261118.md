@@ -17,3 +17,9 @@ EMOTIC 历史划分、seed1、8任务、30轮、batch64。两个训练模型从�
 完整 TRAIN 和永久留出组均用当前任务合法 TRAIN 人物。后一组按原图固定分工，同图所有人物及视图跨任务归于同一侧。两组每个任务的融合训练预算均为300次更新；适配与分类的损失只更新分支。融合特征和分支 logits 在融合监督入口断开梯度。融合 ASL 使用仓库已有公式，对当前任务类别计算，gamma_neg=9.8、gamma_pos=0、clip=0.05；第五组与第三组配对。采用相同分支预算和数据覆盖之间的区别，以实际人数及更新数报告。分支 Adam／cosine 主学习率0.0125，Adapter、交互和门控0.0004，weight decay 0，BF16。详细配置随输出保存。
 
 运行 bash scripts/emotic/run_d9_sample_fusion.sh <smoke或formal> <sample_full或sample_holdout> <GPU>。输出位于 output/d9_sample_fusion/seed1_20261118，日志位于 logs/d9_sample_fusion/seed1_20261118。正式输出包括逐任务 checkpoint、训练人群覆盖、门控学习记录、八阶段逐人 logits 和权重、Validation 与 Test 的最终及阶段平均 mAP、同任务同可靠性内交换权重的比较。全 TRAIN 的固定读出核对受保护历史参照。比较各自同轨迹的固定读出与绝对参照，Test 最终33.2019、阶段平均40.2847，Validation 同批对照43.6272／51.1094。结果是否达标以正式评估为准。
+
+## 全 TRAIN 中间特征 ASL 补充组
+
+第六组与全 TRAIN 中间特征 BCE 成对比较。在独立工作树和输出目录从相同初始化重放全 TRAIN 分支，避免干扰已启动的两条训练。每个任务用相同的官方 TRAIN 人物和确定性图像变换训练融合比例。Fusion ASL 使用当前类别，gamma_neg=9.8、gamma_pos=0、clip=0.05；进入融合层的 Frozen9／Task10 关联与三个分类头的 logits 都停止梯度。该读出从有效视图均分开始，每任务更新 300 次。全 TRAIN 与 90/10 各自比较中间 ASL 和中间 BCE，同时检查不同监督人群是否改变两种损失的相对表现。
+
+远程执行入口为 bash scripts/emotic/run_d9_sample_fusion.sh formal sample_full_asl 0。相对输出为 output/d9_sample_fusion/seed1_20261118/sample_full_asl，日志为 logs/d9_sample_fusion/seed1_20261118/sample_full_asl.log。两任务预检先行，正式流程核对八阶段分支状态及固定预测重放，完成 Validation、Test 与同组人物权重置换。

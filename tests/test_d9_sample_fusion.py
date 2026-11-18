@@ -49,6 +49,18 @@ class SampleFusionTests(unittest.TestCase):
                                 for p in self.model.gates[1][key].parameters()))
             self.assertFalse(torch.equal(readout['weights'][0], readout['weights'][2]))
 
+    def test_full_asl_has_only_paired_mid_gate_and_matches_native_logits(self):
+        model = D9RelationFusion(copy.deepcopy(dict(self.model.branches.items())), 'sample_full_asl')
+        self.assertEqual(set(model.gates[0]), {'fixed', 'mid_asl'})
+        output = model(self.inputs, sample_gate_only=True)
+        self.assertEqual(tuple(output['readouts']), ('fixed', 'equal', 'mid_asl'))
+        reference = self.model(self.inputs, sample_gate_only=True)
+        for view in model.branches:
+            torch.testing.assert_close(output['branches'][view], reference['branches'][view], atol=0, rtol=0)
+        for name in output['readouts']:
+            torch.testing.assert_close(output['readouts'][name]['fused'], reference['readouts'][name]['fused'],
+                                       atol=0, rtol=0)
+
     def test_restricted_training_forwards_preserve_outputs_and_gate_gradients(self):
         all_outputs = self.model(self.inputs)
         gate_only = self.model(self.inputs, sample_gate_only=True)

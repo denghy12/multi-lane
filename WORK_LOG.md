@@ -1,3 +1,7 @@
+## 2026-11-18 全 TRAIN 样本级 ASL
+
+基于 22bcf69 创建 exp/d9-sample-full-asl-20261118，增加 sample_full_asl 独立模式。历史全量与 90/10 进程继续运行。
+
 ## 2026-11-18 样本级融合与 ASL 对照
 
 远程通过 48 项回归及两任务真实数据训练、Validation 和 Test 预检，全 TRAIN 预检分支与历史固定参照通过重放。GPU0 会话 d9_sample_fusion_20261118 并行启动正式八任务。初次同步的 task0 快照中，全 TRAIN 完成第 1 轮、永久 90/10 完成第 3 轮，各自当轮零跳步。ASL 已完成 30 次更新。预检总表已同步本地并核对 SHA-256。批次 output/d9_sample_fusion/seed1_20261118。

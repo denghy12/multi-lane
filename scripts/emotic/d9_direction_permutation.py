@@ -108,7 +108,7 @@ def evaluate(root, smoke, *, methods=METHODS, expected_mode="direction"):
         for stage, saved in enumerate(report['stages']):
             archive = directory / f'task{stage}.npz'
             artifact_hash = sha256_file(archive)
-            if artifact_hash != saved['scores_sha256'] or (expected_mode == 'direction' and not saved['exact_replay']):
+            if artifact_hash != saved['scores_sha256'] or (expected_mode in ('direction', 'sample_full_asl') and not saved['exact_replay']):
                 raise ValueError(f'Unverified saved scores at {split} stage {stage}')
             if saved['protocol']['shuffle_seed'] != SHUFFLE_SEED:
                 raise ValueError('Formal permutation seed differs from protocol')

@@ -14,7 +14,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from multi_lane.track_a.d9_joint_data import build_joint_source
-from multi_lane.track_a.d9_relation_fusion import D9RelationFusion
+from multi_lane.track_a.d9_relation_fusion import D9RelationFusion, SAMPLE_GATES, SAMPLE_MODES
 from multi_lane.track_a.d9_direction_objective import (
     deranged_targets, direction_benefits, gate_update_due)
 from multi_lane.track_a.r1_crossvit import VIEWS, compact, restore_rng, rng_state
@@ -25,7 +25,7 @@ from multi_lane.track_a.runner import (
     compute_training_loss, fit_calibration_indices, git_metadata, set_seed, task_indices)
 from scripts.emotic.run_r1_frozen_cross_view import input_paths
 from scripts.emotic.d9_sample_training import (
-    FUSION_ASL, SAMPLE_MODES, describe_cohort, fusion_source, global_image_roles, task_cohorts, train_gate_sweep)
+    FUSION_ASL, describe_cohort, fusion_source, global_image_roles, task_cohorts, train_gate_sweep)
 
 
 def branch_configs(inputs):
@@ -403,7 +403,7 @@ def train(args):
                       fusion_preprocessing='deterministic_train_images', gate_schedule='full_sweep_before_each_branch_epoch',
                       image_split='global_10pct_hash_rank' if args.mode == 'sample_holdout' else 'all_train',
                       fusion_input='selector_weighted_frozen9_or_final_task_cls', fusion_init='equal_available_views',
-                      fusion_asl=FUSION_ASL if args.mode == 'sample_holdout' else None)
+                      fusion_asl=FUSION_ASL if 'mid_asl' in SAMPLE_GATES[args.mode] else None)
     if (root/'config.json').exists() and read(root/'config.json') != config:
         raise ValueError('Existing experiment has a different configuration')
     write(root/'config.json', config)
@@ -441,8 +441,8 @@ def train(args):
                          for name in ('center', 'a', 'b', 'c', 'center_b')}
         indices, _ = fit_calibration_indices(source, task_indices(task), 0.)
         if sample_mode:
-            names = ('mid_bce', 'late_bce', 'mid_asl') if args.mode == 'sample_holdout' else ('mid_bce', 'late_bce')
-            gate_opts = {name: GateOptimizer(model.gates[task][name], config) for name in names}
+            gate_opts = {name: GateOptimizer(model.gates[task][name], config)
+                         for name in SAMPLE_GATES[args.mode]}
             indices, fusion_indices = task_cohorts(source, indices, roles, args.smoke)
             cohorts = {'branch': describe_cohort(source, indices, task_indices(task)),
                        'fusion': describe_cohort(source, fusion_indices, task_indices(task))}

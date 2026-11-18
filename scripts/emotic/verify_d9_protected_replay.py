@@ -10,7 +10,7 @@ from multi_lane.track_a.r1_crossvit_experiment import read, write
 def verify(root, reference, smoke):
     tasks = 2 if smoke else 8
     new, old = (read(p / 'config.json') for p in (root, reference))
-    if new['mode'] not in ('multi', 'direction', 'sample_full') or old['mode'] != 'fixed':
+    if new['mode'] not in ('multi', 'direction', 'sample_full', 'sample_full_asl') or old['mode'] != 'fixed':
         raise ValueError('Expected new multi-readout model and historical fixed model')
     for config in (new, old):
         if config['smoke'] != smoke or config['tasks'] != tasks or not config['protect_branches']:
