@@ -10,7 +10,7 @@ from multi_lane.track_a.r1_crossvit_experiment import read, write
 def verify(root, reference, smoke):
     tasks = 2 if smoke else 8
     new, old = (read(p / 'config.json') for p in (root, reference))
-    if new['mode'] not in ('multi', 'direction') or old['mode'] != 'fixed':
+    if new['mode'] not in ('multi', 'direction', 'sample_full') or old['mode'] != 'fixed':
         raise ValueError('Expected new multi-readout model and historical fixed model')
     for config in (new, old):
         if config['smoke'] != smoke or config['tasks'] != tasks or not config['protect_branches']:
@@ -25,7 +25,8 @@ def verify(root, reference, smoke):
         states = [torch.load(base / artifact, map_location='cpu', weights_only=False)
                   for base in (root, reference)]
         a, b = states
-        if a['coverage'] != b['coverage'] or a['task'] != task or b['task'] != task:
+        cohort = a['coverage'].get('branch', a['coverage'])
+        if any(cohort.get(key) != value for key, value in b['coverage'].items()) or a['task'] != task or b['task'] != task:
             raise ValueError(f'Cohort mismatch at task {task}')
         tensors = 0
         for view in ('full', 'person', 'face'):

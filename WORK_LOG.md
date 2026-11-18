@@ -1,3 +1,7 @@
+## 2026-11-18 样本级融合与 ASL 对照
+
+已从 8b74b98 新建 exp/d9-sample-fusion-asl-20261118 独立工作树，准备从预训练CLIP启动seed1两条轨迹。记录代码、训练及双split评估入口，等待远程真实数据预检。
+
 ## 三动作价值诊断完成（seed1）
 
 基于 seed1 的16份预测完成CPU复算、100次同群动作置换、组统一与Validation锁定对照；本地归档3份结果JSON和日志已与服务器核对。 见 docs/d9_three_action_results_20261118.md。
