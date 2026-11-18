@@ -1,6 +1,6 @@
 ## 2026-11-18 样本级融合与 ASL 对照
 
-已从 8b74b98 新建 exp/d9-sample-fusion-asl-20261118 独立工作树，准备从预训练CLIP启动seed1两条轨迹。记录代码、训练及双split评估入口，等待远程真实数据预检。
+远程通过 48 项回归及两任务真实数据训练、Validation 和 Test 预检，全 TRAIN 预检分支与历史固定参照通过重放。GPU0 会话 d9_sample_fusion_20261118 并行启动正式八任务。初次同步的 task0 快照中，全 TRAIN 完成第 1 轮、永久 90/10 完成第 3 轮，各自当轮零跳步。ASL 已完成 30 次更新。预检总表已同步本地并核对 SHA-256。批次 output/d9_sample_fusion/seed1_20261118。
 
 ## 三动作价值诊断完成（seed1）
 
