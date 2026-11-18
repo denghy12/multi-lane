@@ -25,6 +25,47 @@ def fuse_view_logits(scores, weights, reliable):
             + weights[:, 2:3] * face)
 
 
+SAMPLE_MODES = ('sample_full', 'sample_holdout')
+
+
+def sample_readouts(mode):
+    if mode not in SAMPLE_MODES:
+        raise ValueError(f'Unknown sample-level protocol: {mode}')
+    names = ('fixed', 'equal', 'mid_bce', 'late_bce')
+    return names + ('mid_asl',) if mode == 'sample_holdout' else names
+
+
+class SampleFusionGate(nn.Module):
+    """Learn unbiased per-person weights over exactly the available views."""
+
+    def __init__(self, cls_width=None):
+        super().__init__()
+        self.linear = nn.Parameter(torch.zeros(3, 8))
+        self.group_bias = nn.Parameter(torch.zeros(2, 3))
+        self.late = cls_width is not None
+        if self.late:
+            # Eight fixed projection coordinates, no TRAIN/Val/Test fitting.
+            # Unit-norm CLS times a Gaussian column has order-one scale.
+            generator = torch.Generator().manual_seed(1)
+            for view, dims in zip(VIEWS, (3, 3, 2)):
+                self.register_buffer(view + '_projection', torch.randn(cls_width, dims, generator=generator))
+
+    def forward(self, reliable, feature_by_view):
+        with torch.autocast(device_type=reliable.device.type, enabled=False):
+            parts = []
+            for view in VIEWS if self.late else ('person', 'face'):
+                values = feature_by_view[view].detach().float()
+                if view == 'face':
+                    values = torch.where(reliable[:, None], values, 0.)
+                if self.late:
+                    values = values @ getattr(self, view + '_projection')
+                parts.append(values)
+            scores = torch.cat(parts, dim=-1) @ self.linear.T
+            scores = scores + torch.where(reliable[:, None], self.group_bias[1], self.group_bias[0])
+            face = scores[:, 2].masked_fill(~reliable, -torch.inf)
+            return torch.stack((scores[:, 0], scores[:, 1], face), dim=-1).softmax(dim=-1)
+
+
 class RelationGate(nn.Module):
     """Native R1 priors plus optional task and per-person log-odds corrections."""
 
@@ -121,7 +162,15 @@ class D9RelationFusion(nn.Module):
             raise ValueError('View task partitions differ')
         # Constructing a scorer must not alter subsequent model or data RNG draws.
         with torch.random.fork_rng(devices=[]):
-            if mode == 'multi':
+            if mode in SAMPLE_MODES:
+                if any(self.branches[v].r1_layer != 8 for v in ('person', 'face')):
+                    raise ValueError('Sample fusion requires Frozen9 patch receivers')
+                self.gates = nn.ModuleList(nn.ModuleDict({
+                    'fixed': RelationGate('fixed'), 'mid_bce': SampleFusionGate(),
+                    'late_bce': SampleFusionGate(self.branches['full'].output_dim),
+                    **({'mid_asl': SampleFusionGate()} if mode == 'sample_holdout' else {}),
+                }) for _ in self.task_sizes)
+            elif mode == 'multi':
                 # Draw all relation scorers first to replay the original relation initialization.
                 relations = [RelationGate('person') for _ in self.task_sizes]
                 if any(self.branches[v].r1_layer != 8 for v in ('person', 'face')):
@@ -174,7 +223,9 @@ class D9RelationFusion(nn.Module):
         lane_logits, relations = {}, {'person': {}, 'face': {}}
         multi = self.mode == 'multi'
         direction = self.mode == 'direction'
-        protected_readouts = multi or direction
+        sample = self.mode in SAMPLE_MODES
+        late_features = {}
+        protected_readouts = multi or direction or sample
         pooled = {v: {} for v in VIEWS} if multi else None
         # The same batch's deterministic Full sender passes through the same
         # frozen CLIP in both receivers. Share only raw detached sender patches.
@@ -184,8 +235,9 @@ class D9RelationFusion(nn.Module):
             branch = self.branches[view]
             summary_args = dict(summary_layer=9, pooled_summaries=pooled[view]) if multi else {}
             if view == 'full':
-                if multi:
-                    lane_logits[view] = branch.head(branch.encode_lanes(inputs['full'], all_seen, **summary_args))
+                if multi or sample:
+                    features = branch.encode_lanes(inputs['full'], all_seen, **summary_args)
+                    lane_logits[view] = branch.head(features)
                 else:
                     lane_logits[view] = branch.lane_logits(inputs['full'], all_seen)
             else:
@@ -194,22 +246,37 @@ class D9RelationFusion(nn.Module):
                 capture = relations[view] if protected_readouts or self.mode == 'person' else None
                 features = branch.encode_lanes(own_inputs, all_seen, full_relations=capture,
                                                full_sender_cache=full_sender_cache,
-                                               detach_relation=protected_readouts, **summary_args)
+                                               detach_relation=protected_readouts,
+                                               selector_weight_relation=sample, **summary_args)
                 lane_logits[view] = branch.head(features)
+            if sample:
+                late_features[view] = features.detach()
 
-        names = DIRECTION_READOUTS if direction else READOUTS if multi else (self.mode,)
+        names = {
+            'multi': READOUTS,
+            'direction': DIRECTION_READOUTS,
+        }.get(self.mode, (self.mode,))
+        if sample:
+            names = sample_readouts(self.mode)
         all_weights = {name: [] for name in names}
         all_fused = {name: [] for name in names}
         direction_scores = {name: [] for name in ('a', 'b', 'c', 'center_b')} if direction else {}
         outputs = {view: [] for view in VIEWS}
         for lane, task in enumerate(lanes):
+            if sample:
+                mid = {v: relations[v][task] for v in ('person', 'face')}
+                late = {v: late_features[v][:, lane] for v in VIEWS}
             start = sum(self.task_sizes[:task])
             columns = slice(start, start + self.task_sizes[task])
             for view in VIEWS:
                 outputs[view].append(lane_logits[view][:, lane, columns])
             scores = torch.stack([outputs[view][-1].float() for view in VIEWS], dim=1)
             for name in names:
-                if name == 'center_b':
+                if name == 'equal':
+                    w = view_weights(scores.new_zeros(len(reliable), 2), reliable)
+                elif name in ('mid_bce', 'mid_asl', 'late_bce'):
+                    w = self.gates[task][name](reliable, late if name == 'late_bce' else mid)
+                elif name == 'center_b':
                     center = self.gates[task]['center']
                     gate = self.gates[task][name]
                     w, raw = gate(reliable, relations['person'][task], relations['face'][task],

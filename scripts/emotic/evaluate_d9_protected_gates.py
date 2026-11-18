@@ -16,6 +16,10 @@ from scripts.emotic.evaluate_d9_relation import (
 )
 
 GROUPS = ("unreliable", "reliable")
+SAMPLE_READOUTS = {
+    "sample_full": ("fixed", "equal", "mid_bce", "late_bce"),
+    "sample_holdout": ("fixed", "equal", "mid_bce", "late_bce", "mid_asl"),
+}
 
 
 def verify_reference(path, task, ids, targets, reliable, branches, fixed_weights, fixed_logits):
@@ -66,11 +70,25 @@ def mean_readout(task, branches, weights, scores, reliable, means):
     return torch.where(same, scores, fused), valid
 
 
+def verify_sample_controls(result, reliable):
+    """A newly trained 90% branch has no historical replay peer; check both controls independently."""
+    for name, available in (("fixed", (.64, .16, .20)), ("equal", (1/3, 1/3, 1/3))):
+        weights = result[name][0]
+        unavailable = (.8, .2, 0.) if name == "fixed" else (.5, .5, 0.)
+        expected = torch.where(reliable[:, None], weights.new_tensor(available),
+                               weights.new_tensor(unavailable))
+        torch.testing.assert_close(weights, expected[:, None, :].expand_as(weights),
+                                   rtol=0., atol=1e-7)
+
+
 def assess(task, batch, reference_file, validation_means, names=READOUTS):
     ids, targets, reliable, branches, result = batch
     if set(result) != set(names):
         raise ValueError(f"Missing or unexpected readouts: {list(result)}")
-    verify_reference(reference_file, task, ids, targets, reliable, branches, *result["fixed"])
+    if reference_file is not None:
+        verify_reference(reference_file, task, ids, targets, reliable, branches, *result["fixed"])
+    if "equal" in names:
+        verify_sample_controls(result, reliable)
     all_predictions = {v: branches[..., i] for i, v in enumerate(VIEWS)}
     mean_predictions, means, stats = {}, {}, {}
     arrays = dict(sample_ids=np.asarray(ids), targets=targets.numpy(), reliable=reliable.numpy(),
@@ -99,7 +117,7 @@ def assess(task, batch, reference_file, validation_means, names=READOUTS):
         if not ok.all():
             groups.pop("all", None)
         metrics[name] = groups
-    return dict(metrics=metrics, weights=stats, validation_cohort_means=means, exact_replay=True), arrays
+    return dict(metrics=metrics, weights=stats, validation_cohort_means=means, exact_replay=reference_file is not None), arrays
 
 
 def evaluate(root, reference_root, split, batch_size, workers, smoke):
@@ -114,13 +132,23 @@ def evaluate(root, reference_root, split, batch_size, workers, smoke):
     device = torch.device("cuda")
     config_path = root / "config.json"
     config = json.loads(config_path.read_text())
-    reference_config = json.loads((reference_root / "config.json").read_text())
-    if any(c["smoke"] != smoke or not c.get("protect_branches") for c in (config, reference_config)):
+    mode = config["mode"]
+    sample_mode = mode in SAMPLE_READOUTS
+    if mode not in ("multi", "direction") and not sample_mode:
+        raise ValueError(f"Unsupported protected evaluation mode: {mode}")
+    if mode == "sample_holdout" and reference_root is not None:
+        raise ValueError("The 90% branches have a different TRAIN cohort from the historical fixed run")
+    if not sample_mode and reference_root is None:
+        raise ValueError("Historical reference required for legacy protected runs")
+    if reference_root is not None:
+        reference_config = json.loads((reference_root / "config.json").read_text())
+        if (reference_config["mode"] != "fixed" or reference_config["smoke"] != smoke
+                or not reference_config.get("protect_branches")):
+            raise ValueError("Expected matching protected fixed reference")
+    if config["smoke"] != smoke or not config.get("protect_branches"):
         raise ValueError("Protected evaluation needs matching smoke/formal configurations")
-    if config["mode"] not in ("multi", "direction") or reference_config["mode"] != "fixed":
-        raise ValueError("Expected protected multi-readout candidate and fixed reference")
     direction_mode = config["mode"] == "direction"
-    names = DIRECTION_READOUTS if direction_mode else READOUTS
+    names = SAMPLE_READOUTS[mode] if sample_mode else DIRECTION_READOUTS if direction_mode else READOUTS
     title = "smoke_evaluation" if smoke else "evaluation"
     directory = root / title / split
     directory.mkdir(parents=True, exist_ok=True)
@@ -135,12 +163,14 @@ def evaluate(root, reference_root, split, batch_size, workers, smoke):
         raise ValueError("Complete Validation before Test")
     for task in range(task_count):
         checkpoint = root / "compact_checkpoints" / f"task{task}.pth"
-        ref = reference_root / title / split / f"task{task}.npz"
-        ref_hash = sha256_file(ref)
-        ref_report = json.loads(ref.with_suffix(".json").read_text())
-        if ref_report["scores_sha256"] != ref_hash or ref_report["protocol"]["batch_size"] != batch_size:
-            raise ValueError(f"Reference artifact hash or eval batch size mismatch for task {task}")
-        protocol = dict(schema=2 if direction_mode else 1, task=task, split=split, smoke=smoke, batch_size=batch_size,
+        ref = ref_hash = None
+        if reference_root is not None:
+            ref = reference_root / title / split / f"task{task}.npz"
+            ref_hash = sha256_file(ref)
+            ref_report = json.loads(ref.with_suffix(".json").read_text())
+            if ref_report["scores_sha256"] != ref_hash or ref_report["protocol"]["batch_size"] != batch_size:
+                raise ValueError(f"Reference artifact hash or eval batch size mismatch for task {task}")
+        protocol = dict(schema=3 if sample_mode else 2 if direction_mode else 1, task=task, split=split, smoke=smoke, batch_size=batch_size,
                         checkpoint_sha256=sha256_file(checkpoint), config_sha256=config_hash,
                         reference_scores_sha256=ref_hash, validation_result_sha256=val_hash,
                         shuffle_seed=SHUFFLE_SEED)
@@ -181,7 +211,7 @@ def evaluate(root, reference_root, split, batch_size, workers, smoke):
         write_json(report, row)
         stages.append(row)
         maps = {key: round(row["metrics"][key]["all"]["mAP"], 4) for key in names}
-        print(f"{split} task{task} people={len(batch[0])} exact_replay=True mAP={maps}", flush=True)
+        print(f"{split} task{task} people={len(batch[0])} exact_replay={row['exact_replay']} mAP={maps}", flush=True)
     summary = {}
     for method in stages[-1]["metrics"]:
         summary[method] = {}

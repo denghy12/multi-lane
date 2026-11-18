@@ -338,6 +338,7 @@ class MultiLaneModel(nn.Module):
         summary_only: bool = False,
         preserve_image_gradient: bool = False,
         pooled_summaries=None,
+        selector_spatial_weights=None,
     ) -> torch.Tensor:
         # The released block applies its first LayerNorm before both selector
         # aggregation and prompt attention.  Keep the residual stream itself
@@ -369,10 +370,11 @@ class MultiLaneModel(nn.Module):
             similarity = torch.einsum(
                 "tbsc,tbnc->tbsn", queries, selector_image_tokens
             ) * (self.width**-0.5)
+            read_weights = torch.softmax(similarity, dim=-1)
             selected = torch.einsum(
                 "tbnc,tbsn->tbsc",
                 selector_image_tokens,
-                torch.softmax(similarity, dim=-1),
+                read_weights,
             )
         else:
             # Preserve the historical contraction path exactly for disabled
@@ -380,11 +382,18 @@ class MultiLaneModel(nn.Module):
             similarity = torch.einsum(
                 "tbsc,bnc->tbsn", queries, frozen_normalized_image
             ) * (self.width**-0.5)
+            read_weights = torch.softmax(similarity, dim=-1)
             selected = torch.einsum(
                 "bnc,tbsn->tbsc",
                 frozen_normalized_image,
-                torch.softmax(similarity, dim=-1),
+                read_weights,
             )
+        if selector_spatial_weights is not None:
+            # Keep only the actual spatial positions of this receiver; image CLS
+            # has no query patch in the preceding Frozen9 relation map.
+            spatial = read_weights.detach().float()[..., 1:].mean(dim=2)
+            spatial = spatial / spatial.sum(dim=-1, keepdim=True).clamp_min(1e-30)
+            selector_spatial_weights.update(zip(lane_ids, spatial.unbind(0)))
         if pooled_summaries is not None:
             # Capture the exact selector summaries consumed by this task MSA.
             pooled = selected.detach().float().mean(dim=2)

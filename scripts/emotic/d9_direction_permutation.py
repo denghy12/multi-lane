@@ -83,16 +83,16 @@ def difference_summary(actual, shuffled):
                 differences=delta.tolist())
 
 
-def evaluate(root, smoke):
+def evaluate(root, smoke, *, methods=METHODS, expected_mode="direction"):
     torch.set_num_threads(2)
     config = json.loads((root / 'config.json').read_text())
-    if config['mode'] != 'direction' or config['smoke'] != smoke:
-        raise ValueError('Expected a direction run with matching smoke/full mode')
+    if config['mode'] != expected_mode or config['smoke'] != smoke:
+        raise ValueError(f'Expected a {expected_mode} run with matching smoke/full mode')
     title = 'smoke_evaluation' if smoke else 'evaluation'
     stage_count = 2 if smoke else len(TASK_SIZES)
     seeds = FORMAL_SEEDS[:3] if smoke else FORMAL_SEEDS
     result = dict(schema=1, trained_seed=config['seed'], smoke=smoke, permutation_seeds=list(seeds),
-                  methods=list(METHODS), config_sha256=sha256_file(root / 'config.json'),
+                  methods=list(methods), config_sha256=sha256_file(root / 'config.json'),
                   assignment='Within task head and Face reliability; sorted person IDs, cyclic derangement; singleton keeps own',
                   pairing='Same donors for every method at each stage and permutation seed',
                   score='Official float32 sigmoid then per-class AP, descending NumPy quicksort; average seen classes',
@@ -108,7 +108,7 @@ def evaluate(root, smoke):
         for stage, saved in enumerate(report['stages']):
             archive = directory / f'task{stage}.npz'
             artifact_hash = sha256_file(archive)
-            if artifact_hash != saved['scores_sha256'] or not saved['exact_replay']:
+            if artifact_hash != saved['scores_sha256'] or (expected_mode == 'direction' and not saved['exact_replay']):
                 raise ValueError(f'Unverified saved scores at {split} stage {stage}')
             if saved['protocol']['shuffle_seed'] != SHUFFLE_SEED:
                 raise ValueError('Formal permutation seed differs from protocol')
@@ -117,12 +117,12 @@ def evaluate(root, smoke):
                 branches, sizes = data['branch_logits'], data['task_sizes'].tolist()
                 if sizes != list(TASK_SIZES[:stage + 1]):
                     raise ValueError('Task class partition differs')
-                weights = np.stack([data[name + '_weights'] for name in METHODS])
-                actual = np.stack([data[name + '_logits'] for name in METHODS])
-                archived_shuffle = np.stack([data[name + '_shuffled_logits'] for name in METHODS])
+                weights = np.stack([data[name + '_weights'] for name in methods])
+                actual = np.stack([data[name + '_logits'] for name in methods])
+                archived_shuffle = np.stack([data[name + '_shuffled_logits'] for name in methods])
                 archived_donors = data['shuffled_source_rows']
             scores = batch_map(actual, targets)
-            expected_actual = [saved['metrics'][name]['all']['mAP'] for name in METHODS]
+            expected_actual = [saved['metrics'][name]['all']['mAP'] for name in methods]
             np.testing.assert_allclose(scores, expected_actual, rtol=0., atol=1e-12)
             official = [np.mean([100. * average_precision(column, truth)
                                 for column, truth in zip(torch.from_numpy(x).sigmoid().numpy().T, targets.T)])
@@ -137,7 +137,7 @@ def evaluate(root, smoke):
                     np.testing.assert_array_equal(donors, archived_donors)
                     np.testing.assert_array_equal(donors, shuffle_sources(ids.tolist(), reliability, len(sizes)).numpy())
                     np.testing.assert_array_equal(permuted, archived_shuffle)
-                    expected = [saved['metrics'][name + '_shuffled']['all']['mAP'] for name in METHODS]
+                    expected = [saved['metrics'][name + '_shuffled']['all']['mAP'] for name in methods]
                     np.testing.assert_allclose(permuted_scores, expected, rtol=0., atol=1e-12)
                 stage_permutations.append(permuted_scores)
             actual_stages.append(scores)
@@ -148,18 +148,18 @@ def evaluate(root, smoke):
             print(f'{split} task{stage}: {len(seeds)} permutations, archived shuffle replayed', flush=True)
         actual_stages = np.asarray(actual_stages)
         shuffled_stages = np.asarray(shuffled_stages)
-        methods = {}
-        for index, name in enumerate(METHODS):
+        by_method = {}
+        for index, name in enumerate(methods):
             a = actual_stages[:, index]
             s = shuffled_stages[:, :, index]
             declared = report['summary'][name]['all']
             np.testing.assert_allclose([a[-1], a.mean()],
                                        [declared['final_mAP'], declared['average_mAP']], rtol=0., atol=1e-12)
-            methods[name] = dict(final=difference_summary(a[-1], s[-1]),
+            by_method[name] = dict(final=difference_summary(a[-1], s[-1]),
                                  average=difference_summary(a.mean(), s.mean(0)),
                                  actual_stages=a.tolist(),
                                  shuffled_stages_by_seed=s.T.tolist())
-        result['splits'][split] = dict(result_sha256=sha256_file(report_path), methods=methods,
+        result['splits'][split] = dict(result_sha256=sha256_file(report_path), methods=by_method,
                                       reproduction=artifacts)
     destination = root / 'diagnostics' / 'permutation_sensitivity.json'
     destination.parent.mkdir(parents=True, exist_ok=True)
