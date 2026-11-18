@@ -420,7 +420,8 @@ class MultiLaneModel(nn.Module):
         return lane_tokens
 
     def encode_lanes(
-        self, images: ModelInputs, all_seen_lanes: bool, *, summary_layer=None, pooled_summaries=None
+        self, images: ModelInputs, all_seen_lanes: bool, *, summary_layer=None, pooled_summaries=None,
+        task10_probe=None
     ) -> torch.Tensor:
         lane_ids = self._lane_ids(all_seen_lanes)
         person_descriptor = None
@@ -478,6 +479,8 @@ class MultiLaneModel(nn.Module):
                 paired["condition_valid"] if person_tokens is not None else None,
                 pooled_summaries=pooled_summaries if layer_id == summary_layer else None,
             )
+            if task10_probe is not None and layer_id == 9:
+                task10_probe['content'] = lane_tokens[lane_ids.index(self.current_task_id), :, 0].detach()
             with torch.no_grad():
                 image_tokens = block(image_tokens.permute(1, 0, 2)).permute(
                     1, 0, 2

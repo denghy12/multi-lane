@@ -1,3 +1,7 @@
+## 2026-11-18 第10层任务内容与交互变化诊断
+
+第 10 层样本级读出诊断使用已有 90/10 seed1 分支。task0/3/6 的官方人群只计本任务新类 AP，比较 A、B 原始与标准化、C 任务内容及 D 内容加交互变化。协议在 docs/d9_task10_probe_20261118.md。
+
 ## 2026-11-18 全 TRAIN 样本级 ASL
 
 GPU0 于北京时间 17:58 启动第六组，全 TRAIN 的 Task10 Selectors 汇总 Frozen9 关联，ASL 学习人物融合比例，分支和 logits 入口停止融合梯度。独立运行版本 d84dde5，完整 TRAIN 与留出 TRAIN 现在各有一对同输入 ASL/BCE。协议见 docs/d9_sample_fusion_20261118.md。

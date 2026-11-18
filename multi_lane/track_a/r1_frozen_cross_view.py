@@ -256,7 +256,7 @@ class FrozenR1Receiver(R1Receiver):
 
     def encode_lanes(self, images, all_seen_lanes, *, full_relations=None, full_sender_cache=None,
                      summary_layer=None, pooled_summaries=None, detach_relation=False,
-                     selector_weight_relation=False):
+                     selector_weight_relation=False, task10_probe=None):
         own = images['full'] if isinstance(images, dict) else images
         if selector_weight_relation and full_relations is None:
             raise ValueError('A relation output is required for task-weighted pooling')
@@ -328,11 +328,21 @@ class FrozenR1Receiver(R1Receiver):
             spatial_weights = {}
             for layer in range(prefix_end+1, len(blocks)):
                 block = blocks[layer]
-                lane = self._lane_block(block, stream, lane, [task], layer,
+                input_lane = lane
+                lane = self._lane_block(block, stream, input_lane, [task], layer,
                                         preserve_image_gradient=True,
                                         pooled_summaries=pooled_summaries if layer == summary_layer else None,
                                         selector_spatial_weights=spatial_weights if selector_weight_relation
                                         and layer == self.r1_layer + 1 else None)
+                if task10_probe is not None and task == self.current_task_id and layer == 9:
+                    if self.r1_layer != 8 or sites != (8,):
+                        raise ValueError('Probe requires a single Frozen9 exchange')
+                    # tokens is exactly the native image stream before Frozen9 cross-view injection.
+                    # Keep the normal on-path in lane for blocks 11-12. Only replay block 10 off-path.
+                    off = self._lane_block(block, tokens, input_lane, [task], layer,
+                                           preserve_image_gradient=True)
+                    task10_probe['content'] = lane[0, :, 0].detach()
+                    task10_probe['delta'] = lane[0, :, 0].float() - off[0, :, 0].float()
                 if task in spatial_weights:
                     with torch.no_grad(), torch.autocast(device_type=stream.device.type, enabled=False):
                         full_relations[task] = (

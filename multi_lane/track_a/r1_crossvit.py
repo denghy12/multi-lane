@@ -207,11 +207,13 @@ class R1Receiver(MultiLaneModel):
                 tokens = block(tokens.permute(1, 0, 2)).permute(1, 0, 2)
         return summaries
 
-    def encode_lanes(self,images,all_seen_lanes, *, summary_layer=None, pooled_summaries=None):
+    def encode_lanes(self,images,all_seen_lanes, *, summary_layer=None, pooled_summaries=None, task10_probe=None):
         own=images['full'] if isinstance(images,dict) else images
         if not self.r1_bank or not self.r1_enabled:
             return super().encode_lanes(own, all_seen_lanes, summary_layer=summary_layer,
-                                        pooled_summaries=pooled_summaries)
+                                        pooled_summaries=pooled_summaries, task10_probe=task10_probe)
+        if task10_probe is not None:
+            raise ValueError("Task10 probe supports native Full and Frozen9 patch receivers")
         if not isinstance(images,dict):raise ValueError('Cross-view evidence missing')
         others=[v for v in VIEWS if v!=self.r1_view]
         lanes=self._lane_ids(all_seen_lanes)

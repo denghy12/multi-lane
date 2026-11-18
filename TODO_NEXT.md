@@ -1,3 +1,7 @@
+## 2026-11-18 第10层任务内容与交互变化诊断
+
+验证本头历史 logits 逐值重放和反事实输入，完成 0/3/6 三任务 TRAIN、Validation、Test；对照 D 与 C、仅换消息、组均值与换权重。
+
 ## 2026-11-18 全 TRAIN 样本级 ASL
 
 等待两套原读出与全 TRAIN ASL 的八阶段训练、Validation、Test、100次置换以及全 TRAIN 逐项重放。正式汇总 comparison_with_full_asl.json 将包含全量及留出两对 ASL−BCE 差值。结束后同步远程正式结果再判断两个 mAP 是否达到同轨迹固定读出。

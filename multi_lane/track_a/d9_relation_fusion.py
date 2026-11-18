@@ -218,7 +218,7 @@ class D9RelationFusion(nn.Module):
             model.restore_task(task)
         self._configure_gates(task)
 
-    def forward(self, inputs, *, all_seen=False, sample_gate_only=False, sample_branch_only=False):
+    def forward(self, inputs, *, all_seen=False, sample_gate_only=False, sample_branch_only=False, task10_probe=None):
         current = self.current_task_id
         if current < 0:
             raise RuntimeError('Activate or restore a task before inference')
@@ -244,6 +244,11 @@ class D9RelationFusion(nn.Module):
             for view in VIEWS:
                 branch = self.branches[view]
                 summary_args = dict(summary_layer=9, pooled_summaries=pooled[view]) if multi else {}
+                if task10_probe is not None:
+                    if not sample or self.training or torch.is_grad_enabled():
+                        raise ValueError('Task10 diagnostics require frozen sample-fusion inference')
+                    task10_probe[view] = {}
+                    summary_args['task10_probe'] = task10_probe[view]
                 if view == 'full':
                     if multi or sample:
                         features = branch.encode_lanes(inputs['full'], all_seen, **summary_args)
@@ -276,6 +281,8 @@ class D9RelationFusion(nn.Module):
             if sample:
                 mid = {v: relations[v][task] for v in ('person', 'face')}
                 late = {v: late_features[v][:, lane] for v in VIEWS}
+                if task10_probe is not None and task == current:
+                    task10_probe['relation'] = torch.cat((mid['person'], mid['face']), dim=1)
             start = sum(self.task_sizes[:task])
             columns = slice(start, start + self.task_sizes[task])
             for view in VIEWS:
