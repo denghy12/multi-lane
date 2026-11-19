@@ -25,7 +25,7 @@ extract_two() {
     local result=0
     wait "$even_pid" || result=1
     wait "$odd_pid" || result=1
-    tail -6 "$logs/$phase-even.log" "$logs/$phase-odd.log"
+    tail -n 6 "$logs/$phase-even.log" "$logs/$phase-odd.log"
     return "$result"
 }
 case "$phase" in
