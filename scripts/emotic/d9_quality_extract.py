@@ -33,7 +33,7 @@ def degrade_view(images, view):
         reduced = F.interpolate(x.float(), size=(112, 112), mode='area')
         up = F.interpolate(reduced, size=(224, 224), mode='bilinear', align_corners=False).to(x.dtype)
         if view == 'face':
-            up = torch.where(images['evidence_face_reliable'].reshape(-1, 1, 1, 1), up, x)
+            up = torch.where(images['evidence_face_reliable'].bool().reshape(-1, 1, 1, 1), up, x)
         output[name] = up
     return output
 

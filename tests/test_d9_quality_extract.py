@@ -12,7 +12,7 @@ class ViewQualityTest(unittest.TestCase):
         native = square.expand(2, 3, 224, 224)
         self.inputs = {v: native.clone() for v in ('full', 'person', 'face')}
         self.inputs.update({'evidence_' + v: (native + 1.) for v in ('full', 'person', 'face')})
-        self.inputs['evidence_face_reliable'] = torch.tensor([True, False])
+        self.inputs['evidence_face_reliable'] = torch.tensor([1., 0.])
 
     def test_face_variant_changes_both_copies_on_reliable_people_only(self):
         x = self.inputs
