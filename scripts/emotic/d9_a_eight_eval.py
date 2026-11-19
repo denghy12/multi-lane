@@ -128,7 +128,13 @@ def run(source, prior, out, split):
         with np.load(path, allow_pickle=False) as data:
             z, y, valid = predictions(data, lock['tasks'], stage)
             ids = data['sample_ids']
-        metrics = metrics_for_stage(stage, y, valid, z)
+        # The original eight-stage evaluation used two CPU threads for sigmoid/AP.
+        # The separate current-head probe used one; near-tied scores need its own setting.
+        torch.set_num_threads(2)
+        try:
+            metrics = metrics_for_stage(stage, y, valid, z)
+        finally:
+            torch.set_num_threads(1)
         verify_controls(metrics, saved['metrics'])
         row = dict(stage=stage, people=len(y), reliable_face=int(valid.sum()),
                    scores_sha256=saved['scores_sha256'], checkpoint_sha256=expected['checkpoint_sha256'],
