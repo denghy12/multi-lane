@@ -1,3 +1,7 @@
+## 2026-11-19 Full 下界与辅助分配完成
+
+分支 exp/d9-aux-budget-20261119，执行版本 860388f。9项单测与64人真实预检通过，两组逐人 Full 份额完全一致。Validation 封存后完成 Test，23份结果与日志已同步且逐文件核验一致。
+
 ## 2026-11-19 全 TRAIN 分支意见不一致诊断完成
 
 实验分支 exp/d9-disagreement-20261119，执行版本 2089a0c。GPU0 重提 task0/3 特征，复用 task6，七项测试及真实数据预检通过，Validation 封存后再评估 Test。五阶段完成，51个日志与结果已同步并逐文件核对 SHA-256。见 output/d9_disagreement/seed1_20261119。
