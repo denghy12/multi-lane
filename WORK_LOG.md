@@ -1,3 +1,7 @@
+## 2026-11-19 清晰度配对平均融合的完整八阶段对照
+
+exp/d9-paired-a-eight-20261119，预定协议4af7d93，运行209c0a7。GPU0预检，复用三任务补齐五任务共1,319条留出TRAIN任务内人物记录。8任务的两套A在CPU拟合，同一评估缓存重放固定与自然A，Validation封存后评估Test。3项回归通过，31份产物同步本地并逐份核验。结果 output/d9_paired_a_eight/seed1_20261119。
+
 ## 2026-11-19 已见与留出 TRAIN 配对实验完成
 
 在 exp/d9-matched-source-20261119 上锁定协议并执行 GPU0 配对前向与 CPU 学习和评价，运行代码 0bbbfa2。完成8项回归、按原图匹配、两组各3任务前向、A源对照、同均值 B/C、自然 Validation 和锁定 Test。4阶段正常退出，70份文件逐一核对 SHA-256 后同步。报告 docs/d9_matched_source_20261119.md，结果 output/d9_matched_source/seed1_20261119。
