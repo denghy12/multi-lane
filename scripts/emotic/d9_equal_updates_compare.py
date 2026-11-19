@@ -163,7 +163,10 @@ def compare(root, historical, out, split):
     new_hashes = {k:sha256_file(p) for k,p in paths.items()}
     report = dict(split=split, source_config_sha256=hashes, official_result_sha256=new_hashes,
                   training=audit, stages=stages, branch_summary=summaries,
-                  simultaneous_gate_readouts={name:gate_refs[name] for name in reports['equal_updates']['learned_readouts']})
+                  simultaneous_gate_readouts={
+                      name:dict(scores={key:reports['equal_updates']['summary'][name]['all'][key] for key in MAP_KEYS},
+                                comparisons=gate_refs[name])
+                      for name in reports['equal_updates']['learned_readouts']})
     if split == 'test':
         report['validation_seal_sha256'] = sha256_file(seal_path)
     dest = out/f'{split}_comparison.json'
