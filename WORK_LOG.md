@@ -1,3 +1,7 @@
+## 2026-11-19 分人群替换融合比例的全人群评估完成
+
+exp/d9-face-group-swap-20261119 协议 dbb6b57，运行代码8681bb2。CPU 对四种只读融合方案完成8阶段 Validation／Test，2项回归通过；固定、完整 A 及替换后的子群得分严格重放。10份产物已同步本地并逐文件核验。结果 output/d9_face_group_swap/seed1_20261119。
+
 ## 2026-11-19 清晰度配对平均融合的完整八阶段对照
 
 exp/d9-paired-a-eight-20261119，预定协议4af7d93，运行209c0a7。GPU0预检，复用三任务补齐五任务共1,319条留出TRAIN任务内人物记录。8任务的两套A在CPU拟合，同一评估缓存重放固定与自然A，Validation封存后评估Test。3项回归通过，31份产物同步本地并逐份核验。结果 output/d9_paired_a_eight/seed1_20261119。
