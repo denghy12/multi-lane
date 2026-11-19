@@ -296,7 +296,14 @@ def train_epoch(model, source, indices, task, epoch, config, primary, adapters, 
     set_seed(seed, tf32=True)
     data = LabelView(source, indices, classes)
     kwargs = {'prefetch_factor': 1} if config['workers'] else {}
-    loader = DataLoader(data, batch_size=config['batch_size'], shuffle=True, generator=generator,
+    sampler = None
+    if 'equal_updates' in config:
+        from scripts.emotic.d9_equal_update_sampler import EqualUpdateSampler
+        cfg = config['equal_updates']
+        requested = len(indices) + cfg['smoke_extra_examples'] if config['smoke'] else cfg['tasks'][str(task)]['examples']
+        sampler = EqualUpdateSampler(len(indices), requested, config['batch_size'], generator,
+                                     config['seed'] + task*10_000, epoch)
+    loader = DataLoader(data, batch_size=config['batch_size'], shuffle=sampler is None, sampler=sampler, generator=generator,
                         num_workers=config['workers'], pin_memory=True, worker_init_fn=single_thread_worker, **kwargs)
     model.train()
     torch.cuda.reset_peak_memory_stats()
@@ -350,7 +357,7 @@ def train_epoch(model, source, indices, task, epoch, config, primary, adapters, 
             train_losses[i] += loss
         for i, row in enumerate(weight_sum):
             gate_sums[i] = [a+b for a, b in zip(gate_sums[i], row)]
-    if seen != len(indices):
+    if seen != (len(sampler) if sampler is not None else len(indices)):
         raise RuntimeError('Lost a training row')
     report = {'task': task, 'epoch': epoch, 'examples': seen, 'valid_face': valid, 'reliable_face': reliable,
             'updates': updates, 'skipped': 0, 'fp32_retries': retries,
@@ -358,6 +365,8 @@ def train_epoch(model, source, indices, task, epoch, config, primary, adapters, 
                 [s/n for s in row] if n else None for row, n in zip(gate_sums, (seen-reliable, reliable))],
             'mean_batch_losses': dict(zip(('fused_bce', 'branch_bce_sum', 'adapter_asl_sum'), [s/updates for s in train_losses])),
             'seconds': time.monotonic()-start_time, 'peak_allocated_mib': torch.cuda.max_memory_allocated()/2**20}
+    if sampler is not None:
+        report['sampling'] = sampler.audit
     if gate_opts:
         report['train_readouts'] = {
             name: {'mean_batch_bce': learned_losses[name] / gate_batches,
@@ -404,6 +413,12 @@ def train(args):
                       image_split='global_10pct_hash_rank' if args.mode == 'sample_holdout' else 'all_train',
                       fusion_input='selector_weighted_frozen9_or_final_task_cls', fusion_init='equal_available_views',
                       fusion_asl=FUSION_ASL if 'mid_asl' in SAMPLE_GATES[args.mode] else None)
+    equal_budget = args.equal_updates_reference is not None
+    if equal_budget:
+        from scripts.emotic.d9_equal_update_budget import load_reference_budget
+        config['equal_updates'] = load_reference_budget(args.equal_updates_reference, args.equal_updates_holdout, config)
+    if args.stop_after_task is not None and not 0 <= args.stop_after_task < config['tasks']:
+        raise ValueError('stop-after-task exceeds configured task range')
     if (root/'config.json').exists() and read(root/'config.json') != config:
         raise ValueError('Existing experiment has a different configuration')
     write(root/'config.json', config)
@@ -414,6 +429,8 @@ def train(args):
         split_path = root/'train_image_roles.json'
         if split_path.is_file() and read(split_path) != roles:
             raise ValueError('Original-image TRAIN split changed since previous launch')
+        if equal_budget and read(args.equal_updates_holdout/'train_image_roles.json') != roles:
+            raise ValueError('The original 90/10 image roles did not replay')
         write(split_path, roles)
         gate_data = fusion_source(source)
     set_seed(config['seed'], tf32=True)
@@ -429,7 +446,8 @@ def train(args):
         restore_rng(state['rng'])
         del state
     print(f"mode={args.mode} precision={precision} completed_tasks={len(completed)}", flush=True)
-    for task in range(len(completed), config['tasks']):
+    end = config['tasks'] if args.stop_after_task is None else args.stop_after_task + 1
+    for task in range(len(completed), end):
         model.activate_task(task)
         primary, adapters, optimizer, scheduler = optimizer_for_task(model, config, task)
         gate_opts = {}
@@ -443,6 +461,14 @@ def train(args):
         if sample_mode:
             gate_opts = {name: GateOptimizer(model.gates[task][name], config)
                          for name in SAMPLE_GATES[args.mode]}
+            if equal_budget:
+                cls = task_indices(task)
+                full = describe_cohort(source, indices, cls)
+                branch, fusion = task_cohorts(source, indices, roles, False)
+                split = dict(branch=describe_cohort(source, branch, cls), fusion=describe_cohort(source, fusion, cls))
+                if (read(args.equal_updates_reference/'cohorts'/f'task{task}.json')['branch'] != full
+                        or read(args.equal_updates_holdout/'cohorts'/f'task{task}.json') != split):
+                    raise ValueError(f'Historical legal TRAIN populations did not replay at task {task}')
             indices, fusion_indices = task_cohorts(source, indices, roles, args.smoke)
             cohorts = {'branch': describe_cohort(source, indices, task_indices(task)),
                        'fusion': describe_cohort(source, fusion_indices, task_indices(task))}
@@ -487,6 +513,9 @@ def train(args):
                     model, gate_data, fusion_indices, task, epoch, config, gate_opts)
             row = train_epoch(model, source, indices, task, epoch, config, primary, adapters, optimizer,
                               {} if sample_mode else gate_opts)
+            if equal_budget:
+                from scripts.emotic.d9_equal_update_budget import check_epoch_budget
+                check_epoch_budget(task, epoch, config, optimizer, scheduler, row)
             if sample_mode:
                 row.update(train_readouts=gate_reports, gate_schedule=gate_schedule)
             history.append(row)
@@ -506,9 +535,11 @@ def train(args):
         if (config['mode'] == 'direction' or sample_mode) and any(g.updates != config['gate_updates'] for g in gate_opts.values()):
             raise RuntimeError('Task did not complete the exact gate update budget')
         state = dict(config=config, task=task, coverage=coverage, history=history, rng=rng_state(), **snapshot(model))
-        save_atomic(checkpoint_dir/f'task{task}.pth', state)
         write(root/'history'/f'task{task}.json', {'coverage': coverage, 'epochs': history})
+        save_atomic(checkpoint_dir/f'task{task}.pth', state)
         del state, optimizer, scheduler
+    if end < config['tasks']:
+        return
     write(root/'training_complete.json', dict(status='complete', tasks=config['tasks'], smoke=args.smoke,
                                               git=git_metadata(Path.cwd())))
 
@@ -523,7 +554,14 @@ def main():
     parser.add_argument('--workers', type=int, default=4)
     parser.add_argument('--precision', choices=('auto', 'bf16', 'fp32', 'fp16'), default='auto')
     parser.add_argument('--smoke', action='store_true')
+    parser.add_argument('--equal-updates-reference', type=Path, help='Historical complete sample_full run')
+    parser.add_argument('--equal-updates-holdout', type=Path, help='Historical permanent 90/10 sample_holdout run')
+    parser.add_argument('--stop-after-task', type=int, help='Return after this zero-based task is published')
     args = parser.parse_args()
+    if (args.equal_updates_reference is None) != (args.equal_updates_holdout is None):
+        parser.error('Supply both equal-updates references')
+    if args.equal_updates_reference is not None and args.mode != 'sample_holdout':
+        parser.error('Equal-update sampling requires sample_holdout')
     if args.protect_branches and args.mode not in ('fixed', 'multi', 'direction', *SAMPLE_MODES):
         parser.error('--protect-branches applies to fixed, multi or direction mode')
     if args.micro_batch_size < 1 or args.workers < 0:
