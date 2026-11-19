@@ -17,11 +17,14 @@ case "$phase" in
     diagnostic-val|diagnostic-test)
         "$py" -u -m scripts.emotic.d9_tcp_diagnostic --caran "$caran" --out "$out/diagnostic" --split "${phase#diagnostic-}" ;;
     smoke)
-        "$py" -m unittest discover -s tests -p 'test_d9_tcp*.py' -v ;;
+        "$py" -m unittest discover -s tests -p 'test_d9_tcp*.py' -v
+        "$py" -u -m scripts.emotic.d9_tcp_probe --prior "$prior" --out "$out/smoke" --phase fit-val --tasks 6 --steps 3 --permutations 2 ;;
     fit-val|test)
         test "$(cat "$out/diagnostic-val.exit.status")" = 0
         test "$(cat "$out/smoke.exit.status")" = 0
         if [[ "$phase" == test ]]; then test "$(cat "$out/fit-val.exit.status")" = 0; fi
+        if [[ "$phase" == fit-val ]]; then splits=(train val); else splits=(test); fi
+        "$py" -u -m scripts.emotic.d9_tcp_preflight --prior "$prior" --caran "$caran" --splits "${splits[@]}"
         "$py" -u -m scripts.emotic.d9_tcp_probe --prior "$prior" --out "$out/probe" --phase "$phase" ;;
     *) exit 2 ;;
 esac
