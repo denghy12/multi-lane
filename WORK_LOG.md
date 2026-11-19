@@ -1,3 +1,7 @@
+## 2026-11-19 全 TRAIN 分支意见不一致诊断完成
+
+实验分支 exp/d9-disagreement-20261119，执行版本 2089a0c。GPU0 重提 task0/3 特征，复用 task6，七项测试及真实数据预检通过，Validation 封存后再评估 Test。五阶段完成，51个日志与结果已同步并逐文件核对 SHA-256。见 output/d9_disagreement/seed1_20261119。
+
 ## 2026-11-19 全 TRAIN Sadness 排名归因
 
 实验分支 exp/d9-sadness-ranking-20261119、执行代码 2b646e6。GPU0 重提取全 TRAIN task6 特征，627名训练人物拟合低维读出并锁定，原分支未更新。两种分支来源均完成 Validation/Test、逐人排序与分路归因，五项回归、真实预检通过，41份结果与日志同步本地且散列逐一一致。见 docs/d9_sadness_ranking_20261119.md。
