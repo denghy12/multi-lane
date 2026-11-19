@@ -144,12 +144,13 @@ def summarize(rows):
                 tcp_passes=bool(passes))
 
 
-def identify_source(prior, task, split):
+def identify_source(prior, task, split, source_mode='sample_holdout'):
     path = prior/'features'/f'task{task}'/f'{split}.npz'
     digest = sha256_file(path)
     meta = read(path.with_suffix('.json'))
     spec = meta['protocol']
-    if (spec['task'] != task or spec['split'] != split or spec['smoke'] or
+    if (spec.get('source_mode', 'sample_holdout') != source_mode or
+            spec['task'] != task or spec['split'] != split or spec['smoke'] or
             digest != meta['features_sha256'] or not meta['visibility_mask_applied'] or
             (split != 'train' and not meta['exact_eval_replay'])):
         raise ValueError(f'Unverified source archive {path}')
@@ -157,7 +158,9 @@ def identify_source(prior, task, split):
                       config_sha256=spec['source_config_sha256'])
 
 
-def run(prior, out, phase, tasks, steps, permutations):
+def run(prior, out, phase, tasks, steps, permutations, source_mode='sample_holdout'):
+    if source_mode not in ('sample_holdout', 'sample_full'):
+        raise ValueError(f'Unsupported branch training data mode {source_mode}')
     if (not tasks or len(set(tasks)) != len(tasks) or any(t not in TASKS for t in tasks) or
             steps < 1 or not 1 <= permutations <= len(FORMAL_SEEDS)):
         raise ValueError('Invalid tasks, step count, or permutation count')
@@ -170,10 +173,12 @@ def run(prior, out, phase, tasks, steps, permutations):
                fit_data='current task 10% TRAIN original-image holdout', initialization='zero, available views equal',
                permutations=permutations, methods=list(METHODS),
                criterion='C minus B, A, own group mean, and within-group shuffle each mean>0 and majority>0')
+    if source_mode == 'sample_full':
+        cfg.update(source_mode=source_mode, fit_data='all current-task eligible TRAIN people also used by the branch protocol')
     lock_path = out/'tcp_validation_lock.json'
     seeds = FORMAL_SEEDS[:permutations]
     if phase == 'fit-val':
-        sources = {str(t): {s: identify_source(prior, t, s)[1] for s in ('train', 'val')} for t in tasks}
+        sources = {str(t): {s: identify_source(prior, t, s, source_mode)[1] for s in ('train', 'val')} for t in tasks}
         if lock_path.exists():
             lock = read(lock_path)
             if (cfg != lock['protocol'] or lock['train_val_sources'] != sources or
@@ -215,7 +220,7 @@ def run(prior, out, phase, tasks, steps, permutations):
         raise ValueError('Invalid Validation lock for Test')
     rows, sources = [], {}
     for task in tasks:
-        path, src = identify_source(prior, task, 'test')
+        path, src = identify_source(prior, task, 'test', source_mode)
         origin = lock['train_val_sources'][str(task)]['val']
         if any(src[key] != origin[key] for key in ('checkpoint_sha256', 'config_sha256')):
             raise ValueError(f'Different Test source at task {task}')
@@ -237,9 +242,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--prior', required=True, type=Path)
     parser.add_argument('--out', required=True, type=Path)
+    parser.add_argument('--source-mode', choices=('sample_holdout', 'sample_full'), default='sample_holdout')
     parser.add_argument('--phase', choices=('fit-val', 'test'), required=True)
     parser.add_argument('--tasks', nargs='+', type=int, default=list(TASKS))
     parser.add_argument('--steps', type=int, default=300)
     parser.add_argument('--permutations', type=int, default=100)
     args = parser.parse_args()
-    run(args.prior, args.out, args.phase, args.tasks, args.steps, args.permutations)
+    run(args.prior, args.out, args.phase, args.tasks, args.steps, args.permutations, args.source_mode)

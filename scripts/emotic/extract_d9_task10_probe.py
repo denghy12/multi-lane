@@ -1,4 +1,4 @@
-"""Extract current-task CLS and the local effect of Frozen9 messages from fixed 90/10 trajectories."""
+"""Extract current-task CLS and the local effect of Frozen9 messages from protected branch trajectories."""
 import argparse
 import hashlib
 import json
@@ -29,11 +29,11 @@ def read_json(path):
 def train_loader(root, source, roles, task, workers, batch_size):
     classes = task_indices(task)
     eligible, _ = fit_calibration_indices(source, classes, 0.)
-    branch, held = task_cohorts(source, eligible, roles, False)
-    actual = {key: describe_cohort(source, rows, classes) for key, rows in [('branch', branch), ('fusion', held)]}
+    branch, fusion = task_cohorts(source, eligible, roles, False)
+    actual = {key: describe_cohort(source, rows, classes) for key, rows in [('branch', branch), ('fusion', fusion)]}
     if actual != read_json(root / 'cohorts' / f'task{task}.json'):
         raise ValueError(f'TRAIN cohort differs from original task {task}')
-    data = LabelView(source, held, classes, include_sample_id=True)
+    data = LabelView(source, fusion, classes, include_sample_id=True)
     return DataLoader(data, batch_size=batch_size, shuffle=False, num_workers=workers,
                       worker_init_fn=single_thread_worker, generator=torch.Generator().manual_seed(77191 + task),
                       **({'prefetch_factor': 1} if workers else {}))
@@ -117,12 +117,13 @@ def extract(args):
     torch.set_num_threads(2)
     set_seed(1, True)
     config = read_json(args.source / 'config.json')
-    if config['mode'] != 'sample_holdout' or config['smoke'] or not config['protect_branches']:
-        raise ValueError('Expected formal sample_holdout checkpoint with protected branches')
+    if (config['mode'] != args.source_mode or config['seed'] != 1 or config['smoke']
+            or not config['protect_branches']):
+        raise ValueError(f'Expected formal seed1 {args.source_mode} checkpoint with protected branches')
     sources = {s: build_joint_source(input_paths(), s) for s in args.splits}
     roles = {}
     if 'train' in sources:
-        roles = global_image_roles(sources['train'], 'sample_holdout', config['seed'])
+        roles = global_image_roles(sources['train'], args.source_mode, config['seed'])
         if roles != read_json(args.source / 'train_image_roles.json'):
             raise ValueError('Original-image role allocation mismatch')
         sources['train'] = fusion_source(sources['train'])
@@ -147,6 +148,8 @@ def extract(args):
             protocol = dict(schema=2, task=task, split=split, smoke=args.smoke, batch_size=args.batch_size,
                             checkpoint_sha256=checkpoint_hash, source_cohort_or_archive_sha256=provenance,
                             source_config_sha256=sha256_file(args.source / 'config.json'))
+            if args.source_mode == 'sample_full':
+                protocol['source_mode'] = args.source_mode
             report = result.with_suffix('.json')
             if result.is_file() and report.is_file():
                 old = read_json(report)
@@ -162,7 +165,7 @@ def extract(args):
                 if args.smoke:
                     expected = expected[:args.batch_size]
                 if features['sample_ids'].tolist() != expected:
-                    raise ValueError('TRAIN prediction rows do not match held-out people')
+                    raise ValueError('TRAIN prediction rows do not match the original fusion cohort')
             temp = result.with_suffix(f'.{os.getpid()}.tmp')
             with temp.open('wb') as f:
                 np.savez(f, **features)
@@ -181,6 +184,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--source-mode', choices=('sample_holdout', 'sample_full'), default='sample_holdout')
     parser.add_argument('--tasks', type=int, nargs='+', choices=range(len(TASK_SIZES)), default=[0, 3, 6])
     parser.add_argument('--splits', nargs='+', choices=['train', 'val', 'test'], default=['train', 'val', 'test'])
     parser.add_argument('--smoke', action='store_true', help='Validate the first native evaluation-sized batch')
