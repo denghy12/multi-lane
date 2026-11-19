@@ -1,3 +1,7 @@
+## 2026-11-19 已见与留出 TRAIN 配对实验完成
+
+在 exp/d9-matched-source-20261119 上锁定协议并执行 GPU0 配对前向与 CPU 学习和评价，运行代码 0bbbfa2。完成8项回归、按原图匹配、两组各3任务前向、A源对照、同均值 B/C、自然 Validation 和锁定 Test。4阶段正常退出，70份文件逐一核对 SHA-256 后同步。报告 docs/d9_matched_source_20261119.md，结果 output/d9_matched_source/seed1_20261119。
+
 ## 2026-11-19 同一人物辅助证据质量实验完成
 
 实验分支 exp/d9-paired-quality-20261119，执行提交174f838。GPU0 完成自然重放和两种配对 TRAIN 前向，修正预检中的 Face 掩码类型后12项单测和64人预检通过。Validation 封存后完成自然 Test，45份输出日志同步本地且散列一致。
