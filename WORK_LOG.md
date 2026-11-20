@@ -1,3 +1,7 @@
+## 2026-11-20 同底座自然图排序对照
+
+从 b708476 建立独立分支 exp/d9-natural-rank。沿用原八任务留出 TRAIN、自然 Validation/Test 预测，新增一项排序监督，不更新分支。
+
 ## 2026-11-20 可靠 Face 人群清晰度八阶段正式结果
 
 exp/d9-reliable-blur 在 Linux CPU 上按 76cc964 运行。四项单元测试、task0 真实小跑、八阶段 Val 封存与 Test 均通过。无可靠 Face 的分数逐值重放。独立复算 32 组比例及两套逐类 AP，11 份日志与产物同步并校验。
