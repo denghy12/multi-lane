@@ -9,3 +9,21 @@ EMOTIC seed1，13,950 次更新的原随机 90% Frozen9 三路及八份原生任
 选择标准执行前锁定。在全体自然 Validation 上比较最终 mAP 和八阶段平均，允许 1e-10 浮点容差。只有两项均达到且一项更高才算通过。C 须通过与 A 的比较，D 须分别通过与 A 和 C 的比较；优先通过双重比较的 D，其次为通过的 C，否则保留 A。B 和同组三路手设固定读出完整重放。先做 task0、1 真实小跑；八任务权重与 Validation 选择封存后，一次报告全部自然 Test。以 33.2019／40.2847 为全 TRAIN 固定 Test 参照。同一人物在多个任务可重复出现，新人次不能当作不同原图。前列正负例指标与各 Face 人群只用于解释结果。
 
 入口 `bash scripts/emotic/run_d9_same_image_neg.sh 0`。图像和人脸清单沿用 `../multi-lane-main/datasets/EMOTIC` 及 `../emotic_benchmark_runs`；冻结 ViT 使用已有 `../CODE_DDP/pretrained/clip/ViT-B-16.pt`。预训练分支与 TRAIN／Val／Test 预测来自 `../multi-lane-main-d9-holdout-equal-updates/output/d9_equal_updates/seed1_20261119/formal`，既有 A/B 来自 `../multi-lane-main-d9-natural-rank/output/d9_natural_rank/seed1_20261120/formal`。GPU0 提取，原 batch64，2 个数据加载进程，CPU 拟合与评价。输出 `output/d9_same_image_neg/seed1_20261120`，日志 `logs/d9_same_image_neg/seed1_20261120`。
+
+## 完成结果（2026-11-21）
+
+| 方案 | Val 最终 | Val 八阶段平均 | Test 最终 | Test 八阶段平均 |
+|---|---:|---:|---:|---:|
+| 同模型手设比例 | 43.7028 | 51.2535 | 32.7557 | 39.9983 |
+| A 原人群 BCE | 43.7811 | 51.3014 | 33.0601 | 40.1808 |
+| B 原人群 BCE＋排序 | 43.7126 | 51.2201 | 33.0541 | 40.1059 |
+| C 补人 BCE | 43.6697 | 51.2105 | 33.0174 | 40.1478 |
+| D 补人 BCE＋排序 | 43.7160 | 51.2029 | 33.0505 | 40.0915 |
+
+Val 预定规则保留 A。task0 没有新增人物，C 与 A、D 与 B 精确重放。task1–7 的全体 Val、Test 阶段 mAP，C 全部低于 A。C−A 四项为 −0.1115／−0.0909／−0.0428／−0.0330，D−A 为 −0.0652／−0.0985／−0.0096／−0.0894。D−C 最终 Val／Test 略升 0.0463／0.0331，阶段平均反降 0.0076／0.0564。
+
+可靠 Face 组跨任务等权 Full／Person／Face 份额由 A 的 83.91%／7.63%／8.46% 变为 C 的 85.80%／6.81%／7.38%，无可靠 Face 时 Full 份额由 92.48% 变为 93.67%。每个情绪 K 取自然评价中该情绪真实正例数，只汇总该类引入当期的前 K 名，C 相对 A 把对当前任务所有新类全阴性的人排进前列的次数，在 Val 从 2,988 降至 2,982，在 Test 从 6,422 降至 6,400。计数按类别与人物累计。Test 总前列误报同时由 9,797 降至 9,783，但 AP 取决于所有正例的具体名次，最终及阶段平均仍下降。
+
+补人后，Test 最终两个人群内部 D−C 的 mAP 差异为有可靠 Face +0.0982、无可靠 Face −0.0901。最终 Sadness 的 D−C 差值为 Val −2.157、Test −0.932，Suffering 为 Val +1.509、Test +1.282。任务共享比例不能专门只调某一种情绪。task6 的同图来源扩充数只为 6 人。该结果适用于本次样本来源、两种目标及 seed1。
+
+Linux GPU0 从阶段 checkpoint 为 368 个同图 TRAIN 人次（217 有可靠 Face）提取自然、身体模糊、可靠脸模糊的证据。只更新融合权重。5 项单元测试、前两任务小跑与正式八阶段全部通过；原读出与 task0 对照重放。独立从预测、权重与真值核算四种方法、两个 split、八阶段、三个评价人群，逐类 AP 最大绝对差为 4.27×10⁻¹⁴ 以内。运行提交 018a5fa，正式产物与日志共 26 份已同步并核验，详见 `output/d9_same_image_neg/seed1_20261120/formal/results.md`。
