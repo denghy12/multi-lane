@@ -1,3 +1,7 @@
+## 2026-11-20 一图一比例八任务结果
+
+正式 TRAIN 门控与 Validation／Test 八阶段结束。独立复算80项固定／学习全体mAP一致，最终两split各8张原图作真实前向抽查。原始数据、报告和日志均已同步本地并校验。 详见 docs/d9_image_gate_20261120.md。
+
 ## 2026-11-20 整张原图共享融合权重的八阶段实验
 
 创建 exp/d9-image-gate。GPU0 小批量提取冻结 ViT 和既有 Person/Face Cross-Attention 特征，CPU拟合。依据原始框与Face清单，Test最终有463张混合图、628名原本可靠的评分人物因整图规则关闭Face。 详见 docs/d9_image_gate_20261120.md。
