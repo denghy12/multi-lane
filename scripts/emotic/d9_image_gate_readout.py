@@ -70,6 +70,12 @@ def load_stage(source, features, split, task, smoke):
         raise ValueError('Expected archived formal score protocol')
     require_digest(path, digest)
     feat = features/split/f'task{task}.npz'
+    feature_meta = read(feat.with_suffix('.json'))
+    expected_features = dict(task=task, split=split, smoke=smoke, native_sha256=digest, checkpoint_sha256=checkpoint,
+                             config_sha256=sha256_file(source/'config.json'))
+    if any(feature_meta['protocol'].get(k) != v for k,v in expected_features.items()):
+        raise ValueError(f'Feature provenance mismatch: {feat}')
+    require_digest(feat,feature_meta['archive_sha256'])
     with np.load(feat, allow_pickle=False) as f, np.load(path, allow_pickle=False) as z:
         image_ids = f['image_ids']
         keys = image_rows(z['sample_ids'], split)
@@ -108,7 +114,7 @@ def load_stage(source, features, split, task, smoke):
             torch.testing.assert_close(replay,historical,atol=5e-6,rtol=2e-6)
     return Stage(image_ids,full,relation,counts,rc,torch.from_numpy(usable),torch.from_numpy(inverse),
                  torch.from_numpy(observed),torch.from_numpy(reliable),branches,labels,historical,
-                 digest,sha256_file(feat),checkpoint)
+                 digest,feature_meta['archive_sha256'],checkpoint)
 
 
 def standardized_features(stage, normalization):

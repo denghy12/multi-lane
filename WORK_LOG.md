@@ -1,3 +1,7 @@
+## 2026-11-20 整张原图共享融合权重的八阶段实验
+
+创建 exp/d9-image-gate。GPU0 小批量提取冻结 ViT 和既有 Person/Face Cross-Attention 特征，CPU拟合。依据原始框与Face清单，Test最终有463张混合图、628名原本可靠的评分人物因整图规则关闭Face。 详见 docs/d9_image_gate_20261120.md。
+
 ## 2026-11-20 等步数模型的自然图与清晰度配对消融
 
 独立分支 exp/d9-matched-natural-a 在服务器用CPU完成八任务同底座自然A与配对A对照。逐阶段逐类重放正式固定及配对，Validation封存后评Test。七份输出和日志校验通过。 详见 docs/d9_matched_natural_a_20261120.md。

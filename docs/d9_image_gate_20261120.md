@@ -21,3 +21,7 @@
 固定所有方法后先评自然 Validation，封存结果及 TRAIN 权重，再评完整自然 Test，历史指标均以 mAP 点报告。举例诊断以整张原图为置换单位，在相同图级可用性内交换或使用组均值，同时报告单人/多人适用性和混合人脸图片的末端变化。先对比新旧固定以估计统一缺脸规则的代价，再比同规则常量、Full、Full 加关联。本人图权重要同时超过组均值、跨图交换以及同规则常量，才支持按图选择带来增益。关联的额外价值由它和 Full 的同底座比较判断。预先以 Validation 最终和阶段平均的共同方向评价，Test 仅作复验。固定比例绝对参照包括等步数 90% 原逐人固定 43.7028／51.2535、32.7557／39.9983 及全 TRAIN 固定 43.6272／51.1094、33.2019／40.2847。
 
 入口 `bash scripts/emotic/run_d9_image_gate.sh 0`。模型源目录为 `../multi-lane-main-d9-holdout-equal-updates/output/d9_equal_updates/seed1_20261119/formal`；EMOTIC、ViT-B/16 和 Face manifest 跟随原实验路径。只读图像特征在 GPU0 小批量提取，分支不重训。先真实 task0 小跑，再八任务。结果在 `output/d9_image_gate/seed1_20261120/`，日志在 `logs/d9_image_gate/seed1_20261120/run.log`。
+
+## 完整人物框核验
+
+从原始人物框核验，TRAIN/Val/Test 分别有 16,001／2,397／5,369 个目标框。Test 有一人没有情绪标签及 Face 记录，仍计入原图目标名单，其 Face 视为不可用。最终阶段 Test 的 3,682 张图中有 2,042 张全有可靠 Face、463 张混合、1,177 张完全没有可靠 Face。图级规则使 628 名原本可靠的评分目标关闭末端 Face；Val 对应为 265 人。图级 Face 可用性只由目标框和 Face manifest 决定。
