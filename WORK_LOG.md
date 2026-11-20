@@ -1,3 +1,7 @@
+## 2026-11-20 可靠组分开检验身体与人脸清晰度
+
+实验分支 exp/d9-reliable-blur 基于既有自然／配对消融版本 8ee1779，冻结三路，复用已有 TRAIN 和自然 Val/Test 预测。
+
 ## 2026-11-20 等步数模型的自然图与清晰度配对消融
 
 独立分支 exp/d9-matched-natural-a 在服务器用CPU完成八任务同底座自然A与配对A对照。逐阶段逐类重放正式固定及配对，Validation封存后评Test。七份输出和日志校验通过。 详见 docs/d9_matched_natural_a_20261120.md。
