@@ -1,3 +1,7 @@
+## 2026-11-20 等步数模型的自然图与清晰度配对消融
+
+独立分支 exp/d9-matched-natural-a 在服务器用CPU完成八任务同底座自然A与配对A对照。逐阶段逐类重放正式固定及配对，Validation封存后评Test。七份输出和日志校验通过。 详见 docs/d9_matched_natural_a_20261120.md。
+
 ## 2026-11-20 Face 预算候选完成并锁定决定
 
 独立分支 exp/d9-face-budget-probe 在服务器 CPU 上完成拟合和 Val→封存→Test。八个任务的两个来源 A、受控读出均重放，3 项测试通过，8 份结果与日志同步本地并核验。 详见 docs/d9_face_budget_probe_20261120.md。
