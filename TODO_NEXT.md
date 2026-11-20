@@ -1,3 +1,7 @@
+## 2026-11-20 Face 预算候选完成并锁定决定
+
+Face 预算候选未通过预先定义的 Validation 比较。单轨迹 Face 缩预算训练不启动。现阶段正式参照仍为等步数 A，Test 33.0601／40.1808。 详见 docs/d9_face_budget_probe_20261120.md。
+
 ## 2026-11-19 90% 原图等步数训练
 
 GPU0 会话 d9_equal_updates_20261119 运行中，已同步task0 第4轮快照。完成后同步正式 comparison 与 paired_A 的 val/test 结果。同模型对照及全量参照决定下一轮。
