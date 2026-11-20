@@ -1,4 +1,4 @@
-"""Fit each task's held-TRAIN paired A before advancing the 90%-branch trajectory."""
+"""Fit held-TRAIN paired A online, or replay immutable per-task metadata-split checkpoints."""
 import argparse
 import os
 from pathlib import Path
@@ -14,6 +14,7 @@ from scripts.emotic.d9_matched_extract import collect
 from scripts.emotic.d9_matched_run import fit_average
 from scripts.emotic.d9_paired_a_evaluate import write_verified
 from scripts.emotic.d9_quality_fit import LR, STEPS
+from scripts.emotic.d9_split90_roles import split_roles
 from scripts.emotic.d9_sample_training import describe_cohort, fusion_source, global_image_roles, task_cohorts
 from scripts.emotic.evaluate_d9_relation import metrics_for_stage
 from scripts.emotic.evaluate_d9_sample_fusion import MAP_KEYS, comparisons
@@ -28,7 +29,27 @@ def provenance(root, task):
     return {name + '_sha256': sha256_file(path) for name, path in paths.items()}
 
 
-def fit(root, out, cfg, task, workers):
+def validate_source(cfg, replay_meta):
+    expected_split = 'global_10pct_meta' if replay_meta else 'global_10pct_hash_rank'
+    if (cfg['mode'] != 'sample_holdout' or not cfg.get('protect_branches') or 'equal_updates' not in cfg
+            or cfg['image_split'] != expected_split or cfg['seed'] != 1
+            or cfg['tasks'] != (2 if cfg['smoke'] else len(TASK_SIZES))):
+        raise ValueError('Expected the declared protected equal-update seed1 90/10 branch trajectory')
+    if replay_meta and (cfg.get('split90') != 'meta' or cfg['epochs'] != (1 if cfg['smoke'] else 30)
+                        or cfg['batch_size'] != (4 if cfg['smoke'] else 64)
+                        or cfg['equal_updates'].get('mode') != 'cycle_90pct_to_full_epoch_size'):
+        raise ValueError('Replay requires the original metadata-stratified branch recipe')
+
+
+def check_fit_point(root, task, replay_meta):
+    if replay_meta:
+        return  # The caller loads only the compact checkpoint at this stage.
+    if ((root / 'cohorts' / f'task{task+1}.json').exists()
+            or (root / 'compact_checkpoints' / f'task{task+1}.pth').exists()):
+        raise ValueError('New fusion weights must be fitted before the next task starts')
+
+
+def fit(root, out, cfg, task, workers, replay_meta=False):
     if task is None or not 0 <= task < cfg['tasks']:
         raise ValueError('Specify a valid --task when fitting paired A')
     path = out / f'task{task}_center.json'
@@ -38,14 +59,17 @@ def fit(root, out, cfg, task, workers):
     protocol = dict(task=task, split='train', smoke=cfg['smoke'], previous_center_sha256=previous,
                     init='equal_available_views', optimizer='adam', steps=STEPS, lr=LR,
                     classes=list(task_indices(task)), variants=['natural', 'person_112', 'reliable_face_112'], **hashes)
+    if replay_meta:
+        if hashes['roles_sha256'] != cfg['equal_updates']['roles_sha256']:
+            raise ValueError('TRAIN role manifest differs from the one used to train the branches')
+        protocol['fit_mode'] = 'replay_meta_task_checkpoint'
     if path.exists():
         saved = read(path)
         if saved['protocol'] != protocol:
             raise ValueError(f'Sealed TRAIN inputs for task {task} changed')
         require_digest(pair_path, saved['archive_sha256'])
         return
-    if (root / 'cohorts' / f'task{task+1}.json').exists() or (root / 'compact_checkpoints' / f'task{task+1}.pth').exists():
-        raise ValueError('New fusion weights must be fitted before the next task starts')
+    check_fit_point(root, task, replay_meta)
 
     os.environ.setdefault('CUBLAS_WORKSPACE_CONFIG', ':4096:8')
     torch.use_deterministic_algorithms(True)
@@ -53,7 +77,9 @@ def fit(root, out, cfg, task, workers):
     torch.set_num_threads(2)
     train = build_joint_source(input_paths(), 'train')
     roles = read(root / 'train_image_roles.json')
-    if roles != global_image_roles(train, 'sample_holdout', cfg['seed']):
+    expected_roles = (split_roles(train, 'meta', cfg['seed']) if replay_meta
+                      else global_image_roles(train, 'sample_holdout', cfg['seed']))
+    if roles != expected_roles:
         raise ValueError('Held TRAIN original-image roles changed')
     classes = task_indices(task)
     rows, _ = fit_calibration_indices(train, classes, 0.)
@@ -64,6 +90,11 @@ def fit(root, out, cfg, task, workers):
     model = load_evaluation_model(root, task).requires_grad_(False)
     data = collect(model, fusion_source(train), held, task, workers, None)
     del model
+    if replay_meta:
+        labels = [[c in train.targets[i] for c in classes] for i in held]
+        np.testing.assert_array_equal(data['targets'], labels, err_msg='Wrong current-task TRAIN labels')
+        np.testing.assert_array_equal(data['reliable'], [bool(train.face_reliable[i]) for i in held],
+                                      err_msg='Incorrect held-person Face mask')
     torch.set_num_threads(1)
     variants = {v: {'branch_logits': data[v + '_branch_logits']} for v in ('person', 'face')}
     fit_result = fit_average(data, variants)
@@ -84,7 +115,7 @@ def fit(root, out, cfg, task, workers):
     print(f'task {task} paired A sealed from {len(held)} held TRAIN people', fit_result['weights'], flush=True)
 
 
-def evaluate(root, out, cfg, split):
+def evaluate(root, out, cfg, split, replay_meta=False):
     native = root / ('smoke_evaluation' if cfg['smoke'] else 'evaluation')
     hashes, centers = {}, {}
     for t in range(cfg['tasks']):
@@ -93,7 +124,10 @@ def evaluate(root, out, cfg, split):
         center = read(path)
         expected = provenance(root, t)
         protocol = center['protocol']
-        if (any(protocol[k] != v for k, v in expected.items()) or protocol['task'] != t
+        fit_mode = 'replay_meta_task_checkpoint' if replay_meta else None
+        if (protocol.get('fit_mode') != fit_mode or protocol['split'] != 'train'
+                or protocol['classes'] != list(task_indices(t))
+                or any(protocol[k] != v for k, v in expected.items()) or protocol['task'] != t
                 or protocol['previous_center_sha256'] != hashes.get(str(t - 1))
                 or center['checkpoint_sha256'] != expected['checkpoint_sha256']):
             raise ValueError(f'Current model or previous TRAIN seal differs for task {t}')
@@ -158,16 +192,15 @@ if __name__ == '__main__':
     cli.add_argument('--phase', choices=('fit', 'val', 'test'), required=True)
     cli.add_argument('--task', type=int)
     cli.add_argument('--workers', type=int, default=2)
+    cli.add_argument('--replay-meta', action='store_true',
+                     help='Read frozen metadata-split checkpoints in task order and fit fresh held-TRAIN centers')
     args = cli.parse_args()
     cfg = read(args.root / 'config.json')
-    if (cfg['mode'] != 'sample_holdout' or not cfg.get('protect_branches') or 'equal_updates' not in cfg
-            or cfg['image_split'] != 'global_10pct_hash_rank' or cfg['seed'] != 1
-            or cfg['tasks'] != (2 if cfg['smoke'] else len(TASK_SIZES))):
-        raise ValueError('Expected protected equal-update seed1 90/10 branch trajectory')
+    validate_source(cfg, args.replay_meta)
     args.out.mkdir(parents=True, exist_ok=True)
     if args.phase == 'fit':
-        fit(args.root, args.out, cfg, args.task, args.workers)
+        fit(args.root, args.out, cfg, args.task, args.workers, args.replay_meta)
     else:
         if args.task is not None:
             cli.error('--task is used only with --phase fit')
-        evaluate(args.root, args.out, cfg, args.phase)
+        evaluate(args.root, args.out, cfg, args.phase, args.replay_meta)
