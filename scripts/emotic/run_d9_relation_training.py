@@ -413,23 +413,30 @@ def train(args):
                       image_split='global_10pct_hash_rank' if args.mode == 'sample_holdout' else 'all_train',
                       fusion_input='selector_weighted_frozen9_or_final_task_cls', fusion_init='equal_available_views',
                       fusion_asl=FUSION_ASL if 'mid_asl' in SAMPLE_GATES[args.mode] else None)
+    source = build_joint_source(inputs, 'train')
+    reassigned_roles = None
+    split90 = getattr(args, 'split90', None)
+    if split90 is not None:
+        from scripts.emotic.d9_split90_roles import split_roles
+        reassigned_roles = split_roles(source, split90, config['seed'])
+        config.update(split90=split90, image_split='global_10pct_' + split90)
     equal_budget = args.equal_updates_reference is not None
     if equal_budget:
         from scripts.emotic.d9_equal_update_budget import load_reference_budget
-        config['equal_updates'] = load_reference_budget(args.equal_updates_reference, args.equal_updates_holdout, config)
+        config['equal_updates'] = load_reference_budget(
+            args.equal_updates_reference, args.equal_updates_holdout, config, reassigned_roles)
     if args.stop_after_task is not None and not 0 <= args.stop_after_task < config['tasks']:
         raise ValueError('stop-after-task exceeds configured task range')
     if (root/'config.json').exists() and read(root/'config.json') != config:
         raise ValueError('Existing experiment has a different configuration')
     write(root/'config.json', config)
-    source = build_joint_source(inputs, 'train')
     sample_mode = args.mode in SAMPLE_MODES
     if sample_mode:
-        roles = global_image_roles(source, args.mode, config['seed'])
+        roles = reassigned_roles if split90 is not None else global_image_roles(source, args.mode, config['seed'])
         split_path = root/'train_image_roles.json'
         if split_path.is_file() and read(split_path) != roles:
             raise ValueError('Original-image TRAIN split changed since previous launch')
-        if equal_budget and read(args.equal_updates_holdout/'train_image_roles.json') != roles:
+        if equal_budget and split90 is None and read(args.equal_updates_holdout/'train_image_roles.json') != roles:
             raise ValueError('The original 90/10 image roles did not replay')
         write(split_path, roles)
         gate_data = fusion_source(source)
@@ -464,11 +471,14 @@ def train(args):
             if equal_budget:
                 cls = task_indices(task)
                 full = describe_cohort(source, indices, cls)
-                branch, fusion = task_cohorts(source, indices, roles, False)
-                split = dict(branch=describe_cohort(source, branch, cls), fusion=describe_cohort(source, fusion, cls))
-                if (read(args.equal_updates_reference/'cohorts'/f'task{task}.json')['branch'] != full
-                        or read(args.equal_updates_holdout/'cohorts'/f'task{task}.json') != split):
-                    raise ValueError(f'Historical legal TRAIN populations did not replay at task {task}')
+                if read(args.equal_updates_reference/'cohorts'/f'task{task}.json')['branch'] != full:
+                    raise ValueError(f'Full reference TRAIN population did not replay at task {task}')
+                if split90 is None:
+                    branch, fusion = task_cohorts(source, indices, roles, False)
+                    split = dict(branch=describe_cohort(source, branch, cls),
+                                 fusion=describe_cohort(source, fusion, cls))
+                    if read(args.equal_updates_holdout/'cohorts'/f'task{task}.json') != split:
+                        raise ValueError(f'Historical 90/10 TRAIN populations did not replay at task {task}')
             indices, fusion_indices = task_cohorts(source, indices, roles, args.smoke)
             cohorts = {'branch': describe_cohort(source, indices, task_indices(task)),
                        'fusion': describe_cohort(source, fusion_indices, task_indices(task))}
@@ -556,12 +566,16 @@ def main():
     parser.add_argument('--smoke', action='store_true')
     parser.add_argument('--equal-updates-reference', type=Path, help='Historical complete sample_full run')
     parser.add_argument('--equal-updates-holdout', type=Path, help='Historical permanent 90/10 sample_holdout run')
+    parser.add_argument('--split90', choices=('hash2', 'meta', 'online'),
+                        help='Alternative permanent TRAIN original-image split with equal-update sampling')
     parser.add_argument('--stop-after-task', type=int, help='Return after this zero-based task is published')
     args = parser.parse_args()
     if (args.equal_updates_reference is None) != (args.equal_updates_holdout is None):
         parser.error('Supply both equal-updates references')
     if args.equal_updates_reference is not None and args.mode != 'sample_holdout':
         parser.error('Equal-update sampling requires sample_holdout')
+    if args.split90 is not None and args.equal_updates_reference is None:
+        parser.error('--split90 requires both equal-updates references and sample_holdout mode')
     if args.protect_branches and args.mode not in ('fixed', 'multi', 'direction', *SAMPLE_MODES):
         parser.error('--protect-branches applies to fixed, multi or direction mode')
     if args.micro_batch_size < 1 or args.workers < 0:
