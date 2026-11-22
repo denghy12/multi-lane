@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import time
 
 
@@ -47,6 +48,11 @@ def run(phase):
                 finished.append(dict(name=name, returncode=code, seconds=time.time()-started))
                 del active[name]
                 print('FINISH', name, code, flush=True)
+                if phase == 'formal':
+                    with (LOGS / 'table_report.log').open('a') as report_log:
+                        subprocess.run([sys.executable, '-m', 'scripts.emotic.d9_fill_report',
+                                        '--root', str(ROOT)], stdout=report_log, stderr=subprocess.STDOUT,
+                                       check=True)
             # Reserve at most two replay models plus one extractor. Smoke runs use two slots.
             slots = 2 if phase == 'smoke' else 3
             if pending and len(active) < slots:
@@ -72,6 +78,9 @@ def run(phase):
         save(ROOT / f'{phase}_complete.json', dict(status='failed' if failed else 'complete', jobs=finished))
         if failed:
             raise RuntimeError(f'{phase} failures: {failed}')
+        if phase == 'formal':
+            subprocess.run([sys.executable, '-m', 'scripts.emotic.d9_fill_report',
+                            '--root', str(ROOT), '--require-complete'], check=True)
 
 
 if __name__ == '__main__':

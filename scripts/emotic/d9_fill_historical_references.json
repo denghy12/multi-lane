@@ -1,0 +1,619 @@
+{
+  "schema": 1,
+  "audit_note": "Historical figures transcribed from verified project reports; four decimals as in the user table. Source document digests anchor the audited snapshots.",
+  "source_documents": {
+    "protected": {
+      "path": "docs/d9_protected_gates_results_20261117.md",
+      "sha256": "432ccb2fe9e12b4d1b71816365c2a0aa836d7a0a72b107119a8dab8f167eaca6"
+    },
+    "direction": {
+      "path": "docs/d9_direction_results_20261118.md",
+      "sha256": "cc2e533fbfeaeb645bf7414f128956f5ef7ccdad58ddc30eaf2478974b2d4abd"
+    },
+    "fullsample": {
+      "path": "docs/d9_sample_fusion_20261118.md",
+      "sha256": "83694d02704652613c56e7e92d4af229b9ac6c2d2e557ba5ebf2afaa93437adc"
+    },
+    "equal90": {
+      "path": "docs/d9_equal_updates_results_20261120.md",
+      "sha256": "e0be63118e6e1726b85fbc4bb0adfe2d65f2e4a1b24c4beb83ed17520243fb14"
+    },
+    "base": {
+      "path": "docs/d9_protected_fixed_results_20261117.md",
+      "sha256": "98b04ac0a8623a9d22864ca87d597a16386871081d80a7fa21dd437ed4e94a84"
+    },
+    "sadness": {
+      "path": "docs/d9_sadness_ranking_20261119.md",
+      "sha256": "b0689cb91778d7d580e6f4803b68bd3ed58a729a1a252313253107f792e6564f"
+    },
+    "quality": {
+      "path": "docs/d9_paired_quality_20261119.md",
+      "sha256": "27ee7a74ad5b2433c0ee7f80946e4dbceb2d211b2009c5b7106de62c60b49f71"
+    },
+    "budget": {
+      "path": "docs/d9_aux_budget_20261119.md",
+      "sha256": "909d6bd2a25174d0814a28800eab642d214d3176fa97cd46b14ee0ab82687ec1"
+    },
+    "disagreement": {
+      "path": "docs/d9_disagreement_20261119.md",
+      "sha256": "764bcd23c5a68ed1fba02409ae687e1c54ed503778ad35e9ad4dbf004d00a5e2"
+    },
+    "image": {
+      "path": "docs/d9_image_gate_20261120.md",
+      "sha256": "22b11c4ab4d72c0f50cdab801cc1f7c02c3527198e9b64951c200911fcd07273"
+    },
+    "shrink": {
+      "path": "docs/d9_image_shrink_20261120.md",
+      "sha256": "8a911c1c8eb0b41335b125039def15a3827df1b944d23c539581986c368f8e03"
+    }
+  },
+  "rows": {
+    "baseline": {
+      "name": "同一组三路，维持原固定比例",
+      "category": "baseline",
+      "input": "不读取特征，使用常量",
+      "scope": "eight_stage",
+      "historical": {
+        "full": {
+          "val": [
+            43.6272,
+            51.1094
+          ],
+          "test": [
+            33.2019,
+            40.2847
+          ]
+        },
+        "equal90": {
+          "val": [
+            43.7028,
+            51.2535
+          ],
+          "test": [
+            32.7557,
+            39.9983
+          ]
+        }
+      },
+      "reference_documents": [
+        "base",
+        "equal90"
+      ]
+    },
+    "global_relation": {
+      "name": "中间匹配信息直接平均，再预测人物比例",
+      "category": "global",
+      "input": "Frozen9四项匹配统计，Person和Face共8项",
+      "scope": "eight_stage",
+      "historical": {
+        "full": {
+          "val": [
+            40.6266,
+            47.1595
+          ],
+          "test": [
+            31.0868,
+            37.561
+          ]
+        }
+      },
+      "reference_documents": [
+        "protected"
+      ]
+    },
+    "bounded_bce": {
+      "name": "相同信息，简化计算并限制调整幅度",
+      "category": "global",
+      "input": "相同8项中间匹配统计",
+      "scope": "eight_stage",
+      "historical": {
+        "full": {
+          "val": [
+            43.5207,
+            50.9999
+          ],
+          "test": [
+            33.1324,
+            40.2364
+          ]
+        }
+      },
+      "reference_documents": [
+        "direction"
+      ]
+    },
+    "own_benefit": {
+      "name": "相同信息，再教它本人增加辅助份额是否有利",
+      "category": "global",
+      "input": "相同8项统计；TRAIN本人收益方向作为监督",
+      "scope": "eight_stage",
+      "historical": {
+        "full": {
+          "val": [
+            43.5356,
+            51.0195
+          ],
+          "test": [
+            33.1347,
+            40.2377
+          ]
+        }
+      },
+      "reference_documents": [
+        "direction"
+      ]
+    },
+    "shuffled_benefit": {
+      "name": "相同信息，将训练收益标签换成同组别人的",
+      "category": "global",
+      "input": "相同8项统计；同组错配收益方向作为监督",
+      "scope": "eight_stage",
+      "historical": {
+        "full": {
+          "val": [
+            43.5358,
+            51.0192
+          ],
+          "test": [
+            33.1343,
+            40.2373
+          ]
+        }
+      },
+      "reference_documents": [
+        "direction"
+      ]
+    },
+    "mid_bce": {
+      "name": "按当前任务关注的位置汇总匹配信息，学习分类误差",
+      "category": "weighted",
+      "input": "Task10 Selectors加权Frozen9匹配统计",
+      "scope": "eight_stage",
+      "historical": {
+        "full": {
+          "val": [
+            41.0918,
+            48.5904
+          ],
+          "test": [
+            31.2295,
+            38.4701
+          ]
+        },
+        "equal90": {
+          "val": [
+            42.3027,
+            49.9851
+          ],
+          "test": [
+            31.4202,
+            38.793
+          ]
+        }
+      },
+      "reference_documents": [
+        "fullsample",
+        "equal90"
+      ],
+      "reference_results": [
+        {
+          "key": "sample_full_val",
+          "json_path": "summary.mid_bce.all"
+        },
+        {
+          "key": "sample_full_test",
+          "json_path": "summary.mid_bce.all"
+        }
+      ]
+    },
+    "mid_asl": {
+      "name": "相同匹配信息，改用ASL学习分类误差",
+      "category": "weighted",
+      "input": "同一任务加权匹配信息；只更换损失",
+      "scope": "eight_stage",
+      "historical": {
+        "full": {
+          "val": [
+            41.1665,
+            48.6544
+          ],
+          "test": [
+            31.2879,
+            38.5071
+          ]
+        },
+        "equal90": {
+          "val": [
+            42.3028,
+            49.9965
+          ],
+          "test": [
+            31.4438,
+            38.8058
+          ]
+        }
+      },
+      "reference_documents": [
+        "fullsample",
+        "equal90"
+      ],
+      "reference_results": [
+        {
+          "key": "sample_full_asl_val",
+          "json_path": "summary.mid_asl.all"
+        },
+        {
+          "key": "sample_full_asl_test",
+          "json_path": "summary.mid_asl.all"
+        }
+      ]
+    },
+    "task_summary": {
+      "name": "三路第10层任务摘要分别平均，再预测人物比例",
+      "category": "summary",
+      "input": "Summarize后、任务注意力前的摘要内容；不计算摘要余弦",
+      "scope": "eight_stage",
+      "historical": {
+        "full": {
+          "val": [
+            40.4913,
+            47.1684
+          ],
+          "test": [
+            30.9735,
+            37.5487
+          ]
+        }
+      },
+      "reference_documents": [
+        "protected"
+      ]
+    },
+    "tcp_fixed": {
+      "name": "固定比例",
+      "category": "task10",
+      "input": "不读取特征",
+      "scope": "task6_current",
+      "historical": {
+        "full": {
+          "val": [
+            31.0758
+          ],
+          "test": [
+            30.0014
+          ]
+        }
+      },
+      "reference_documents": [
+        "sadness"
+      ]
+    },
+    "tcp_A": {
+      "name": "不读人物特征，直接学习共用比例",
+      "category": "task10",
+      "input": "任务和Face可用性选择比例参数",
+      "scope": "task6_current",
+      "historical": {
+        "full": {
+          "val": [
+            18.3607
+          ],
+          "test": [
+            17.5524
+          ]
+        }
+      },
+      "reference_documents": [
+        "sadness"
+      ]
+    },
+    "tcp_C_tcp": {
+      "name": "第10层CLS预测人物比例，并学习分支可靠程度",
+      "category": "task10",
+      "input": "三路Task10 CLS各压缩4维，共12维；未计算余弦",
+      "scope": "task6_current",
+      "historical": {
+        "full": {
+          "val": [
+            21.3446
+          ],
+          "test": [
+            19.5561
+          ]
+        }
+      },
+      "reference_documents": [
+        "sadness"
+      ]
+    },
+    "late_bce": {
+      "name": "三路最终CLS压缩后拼接，再预测人物比例",
+      "category": "final",
+      "input": "三路最终CLS内容压缩为3/3/2维；未计算余弦",
+      "scope": "eight_stage",
+      "historical": {
+        "full": {
+          "val": [
+            41.126,
+            48.6143
+          ],
+          "test": [
+            31.1783,
+            38.4538
+          ]
+        },
+        "equal90": {
+          "val": [
+            42.3397,
+            49.9704
+          ],
+          "test": [
+            31.5094,
+            38.7883
+          ]
+        }
+      },
+      "reference_documents": [
+        "fullsample",
+        "equal90"
+      ],
+      "reference_results": [
+        {
+          "key": "sample_full_val",
+          "json_path": "summary.late_bce.all"
+        },
+        {
+          "key": "sample_full_test",
+          "json_path": "summary.late_bce.all"
+        }
+      ]
+    },
+    "final_cosine": {
+      "name": "先计算三路最终CLS之间的相似度，再预测比例",
+      "category": "final",
+      "input": "原始等维最终CLS两两余弦，相似度共3项",
+      "scope": "eight_stage",
+      "historical": {},
+      "reference_documents": []
+    },
+    "combined_fixed": {
+      "name": "固定比例参照",
+      "category": "combined",
+      "input": "不读取人物特征",
+      "scope": "three_heads",
+      "historical": {
+        "full": {
+          "val": [
+            53.7065
+          ],
+          "test": [
+            47.2294
+          ]
+        }
+      },
+      "reference_documents": [
+        "quality"
+      ]
+    },
+    "quality_B": {
+      "name": "内容与匹配信息一起预测人物比例，用清晰和模糊版本训练",
+      "category": "combined",
+      "input": "Task10 CLS12维＋Frozen9匹配8维",
+      "scope": "three_heads",
+      "historical": {
+        "full": {
+          "val": [
+            46.5958
+          ],
+          "test": [
+            40.0196
+          ]
+        }
+      },
+      "reference_documents": [
+        "quality"
+      ]
+    },
+    "quality_C": {
+      "name": "同样输入，再学习清晰度变化是否改变辅助收益",
+      "category": "combined",
+      "input": "相同20维内容与匹配信息",
+      "scope": "three_heads",
+      "historical": {
+        "full": {
+          "val": [
+            46.5744
+          ],
+          "test": [
+            40.2542
+          ]
+        }
+      },
+      "reference_documents": [
+        "quality"
+      ]
+    },
+    "budget_person": {
+      "name": "保持Full份额，用这些信息分配Person和Face份额",
+      "category": "combined",
+      "input": "相同20维信息；Full份额先由TRAIN学并封存",
+      "scope": "three_heads",
+      "historical": {
+        "full": {
+          "val": [
+            51.4965
+          ],
+          "test": [
+            45.465
+          ]
+        }
+      },
+      "reference_documents": [
+        "budget"
+      ]
+    },
+    "disagreement_middle": {
+      "name": "只在辅助与Full意见冲突时，判断是否采纳辅助",
+      "category": "combined",
+      "input": "相同20维信息和可用性标记；预测是否转移5个百分点",
+      "scope": "three_heads",
+      "historical": {
+        "full": {
+          "val": [
+            53.6346
+          ],
+          "test": [
+            47.1213
+          ]
+        }
+      },
+      "reference_documents": [
+        "disagreement"
+      ]
+    },
+    "image_fixed": {
+      "name": "同一张图用固定比例",
+      "category": "image",
+      "input": "不读取内容，同图统一Face可用性",
+      "scope": "eight_stage",
+      "historical": {
+        "equal90": {
+          "val": [
+            43.5255,
+            51.058
+          ],
+          "test": [
+            32.7572,
+            40.0025
+          ]
+        }
+      },
+      "reference_documents": [
+        "image"
+      ]
+    },
+    "image_constant": {
+      "name": "不看图像内容，只学习共用比例",
+      "category": "image",
+      "input": "图级Face可用性选择学习参数",
+      "scope": "eight_stage",
+      "historical": {
+        "equal90": {
+          "val": [
+            43.5805,
+            50.8735
+          ],
+          "test": [
+            32.9718,
+            39.7807
+          ]
+        }
+      },
+      "reference_documents": [
+        "image"
+      ]
+    },
+    "image_full": {
+      "name": "用Full整图内容预测这张图的比例",
+      "category": "image",
+      "input": "Full Frozen9空间patch均值投影8维；不是CLS",
+      "scope": "eight_stage",
+      "historical": {
+        "equal90": {
+          "val": [
+            41.8625,
+            48.6675
+          ],
+          "test": [
+            30.7978,
+            37.5445
+          ]
+        }
+      },
+      "reference_documents": [
+        "image"
+      ]
+    },
+    "image_full_relation": {
+      "name": "用整图内容和跨视图匹配信息预测比例",
+      "category": "image",
+      "input": "上述8维内容＋整图人物匹配统计8维",
+      "scope": "eight_stage",
+      "historical": {
+        "equal90": {
+          "val": [
+            40.2841,
+            48.2201
+          ],
+          "test": [
+            28.7946,
+            36.9651
+          ]
+        }
+      },
+      "reference_documents": [
+        "image"
+      ]
+    },
+    "shrink_full": {
+      "name": "共用比例为主，允许整图内容小幅调整",
+      "category": "image",
+      "input": "图像内容预测值与TRAIN学习常量混合",
+      "scope": "eight_stage",
+      "historical": {
+        "equal90": {
+          "val": [
+            43.6015,
+            50.6128
+          ],
+          "test": [
+            32.9361,
+            39.6004
+          ]
+        }
+      },
+      "reference_documents": [
+        "shrink"
+      ]
+    },
+    "shrink_full_relation": {
+      "name": "共用比例为主，允许整图内容与匹配信息小幅调整",
+      "category": "image",
+      "input": "图像内容＋匹配预测值与TRAIN学习常量混合",
+      "scope": "eight_stage",
+      "historical": {
+        "equal90": {
+          "val": [
+            43.5821,
+            50.7939
+          ],
+          "test": [
+            32.9627,
+            39.647
+          ]
+        }
+      },
+      "reference_documents": [
+        "shrink"
+      ]
+    }
+  },
+  "source_result_artifacts": {
+    "sample_full_val": {
+      "path": "output/d9_sample_fusion/seed1_20261118/sample_full/evaluation/val/result.json",
+      "sha256": "40d1958bef834fee8604616a7f3f917fde7f8e48adde7920e0ec6b77021cadbf"
+    },
+    "sample_full_asl_val": {
+      "path": "output/d9_sample_fusion/seed1_20261118/sample_full_asl/evaluation/val/result.json",
+      "sha256": "fd6ef445de58c6f6257f47a06de0f84a4d867155c920b44e9fc7c1176f446890"
+    },
+    "sample_full_test": {
+      "path": "output/d9_sample_fusion/seed1_20261118/sample_full/evaluation/test/result.json",
+      "sha256": "324874608b6bffdb21a6d1befcbfa96c7b140fd16d8ca34ffbdc8a2858b18595"
+    },
+    "sample_full_asl_test": {
+      "path": "output/d9_sample_fusion/seed1_20261118/sample_full_asl/evaluation/test/result.json",
+      "sha256": "023de110837baa4a6e005a1904635b26b90f0ff135be2c5ea1b144438af26c03"
+    }
+  }
+}
