@@ -146,7 +146,7 @@ def evaluate(root, reference_root, split, batch_size, workers, smoke):
     direction_mode = config["mode"] == "direction"
     names = DIRECTION_READOUTS if direction_mode else READOUTS
     if sample_mode:
-        names = sample_readouts(mode)
+        names = sample_readouts(mode, config.get('fill_table_readouts', ()))
     title = "smoke_evaluation" if smoke else "evaluation"
     directory = root / title / split
     directory.mkdir(parents=True, exist_ok=True)

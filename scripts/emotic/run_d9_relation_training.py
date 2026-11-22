@@ -14,7 +14,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from multi_lane.track_a.d9_joint_data import build_joint_source
-from multi_lane.track_a.d9_relation_fusion import D9RelationFusion, SAMPLE_GATES, SAMPLE_MODES
+from multi_lane.track_a.d9_relation_fusion import D9RelationFusion, SAMPLE_GATES, SAMPLE_MODES, FILL_GATES, FILL_LEGACY_GATES
 from multi_lane.track_a.d9_direction_objective import (
     deranged_targets, direction_benefits, gate_update_due)
 from multi_lane.track_a.r1_crossvit import VIEWS, compact, restore_rng, rng_state
@@ -55,7 +55,7 @@ def make_model(config, device='cuda'):
             if branches:
                 branch.visual_encoder = branches['full'].visual_encoder
             branches[view] = branch
-        return D9RelationFusion(branches, config['mode']).to(device)
+        return D9RelationFusion(branches, config['mode'], config.get('fill_table_readouts', ())).to(device)
 
 
 def snapshot(model):
@@ -289,7 +289,7 @@ def update_batch(model, batch, classes, config, primary, adapters, optimizer, pr
     return totals.tolist(), weight_sum.tolist(), count, valid_count, reliable_count, gate_norm
 
 
-def train_epoch(model, source, indices, task, epoch, config, primary, adapters, optimizer, gate_opts):
+def train_epoch(model, source, indices, task, epoch, config, primary, adapters, optimizer, gate_opts, fill_inputs=None):
     classes = task_indices(task)
     seed = config['seed'] + task * 10_000 + epoch
     generator = torch.Generator().manual_seed(seed)
@@ -320,7 +320,14 @@ def train_epoch(model, source, indices, task, epoch, config, primary, adapters, 
     gate_batches = gate_people = gate_reliable = 0
     direction_mode = config['mode'] == 'direction'
     selected_indices = []
+    held_updates = None
+    if fill_inputs is not None and fill_inputs[2]:
+        from scripts.emotic.d9_fill_online import HeldGateUpdates
+        held_updates = HeldGateUpdates(model, fill_inputs[0], fill_inputs[1], task, epoch,
+                                       len(loader), config, fill_inputs[2])
     for batch_index, batch in enumerate(loader):
+        if held_updates is not None:
+            held_updates.step(batch_index)
         due = not direction_mode or gate_update_due(
             batch_index, len(loader), epoch, config['epochs'], config['gate_updates'])
         active_gates = gate_opts if due else {}
@@ -382,6 +389,8 @@ def train_epoch(model, source, indices, task, epoch, config, primary, adapters, 
         if direction_mode:
             report['gate_schedule'] = {'batch_indices': selected_indices, 'people': gate_people,
                                        'reliable_face': gate_reliable, 'updates_this_epoch': gate_batches}
+    if held_updates is not None:
+        report['fill_readouts'] = held_updates.report()
     return report
 
 
@@ -413,6 +422,22 @@ def train(args):
                       image_split='global_10pct_hash_rank' if args.mode == 'sample_holdout' else 'all_train',
                       fusion_input='selector_weighted_frozen9_or_final_task_cls', fusion_init='equal_available_views',
                       fusion_asl=FUSION_ASL if 'mid_asl' in SAMPLE_GATES[args.mode] else None)
+    fill_request = getattr(args, 'fill_table_gates', None)
+    if fill_request:
+        if args.mode not in SAMPLE_MODES:
+            raise ValueError('Fill gates require sample_full or sample_holdout')
+        extra = FILL_GATES if fill_request == 'all' else (('final_cosine',) if fill_request == 'cosine' else FILL_LEGACY_GATES)
+        if fill_request != 'cosine' and args.mode != 'sample_holdout':
+            raise ValueError('Historical fill gates are missing only on held-TRAIN branches')
+        config['fill_table_readouts'] = list(extra)
+        config['fill_table_protocol'] = dict(
+            global_summary='held_deterministic_batch_before_every_branch_update',
+            global_summary_lr='original_epoch_cosine', direction='300_uniform_branch_clock_updates',
+            cosine='native_10_sweep_steps_before_each_epoch',
+            held_batch='uniform_without_replacement_within_step_size_min64',
+            cosine_input='three_pairwise_final_cls_cosines', cosine_parameters=15)
+    if getattr(args, 'fill_replay_reference', None) is not None:
+        config['fill_replay_reference'] = str(args.fill_replay_reference)
     equal_budget = args.equal_updates_reference is not None
     if equal_budget:
         from scripts.emotic.d9_equal_update_budget import load_reference_budget
@@ -460,7 +485,10 @@ def train(args):
         indices, _ = fit_calibration_indices(source, task_indices(task), 0.)
         if sample_mode:
             gate_opts = {name: GateOptimizer(model.gates[task][name], config)
-                         for name in SAMPLE_GATES[args.mode]}
+                         for name in (*SAMPLE_GATES[args.mode], *config.get('fill_table_readouts', ()))}
+            for name in config.get('fill_table_readouts', ()):
+                if name in ('global_relation', 'task_summary', 'shared_static'):
+                    gate_opts[name] = GateOptimizer(model.gates[task][name], {**config, 'mode': 'multi'})
             if equal_budget:
                 cls = task_indices(task)
                 full = describe_cohort(source, indices, cls)
@@ -502,7 +530,9 @@ def train(args):
                 history = state['history']
                 if config['mode'] == 'direction' or sample_mode:
                     expected = sum(r['gate_schedule']['updates_this_epoch'] for r in history)
-                    if any(g.updates != expected or g.scheduler.last_epoch != expected for g in gate_opts.values()):
+                    if any(g.updates != (sum(r['updates'] for r in history) if name in ('global_relation', 'task_summary', 'shared_static') else expected)
+                           or g.scheduler.last_epoch != (len(history) if name in ('global_relation', 'task_summary', 'shared_static') else expected)
+                           for name, g in gate_opts.items()):
                         raise ValueError('Recovered gate update clocks disagree with complete epochs')
             elif state['task'] != task - 1:
                 raise RuntimeError('Epoch recovery does not match completed task chain')
@@ -510,9 +540,14 @@ def train(args):
         for epoch in range(len(history)+1, config['epochs']+1):
             if sample_mode:
                 gate_reports, gate_schedule = train_gate_sweep(
-                    model, gate_data, fusion_indices, task, epoch, config, gate_opts)
+                    model, gate_data, fusion_indices, task, epoch, config,
+                    {name: opt for name, opt in gate_opts.items()
+                     if name in (*SAMPLE_GATES[args.mode], 'final_cosine')})
             row = train_epoch(model, source, indices, task, epoch, config, primary, adapters, optimizer,
-                              {} if sample_mode else gate_opts)
+                              {} if sample_mode else gate_opts,
+                              fill_inputs=(gate_data, fusion_indices,
+                                  {name: opt for name, opt in gate_opts.items() if name in FILL_LEGACY_GATES})
+                              if sample_mode and config.get('fill_table_readouts') else None)
             if equal_budget:
                 from scripts.emotic.d9_equal_update_budget import check_epoch_budget
                 check_epoch_budget(task, epoch, config, optimizer, scheduler, row)
@@ -532,9 +567,13 @@ def train(args):
             write(root/'progress.json', row)
             print(json.dumps(row), flush=True)
         # Also handles recovery after the last epoch was saved but before task publication.
-        if (config['mode'] == 'direction' or sample_mode) and any(g.updates != config['gate_updates'] for g in gate_opts.values()):
+        if (config['mode'] == 'direction' or sample_mode) and any(g.updates != (sum(r['updates'] for r in history) if name in ('global_relation', 'task_summary', 'shared_static') else config['gate_updates']) for name, g in gate_opts.items()):
             raise RuntimeError('Task did not complete the exact gate update budget')
         state = dict(config=config, task=task, coverage=coverage, history=history, rng=rng_state(), **snapshot(model))
+        if config.get('fill_replay_reference'):
+            from scripts.emotic.d9_fill_replay import verify_task_replay
+            audit = verify_task_replay(state, Path(config['fill_replay_reference']), task)
+            write(root/'branch_replay'/f'task{task}.json', audit)
         write(root/'history'/f'task{task}.json', {'coverage': coverage, 'epochs': history})
         save_atomic(checkpoint_dir/f'task{task}.pth', state)
         del state, optimizer, scheduler
@@ -556,6 +595,9 @@ def main():
     parser.add_argument('--smoke', action='store_true')
     parser.add_argument('--equal-updates-reference', type=Path, help='Historical complete sample_full run')
     parser.add_argument('--equal-updates-holdout', type=Path, help='Historical permanent 90/10 sample_holdout run')
+    parser.add_argument('--fill-replay-reference', type=Path, help='Fail before publishing a task if branches differ from this source')
+    parser.add_argument('--fill-table-gates', choices=('all', 'legacy', 'cosine'),
+                        help='Append protected readouts while exactly replaying the branch trajectory')
     parser.add_argument('--stop-after-task', type=int, help='Return after this zero-based task is published')
     args = parser.parse_args()
     if (args.equal_updates_reference is None) != (args.equal_updates_holdout is None):

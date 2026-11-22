@@ -256,7 +256,7 @@ class FrozenR1Receiver(R1Receiver):
 
     def encode_lanes(self, images, all_seen_lanes, *, full_relations=None, full_sender_cache=None,
                      summary_layer=None, pooled_summaries=None, detach_relation=False,
-                     selector_weight_relation=False, task10_probe=None):
+                     selector_weight_relation=False, task10_probe=None, global_full_relations=None):
         own = images['full'] if isinstance(images, dict) else images
         if selector_weight_relation and full_relations is None:
             raise ValueError('A relation output is required for task-weighted pooling')
@@ -324,6 +324,9 @@ class FrozenR1Receiver(R1Receiver):
                     stream, full_relations[task] = agent(
                         stream, memories[self.r1_layer], masks, return_full_relation=True,
                         detach_relation=detach_relation, spatial_relation=selector_weight_relation)
+                    if global_full_relations is not None:
+                        value = full_relations[task].detach()
+                        global_full_relations[task] = value.mean(1) if selector_weight_relation else value
             lane = state[i:i+1]
             spatial_weights = {}
             for layer in range(prefix_end+1, len(blocks)):

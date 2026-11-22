@@ -45,7 +45,7 @@ def evaluate(root, reference_root, split, batch_size, workers, smoke):
     directory = root / ("smoke_evaluation" if smoke else "evaluation") / split
     path = directory / "result.json"
     report = json.loads(path.read_text())
-    learned = [name for name in sample_readouts(mode) if name not in ("fixed", "equal")]
+    learned = [name for name in sample_readouts(mode, config.get('fill_table_readouts', ())) if name not in ("fixed", "equal")]
     report.update(mode=mode, learned_readouts=learned, comparisons=comparisons(report["summary"], learned, split, smoke),
                   historical_reference_supplied=reference_root is not None)
     write_json(path, report)

@@ -33,10 +33,14 @@ SAMPLE_GATES = {
 SAMPLE_MODES = tuple(SAMPLE_GATES)
 
 
-def sample_readouts(mode):
+FILL_LEGACY_GATES = ('global_relation', 'task_summary', 'bounded_bce', 'own_benefit', 'shuffled_benefit', 'shared_static')
+FILL_GATES = (*FILL_LEGACY_GATES, 'final_cosine')
+
+
+def sample_readouts(mode, extra=()):
     if mode not in SAMPLE_MODES:
         raise ValueError(f'Unknown sample-level protocol: {mode}')
-    return ('fixed', 'equal', *SAMPLE_GATES[mode])
+    return ('fixed', 'equal', *SAMPLE_GATES[mode], *extra)
 
 
 class SampleFusionGate(nn.Module):
@@ -68,6 +72,31 @@ class SampleFusionGate(nn.Module):
             scores = scores + torch.where(reliable[:, None], self.group_bias[1], self.group_bias[0])
             face = scores[:, 2].masked_fill(~reliable, -torch.inf)
             return torch.stack((scores[:, 0], scores[:, 1], face), dim=-1).softmax(dim=-1)
+
+
+class FinalSimilarityGate(nn.Module):
+    """Three explicit final-CLS cosine similarities; no learnt feature projection."""
+    def __init__(self):
+        super().__init__()
+        self.linear = nn.Parameter(torch.zeros(3, 3))
+        self.group_bias = nn.Parameter(torch.zeros(2, 3))
+
+    @staticmethod
+    def features(reliable, features):
+        values = {v: torch.nn.functional.normalize(features[v].detach().float(), dim=-1)
+                  for v in VIEWS}
+        cosine = torch.stack([(values[a] * values[b]).sum(-1)
+                              for a, b in (('full', 'person'), ('full', 'face'), ('person', 'face'))], -1)
+        return torch.cat((cosine[:, :1], torch.where(reliable[:, None], cosine[:, 1:], 0.)), -1)
+
+    def from_features(self, reliable, cosine):
+        with torch.autocast(device_type=reliable.device.type, enabled=False):
+            scores = cosine.detach().float() @ self.linear.T + self.group_bias[reliable.long()]
+            scores = torch.cat((scores[:, :2], scores[:, 2:].masked_fill(~reliable[:, None], -torch.inf)), -1)
+            return scores.softmax(-1)
+
+    def forward(self, reliable, features):
+        return self.from_features(reliable, self.features(reliable, features))
 
 
 class RelationGate(nn.Module):
@@ -155,11 +184,16 @@ class LinearDirectionGate(nn.Module):
 class D9RelationFusion(nn.Module):
     """Independent native Full and patch-receiving Person/Face, one readout per task."""
 
-    def __init__(self, branches, mode):
+    def __init__(self, branches, mode, extra_readouts=()):
         super().__init__()
         if set(branches) != set(VIEWS):
             raise ValueError('Joint D9 model requires Full, Person, and Face')
         self.mode = mode
+        self.extra_readouts = tuple(extra_readouts)
+        if len(set(self.extra_readouts)) != len(self.extra_readouts) or set(self.extra_readouts) - set(FILL_GATES):
+            raise ValueError('Unknown or repeated fill-table readout')
+        if self.extra_readouts and mode not in SAMPLE_MODES:
+            raise ValueError('Fill-table readouts require protected sample training')
         self.branches = nn.ModuleDict(branches)
         self.task_sizes = tuple(self.branches['full'].task_sizes)
         if any(tuple(model.task_sizes) != self.task_sizes for model in self.branches.values()):
@@ -198,6 +232,25 @@ class D9RelationFusion(nn.Module):
                     bank['center_b'].prior.zero_()
             else:
                 self.gates = nn.ModuleList(RelationGate(mode) for _ in self.task_sizes)
+        if self.extra_readouts:
+            # Isolate auxiliary initialization from all branch/data random streams.
+            # Global-relation and summary ordering reproduces historical multi initialization.
+            with torch.random.fork_rng(devices=[]):
+                torch.set_rng_state(torch.Generator().manual_seed(1).get_state())
+                relations = [RelationGate('person') for _ in self.task_sizes]
+                summaries = [SummaryGate(self.branches['full'].width) for _ in self.task_sizes]
+                for task, bank in enumerate(self.gates):
+                    constructors = {
+                        'global_relation': lambda task=task: relations[task],
+                        'task_summary': lambda task=task: summaries[task],
+                        'shared_static': lambda: RelationGate('static'),
+                        'bounded_bce': LinearDirectionGate,
+                        'own_benefit': LinearDirectionGate,
+                        'shuffled_benefit': LinearDirectionGate,
+                        'final_cosine': FinalSimilarityGate,
+                    }
+                    for name in self.extra_readouts:
+                        bank[name] = constructors[name]()
         self._configure_gates(self.current_task_id)
 
     @property
@@ -235,7 +288,9 @@ class D9RelationFusion(nn.Module):
         sample = sample_mode and not sample_branch_only
         late_features = {}
         protected_readouts = multi or direction or sample
-        pooled = {v: {} for v in VIEWS} if multi else None
+        need_summary = multi or (sample and 'task_summary' in self.extra_readouts)
+        pooled = {v: {} for v in VIEWS} if need_summary else None
+        global_relations = {v: {} for v in ('person', 'face')} if sample and self.extra_readouts else None
         # The same batch's deterministic Full sender passes through the same
         # frozen CLIP in both receivers. Share only raw detached sender patches.
         shared_tower = self.branches['person'].visual_encoder is self.branches['face'].visual_encoder
@@ -243,7 +298,7 @@ class D9RelationFusion(nn.Module):
         with torch.set_grad_enabled(torch.is_grad_enabled() and not sample_gate_only):
             for view in VIEWS:
                 branch = self.branches[view]
-                summary_args = dict(summary_layer=9, pooled_summaries=pooled[view]) if multi else {}
+                summary_args = dict(summary_layer=9, pooled_summaries=pooled[view]) if need_summary else {}
                 if task10_probe is not None:
                     if not sample or self.training or torch.is_grad_enabled():
                         raise ValueError('Task10 diagnostics require frozen sample-fusion inference')
@@ -262,7 +317,9 @@ class D9RelationFusion(nn.Module):
                     features = branch.encode_lanes(own_inputs, all_seen, full_relations=capture,
                                                    full_sender_cache=full_sender_cache,
                                                    detach_relation=protected_readouts,
-                                                   selector_weight_relation=sample, **summary_args)
+                                                   selector_weight_relation=sample,
+                                                   **({'global_full_relations': global_relations[view]} if global_relations is not None else {}),
+                                                   **summary_args)
                     lane_logits[view] = branch.head(features)
                 if sample:
                     late_features[view] = features.detach()
@@ -272,10 +329,13 @@ class D9RelationFusion(nn.Module):
             'direction': DIRECTION_READOUTS,
         }.get(self.mode, (self.mode,))
         if sample_mode:
-            names = ('fixed',) if sample_branch_only else sample_readouts(self.mode)
+            names = ('fixed',) if sample_branch_only else sample_readouts(self.mode, self.extra_readouts)
         all_weights = {name: [] for name in names}
         all_fused = {name: [] for name in names}
         direction_scores = {name: [] for name in ('a', 'b', 'c', 'center_b')} if direction else {}
+        if sample:
+            direction_scores.update({name: [] for name in self.extra_readouts
+                                     if name in ('bounded_bce', 'own_benefit', 'shuffled_benefit')})
         outputs = {view: [] for view in VIEWS}
         for lane, task in enumerate(lanes):
             if sample:
@@ -293,6 +353,19 @@ class D9RelationFusion(nn.Module):
                     w = view_weights(scores.new_zeros(len(reliable), 2), reliable)
                 elif name in ('mid_bce', 'mid_asl', 'late_bce'):
                     w = self.gates[task][name](reliable, late if name == 'late_bce' else mid)
+                elif name in self.extra_readouts:
+                    gate = self.gates[task][name]
+                    if name == 'final_cosine':
+                        w = gate(reliable, late)
+                    elif name == 'task_summary':
+                        w = gate(reliable, {v: pooled[v][task] for v in VIEWS})
+                    elif name == 'shared_static':
+                        w = gate(reliable)
+                    elif name == 'global_relation':
+                        w = gate(reliable, global_relations['person'][task], global_relations['face'][task])
+                    else:
+                        w, raw = gate(reliable, global_relations['person'][task], global_relations['face'][task])
+                        direction_scores[name].append(raw)
                 elif name == 'center_b':
                     center = self.gates[task]['center']
                     gate = self.gates[task][name]
@@ -325,4 +398,10 @@ class D9RelationFusion(nn.Module):
                       all_columns={v: scores[:, -1] for v, scores in lane_logits.items()})
         if protected_readouts or sample_mode:
             result['readouts'] = readouts
+        if sample and self.extra_readouts and not all_seen:
+            result['fill_features'] = {
+                'global': {v: global_relations[v][current].detach() for v in ('person', 'face')},
+                'cosine': FinalSimilarityGate.features(reliable, late),
+                **({'summary': {v: pooled[v][current].detach() for v in VIEWS}} if need_summary else {}),
+            }
         return result
