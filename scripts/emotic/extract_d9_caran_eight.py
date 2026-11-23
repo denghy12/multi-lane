@@ -48,7 +48,8 @@ def reference_path(source, prior, eight, task, split):
 
 
 @torch.inference_mode()
-def extract_batches(model, loader, archive, task, split, smoke, batch_size):
+def extract_batches(model, loader, archive, task, split, smoke, batch_size,
+                    mask_unavailable_scores=False):
     head_ids = [task] if split == 'train' else list(range(task + 1))
     n = min(batch_size, len(loader.dataset)) if smoke else len(loader.dataset)
     keys = ('sample_ids', 'targets', 'reliable', 'branch_logits')
@@ -76,6 +77,9 @@ def extract_batches(model, loader, archive, task, split, smoke, batch_size):
                 features = np.empty((n, *cls.shape[1:]), dtype=cls.dtype)
             rows = slice(count, count + len(ids))
             scores = torch.stack([result['branches'][v].float() for v in VIEWS], dim=2)
+            if mask_unavailable_scores:
+                # Paired TRAIN archives stored unavailable Face logits as zero.
+                scores[~valid, :, VIEWS.index('face')] = 0
             observed = dict(sample_ids=np.asarray(ids), targets=targets.cpu().numpy(),
                             reliable=valid.cpu().numpy(), branch_logits=scores.cpu().numpy())
             for k in keys:

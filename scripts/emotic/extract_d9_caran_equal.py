@@ -109,7 +109,8 @@ def run(args):
                       if split == 'train' else stage_loader(source, task, False, 64, args.workers))
             if model is None:
                 model = load_evaluation_model(args.source, task).requires_grad_(False).eval()
-            arrays = extract_batches(model, loader, archive, task, split, args.smoke, 64)
+            arrays = extract_batches(model, loader, archive, task, split, args.smoke, 64,
+                                     mask_unavailable_scores=(split == 'train'))
             tmp = path.with_suffix(f'.{os.getpid()}.tmp')
             with tmp.open('wb') as handle:
                 np.savez(handle, **arrays)
