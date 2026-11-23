@@ -1,3 +1,7 @@
+## 2026-11-23 CARAN等步数重算预检通过
+
+代码c90ce6e已Git-only部署独立工作树。8项历史CARAN回归通过；task0/task7真实TRAIN和Val首批的sample IDs、targets、Face mask、branch_logits均逐值重放，原生CLS形状每路512维。提取入口对齐源paired_A缓存的不可用Face logits置零，未改变有效分数或模型。完整四组按已声明设置待启动：GPU0两提取进程共享自然图原生特征，CPU四读出拟合，Val封存后Test；输出output/d9_caran_equal_updates/seed1_20261123/formal。
+
 ## 2026-11-23 补足更新90%模型重算CARAN四种融合
 
 用户授权复算任务常量、类别常量、人物共享类别、人物逐类别四组。新实验分支exp/d9-caran-equal-updates，复用原随机90%分支已完成的13,950有效更新checkpoint；该模型自己的10%留出TRAIN自然图用于融合，原生最终CLS512×3拼接1536维，等权起步、Adam0.01/BCE300步，旧任务封存。固定读出应重放Val43.7028/51.2535、Test32.7557/39.9983。GPU0共享特征提取，CPU拟合，先Val锁定后Test；不复用旧90%融合权重，不重训分支。代码预检与正式结果待完成。协议docs/d9_caran_equal_updates_20261123.md。
