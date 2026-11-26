@@ -1,6 +1,6 @@
 # Summarized Patches 决定 logit 融合比例：两种 TRAIN 来源的八组对照
 
-2026-11-26：已实现，尚未在 Linux 运行新单元测试、真实 smoke 或正式实验，尚无新成绩。
+2026-11-26 17:24：49项Linux测试及真实preflight通过，正式pilot已在GPU0启动，尚无完整正式成绩。运行HEAD为71731c3，后续文档更新不改变运行代码。
 分支 `exp/d9-summary-fusion-coverage`，从已核验的 `626d812` 建立独立工作树。
 本文件覆盖历史六组方案，不恢复任何分类输出输入或 Task CLS 输入。
 
@@ -121,6 +121,6 @@ pilot要求同代码、同配置、同来源已通过preflight，且工作树干
 实现涉及四个原模型文件的可选摘要捕获、新比例模块、提取/拟合/诊断/运行入口、统一配置和Linux launcher。
 新增12项单元测试覆盖捕获不改logits、输入/梯度边界、Selector/人物顺序、零初始化与Face遮蔽、三折、Val封存及完整小型合成流程。
 
-本地已通过Python AST语法、JSON、bash语法和diff空白检查；本地缺PyTorch且项目运行约定在Linux，故未将新增单元测试、原生数值重放或真实smoke列为已通过。
+本地AST/JSON/bash/diff检查通过；Linux新增12项单测和37项相关回归全部通过。真实preflight耗时259.22秒，捕获开关与归档原生logits逐值一致、两来源Val/Test人群及封存顺序检查通过。正式pilot于17:24:03在GPU0启动。
 服务器只读核对已确认两来源目录、全部TRAIN角色表及task0/3/6 checkpoint存在；原90%来源结构与全部TRAIN来源匹配，预算13,950更新。
-未提交、推送或运行新实验。远程实验结束后需同步 `logs/`、`output/` 回本地，核对哈希后分析结果。
+用户已授权执行，代码提交并推送为71731c3，独立Linux工作树通过Git同步。预检包已同步主本地并核验SHA-256；完整正式结果待运行结束后同步分析。启动回执位于主本地logs/d9_summary_fusion/seed1_20261126/launch_receipt.json。按实测吞吐，整批初估18:50–19:30（北京时间）完成；主要耗时为bootstrap，不保证固定完成时刻。

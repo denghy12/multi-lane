@@ -1,3 +1,15 @@
+## 2026-11-26 17:24 八组正式诊断已启动
+
+运行版本71731c3f460ba30ed8d9d3d1c71608a1daed5cbb，分支exp/d9-summary-fusion-coverage；Git-only同步至独立服务器worktree /mnt/haoyuan/workspace/multi-lane-main-d9-summary-fusion-20261126，两端branch/HEAD/upstream核对一致。服务器主工作树有154项状态记录、test-only有5项，均未触碰；两个来源工作树干净。使用GPU0，tmux ml_d9_summary_20261126。
+
+新增12项单测、37项相关回归全部通过。真实preflight覆盖两来源task0/6、TRAIN→Val封存→Test流程，耗时259.22秒，于17:24:01完成；所有摘要捕获开关及原生首批分支logits逐值重放一致，固定读出与两来源评价人物/标签/Face配对通过。正式pilot于17:24:03自动启动，首次正式90% task0提取496图/678完整名册人物约5.7秒；当前未完成正式效果比较，不将smoke指标作为收益证据。
+
+配置保持原声明的两来源四方法、task0/3/6独立当前头诊断、全批Adam300步、三折、100交换/1000bootstrap及Val封存后Test，未扩展八任务。基于GPU实测及合成AP计算速度，整批完成初估北京时间18:50–19:30；CPU bootstrap约50–60分钟为主要耗时，实际负载/异常会改变估计，不作完成保证。
+
+预检包已同步主本地logs/output；包logs/d9_summary_fusion/seed1_20261126/preflight_complete.tar.gz两端SHA256=508a452caf059c3bc4bb3f8c032f8ccc6f6a6f6ba30b3d0077767d00d3242730。启动回执logs/d9_summary_fusion/seed1_20261126/launch_receipt.json；运行状态在远程output/d9_summary_fusion/seed1_20261126/run_state.json，正式结果在pilot/。本轮后续文档提交不拉取到正在运行的服务器工作树，运行HEAD仍为71731c3。
+
+后续待完成：核验pilot/complete.json及两来源Val/Test、bootstrap/decision，按Git-only保留代码版本、只同步日志与结果回本地分析。实验尚在运行，原D双目标是否达到不能由本批三个当前头指标直接判定。
+
 ## 2026-11-26 用户授权执行八组对照
 
 用户明确“开始执行，并且估算完成时间”。本次授权涵盖当前实验分支提交推送、Git-only同步独立Linux工作树、单测/真实preflight及通过后的task0/3/6八组pilot；不扩展八任务。执行配置沿用d9_summary_fusion_20261126.json：两来源各四组、seed1、CPU全批Adam300步、b LR0.01/W LR0.001、幅度0.25/L2 0.001、三折、100交换/1000bootstrap、Val封存后Test。新增运行状态与提取计时输出，execute入口顺序check→preflight→pilot，失败不继续。
