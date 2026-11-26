@@ -338,6 +338,7 @@ class MultiLaneModel(nn.Module):
         summary_only: bool = False,
         preserve_image_gradient: bool = False,
         pooled_summaries=None,
+        summary_tokens=None,
         selector_spatial_weights=None,
     ) -> torch.Tensor:
         # The released block applies its first LayerNorm before both selector
@@ -394,6 +395,8 @@ class MultiLaneModel(nn.Module):
             spatial = read_weights.detach().float()[..., 1:].mean(dim=2)
             spatial = spatial / spatial.sum(dim=-1, keepdim=True).clamp_min(1e-30)
             selector_spatial_weights.update(zip(lane_ids, spatial.unbind(0)))
+        if summary_tokens is not None:
+            summary_tokens.update(zip(lane_ids, selected.detach().float().unbind(0)))
         if pooled_summaries is not None:
             # Capture the exact selector summaries consumed by this task MSA.
             pooled = selected.detach().float().mean(dim=2)
@@ -420,7 +423,7 @@ class MultiLaneModel(nn.Module):
         return lane_tokens
 
     def encode_lanes(
-        self, images: ModelInputs, all_seen_lanes: bool, *, summary_layer=None, pooled_summaries=None,
+        self, images: ModelInputs, all_seen_lanes: bool, *, summary_layer=None, pooled_summaries=None, summary_tokens=None,
         task10_probe=None
     ) -> torch.Tensor:
         lane_ids = self._lane_ids(all_seen_lanes)
@@ -478,6 +481,7 @@ class MultiLaneModel(nn.Module):
                 paired["person_patch_mask"] if person_tokens is not None else None,
                 paired["condition_valid"] if person_tokens is not None else None,
                 pooled_summaries=pooled_summaries if layer_id == summary_layer else None,
+                summary_tokens=summary_tokens if layer_id == summary_layer else None,
             )
             if task10_probe is not None and layer_id == 9:
                 task10_probe['content'] = lane_tokens[lane_ids.index(self.current_task_id), :, 0].detach()

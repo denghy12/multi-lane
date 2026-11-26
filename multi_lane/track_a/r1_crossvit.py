@@ -207,11 +207,11 @@ class R1Receiver(MultiLaneModel):
                 tokens = block(tokens.permute(1, 0, 2)).permute(1, 0, 2)
         return summaries
 
-    def encode_lanes(self,images,all_seen_lanes, *, summary_layer=None, pooled_summaries=None, task10_probe=None):
+    def encode_lanes(self,images,all_seen_lanes, *, summary_layer=None, pooled_summaries=None, summary_tokens=None, task10_probe=None):
         own=images['full'] if isinstance(images,dict) else images
         if not self.r1_bank or not self.r1_enabled:
             return super().encode_lanes(own, all_seen_lanes, summary_layer=summary_layer,
-                                        pooled_summaries=pooled_summaries, task10_probe=task10_probe)
+                                        pooled_summaries=pooled_summaries, summary_tokens=summary_tokens, task10_probe=task10_probe)
         if task10_probe is not None:
             raise ValueError("Task10 probe supports native Full and Frozen9 patch receivers")
         if not isinstance(images,dict):raise ValueError('Cross-view evidence missing')
@@ -234,7 +234,8 @@ class R1Receiver(MultiLaneModel):
         tokens=self._visual_tokens(own);state=self._initial_lane_tokens(len(own),lanes)
         for layer,block in enumerate(self.visual_encoder.transformer.resblocks):
             state=self._lane_block(block,tokens,state,lanes,layer,
-                                   pooled_summaries=pooled_summaries if layer == summary_layer else None)
+                                   pooled_summaries=pooled_summaries if layer == summary_layer else None,
+                                   summary_tokens=summary_tokens if layer == summary_layer else None)
             with torch.no_grad():tokens=block(tokens.permute(1,0,2)).permute(1,0,2)
             if layer==self.r1_layer:
                 state=torch.stack([torch.cat([self.r1_bank[t](state[i,:,:1],memories if summaries is None else [x[i] for x in summaries],masks,selectors=state[i,:,1:]),state[i,:,1:]],1)

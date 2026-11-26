@@ -1,3 +1,23 @@
+## 2026-11-26 用户授权执行八组对照
+
+用户明确“开始执行，并且估算完成时间”。本次授权涵盖当前实验分支提交推送、Git-only同步独立Linux工作树、单测/真实preflight及通过后的task0/3/6八组pilot；不扩展八任务。执行配置沿用d9_summary_fusion_20261126.json：两来源各四组、seed1、CPU全批Adam300步、b LR0.01/W LR0.001、幅度0.25/L2 0.001、三折、100交换/1000bootstrap、Val封存后Test。新增运行状态与提取计时输出，execute入口顺序check→preflight→pilot，失败不继续。
+
+17:16只读GPU0–7均空闲，计划使用GPU0；源/主/test-only原工作树保持不变。先在新独立Linux工作树验证，时间估计待真实吞吐确定。尚未记录任何新效果结果。
+
+## 2026-11-26 新增全部TRAIN四组对照：已实现，未运行
+
+用户授权“再增加四组同样配置全部train的对照实验，开始修改”。从干净626d812创建独立分支`exp/d9-summary-fusion-coverage`，本地工作树`tmp/d9_summary_fusion_20261126`；原工作树和其他会话代码保留。此条覆盖此前“当前四组尚未实现”的状态，不恢复已撤回的分类输出输入方案。
+
+现为两种来源各四组：原固定比例、当前任务共用比例、Summarized Patches平均相似度、Summarized Patches对应情况。90%来源复用11,623图/补足13,950更新的冻结三路，另1,292图学习融合；新增来源复用已有sample_full冻结三路，全部当期合法TRAIN人物学习融合。全TRAIN人物已参与分支训练，不把三折解释为分支未见数据。不重训三路，不读取未来类标签。
+
+新增第10层Summarize未平均摘要捕获接口，默认关闭；比例输入仅中间摘要统计与无标签人数/Face可用性，不含最终Task CLS、分类logits/概率/分差/分类熵或变相分类头。最后仍加权原logits。Full分数恒1，初始64/16/20，缺Face逐人80/20/0；同图共享基础分数，混合缺脸图归一化后可不同。平均相似度输入6维/14可训练参数，对应情况26维/54参数，共用比例2参数。
+
+两来源共享同一配置：seed1、task0/3/6独立当前头诊断、按图等权当前标签BCE；b和W同时从零学习，b LR0.01、W LR0.001、全批Adam300步、0.25*tanh动态项、0.001*mean(W²)、无scheduler。动态组不再必须使用第二组学出的常量作中心。仅TRAIN均值中心化，按原图三折；Val/Test本图、分组基础分数均值、100次交换、1000次原图配对bootstrap；两来源Val决策封存后才评Test，不因Val失败取消Test。
+
+统一入口scripts/emotic/d9_summary_run.py，配置scripts/emotic/configs/d9_summary_fusion_20261126.json，Linux launcher scripts/emotic/run_d9_summary_fusion.sh。输出output/d9_summary_fusion/seed1_20261126，日志logs/d9_summary_fusion/seed1_20261126。完整修改依据、公式及执行说明见独立工作树docs/d9_summary_fusion_coverage_20261126.md。pilot不会自动扩展八任务；三任务当前头均值不得冒充原D Val44.0329/51.1335、Test33.1770/40.2083的达标结果。
+
+本地AST/JSON/bash语法、diff空白检查通过；新增12项PyTorch单测已写入，但本地缺PyTorch，遵守Linux运行约定，未执行单测/真实smoke/正式实验。服务器仅只读确认两来源目录、角色表及task0/3/6 checkpoint存在，90%为11623/1292、全TRAIN为12915 both；本地已有来源config结构/精度/seed匹配。没有Git提交、推送、服务器代码同步或新训练。
+
 ## 2026-11-22 补齐融合表格缺失对照
 
 执行代码886467f已通过Git-only部署至远端独立工作树；50项测试、两条训练重放、任务诊断与图级真实smoke均通过，原分支及既有读出逐值重放。补表共21个方法×数据覆盖空项，正式批次即将启动；仍无新正式效果数字。

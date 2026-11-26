@@ -255,7 +255,7 @@ class FrozenR1Receiver(R1Receiver):
         return patches
 
     def encode_lanes(self, images, all_seen_lanes, *, full_relations=None, full_sender_cache=None,
-                     summary_layer=None, pooled_summaries=None, detach_relation=False,
+                     summary_layer=None, pooled_summaries=None, summary_tokens=None, detach_relation=False,
                      selector_weight_relation=False, task10_probe=None, global_full_relations=None):
         own = images['full'] if isinstance(images, dict) else images
         if selector_weight_relation and full_relations is None:
@@ -266,7 +266,7 @@ class FrozenR1Receiver(R1Receiver):
             raise ValueError('Full relation readout requires an active single patch site')
         if not self.r1_enabled:
             return super().encode_lanes(own, all_seen_lanes, summary_layer=summary_layer,
-                                        pooled_summaries=pooled_summaries)
+                                        pooled_summaries=pooled_summaries, summary_tokens=summary_tokens)
         if not isinstance(images, dict):
             raise ValueError('Cross-view evidence is required')
         lanes = self._lane_ids(all_seen_lanes)
@@ -304,7 +304,8 @@ class FrozenR1Receiver(R1Receiver):
         prefix_end = self.r1_layer if sites else len(blocks) - 1
         for layer, block in enumerate(blocks[:prefix_end+1]):
             state = self._lane_block(block, tokens, state, lanes, layer,
-                                     pooled_summaries=pooled_summaries if layer == summary_layer else None)
+                                     pooled_summaries=pooled_summaries if layer == summary_layer else None,
+                                     summary_tokens=summary_tokens if layer == summary_layer else None)
             with torch.no_grad():
                 tokens = block(tokens.permute(1, 0, 2)).permute(1, 0, 2)
             if layer == pool_site:
@@ -335,6 +336,7 @@ class FrozenR1Receiver(R1Receiver):
                 lane = self._lane_block(block, stream, input_lane, [task], layer,
                                         preserve_image_gradient=True,
                                         pooled_summaries=pooled_summaries if layer == summary_layer else None,
+                                        summary_tokens=summary_tokens if layer == summary_layer else None,
                                         selector_spatial_weights=spatial_weights if selector_weight_relation
                                         and layer == self.r1_layer + 1 else None)
                 if task10_probe is not None and task == self.current_task_id and layer == 9:
