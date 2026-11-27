@@ -1,9 +1,12 @@
 from dataclasses import replace
+import os
 import unittest
 from unittest.mock import patch as mock_patch
 
 import numpy as np
 import torch
+
+os.environ.setdefault('CUBLAS_WORKSPACE_CONFIG', ':4096:8')
 
 from multi_lane.track_a.final_patch_fusion import (
     FinalPatchFusion, PatchReader, METHODS, LEARNED, WIDTH, project_tokens, roster_mean,
@@ -117,6 +120,26 @@ class FinalPatchTests(unittest.TestCase):
             scores=gate(*args(stage));weights=masked_weights(scores[stage.base.inverse],stage.base.reliable)
             self.assertTrue((scores[:,1:].abs()<=.25).all());self.assertTrue((weights[:,0,None]>weights[:,1:]).all())
             self.assertTrue((weights[~stage.base.reliable,2]==0).all())
+
+    @unittest.skipUnless(torch.cuda.is_available(), 'CUDA fitting integration')
+    def test_all_methods_fit_with_deterministic_cuda_and_same_image_bce(self):
+        enabled = torch.are_deterministic_algorithms_enabled()
+        torch.use_deterministic_algorithms(True)
+        torch.backends.cuda.matmul.allow_tf32 = False
+        try:
+            stage = population()
+            _, initial, _ = predict(stage, FinalPatchFusion('initial'), 'cpu')
+            reference = float(image_bce(initial, stage.base.targets, stage.base.inverse, len(stage.base.ids)))
+            for method in LEARNED:
+                fitted = fit_one(stage, method, dict(FIT, steps=3), 'cuda')
+                self.assertAlmostEqual(fitted['bce_history'][0], reference, places=6)
+                scores, logits, _ = predict(stage, FinalPatchFusion.restore(fitted['gate']), 'cuda')
+                self.assertTrue(torch.isfinite(logits).all())
+                self.assertTrue((scores[:, 1:].abs() <= .25).all())
+                if method in ('cls_patch', 'cls_patch_full'):
+                    self.assertEqual(fitted['first_reader_gradient_step'], 1)
+        finally:
+            torch.use_deterministic_algorithms(enabled)
 
     def test_uniform_patch_reading_equals_same_layer_mean_and_order_invariance(self):
         stage=population();mean=FinalPatchFusion('cls_mean');learned=FinalPatchFusion('cls_patch')

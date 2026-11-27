@@ -106,11 +106,17 @@ def fit_one(stage,method,config,device):
     cls,patch,counts,flags=inputs(stage,device)
     logits=stage.base.logits.to(device);targets=stage.base.targets.to(device)
     inverse=stage.base.inverse.to(device);reliable=stage.base.reliable.to(device)
+    # This population is fixed. Avoid unsupported deterministic CUDA bincount.
+    supervised_counts=torch.bincount(stage.base.inverse,minlength=len(counts))
+    if (supervised_counts<1).any():raise ValueError('Every training image needs a supervised person')
+    person_counts=supervised_counts[stage.base.inverse].to(device)
     optimizer=torch.optim.Adam(gate.parameters(),lr=config['lr'],weight_decay=0)
     history=[];first_reader_gradient=None
     for step in range(config['steps']+1):
         gate.train();scores=gate(cls,patch,counts,flags,train_center=True)
-        bce=image_bce(fused_logits(logits,scores,inverse,reliable),targets,inverse,len(counts))
+        fused=fused_logits(logits,scores,inverse,reliable)
+        person_loss=torch.nn.functional.binary_cross_entropy_with_logits(fused,targets.detach(),reduction='none').mean(1)
+        bce=(person_loss/person_counts).sum()/len(counts)
         if step%25==0 or step==config['steps']:history.append(float(bce.detach()))
         if step==config['steps']:break
         optimizer.zero_grad(set_to_none=True)
