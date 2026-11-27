@@ -13,7 +13,7 @@ from multi_lane.track_a.openai_clip_loader import sha256_file
 from scripts.emotic.d9_a_eight_eval import read
 from scripts.emotic.d9_final_patch_extract import SCHEMA, capture_identity
 from scripts.emotic.d9_final_patch_readout import train,evaluate,load_stage
-from scripts.emotic.d9_final_patch_run import CONFIG,FIT,check
+from scripts.emotic.d9_final_patch_run import CONFIG,FIT,check,lock_protocol
 from scripts.emotic.evaluate_d9_relation import metrics_for_stage
 from scripts.emotic.r1_asymmetric_forward import fuse_logits
 from test_d9_final_patch import population
@@ -31,6 +31,15 @@ class FinalPatchPipelineTests(unittest.TestCase):
         cfg=read(CONFIG);cfg['sources']['full']['lr']=.01
         with self.assertRaises(ValueError):check(cfg)
 
+    def test_documentation_commit_keeps_original_phase_identity_but_code_change_fails(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base=Path(temporary)
+            record=dict(digest='original',code_sha256={'model.py':'content'},config={'seed':1},
+                        head='execution-commit',branch='experiment')
+            lock_protocol(base,record)
+            same=dict(record,head='documentation-commit')
+            self.assertEqual(lock_protocol(base,same)['head'],'execution-commit')
+            with self.assertRaises(ValueError):lock_protocol(base,dict(same,digest='changed-code'))
     def test_cache_retains_every_patch_and_matches_complete_and_supervised_rosters(self):
         stage=population();cfg=read(CONFIG)
         with tempfile.TemporaryDirectory() as temporary:

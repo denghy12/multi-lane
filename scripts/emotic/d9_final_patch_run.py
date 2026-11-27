@@ -70,6 +70,19 @@ def verify_validation(out):
         require_digest(out/file,seal[key])
 
 
+def lock_protocol(base, record):
+    """Keep the initial execution identity across documentation-only commits."""
+    path=base/'protocol.json'
+    if path.exists():
+        saved=read(path)
+        keys=set(record)-{'head','branch'}
+        if set(saved)!=set(record) or any(saved[k]!=record[k] for k in keys):
+            raise ValueError('Existing phase code/config/source protocol differs; use a fresh output directory')
+        return saved
+    write_verified(path,record)
+    return record
+
+
 def run(cfg,phase):
     record=protocol(cfg)
     if phase=='check':
@@ -81,7 +94,7 @@ def run(cfg,phase):
         preflight=read(Path(cfg['output'])/'preflight/complete.json')
         if preflight['digest']!=record['digest'] or preflight['sources']!=record['sources']:
             raise ValueError('Complete matching real preflight before formal evaluation')
-    write_verified(base/'protocol.json',record)
+    lock_protocol(base,record)
     tasks=[0,7] if smoke else cfg['tasks'];fitting=dict(cfg['fit'])
     if smoke:fitting.update(steps=5,permutations=2,patch_swaps=2)
     for name in cfg['sources']:
