@@ -194,6 +194,7 @@ def run(cfg, phase):
         raise ValueError('Run only committed implementation/configuration')
     smoke = phase == 'preflight'
     base = Path(cfg['output'])/phase
+    base.mkdir(parents=True, exist_ok=True)
     if not smoke:
         prior = read(Path(cfg['output'])/'preflight'/'complete.json')
         if prior['digest'] != record['digest'] or prior['sources'] != record['sources']:
