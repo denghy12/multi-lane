@@ -1,3 +1,12 @@
+## 2026-11-27 22:08 正式启动两来源完整八阶段patch融合实验
+
+用户明确要求启动正式实验，包含90% TRAIN和全TRAIN的8task Test。已核对本地/服务器分支codex/d9-final-patch-fusion、HEAD/upstream均35d0c1443cb5cb99ac86d8b84f335769dc9bbf46，工作树clean；92项测试和真实预检有效，正式与预检digest同为718e6ba955f50264ba7423cbcebc1dae97541727906741fbf3ea74ee49855ec9。GPU0空闲、磁盘约1.2T可用后启动唯一tmux会话ml_d9_final_patch_formal_20261127，启动北京时间2026-11-27 22:08:07，正式phase自22:08:09运行，未重复启动其他实验。
+
+保持预先声明配置：EMOTIC seed1；90%分支来源用另10% TRAIN学融合，全TRAIN来源用全部当期合法TRAIN人物；八种对照×两来源共16结果行（12个学习配置）；全部task0–7，最终26类和8阶段全部已见类均值。三路冻结，最终CLS＋196patch逐token投影32维；Full分数1、辅助0起步、A0.25；全批Adam300步、LR0.001、所有新增参数均方L2系数0.001、无scheduler、原图三折、100次比例交换、10次patch换图。两来源完整Val后封存选择，再提取和评价全部Test；目标原D Test33.1770/40.2083，另同批Val44.0329/51.1335参照。
+
+服务器入口CUDA_VISIBLE_DEVICES=0 bash scripts/emotic/run_d9_final_patch.sh formal，输出output/d9_final_patch/seed1_20261127/formal，日志logs/d9_final_patch/seed1_20261127/formal_launcher.log；启动凭据formal_launch.json，退出后formal_exit.status。当前90%来源task0/1的完整patch已提取，正在继续TRAIN提取，无错误或退出记录。初估1–2小时、约11月27日23:15至11月28日00:15完成，尚未实测全TRAIN拟合耗时，须以后续进度校准。正式结果尚未生成，不以预检或局部阶段判定达标。正式运行代码HEAD固定35d0c14，随后文档提交与运行身份分开记录。
+
+
 ## 2026-11-27 最终CLS＋完整patch融合修改完成，真实预检通过
 
 新代码位于tmp/d9_final_patch_20261127，分支codex/d9-final-patch-fusion；运行代码e18158ca1bd8ac7715de7a20785f6be99012c042，已Git-only推送/同步服务器独立worktree。实现8种对照×90%/全TRAIN两来源，共16结果行（12个学习配置），正式入口覆盖task0–7完整Val/Test。Full=1、辅助从0开始、统一A0.25，无历史固定比例初始化；输入最终Task CLS与全部196空间位置的32维固定投影特征，最终仍只加权原logits。原固定仅评价，不参加拟合。
