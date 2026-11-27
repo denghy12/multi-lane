@@ -1,0 +1,68 @@
+{
+  "schema": 1,
+  "seed": 1,
+  "tasks": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "sources": {
+    "equal90": {
+      "path": "../multi-lane-main-d9-holdout-equal-updates/output/d9_equal_updates/seed1_20261119/formal",
+      "mode": "sample_holdout",
+      "exposure": "90% TRAIN branch images; disjoint 10% TRAIN fusion pool"
+    },
+    "full": {
+      "path": "../multi-lane-main-d9-sample-fusion-20261118/output/d9_sample_fusion/seed1_20261118/sample_full",
+      "mode": "sample_full",
+      "exposure": "100% TRAIN branches; same current-task legal TRAIN people for fusion"
+    }
+  },
+  "cache": "../multi-lane-main-d9-summary-eight-20261127/output/d9_summary_eight/seed1_20261127/formal",
+  "methods": [
+    "fixed",
+    "initial",
+    "shared",
+    "cls",
+    "cls_mean",
+    "cls_regions",
+    "cls_patch",
+    "cls_patch_full"
+  ],
+  "extraction": {
+    "batch_size": 64,
+    "workers": 2
+  },
+  "representation": {
+    "layer": "final",
+    "task": "current",
+    "patches": 196,
+    "width": 32,
+    "hidden": 8,
+    "projection_seed": 20261128,
+    "patch_dtype": "float16"
+  },
+  "fit": {
+    "seed": 1,
+    "steps": 300,
+    "lr": 0.001,
+    "l2": 0.001,
+    "amplitude": 0.25,
+    "folds": 3,
+    "permutations": 100,
+    "permutation_seed": 20261128,
+    "patch_swaps": 10,
+    "patch_swap_seed": 20261129,
+    "spatial_seed": 20261130
+  },
+  "output": "output/d9_final_patch/seed1_20261127",
+  "logs": "logs/d9_final_patch/seed1_20261127",
+  "initialization": "Full1_aux0_no_prior",
+  "selection": "Val average_mAP descending, then final_mAP descending, then declared order",
+  "evaluation": "current_stage_gate_broadcast_all_seen"
+}

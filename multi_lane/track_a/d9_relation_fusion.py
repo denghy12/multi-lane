@@ -271,7 +271,8 @@ class D9RelationFusion(nn.Module):
             model.restore_task(task)
         self._configure_gates(task)
 
-    def forward(self, inputs, *, all_seen=False, sample_gate_only=False, sample_branch_only=False, task10_probe=None, summary_tokens=None):
+    def forward(self, inputs, *, all_seen=False, sample_gate_only=False, sample_branch_only=False,
+                task10_probe=None, summary_tokens=None, final_tokens=None):
         current = self.current_task_id
         if current < 0:
             raise RuntimeError('Activate or restore a task before inference')
@@ -299,6 +300,11 @@ class D9RelationFusion(nn.Module):
             for view in VIEWS:
                 branch = self.branches[view]
                 summary_args = dict(summary_layer=9, pooled_summaries=pooled[view]) if need_summary else {}
+                if final_tokens is not None:
+                    if self.training or torch.is_grad_enabled() or not sample:
+                        raise ValueError('Final token capture requires frozen sample-fusion inference')
+                    final_tokens[view] = {}
+                    summary_args['final_tokens'] = final_tokens[view]
                 if summary_tokens is not None:
                     if self.training or torch.is_grad_enabled() or not sample:
                         raise ValueError('Summary capture requires frozen sample-fusion inference')

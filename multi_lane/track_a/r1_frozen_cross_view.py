@@ -256,7 +256,8 @@ class FrozenR1Receiver(R1Receiver):
 
     def encode_lanes(self, images, all_seen_lanes, *, full_relations=None, full_sender_cache=None,
                      summary_layer=None, pooled_summaries=None, summary_tokens=None, detach_relation=False,
-                     selector_weight_relation=False, task10_probe=None, global_full_relations=None):
+                     selector_weight_relation=False, task10_probe=None, global_full_relations=None,
+                     final_tokens=None):
         own = images['full'] if isinstance(images, dict) else images
         if selector_weight_relation and full_relations is None:
             raise ValueError('A relation output is required for task-weighted pooling')
@@ -266,7 +267,11 @@ class FrozenR1Receiver(R1Receiver):
             raise ValueError('Full relation readout requires an active single patch site')
         if not self.r1_enabled:
             return super().encode_lanes(own, all_seen_lanes, summary_layer=summary_layer,
-                                        pooled_summaries=pooled_summaries, summary_tokens=summary_tokens)
+                                        pooled_summaries=pooled_summaries, summary_tokens=summary_tokens,
+                                        final_tokens=final_tokens)
+        if final_tokens is not None and (self.training or torch.is_grad_enabled()
+                                         or len(self.frozen_cross_active_layers) != 1):
+            raise ValueError('Final token capture requires frozen single-site inference')
         if not isinstance(images, dict):
             raise ValueError('Cross-view evidence is required')
         lanes = self._lane_ids(all_seen_lanes)
@@ -360,8 +365,13 @@ class FrozenR1Receiver(R1Receiver):
                     stream = self.cross_agent(task, layer)(stream, memories[layer], masks)
                 if layer == pool_site:
                     lane = self._apply_task_pool(lane[0], task, memories, masks).unsqueeze(0)
+            if final_tokens is not None and task == self.current_task_id:
+                final_tokens['patch'] = stream[:, 1:].detach()
             outputs.append(lane)
         state = self.visual_encoder.ln_post(torch.cat(outputs, 0))
         if self.visual_encoder.proj is not None:
             state = state @ self.visual_encoder.proj
-        return F.normalize(state[:, :, 0].permute(1, 0, 2).float(), dim=-1)
+        features = F.normalize(state[:, :, 0].permute(1, 0, 2).float(), dim=-1)
+        if final_tokens is not None:
+            final_tokens['cls'] = features[:, lanes.index(self.current_task_id)].detach()
+        return features

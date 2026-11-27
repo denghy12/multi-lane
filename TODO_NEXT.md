@@ -1,3 +1,29 @@
+## 2026-11-27 最终Task CLS与完整patch融合：开始实现与验证
+
+用户要求“开始执行修改”。新建独立worktree tmp/d9_final_patch_20261127，分支codex/d9-final-patch-fusion，基于e38d866；上一分支未提交解释文档带入新分支，旧工作树改动保留。新增final_patch_fusion.py及提取、训练评价、执行入口、统一JSON和10项测试；四个旧模型文件仅增加冻结推理可选final_tokens接口，读取当前任务原分类头前CLS及Frozen Forward最后block全部196patch，不改原分类路径。
+
+配置：EMOTIC CVPR17 seed1，两来源沿用90%补足更新分支+另10%融合TRAIN、全TRAIN分支+全部当期合法TRAIN；原checkpoint位于既有d9_equal_updates/seed1_20261119/formal及d9_sample_fusion/seed1_20261118/sample_full，旧原logits和摘要缓存只读复用d9_summary_eight/seed1_20261127/formal。两来源各8种：原固定只评价、初始不学习、任务共用、CLS、CLS加patch均值、四分区、可学习patch汇总、再参考Full CLS。共16结果行，12组学习。没有64/16/20初始化，Full1、辅助0起步；统一A0.25；任务共用对照只有有界b，特征组无额外b。
+
+特征按token LayerNorm后用固定数据无关投影压到32维，全部196位置保留；CLS缓存float32、patch缓存float16，学习以float32读取。单个patch评分隐藏维8，本路参数独立，条件版只增加辅助路的Full CLS项。同图完整人物名单汇总，Face无效特征为零且逐人mask；TRAIN中心随读取参数在图内更新，拟合后封存。参数量initial0/shared2/cls196/cls_mean388/cls_regions1732/cls_patch1948/cls_patch_full2460，不宣称等容量。
+
+正式全批Adam300步、LR0.001、所有新增参数均方L2系数0.001、weight_decay0、无scheduler、GPU float32无TF32，原图三折，100次比例交换、10次patch换图、分区位置打乱、Val锁定组均值。当前任务比例广播全部已见头，Val两来源完成封存后才提取并评价Test；task0–7完整八阶段final/average对比原D及同源固定、初始、共用、CLS、等权patch。提取batch64/workers2，保持原AMP/TF32以核对原logits。patch换图按原图Face可用性选另一张图，再匹配人物Face状态，人数不同时循环使用并记录。
+
+本次验证范围为Linux单测及task0/7真实预检：每Face可用性组最多12原图，5步、2次比例交换、2次patch换图，配置其余相同。入口bash scripts/emotic/run_d9_final_patch.sh tests/preflight；完整入口execute按check→tests→preflight→formal。输出output/d9_final_patch/seed1_20261127，日志logs/d9_final_patch/seed1_20261127。本地AST/JSON/bash/diff静态检查已通过，Linux及真实预检待执行。旧保护test-only工作树保持不动。
+
+
+## 2026-11-27 完整patch用于学习logit融合比例：解释方案，尚未实施
+
+用户要求由浅入深解释此前最终Task CLS＋完整patch候选，沿用Multi-LANE术语。已核对实际实验worktree代码：分类头前Task CLS来自Task Forward最后的ln_post/proj/normalize输出；完整空间patch需另取Frozen Forward最后block的图像流并排除image CLS。Person/Face应取当前任务原有Frozen9交互后的对应任务图像流，不能以Task Forward末尾Selectors替代patch；三路计算和分类头冻结。以下为修订建议，不是已完成的新实验。
+
+覆盖旧提案中的历史64/16/20先验和无约束b：所有新学习配置从Full分数1、辅助0起步；辅助=A*tanh(特征输出)，首批解释以共同A0.25为例，固定约束比较特征，不按已知固定比例初始化。只看任务的共用比例对照为辅助=A*tanh(b)，b=0初始化，仅作为任务级对照；特征组不额外加共用b。普通特征输出采用TRAIN中心化的描述乘最后矩阵，最后矩阵置0；内部patch读取参数小随机初始化，不能把多层网络所有层置0。
+
+候选由浅至深：最终CLS；CLS加同层全部patch等权平均；CLS加四分区patch均值/波动；CLS加本路CLS决定的逐patch权重并汇总；辅助patch评分额外加入Full CLS。局部卷积保留二维位置的版本放在后续独立扩展。首批8种含原生固定评价对照、[1,0,0]不学习、任务级共用比例及上述5种特征组；两来源共16结果行，其中12组需学习。新增初始和同层等权patch对照用于区分起点、patch内容和学习读取的贡献。32维固定逐token压缩只是控参数实现候选，会损失通道信息，不能宣称保留全部原始信息；各组训练预算一致不等于参数量一致。
+
+同图人物先各自形成特征，再按原图汇总输出一套基础分数，Face逐人mask。阶段t使用该阶段Task CLS和匹配patch，当前比例沿用上轮广播全部已见头，故当前类BCE与旧类mAP的差异仍需检查。监督仍是当前合法TRAIN真实标签的图均衡BCE，经融合误差传到两辅助分数和patch读取参数；没有最佳比例/patch权重标签，也不把原分类logits放入比例输入。90%分支用另10%融合TRAIN；全TRAIN用全部当期合法人物且保留训练曝光说明；正式同批8阶段Val/Test，task0/3/6只能预检。检查本图patch换成同可用性其他图、最终比例同组交换及均值对照；二维位置打乱只解释分区/卷积的排列依赖，普通加权汇总仅交换token顺序本来就不变。
+
+本轮只补充解释和上下文，未修改模型或训练配置、未新建实验分支、未提取特征或运行新实验、未提交推送。旧16组分数约束实验已经完成，不再沿用早期“仍在运行”的描述。详细解释记于实验worktree的docs/d9_summary_fusion_coverage_20261126.md。
+
+
 ## 2026-11-27 四档分数约束：完整8阶段Val/Test已完成
 
 用户授权的16组学习配置及4个对照均完成。运行代码86fe140b310bb1083bf1a1b03b8cbc9e4e03ca3d，分支exp/d9-feature-fusion-bounds；正式运行北京时间16:02:20–16:08:51，390.83秒，CPU。6项测试与真实缓存预检通过；独立复算310个Python文件身份、16个TRAIN阶段/384个折内模型、320个阶段读出、256个均值对照及首次交换、16套配对评估人群，全部通过。两来源先全部Val锁定再全部Test，最终task7为26类、average为8阶段全部已见类mAP平均。

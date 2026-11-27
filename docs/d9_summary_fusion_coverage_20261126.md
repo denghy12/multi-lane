@@ -416,3 +416,49 @@ A限制的是辅助分数的整个输出范围[-A,A]，不是融合比例变化2
 6项Linux测试和真实缓存task0/7预检通过，正式exit.status=0。独立复算310个Python文件身份、16个TRAIN阶段、384个折内模型/OOF预测、320个阶段读出、256个均值对照和每配置首次交换、16对评估人群，全部通过。分支checkpoint/config、缓存哈希和Val选择封存匹配。
 
 95个结果/日志文件已同步本地。压缩包output/d9_feature_bounds/seed1_20261127_results.tar.gz的SHA256为c6a9d30e9536c97b29e516f2d9d7a96a08ec875de40f8ba20b9dbcfdfb27fa4e，解包前完整校验且未覆盖其他产物。原始结果在output/d9_feature_bounds/seed1_20261127/formal/comparison.json，复算记录independent_audit.json，各来源含fit.json、val_results.json、test_results.json及全部逐图预测；日志在logs/d9_feature_bounds/seed1_20261127。运行代码HEAD始终为86fe140，后续文档提交不改变此记录。
+
+
+## 2026-11-27 最终Task CLS与完整patch的解释版方案（未实施）
+
+已按用户最新要求修订旧提案：去掉已知64/16/20先验和无约束共用b，保留Full分数1、辅助从0开始，以及最终原logits融合。前一批约束实验已经结束。本节是下一轮方案说明，未授权自动启动新实验。
+
+### 从Multi-LANE取什么
+
+对当前阶段t读取当前任务Task Forward的最终Task CLS，记作c_v；读取Frozen Forward最后block输出的全部空间patch，记作G_v={g_v,1,...,g_v,N}，不含图像CLS。v指Full/Person/Face，j是空间patch编号。Person/Face读取对应任务经过既有Frozen9交互后的图像流，不能混入其他任务的patch。最终Task CLS与patch原始维数可能不同，不能直接相加。Task Forward末尾Selectors经drop-and-replace恢复，不等同于完整空间patch。三路原来的CLS、Selectors、图像流和分类器都冻结，新增读取只用于计算比例。
+
+### 八种对照，局部卷积留作扩展
+
+|方法|给比例模块的信息|要区分什么|
+|---|---|---|
+|原生固定评价对照|不学习，沿用原生输出|同源目标，绝不作为新学习初始化|
+|初始分数不学习|Full1/Person0/Face0|学习本身是否有收益|
+|当前任务共用比例|两个可学习常数，经同样限幅|是否只需调整整体比例|
+|只用最终Task CLS|各路c_v|匹配新协议的CLS对照|
+|CLS加同层patch等权平均|[c_v; mean_j(g_v,j)]|加入patch内容是否有用|
+|CLS加四分区patch|c_v与各分区均值、标准差|粗略空间信息是否有用|
+|CLS加可学习patch汇总|[c_v; sum_j alpha_v,j g_v,j]|学习读取哪些patch是否有用|
+|上述汇总再参考Full CLS|辅助patch评分增加Full CLS|Full内容是否帮助读取辅助patch|
+
+分区版本分别处理每路自己的四个区域，不把Full与Face同编号区域当作对齐位置。可学习汇总版本：
+
+$$e_{v,j}=q_v^T\tanh(U_vg_{v,j}+V_vc_v),\quad
+\alpha_{v,j}=\frac{\exp(e_{v,j})}{\sum_{k=1}^N\exp(e_{v,k})},\quad
+r_v=\sum_j\alpha_{v,j}g_{v,j}.$$
+
+U_v、V_v是把patch和CLS变到同一小维数的可学习矩阵；q_v把合成向量变为一个数；e是一个patch的分数；alpha是本路内部patch的读取比例，总和1；r是加权汇总的patch内容。alpha不是三路融合比例。加入Full条件时，只给Person/Face评分增加T_v c_Full，T_v是额外学习矩阵，Full本路读取保持相同。这是内容决定读取，不计算跨视图余弦相似度。
+
+局部卷积扩展：每路自己的patch保持二维网格，经过一层小卷积、平均汇总，再与CLS拼接。它检验相邻patch的组合是否有价值，暂不与上述输入比较同时增加多层或多摘要。
+
+### 如何产生并监督融合比例
+
+上述描述先按原图汇总人物，形成x(I)；mu是仅由融合TRAIN得到的特征中心。两辅助输出u_v(I)=W_v^T[x(I)-mu]，最后矩阵W从0开始且不另加共用常数；其余patch读取参数正常小随机初始化，避免多层全零阻断学习。Full分数1，辅助分数A*tanh(u_v)，再在可用视图做softmax得到w_Full/w_Person/w_Face。最后矩阵W是可学习参数，最终融合权重omega是每张图算出的结果，两者不同。若patch读取参数在训练中变化，TRAIN特征中心须随当前读取参数更新，拟合完成后用同一拟合TRAIN重算并封存；Val/Test不能重新估计中心。共用比例对照仅把u_v换成从0学习的b_v，仍受A限幅，按任务学习常数，缺Face时仍逐人遮蔽。
+
+先用共同A=0.25解释/设计输入对照，意味着辅助分数在[-0.25,0.25]，不是权重变化25个百分点；具体运行配置需启动前锁定。所有新学习配置初始[1,0,0]，三路可用时权重约57.6117/21.1942/21.1942%。当前图像权重广播全部已见类别：z_k=sum_v omega_v z_v,k，z_v,k是冻结分支对类别k的原始logit。标签y_k只通过BCEWithLogits(z_k,y_k)产生梯度，再平均当前合法类别、同图合法人物及原图，更新最后分数矩阵和patch读取参数；不更新三路，也不把z_v,k或真实标签放入比例模块输入。没有额外最佳比例或patch位置标签。
+
+### 数据、参数与证据
+
+仍是90%分支/另10%融合TRAIN与全TRAIN分支/全部当期合法TRAIN两来源；正式评全部8阶段Val/Test，最终26类与八阶段全部已见类均值。当前类别监督作用于全部已见头的局限仍在。图级三折不能消除全TRAIN分支训练曝光。8种对照×2来源为16结果行，其中12个学习配置；不再同时扫多层、多摘要和幅度。
+
+为控制参数，可以逐个token固定投影到32维，保留全部空间位置，再使用浅层小模块；这会压缩通道信息，不能声称保留全部原始信息。同层等权平均对照必须使用完全相同的投影和预处理。参数量需实际统计，不能把相同步数/学习率称为严格同容量。完整patch需要从checkpoint重新提取，上一轮6/26维缓存不能还原全部patch。
+
+诊断包括：与不学习起点、任务共用比例、同层等权patch比较；保留本图CLS，联合替换同Face可用性其他图的patch；交换最终比例以及Val锁定组均值。二维位置打乱用于分区/卷积，普通内容加权汇总仅换token顺序在数学上不变，不能据此否定patch作用。新旧类别AP分开看，三路原logits须在新增提取前后逐值重放相同。下一轮是否有效取决于泛化结果，不能由读取权重看起来集中就下结论。
