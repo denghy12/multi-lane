@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "seed": 1,
+  "tasks": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "sources": {
+    "equal90": {
+      "path": "../multi-lane-main-d9-holdout-equal-updates/output/d9_equal_updates/seed1_20261119/formal",
+      "mode": "sample_holdout",
+      "exposure": "90% TRAIN branch images; disjoint 10% TRAIN fusion pool"
+    },
+    "full": {
+      "path": "../multi-lane-main-d9-sample-fusion-20261118/output/d9_sample_fusion/seed1_20261118/sample_full",
+      "mode": "sample_full",
+      "exposure": "100% TRAIN branches; same current-task legal TRAIN people for fusion"
+    }
+  },
+  "features": [
+    "summary_mean",
+    "summary_correspondence"
+  ],
+  "amplitudes": [
+    0.1,
+    0.25,
+    0.5,
+    0.75
+  ],
+  "initialization": "zero_matrix_no_bias_no_prior",
+  "fit": {
+    "steps": 300,
+    "matrix_lr": 0.001,
+    "matrix_l2": 0.001,
+    "folds": 3,
+    "permutations": 100,
+    "permutation_seed": 20261127
+  },
+  "cache": "../multi-lane-main-d9-summary-eight-20261127/output/d9_summary_eight/seed1_20261127/formal",
+  "output": "output/d9_feature_bounds/seed1_20261127",
+  "logs": "logs/d9_feature_bounds/seed1_20261127",
+  "selection": "Val average_mAP descending, then final_mAP descending, then declared order",
+  "evaluation": "current_stage_gate_broadcast_all_seen"
+}
