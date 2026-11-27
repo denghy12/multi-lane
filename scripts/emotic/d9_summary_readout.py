@@ -33,7 +33,7 @@ class Stage:
     provenance: dict
 
 
-def load_stage(source, features, split, task, smoke):
+def load_stage(source, features, split, task, smoke, *, current_only=True):
     path, meta, digest, checkpoint = native_scores(source, features, split, task)
     p = meta['protocol']
     if p['task'] != task or p['split'] != split or p['smoke']:
@@ -90,8 +90,9 @@ def load_stage(source, features, split, task, smoke):
                 raise ValueError('Evaluation head/view order changed')
             replay = fuse_logits(*logits.unbind(-1), torch.from_numpy(reliable))
             torch.testing.assert_close(replay, torch.from_numpy(z['fixed_logits'][take]), rtol=2e-6, atol=5e-6)
-            # Pilot reports only newly introduced classes, never an eight-stage aggregate.
-            logits, targets = logits[:, -TASK_SIZES[task]:], targets[:, -TASK_SIZES[task]:]
+            # The original pilot defaults to new classes; full evaluation keeps every seen head.
+            if current_only:
+                logits, targets = logits[:, -TASK_SIZES[task]:], targets[:, -TASK_SIZES[task]:]
         person_ids = z['sample_ids'][take]
     if training:
         assert_train_roles(source, ids)
@@ -183,7 +184,7 @@ def save_npz(path, **arrays):
     tmp.replace(path)
 
 
-def train(source, features, out, tasks, config, smoke):
+def train(source, features, out, tasks, config, smoke, *, protocol='independent current-head pilots; complete-roster inputs; image-balanced TRAIN BCE'):
     torch.set_num_threads(1)
     torch.manual_seed(1)
     rows = []
@@ -216,7 +217,7 @@ def train(source, features, out, tasks, config, smoke):
                          oof_sha256=sha256_file(oof_path)))
         print(f'fit task{task}: {len(stage.ids)} images, four methods, three TRAIN folds', flush=True)
     write_verified(out/'fit.json', dict(tasks=tasks, config=config, smoke=smoke, stages=rows,
-                   protocol='independent current-head pilots; complete-roster inputs; image-balanced TRAIN BCE'))
+                   protocol=protocol))
 
 
 def availability(stage):

@@ -1,0 +1,53 @@
+{
+  "schema": 1,
+  "seed": 1,
+  "tasks": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "methods": [
+    "fixed",
+    "shared",
+    "summary_mean",
+    "summary_correspondence"
+  ],
+  "sources": {
+    "equal90": {
+      "path": "../multi-lane-main-d9-holdout-equal-updates/output/d9_equal_updates/seed1_20261119/formal",
+      "mode": "sample_holdout",
+      "exposure": "90% TRAIN branch images; disjoint 10% TRAIN fusion pool"
+    },
+    "full": {
+      "path": "../multi-lane-main-d9-sample-fusion-20261118/output/d9_sample_fusion/seed1_20261118/sample_full",
+      "mode": "sample_full",
+      "exposure": "100% TRAIN branches; same current-task legal TRAIN people for fusion"
+    }
+  },
+  "fit": {
+    "steps": 300,
+    "bias_lr": 0.01,
+    "matrix_lr": 0.001,
+    "amplitude": 0.25,
+    "matrix_l2": 0.001,
+    "folds": 3,
+    "permutations": 100,
+    "permutation_seed": 20261126,
+    "bootstrap": 1000,
+    "bootstrap_seed": 20261127
+  },
+  "extraction": {
+    "batch_size": 64,
+    "workers": 2
+  },
+  "output": "output/d9_summary_eight/seed1_20261127",
+  "logs": "logs/d9_summary_eight/seed1_20261127",
+  "evaluation": "current_stage_gate_broadcast_all_seen",
+  "reuse": "../multi-lane-main-d9-summary-fusion-20261126/output/d9_summary_fusion/seed1_20261126/pilot",
+  "diagnostics": "three_train_folds_and_100_permutations; no_bootstrap_in_main_evaluation"
+}
