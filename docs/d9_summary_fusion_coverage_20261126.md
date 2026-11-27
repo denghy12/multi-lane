@@ -462,3 +462,57 @@ U_v、V_v是把patch和CLS变到同一小维数的可学习矩阵；q_v把合成
 为控制参数，可以逐个token固定投影到32维，保留全部空间位置，再使用浅层小模块；这会压缩通道信息，不能声称保留全部原始信息。同层等权平均对照必须使用完全相同的投影和预处理。参数量需实际统计，不能把相同步数/学习率称为严格同容量。完整patch需要从checkpoint重新提取，上一轮6/26维缓存不能还原全部patch。
 
 诊断包括：与不学习起点、任务共用比例、同层等权patch比较；保留本图CLS，联合替换同Face可用性其他图的patch；交换最终比例以及Val锁定组均值。二维位置打乱用于分区/卷积，普通内容加权汇总仅换token顺序在数学上不变，不能据此否定patch作用。新旧类别AP分开看，三路原logits须在新增提取前后逐值重放相同。下一轮是否有效取决于泛化结果，不能由读取权重看起来集中就下结论。
+
+
+## 2026-11-27 最终CLS＋完整patch融合：实现与预检记录
+
+修改完成。分支codex/d9-final-patch-fusion，本地实验worktree tmp/d9_final_patch_20261127；服务器独立worktree /mnt/haoyuan/workspace/multi-lane-main-d9-final-patch-20261127。运行代码e18158ca1bd8ac7715de7a20785f6be99012c042，后续文档commit与运行代码身份分别记录。尚未运行正式全量效果实验。
+
+### 改动文件与数据路径
+
+- model.py、r1_crossvit.py、r1_frozen_cross_view.py、d9_relation_fusion.py仅增加可选final_tokens冻结推理导出：当前任务最终原分类头输入CLS、最后Frozen Forward图像流的全部空间patch。Person/Face保留原Frozen9任务交互，最终图像CLS排除，Selectors不当作patch。
+- final_patch_fusion.py实现固定逐token投影、完整原图人物汇总、六种学习方法及不学习初始对照；原固定使用原生预测存档。图像特征不更新三路，分类logits不进入比例输入。
+- d9_final_patch_extract.py从原checkpoint重新读取全部patch。原始CLS512维、patch196×768维，逐token LayerNorm后固定数据无关Gaussian列投影到32维；CLS存float32，patch存float16，拟合转float32。位置全部保留，但通道压缩有信息损失。
+- d9_final_patch_readout.py实现原图三折、完整名单特征/合法人物标签对齐、动态TRAIN中心及最终封存、八阶段原logits融合、均值/比例交换/patch换图/分区位置打乱对照。patch换图在同Face可用性图组内进行，人数不同时按人物Face状态循环匹配并记录。
+- d9_final_patch_run.py、统一配置d9_final_patch_20261127.json、run_d9_final_patch.sh负责来源封存、提取、拟合、全部Val后锁定并运行全部Test，输出完整8阶段最终/平均指标。两个测试文件覆盖新接口、真实形状协议、CUDA梯度、完整八阶段合成流程和Val封存。
+
+原checkpoint及logits仍来自d9_equal_updates/seed1_20261119/formal和d9_sample_fusion/seed1_20261118/sample_full。已有d9_summary_eight/seed1_20261127/formal只复用原logits、人物身份和来源验证，完整patch单独导出，不能从旧摘要统计还原。
+
+### 锁定的正式配置
+
+|方法|可学习参数|
+|---|---:|
+|原固定，只评价|0|
+|初始分数[1,0,0]不学习|0|
+|当前任务共用比例|2|
+|最终Task CLS|196|
+|CLS＋全部patch等权平均|388|
+|CLS＋四分区patch均值/标准差|1732|
+|CLS＋可学习patch汇总|1948|
+|辅助patch读取再参考Full CLS|2460|
+
+两种TRAIN来源使用相同配置。Full分数1，辅助从0起步，分数=A*tanh(u)，A0.25；特征方法无额外共用b，只有任务级共用比例对照学习有界b。单个patch读取隐藏维8。全批Adam300步、LR0.001、所有新增可学习参数均方L2系数0.001、weight_decay0、无scheduler。GPU拟合float32、TF32关闭；原模型提取保持原AMP/TF32，batch64/workers2。
+
+原图3折；最终比例100次交换；patch10次换图；分区位置1次打乱；Val封存的同Face可用性组均值用于Test。当前任务比例广播全部已见类，正式task0–7，最终26类及8阶段全已见类均值。按Val均值优先、最终值其次、声明顺序最后锁定一个学习配置，仍报告全部方法Test，不按Test挑超参数。
+
+### 验证证据和限制
+
+13项新增测试与79项受影响旧路径回归通过，共92项。GPU真实预检包含两来源task0/7，TRAIN/Val/Test各可用性组最多12原图，5步拟合，2次比例交换和2次patch换图；其余结构相同。完整重提取预检耗时180.30秒，最后仅运行记录修正后复用12份已封存特征重验9.14秒，退出码0。
+
+独立审计通过：316个Python文件身份、12份特征捕获开关/原存档logits逐值一致、72个折内模型、24个最终模型、64个阶段读出、48次GPU预测逐值重放。Task7读取26类；Face遮蔽及Full权重大于任一辅助路均正确。8个最终patch读取模型从0基step1获得BCE梯度，零初始化只放在最后输出矩阵，没有阻断内部读取模块学习。
+
+预检发现并修复torch2.0.1 CUDA cumsum/bincount缺乏确定性实现的问题。保持确定性开关：只将汇总后的小描述矩阵移到CPU可微聚合，监督人数在CPU预计算；未把全部patch转到CPU训练，BCE按监督人物和原图平均的公式不变。此前失败日志和通过前版本完整保留。
+
+本次仅能证明实现和小样本流程可运行，不说明正式mAP提升。全TRAIN仍有三路训练曝光，三折不消除此问题；32维投影压缩通道；参数量不同；当前类BCE作用于全部已见头的限制仍在。
+
+### 产物及运行
+
+126个文件已同步本地主项目output/d9_final_patch/seed1_20261127、logs/d9_final_patch/seed1_20261127。最终预检审计在preflight/independent_audit.json；原预测、拟合参数和特征同目录保存。压缩包output/d9_final_patch/seed1_20261127_preflight.tar.gz的SHA256为7afab283785760691c921f1e9823c549bc90c51cf57635ff7bd0bf45f1c0d8f6。
+
+在Linux实验worktree和ddp环境中，已有匹配预检后运行正式阶段：
+
+```bash
+CUDA_VISIBLE_DEVICES=0 bash scripts/emotic/run_d9_final_patch.sh formal
+```
+
+新执行从检查开始可使用execute（check→tests→preflight→formal）。正式输出output/d9_final_patch/seed1_20261127/formal，日志logs/d9_final_patch/seed1_20261127。再次执行同代码/config/source允许文档HEAD变化并保留首次运行身份；业务代码/config/source变化须用独立输出目录或保留旧产物后重新预检。未合并main。

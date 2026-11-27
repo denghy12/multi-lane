@@ -1,3 +1,13 @@
+## 2026-11-27 最终CLS＋完整patch融合修改完成，真实预检通过
+
+新代码位于tmp/d9_final_patch_20261127，分支codex/d9-final-patch-fusion；运行代码e18158ca1bd8ac7715de7a20785f6be99012c042，已Git-only推送/同步服务器独立worktree。实现8种对照×90%/全TRAIN两来源，共16结果行（12个学习配置），正式入口覆盖task0–7完整Val/Test。Full=1、辅助从0开始、统一A0.25，无历史固定比例初始化；输入最终Task CLS与全部196空间位置的32维固定投影特征，最终仍只加权原logits。原固定仅评价，不参加拟合。
+
+验证完成：13项新增测试（含全部六方法确定性CUDA拟合、原图监督人数与BCE一致性）及79项旧路径回归全部通过。真实task0/7两来源TRAIN/Val/Test预检完成，第一次完整提取与拟合180.30秒；最终运行记录修正后复用12份哈希相同的特征重验9.14秒，exit0。独立审计通过316个Python文件身份、12份真实特征的原logits逐值重放、72折内模型、24最终模型、64阶段读出、48次GPU预测逐值重放。8个最终patch读取模型均从第2次梯度计算起收到真实BCE梯度（0基step1），不是只有最后矩阵在更新。
+
+解决了torch2.0.1严格确定性下CUDA cumsum/bincount的运行限制：仅汇总后的小特征矩阵在CPU可微聚合，监督人数在CPU预计算，GPU保持相同图均衡BCE与读取参数梯度。捕获接口不改变三路原输出。运行协议允许后续仅文档提交改变HEAD，保留首次执行身份；代码/config/source改变仍拒绝复用。失败尝试、通过版本和最终版本记录都保留。
+
+126个结果/日志文件已同步本地主项目output/d9_final_patch/seed1_20261127和logs/d9_final_patch/seed1_20261127，压缩包SHA256为7afab283785760691c921f1e9823c549bc90c51cf57635ff7bd0bf45f1c0d8f6。详细修改说明在实验worktree的docs/d9_summary_fusion_coverage_20261126.md末尾。正式全量效果实验尚未启动，本次小样本预检不能用于33.1770/40.2083达标判断；准备好的正式入口为CUDA_VISIBLE_DEVICES=0 bash scripts/emotic/run_d9_final_patch.sh formal。原主工作树及test-only未改业务文件，未合并main。
+
 ## 2026-11-27 真实patch预检通过与运行记录修正
 
 8b39000的12项新增测试及此前79项回归通过；GPU0预检17:44:56–17:47:56完成，exit0，两来源task0/7 TRAIN/Val/Test全部通过。独立复算通过：316个Python文件身份、12份真实特征原logits逐值核对、72个折内模型、24个最终模型、64个阶段读出及48次GPU预测逐值重放。正式8阶段效果实验尚未启动。
