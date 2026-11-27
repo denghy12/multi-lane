@@ -85,6 +85,24 @@ class FinalPatchTests(unittest.TestCase):
         self.assertFalse(y.requires_grad);self.assertEqual(y.shape,(4,196,32))
         self.assertFalse(torch.equal(y,project_tokens(x,'face','patch')))
 
+    @unittest.skipUnless(torch.cuda.is_available(), 'CUDA runtime regression')
+    def test_deterministic_cuda_roster_pooling_and_backward_match_cpu(self):
+        enabled = torch.are_deterministic_algorithms_enabled()
+        torch.use_deterministic_algorithms(True)
+        try:
+            counts = torch.tensor([3, 1, 2])
+            flags = torch.tensor([True, False, True, False, True, True])
+            cpu = torch.randn(6, 7, requires_grad=True)
+            gpu = cpu.detach().cuda().requires_grad_()
+            expected = roster_mean(cpu, counts, flags)
+            actual = roster_mean(gpu, counts.cuda(), flags.cuda())
+            torch.testing.assert_close(actual.cpu(), expected, rtol=0, atol=0)
+            expected.square().sum().backward()
+            actual.square().sum().backward()
+            torch.testing.assert_close(gpu.grad.cpu(), cpu.grad, rtol=0, atol=0)
+        finally:
+            torch.use_deterministic_algorithms(enabled)
+
     def test_zero_initialization_full_bounds_and_parameter_counts(self):
         stage=population();expected={'initial':0,'shared':2,'cls':196,'cls_mean':388,'cls_regions':1732,'cls_patch':1948,'cls_patch_full':2460}
         for method in METHODS[1:]:

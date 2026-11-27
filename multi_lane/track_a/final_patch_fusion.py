@@ -30,7 +30,15 @@ def project_tokens(value, view, kind, width=WIDTH):
 
 
 def roster_mean(value, counts, valid=None):
-    """Contiguous complete-image rosters; differentiable deterministic sums on CUDA."""
+    """Contiguous rosters; CPU prefix sums retain gradients on PyTorch 2.0 CUDA.
+
+    Only already-pooled descriptors cross devices, never the spatial patch array.
+    CUDA floating cumsum lacks a deterministic implementation in the run environment.
+    """
+    device = value.device
+    if value.is_cuda:
+        value, counts = value.cpu(), counts.cpu()
+        valid = valid.cpu() if valid is not None else None
     if value.ndim != 2 or counts.ndim != 1 or len(value) != int(counts.sum()) or (counts < 1).any():
         raise ValueError('Invalid complete image roster')
     ends = counts.cumsum(0)
@@ -38,10 +46,11 @@ def roster_mean(value, counts, valid=None):
         prefix = torch.cat((x.new_zeros((1, x.shape[1])), x.cumsum(0)), 0)
         return prefix[ends] - prefix[ends-counts]
     if valid is None:
-        return summed(value) / counts[:, None]
+        return (summed(value) / counts[:, None]).to(device)
     if valid.shape != (len(value),) or valid.dtype != torch.bool:
         raise ValueError('Invalid roster Face mask')
-    return summed(value.masked_fill(~valid[:, None], 0)) / summed(valid[:, None].to(value.dtype)).clamp_min(1)
+    result = summed(value.masked_fill(~valid[:, None], 0)) / summed(valid[:, None].to(value.dtype)).clamp_min(1)
+    return result.to(device)
 
 
 class PatchReader(nn.Module):

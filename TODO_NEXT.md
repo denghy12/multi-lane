@@ -1,3 +1,8 @@
+## 2026-11-27 patch实现阶段验证
+
+实现f543ed0已按Git-only推送并在服务器独立worktree /mnt/haoyuan/workspace/multi-lane-main-d9-final-patch-20261127同步；主工作树154项、保护test-only5项原状态保留。10项新增测试和79项受影响的旧路径回归全部通过，配置/来源检查通过。GPU确定性微检查发现当前torch2.0.1不支持浮点CUDA cumsum；已将仅完成patch汇总后的小特征矩阵按原图在CPU做可微累加并传回GPU，保持全部patch读取在GPU和严格确定性，不关闭确定性选项。新增CPU/CUDA前向及反向一致性回归，待同步验证。此问题在真实预检前发现，尚无正式效果实验结果。
+
+
 ## 2026-11-27 最终Task CLS与完整patch融合：开始实现与验证
 
 用户要求“开始执行修改”。新建独立worktree tmp/d9_final_patch_20261127，分支codex/d9-final-patch-fusion，基于e38d866；上一分支未提交解释文档带入新分支，旧工作树改动保留。新增final_patch_fusion.py及提取、训练评价、执行入口、统一JSON和10项测试；四个旧模型文件仅增加冻结推理可选final_tokens接口，读取当前任务原分类头前CLS及Frozen Forward最后block全部196patch，不改原分类路径。
