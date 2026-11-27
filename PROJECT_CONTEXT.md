@@ -1,3 +1,18 @@
+## 2026-11-27 四档分数约束：完整8阶段Val/Test已完成
+
+用户授权的16组学习配置及4个对照均完成。运行代码86fe140b310bb1083bf1a1b03b8cbc9e4e03ca3d，分支exp/d9-feature-fusion-bounds；正式运行北京时间16:02:20–16:08:51，390.83秒，CPU。6项测试与真实缓存预检通过；独立复算310个Python文件身份、16个TRAIN阶段/384个折内模型、320个阶段读出、256个均值对照及首次交换、16套配对评估人群，全部通过。两来源先全部Val锁定再全部Test，最终task7为26类、average为8阶段全部已见类mAP平均。
+
+16组学习配置均未同时达到原D Test33.1770/40.2083。Val选出的90%来源“平均相似度+A0.75”为Val43.4495/51.0156、Test32.5207/39.7832；全TRAIN来源“平均相似度+A0.10”为Val43.3222/50.8242、Test32.9899/40.1098。原生全TRAIN固定对照Test33.2019/40.2847达标，但该对照未学习，不能算新方法成功。所有新方法均从[1,0,0]开始，无64/16/20先验或可学习共用bias。
+
+90%所选组相对初始读出Test final/average提高0.0400/0.0353，但相对同源固定下降0.2349/0.2151；全TRAIN所选组相对初始下降0.0039/提高0.0002，相对固定下降0.2120/0.1749。90%所选组Test平均相对同Face可用性均值对照为-0.0065、相对100次交换均值为+0.0011；全TRAIN大幅度对应统计A0.75在Val/Test的8个阶段全部不如交换均值。所有评估分数均未达到0.95A，不能把失败直接归因于tanh饱和。两所选组Test可靠Face的Full均值/标准差分别57.5851%/0.2953个百分点和57.6095%/0.0022个百分点；Full主导已保证，但逐图调整的有效性仍不足。
+
+95个结果/日志文件已同步回本地output/d9_feature_bounds/seed1_20261127和logs/d9_feature_bounds/seed1_20261127；压缩包SHA256 c6a9d30e9536c97b29e516f2d9d7a96a08ec875de40f8ba20b9dbcfdfb27fa4e已核对。完整20行结果、阶段值、逻辑诊断见docs/d9_summary_fusion_coverage_20261126.md末尾；机器复算记录formal/independent_audit.json。下一步建议优先改进冻结patch特征的比例输入，分开检查辅助分数负向范围与特征信息量，不再单独盲扫对称A；仅为建议，未启动新批次。全TRAIN折分仍未消除三路对TRAIN图片的训练曝光，单seed和重复使用Test限制仍需后续独立验证。
+
+## 2026-11-27 16:02 四档分数约束正式运行
+
+实现86fe140b310bb1083bf1a1b03b8cbc9e4e03ca3d已通过Git推送并在独立服务器worktree同步，分支exp/d9-feature-fusion-bounds，两端HEAD一致、服务器工作树clean。服务器6项测试和真实缓存task0/7预检通过，16:02:20北京时间开始formal；tmux为ml_d9_feature_bounds_20261127，CPU运行，不占GPU。90%来源8阶段拟合已完成，正在全TRAIN拟合；后续全部Val→封存选择→全部Test→逐文件复算和同步结果。预计正式运行10–25分钟，尚无完整结果。输出output/d9_feature_bounds/seed1_20261127，日志logs/d9_feature_bounds/seed1_20261127。此次本地直连GitHub SSH超时，改由既有服务器SSH转发完成Git推送，未改SSH配置或复制受控代码。
+
+
 ## 2026-11-27 用户授权四档分数约束的完整八阶段实验
 
 新分支exp/d9-feature-fusion-bounds，基于20ccc71，独立本地tmp/d9_feature_bounds_20261127；用户要求开始执行多档约束、90%与全部TRAIN、完整8task Test，仍同批完整Val。保留旧代码与结果，新增feature_bound_fusion.py、d9_feature_bounds.py、统一配置与入口、6项新测试。此前未提交的解释文档已带入本分支，原工作树改动不动。
