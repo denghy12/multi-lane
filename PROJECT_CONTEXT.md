@@ -1,3 +1,11 @@
+## 2026-11-28 14:59 GPU0单卡加速正式接续已启动
+
+按用户最新要求只用GPU0、最多4独立任务并发，GPU1空闲。两端启动HEAD/upstream4878e039852e22ac1f7c0de00090c3fc4b6e9da2、工作树clean，分支codex/d9-task-patch-speed；运行digest6f44a7ec1602bd3969361acaa72d3f5ef344e59af5cad6d50a45160a64332a69。旧PID3175867已主动SIGINT停止并保留全部产物；旧run_state的KeyboardInterrupt为本次接续操作，详情在旧acceleration_handoff.json，非模型异常。
+
+新tmux ml_d9_task_patch_speed_20261128于14:59:29启动，正式phase14:59:30运行。已按SHA导入160份完成候选拟合，当前full任务3/4/5/7在GPU0并行；后续继续剩余任务与完整8阶段Val/Test，两个来源Val均封存后才能Test。启动首轮15秒实测GPU0显存峰值6818MiB（约6.66GiB）、利用率68–98%；GPU1仅11MiB、空闲。该观测不是整个流程峰值承诺。
+
+新输出output/d9_task_patch_speed/seed1_20261128，主日志logs/d9_task_patch_speed/seed1_20261128/formal_launcher.log，各任务日志formal/fit_*.log；入口--phase formal --gpus 0 --resume-from旧formal。完整验证：26 Linux测试通过；真实预检196.867s、旧新896模型状态/928预测等数组/288特征数组/8阶段对照逐值一致；300步6组真实TRAIN也逐值一致。单卡4并发patch吞吐3.11倍；大任务CLS单拟合3.06倍、四分区23.35倍、patch单拟合无提速，不能等同整批倍率。仍未有新完整正式效果结果，不宣称达标33.1770/40.2083。运行使用4878e03，后续文档提交与运行身份区分。
+
 ## 2026-11-28 用户最新调整：正式仅用GPU0
 
 用户补充“如果占用内存不多，就放在一张gpu0上跑”。采用已实测单卡最快的最多4任务并行，正式--gpus 0、CUDA_VISIBLE_DEVICES=0；GPU1不再用于正式运行。两来源Val/Test依次在GPU0处理，并保留两Val先封存规则。测速和预检已完成，GPU1此前的临时使用结束。启动后记录实际显存，原两卡计划以此条为准；科学配置与已通过的数值一致性检查不变。

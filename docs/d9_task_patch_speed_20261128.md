@@ -53,3 +53,9 @@ CUDA_VISIBLE_DEVICES=0 python -m scripts.emotic.d9_task_patch_parallel --phase f
 输出`output/d9_task_patch_speed/seed1_20261128/`；日志`logs/d9_task_patch_speed/seed1_20261128/`。正式恢复需要匹配当前代码的完整预检；旧来源协议固定为`e3afb150ab6f5bdb59c3a8aa34a11a4d49c697a5930912c6c0df4c8de6db90b6`。
 
 26项Linux测试已通过：新增缓存/梯度/预测/换图一致性3项，原任务路径10项，原patch路径13项。实际预检及正式切换的最终状态见本目录运行记录及三个根上下文文档。
+
+## 正式接续记录
+
+2026-11-28 14:59:29启动，正式phase14:59:30，runtime HEAD `4878e039852e22ac1f7c0de00090c3fc4b6e9da2`，digest `6f44a7ec1602bd3969361acaa72d3f5ef344e59af5cad6d50a45160a64332a69`，tmux `ml_d9_task_patch_speed_20261128`。按用户最新要求仅GPU0、4任务并发，导入160份已完成拟合；旧进程主动中断，旧输出保留。首次15秒监测GPU0峰值6818MiB、利用率68–98%，GPU1空闲。旧运行的KeyboardInterrupt是接续操作记录。
+
+真实预检14:53:04–14:56:21完成，196.867秒；与旧预检896份最终/折内训练状态、928个预测等数组、288个特征数组，以及全部8个预检阶段的指标/对照/权重逐值一致。单卡正式正在运行，尚无本轮完整效果结论。
