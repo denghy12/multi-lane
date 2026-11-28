@@ -22,11 +22,13 @@ METHODS = ('fixed','initial',*(m+'__current' for m in LEGACY),
            *(s['key']+'__own' for s in candidates()))
 
 
-def fit_one(stage,spec,config,device):
+def fit_one(stage,spec,config,device,*,fast=True):
     if spec['reuse']:
         return old_fit(stage,spec['reader'],config,device)
     gate=TaskPatchFusion(spec).to(device)
     cls,patch,counts,flags=inputs(stage,device)
+    from multi_lane.track_a.task_patch_execution import PreparedDescriptor
+    prepared=PreparedDescriptor(gate,cls,patch,counts,flags) if fast else None
     base=stage.base;logits=base.logits.to(device);targets=base.targets.to(device)
     inverse=base.inverse.to(device);reliable=base.reliable.to(device)
     people=torch.bincount(base.inverse,minlength=len(counts))[base.inverse].to(device)
@@ -34,7 +36,7 @@ def fit_one(stage,spec,config,device):
     history=[];variation_history=[];first=None
     parameters=list(gate.parameters());number=sum(p.numel() for p in parameters)
     for step in range(config['steps']+1):
-        desc,_=gate.describe(cls,patch,counts,flags)
+        desc=prepared() if prepared is not None else gate.describe(cls,patch,counts,flags)[0]
         scores=gate.scores(desc,train_center=True)
         z=fused_logits(logits,scores,inverse,reliable)
         person_loss=torch.nn.functional.binary_cross_entropy_with_logits(z,targets,reduction='none').mean(1)
@@ -50,23 +52,24 @@ def fit_one(stage,spec,config,device):
             if any(g is not None and g.abs().sum()>0 for g in gradients):first=step
         loss=bce+config['l2']*penalty+spec['variation']*variation
         loss.backward()
-        if not torch.isfinite(loss) or any(p.grad is not None and not torch.isfinite(p.grad).all() for p in parameters):
+        finite=torch.stack([torch.isfinite(loss),*[torch.isfinite(p.grad).all() for p in parameters if p.grad is not None]]).all()
+        if not finite:
             raise FloatingPointError('Nonfinite fusion optimization')
         optimizer.step()
     with torch.no_grad():
-        desc,_=gate.describe(cls,patch,counts,flags)
+        desc=prepared() if prepared is not None else gate.describe(cls,patch,counts,flags)[0]
         if gate.method!='shared':gate.center.copy_(desc.mean(0))
         torch.testing.assert_close(gate.scores(desc),scores,rtol=1e-6,atol=1e-7)
     return dict(gate=gate.export(),parameters=number,bce_history=history,
                 variation_history=variation_history,first_reader_gradient_step=first,center_images=len(counts))
 
 
-def train(cfg,name,out,config,smoke,device):
+def train(cfg,name,out,config,smoke,device,*,tasks=None,finalize=True):
     torch.set_num_threads(1);torch.backends.cuda.matmul.allow_tf32=False
     parent=Path(cfg['parent'])/name
     old=read(parent/'fit.json')
     rows=[]
-    for task in range(8):
+    for task in (range(8) if tasks is None else tasks):
         stage=load_features(cfg,name,out,'train',task,smoke=smoke);base=stage.base
         assignment=folds(base.ids,config['folds'])
         if set(assignment.tolist())!=set(range(config['folds'])):raise ValueError('Empty TRAIN image fold')
@@ -113,8 +116,18 @@ def train(cfg,name,out,config,smoke,device):
                  inverse=base.inverse.numpy(),fold=assignment,**arrays)
         rows.append(dict(task=task,coverage=coverage(base),provenance=base.provenance,
                          features_sha256=stage.feature_sha256,methods=states,oof_sha256=sha256_file(path)))
+        write_verified(out/'train'/f'task{task}_fit.json',rows[-1])
+    if finalize:
+        finalize_train(cfg,name,out,config,smoke)
+
+
+def finalize_train(cfg,name,out,config,smoke):
+    rows=[read(out/'train'/f'task{t}_fit.json') for t in range(8)]
+    for task,row in enumerate(rows):
+        if row['task']!=task:raise ValueError('Task fitting order changed')
+        require_digest(out/'train'/f'task{task}_oof.npz',row['oof_sha256'])
     write_verified(out/'fit.json',dict(config=config,smoke=smoke,candidates=candidates(),stages=rows,
-                                     parent_fit_sha256=sha256_file(parent/'fit.json')))
+                                     parent_fit_sha256=sha256_file(Path(cfg['parent'])/name/'fit.json')))
 
 
 def mix_heads(base,scores,scope):

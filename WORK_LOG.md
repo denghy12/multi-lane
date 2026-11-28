@@ -1,3 +1,9 @@
+## 2026-11-28 融合执行速度优化（进行中）
+
+用户要求最多使用GPU0/1加速当前完整八阶段实验。独立分支codex/d9-task-patch-speed，基于fda82fb；原GPU0正式进程继续运行。检查发现已为全批融合拟合，batch64只作用特征提取；CLS/四分区静态描述反复计算，patch输入每步重复转float/遮蔽/检查，确定性CPU人物汇总造成同步。先测试缓存不变描述与patch输入，保留CPU prefix sum的运算及梯度顺序；计划按任务在两卡调度。所有公式/监督/300步/三折/Val先封存均保持。
+
+测速入口python -m scripts.emotic.d9_task_patch_benchmark --steps 30，GPU1，EMOTIC equal90/task6与full/task3原TRAIN缓存；Adam LR.001 L2.001 seed1全批，CPU单线程/FP32/TF32关闭/严格确定性。后续300步核对全部参数、曲线、中心与预测逐值相同。输出output/d9_task_patch_speed/seed1_20261128/benchmark，logs同前缀。仅新增执行优化文件并调整task_patch_readout可分任务拟合；旧模型与捕获代码未改。尚未宣称测速通过或切换正式进程。
+
 ## 2026-11-28 14:27 两来源40条完整八阶段正式启动
 
 实现57489e42c14aa4699f409ddcc99b6a8e55572809已按Git-only推送并同步独立服务器worktree，分支codex/d9-task-patch-fusion；启动时两端HEAD/upstream一致、服务器clean。23项Linux测试通过（10新增、13旧路径回归），配置与来源检查通过。GPU0真实预检14:22:23–14:26:02完成，219.30秒、exit0；八个任务均拟合，Val/Test检查task0与task7全部已见头。
