@@ -424,7 +424,7 @@ class MultiLaneModel(nn.Module):
 
     def encode_lanes(
         self, images: ModelInputs, all_seen_lanes: bool, *, summary_layer=None, pooled_summaries=None, summary_tokens=None,
-        task10_probe=None, final_tokens=None
+        task10_probe=None, final_tokens=None, task_final_tokens=None
     ) -> torch.Tensor:
         lane_ids = self._lane_ids(all_seen_lanes)
         person_descriptor = None
@@ -505,6 +505,12 @@ class MultiLaneModel(nn.Module):
                 raise ValueError("Final token capture requires frozen inference")
             final_tokens.update(cls=lane_cls[:, lane_ids.index(self.current_task_id)].detach(),
                                 patch=image_tokens[:, 1:].detach())
+        if task_final_tokens is not None:
+            if self.training or torch.is_grad_enabled():
+                raise ValueError("Task token capture requires frozen inference")
+            for index, task in enumerate(lane_ids):
+                task_final_tokens[task] = dict(cls=lane_cls[:, index].detach(),
+                                              patch=image_tokens[:, 1:].detach())
         return lane_cls
 
     def adapter_auxiliary_metric(self, mode: str) -> torch.Tensor:

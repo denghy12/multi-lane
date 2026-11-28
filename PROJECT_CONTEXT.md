@@ -1,3 +1,29 @@
+## 2026-11-28 启动各Task Forward独立融合与有界调整实验
+
+用户明确“开始执行”上轮下一步方案。新分支codex/d9-task-patch-fusion，本地tmp/d9_task_patch_20261128，基于5ceea9b；带入上一轮未提交分析文档，保留旧worktree原改动。服务器计划独立multi-lane-main-d9-task-patch-20261128；主工作树154项、test-only5项未提交状态保持。
+
+本轮两来源各20结果行，共40：固定/初始2项，原共用/CLS/四分区/可学习patch四方法×当前广播与各头独立2方式共8项，三特征读法加有界共用项3项，下界-.5的共用与三特征4项，三特征增加逐图u均方惩罚0.01共3项。各任务拟合14模型，其中4复用父实验封存结果、10新增。所有输入仍为32维最终CLS与196patch，三路冻结、无原logits比例输入、Full1/辅助0起步、上界+.25；负向有界函数B*tanh(.25*u/B)与正向.25*tanh(u)在0处斜率均.25，B=.25或.50，不导入历史比例。新共用b在总有界映射内部。逐图惩罚只作用u，不惩罚b。
+
+EMOTIC seed1；90%分支用另10% TRAIN当期合法人物拟合，全TRAIN用全部当期合法人物，训练曝光限制不变。原图三折、Adam全批300步LR.001、参数均方L2.001、weight_decay0无scheduler；100比例交换/10patch换图/一次分区位置打乱。所有Val先完成并封存，之后所有Test；各头自己的方法中按Val平均/最终/声明顺序选定，仍报告全部候选。最终task7全部26类及8阶段全已见类平均，对照Test33.1770/40.2083与同源固定。预检拟合全部8头（小人群、5步），评价task0/7（2交换/2patch换图），不能作效果结论。
+
+新增可选task_final_tokens接口只读取每条Task Forward的真实最终CLS及其Frozen9后空间流；捕获开关原logits逐值重放，正式当前头特征必须与父实验全部存档逐值相同。新输出明确区分prediction__/control__命名，修复旧CLS均值对照与CLS+均值方法数组重名问题，旧产物不覆盖。新模块task_patch_fusion.py、提取/拟合评估/执行脚本、JSON配置和10项测试。已有四个模型文件仅新增可选捕获；旧训练推理默认路径保留。
+
+原输入来源沿用d9_equal_updates/seed1_20261119/formal、d9_sample_fusion/seed1_20261118/sample_full，原logits/名单缓存d9_summary_eight/seed1_20261127/formal，父patch缓存d9_final_patch/seed1_20261127/formal。入口CUDA_VISIBLE_DEVICES=0 bash scripts/emotic/run_d9_task_patch.sh execute；输出output/d9_task_patch/seed1_20261128，日志logs/d9_task_patch/seed1_20261128。预计正式2–4小时，须预检后校准。分支层面分折重训、更高投影维度、扩网络及新损失均等90%证据成立后再推进，本批不启动。当前静态AST/JSON/bash检查通过，Linux测试/真实预检/正式启动待完成；无main合并。
+
+
+
+## 2026-11-28 最终CLS与完整patch的八阶段正式结果已分析
+
+正式运行北京时间2026-11-27 22:08:09–23:27:17完成，4747.32秒、exit0；运行HEAD35d0c1443cb5cb99ac86d8b84f335769dc9bbf46，分支codex/d9-final-patch-fusion，启动记录HEAD5ceea9b。两来源各8组、完整task0–7 Val/Test。12个学习配置均未同时达到Test33.1770/40.2083。Val在六个学习方法中均选任务共用比例：90% Val43.4783/51.0637、Test32.5708/39.8291；全TRAIN Val43.2624/50.7698、Test32.9305/40.0558。全TRAIN原固定33.2019/40.2847达到Test目标，但未学习，不能算新方法成功。90%/全TRAIN可学习patch分别Test32.4738/39.7163、32.8807/39.9471。
+
+所有逐图特征方法在两来源两split的阶段平均均不如同Face可用性组均值；全TRAIN可学习patch相对100次交换的阶段平均Val/Test为-0.08793/-0.04668。不是patch未更新：32个最终读取模型均在0基step1获得BCE梯度。90%task6仅47原图62人；task7 patch的TRAIN mAP57.0903→61.9521，三折仅57.3753。全TRAIN三折未消除分支训练曝光；task7相同当前阳性可靠Face条件下，TRAIN单路Full/Person/Face79.1275/98.2037/99.2575，Val51.0555/46.7370/48.0600，Test50.3270/45.1513/44.2326。初始BCE对辅助分数的梯度TRAIN要求加权、Val/Test要求减权，说明训练相对可信度不能直接泛化。
+
+结构风险：当前任务3类监督却广播全部26类；TRAIN中心化且无共用b去掉统一偏移；A0.25限制可靠Face Full至51.42–63.57%、缺Face67.92–77.73%，排除了64/80固定读出，但不等于指标理论不可超越。新patch方法与旧摘要统计不同：task7 Test辅助分数近边界比例90%40.37%、全TRAIN61.79%，需记录饱和；统计包含之后可能被mask的Face分数。当前TRAIN全为至少一项当前类正标签的人物，完整名单特征不等于完整名单监督。
+
+结果/日志已同步本地主项目，约4.7GB完整patch缓存保留远程；正式产物包135MB、SHA256 5b5a912487cedbc48b31ed18c1887f001c4a2bd13aa8fd837596a5c26661d132。Linux只读复算通过316代码文件、48特征哈希、256主阶段读出、288折内指标、192原logits融合与权重逐值重放、192首交换、352对照指标。发现32份npz的cls_mean_logits键冲突：CLS均值对照原数组被CLS+patch均值主方法数组覆盖；从封存分数重建后JSON指标一致，主结果不受影响，后续需分开method/control键。不能宣称所有原始对照数组无问题。
+
+详细公式/变量/16行结果/完整阶段表/历史失败/下一步在tmp/d9_final_patch_20261127/docs/d9_summary_fusion_coverage_20261126.md的2026-11-28部分；派生证据output/d9_final_patch/seed1_20261127/analysis_20261128/{analysis,train_weights,population}.json。建议先隔离各Task Forward自己的融合规则，再处理三路未见的融合监督来源，配对检验有界共用项与逐图项，最后单独检验负向分数范围/patch维度；历史按头封存、补负例、排序和逐人逐类均有失败，不能保证单项修正成功。当前仅分析及文档更新，未修改业务代码、未启动新批次、未提交推送或合并。原主工作树用户改动及保护test-only保持。
+
 ## 2026-11-27 22:08 正式启动两来源完整八阶段patch融合实验
 
 用户明确要求启动正式实验，包含90% TRAIN和全TRAIN的8task Test。已核对本地/服务器分支codex/d9-final-patch-fusion、HEAD/upstream均35d0c1443cb5cb99ac86d8b84f335769dc9bbf46，工作树clean；92项测试和真实预检有效，正式与预检digest同为718e6ba955f50264ba7423cbcebc1dae97541727906741fbf3ea74ee49855ec9。GPU0空闲、磁盘约1.2T可用后启动唯一tmux会话ml_d9_final_patch_formal_20261127，启动北京时间2026-11-27 22:08:07，正式phase自22:08:09运行，未重复启动其他实验。

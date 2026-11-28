@@ -1,0 +1,195 @@
+{
+  "schema": 1,
+  "seed": 1,
+  "tasks": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "sources": {
+    "equal90": {
+      "path": "../multi-lane-main-d9-holdout-equal-updates/output/d9_equal_updates/seed1_20261119/formal",
+      "mode": "sample_holdout",
+      "exposure": "90% TRAIN branch images; disjoint 10% TRAIN fusion pool"
+    },
+    "full": {
+      "path": "../multi-lane-main-d9-sample-fusion-20261118/output/d9_sample_fusion/seed1_20261118/sample_full",
+      "mode": "sample_full",
+      "exposure": "100% TRAIN branches; same current-task legal TRAIN people for fusion"
+    }
+  },
+  "cache": "../multi-lane-main-d9-summary-eight-20261127/output/d9_summary_eight/seed1_20261127/formal",
+  "methods": [
+    "fixed",
+    "initial",
+    "shared__current",
+    "cls__current",
+    "cls_regions__current",
+    "cls_patch__current",
+    "shared__own",
+    "cls__own",
+    "cls_regions__own",
+    "cls_patch__own",
+    "cls__common__own",
+    "cls_regions__common__own",
+    "cls_patch__common__own",
+    "shared__lower050__own",
+    "cls__lower050__own",
+    "cls_regions__lower050__own",
+    "cls_patch__lower050__own",
+    "cls__variation__own",
+    "cls_regions__variation__own",
+    "cls_patch__variation__own"
+  ],
+  "extraction": {
+    "batch_size": 64,
+    "workers": 2
+  },
+  "representation": {
+    "layer": "final",
+    "task": "current",
+    "patches": 196,
+    "width": 32,
+    "hidden": 8,
+    "projection_seed": 20261128,
+    "patch_dtype": "float16"
+  },
+  "fit": {
+    "seed": 1,
+    "steps": 300,
+    "lr": 0.001,
+    "l2": 0.001,
+    "amplitude": 0.25,
+    "folds": 3,
+    "permutations": 100,
+    "permutation_seed": 20261128,
+    "patch_swaps": 10,
+    "patch_swap_seed": 20261129,
+    "spatial_seed": 20261130
+  },
+  "output": "output/d9_task_patch/seed1_20261128",
+  "logs": "logs/d9_task_patch/seed1_20261128",
+  "initialization": "Full1_aux0_no_prior",
+  "selection": "own-task methods: Val average then final then declared order",
+  "evaluation": "paired_current_broadcast_and_own_task",
+  "candidates": [
+    {
+      "key": "shared",
+      "reader": "shared",
+      "common": true,
+      "lower": 0.25,
+      "variation": 0.0,
+      "reuse": true
+    },
+    {
+      "key": "cls",
+      "reader": "cls",
+      "common": false,
+      "lower": 0.25,
+      "variation": 0.0,
+      "reuse": true
+    },
+    {
+      "key": "cls_regions",
+      "reader": "cls_regions",
+      "common": false,
+      "lower": 0.25,
+      "variation": 0.0,
+      "reuse": true
+    },
+    {
+      "key": "cls_patch",
+      "reader": "cls_patch",
+      "common": false,
+      "lower": 0.25,
+      "variation": 0.0,
+      "reuse": true
+    },
+    {
+      "key": "cls__common",
+      "reader": "cls",
+      "common": true,
+      "lower": 0.25,
+      "variation": 0.0,
+      "reuse": false
+    },
+    {
+      "key": "cls_regions__common",
+      "reader": "cls_regions",
+      "common": true,
+      "lower": 0.25,
+      "variation": 0.0,
+      "reuse": false
+    },
+    {
+      "key": "cls_patch__common",
+      "reader": "cls_patch",
+      "common": true,
+      "lower": 0.25,
+      "variation": 0.0,
+      "reuse": false
+    },
+    {
+      "key": "shared__lower050",
+      "reader": "shared",
+      "common": true,
+      "lower": 0.5,
+      "variation": 0.0,
+      "reuse": false
+    },
+    {
+      "key": "cls__lower050",
+      "reader": "cls",
+      "common": true,
+      "lower": 0.5,
+      "variation": 0.0,
+      "reuse": false
+    },
+    {
+      "key": "cls_regions__lower050",
+      "reader": "cls_regions",
+      "common": true,
+      "lower": 0.5,
+      "variation": 0.0,
+      "reuse": false
+    },
+    {
+      "key": "cls_patch__lower050",
+      "reader": "cls_patch",
+      "common": true,
+      "lower": 0.5,
+      "variation": 0.0,
+      "reuse": false
+    },
+    {
+      "key": "cls__variation",
+      "reader": "cls",
+      "common": true,
+      "lower": 0.25,
+      "variation": 0.01,
+      "reuse": false
+    },
+    {
+      "key": "cls_regions__variation",
+      "reader": "cls_regions",
+      "common": true,
+      "lower": 0.25,
+      "variation": 0.01,
+      "reuse": false
+    },
+    {
+      "key": "cls_patch__variation",
+      "reader": "cls_patch",
+      "common": true,
+      "lower": 0.25,
+      "variation": 0.01,
+      "reuse": false
+    }
+  ],
+  "parent": "../multi-lane-main-d9-final-patch-20261127/output/d9_final_patch/seed1_20261127/formal"
+}

@@ -208,13 +208,14 @@ class R1Receiver(MultiLaneModel):
         return summaries
 
     def encode_lanes(self,images,all_seen_lanes, *, summary_layer=None, pooled_summaries=None,
-                     summary_tokens=None, task10_probe=None, final_tokens=None):
+                     summary_tokens=None, task10_probe=None, final_tokens=None, task_final_tokens=None):
         own=images['full'] if isinstance(images,dict) else images
         if not self.r1_bank or not self.r1_enabled:
             return super().encode_lanes(own, all_seen_lanes, summary_layer=summary_layer,
                                         pooled_summaries=pooled_summaries, summary_tokens=summary_tokens,
-                                        task10_probe=task10_probe, final_tokens=final_tokens)
-        if final_tokens is not None:
+                                        task10_probe=task10_probe, final_tokens=final_tokens,
+                                        task_final_tokens=task_final_tokens)
+        if final_tokens is not None or task_final_tokens is not None:
             raise ValueError("Final capture supports native Full and Frozen9 patch receivers")
         if task10_probe is not None:
             raise ValueError("Task10 probe supports native Full and Frozen9 patch receivers")
