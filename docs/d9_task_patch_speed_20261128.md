@@ -1,6 +1,6 @@
 # 2026-11-28 融合实验执行加速
 
-用户限定最多使用GPU0、GPU1。本次只优化执行，不改变上一批实验的结构、数据或监督。
+按用户最新要求，正式接续仅使用GPU0，GPU1留空。GPU1此前只用于已完成的测速和预检。本次只优化执行，不改变上一批实验的结构、数据或监督。
 
 ## 原因与修改
 
@@ -8,8 +8,8 @@
 
 1. CLS和四分区patch的描述不含可学习读取参数。原程序在300步中反复计算；现在每个拟合集只计算一次。可学习patch读取器的输出仍每步重算。
 2. 冻结patch的float32转换、缺脸遮蔽和有限值检查提前一次完成；三路同图人物汇总合并传输。仍使用原CPU逐列prefix sum，保留计算顺序和反向梯度。PyTorch 2.0.1的CUDA浮点cumsum在严格确定性模式下不可用，本轮不改变该协议。
-3. 一个任务、一个来源的拟合相互独立。比较同GPU的1/2/4个进程后，采用训练每卡最多4个任务，两卡最多8个任务，剩余工作多的任务先调度。每个任务仍完成原图三折和最后全拟合集拟合。
-4. Validation/Test每卡处理一个来源；同一Task Forward的特征只搬入GPU一次。无可学习读取器的描述按方法及实际patch交换/位置打乱分别缓存。可学习patch输出仍由各自封存参数计算。
+3. 一个任务、一个来源的拟合相互独立。比较同GPU的1/2/4个进程后，采用GPU0最多4个任务，剩余工作多的任务先调度。每个任务仍完成原图三折和最后全拟合集拟合。
+4. Validation/Test在GPU0依次处理两个来源；同一Task Forward的特征只搬入GPU一次。无可学习读取器的描述按方法及实际patch交换/位置打乱分别缓存。可学习patch输出仍由各自封存参数计算。
 5. 复制原运行中已完成的候选拟合JSON，核对旧协议、每份SHA、拟合配置和特征身份。独立输出保留完整导入清单；不重写原结果。两个来源全部Validation完成、封存后才开始Test。
 
 ## 真实TRAIN测速
@@ -46,7 +46,7 @@ GPU1，RTX4090，FP32，TF32关闭，严格确定性，CPU单线程。使用现�
 CUDA_VISIBLE_DEVICES=1 python -m scripts.emotic.d9_task_patch_benchmark --steps 300
 CUDA_VISIBLE_DEVICES=1 python -m scripts.emotic.d9_task_patch_concurrency
 CUDA_VISIBLE_DEVICES=1 python -m scripts.emotic.d9_task_patch_parallel --phase preflight --gpus 1
-CUDA_VISIBLE_DEVICES=0,1 python -m scripts.emotic.d9_task_patch_parallel --phase formal --gpus 0,1 \
+CUDA_VISIBLE_DEVICES=0 python -m scripts.emotic.d9_task_patch_parallel --phase formal --gpus 0 \
   --resume-from ../multi-lane-main-d9-task-patch-20261128/output/d9_task_patch/seed1_20261128/formal
 ```
 
