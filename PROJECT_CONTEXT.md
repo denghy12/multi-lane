@@ -1,5 +1,7 @@
 ## 2026-11-28 14:59 GPU0单卡加速正式接续已启动
 
+补充归档：393份预检、测速和启动记录已同步本地根目录output/logs；归档acceleration_artifacts_20261128.tar.gz（114804396字节），SHA256 448c02d8a31c6cf8c382b1cbcca2d1a3559a43f015a259bd436e225f5d47e26c，校验通过。正式仍运行，当前同步不是完整正式结果。15:02后服务器其他GPU出现新的占用，已再次核对本实验协调器及存活worker的CUDA_VISIBLE_DEVICES均为0；先前6.66GiB/68–98%是启动15秒观测，不代表后续含外部作业的整卡总量。
+
 按用户最新要求只用GPU0、最多4独立任务并发，GPU1空闲。两端启动HEAD/upstream4878e039852e22ac1f7c0de00090c3fc4b6e9da2、工作树clean，分支codex/d9-task-patch-speed；运行digest6f44a7ec1602bd3969361acaa72d3f5ef344e59af5cad6d50a45160a64332a69。旧PID3175867已主动SIGINT停止并保留全部产物；旧run_state的KeyboardInterrupt为本次接续操作，详情在旧acceleration_handoff.json，非模型异常。
 
 新tmux ml_d9_task_patch_speed_20261128于14:59:29启动，正式phase14:59:30运行。已按SHA导入160份完成候选拟合，当前full任务3/4/5/7在GPU0并行；后续继续剩余任务与完整8阶段Val/Test，两个来源Val均封存后才能Test。启动首轮15秒实测GPU0显存峰值6818MiB（约6.66GiB）、利用率68–98%；GPU1仅11MiB、空闲。该观测不是整个流程峰值承诺。
