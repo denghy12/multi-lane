@@ -1,3 +1,13 @@
+## 2026-11-28 14:27 两来源40条完整八阶段正式启动
+
+实现57489e42c14aa4699f409ddcc99b6a8e55572809已按Git-only推送并同步独立服务器worktree，分支codex/d9-task-patch-fusion；启动时两端HEAD/upstream一致、服务器clean。23项Linux测试通过（10新增、13旧路径回归），配置与来源检查通过。GPU0真实预检14:22:23–14:26:02完成，219.30秒、exit0；八个任务均拟合，Val/Test检查task0与task7全部已见头。
+
+独立复算通过321个Python文件身份、36份任务特征档、16份父TRAIN特征绑定、224个最终模型、672份折内指标、160主阶段读出、144次原logits融合逐值重放、504次GPU特征到分数逐值重放、264项保存对照指标。所有最终patch模型在0基step1得到BCE梯度；两来源配对人群/标签/Face标记一致，Val封存有效。预检digest e3afb150ab6f5bdb59c3a8aa34a11a4d49c697a5930912c6c0df4c8de6db90b6。
+
+正式实验已于北京时间14:27:37启动，phase自14:27:39运行，GPU0独立tmux ml_d9_task_patch_formal_20261128。范围为两来源各20条（合计40条），全部task0–7 Val/Test；复用四个旧方法形成按头独立/当前广播配对，再检查有界b+u、负下界-.50、u均方惩罚0.01。三路和原标签协议保持，Full1/辅助0起步，300步Adam LR.001，无已知固定比例初始化。当前90%来源task0原模型重放及新增共用调整已完成，仍在拟合，未产生完整正式结果。
+
+入口CUDA_VISIBLE_DEVICES=0 bash scripts/emotic/run_d9_task_patch.sh formal，输出output/d9_task_patch/seed1_20261128/formal；日志logs/d9_task_patch/seed1_20261128/formal_launcher.log，正式启动凭据formal_launch.json，退出记录formal_exit.status。估计2–4小时，约今天16:30–18:30，待全TRAIN实际耗时校准。完成两来源全部Val并封存后才评价Test；对照33.1770/40.2083及同源固定。所有运行结果以57489e4和以上digest为准，之后文档提交与运行身份分开记录。分支层面分折重训/扩大32维投影均依前述条件待证据，不在此批启动。未合并main，未改保护test-only或服务器主工作树原有文件。
+
 ## 2026-11-28 新实验Linux首轮检查
 
 32cbcc4已Git-only推送并同步独立服务器worktree。10项新增测试中9项通过，包括全候选确定性CUDA拟合、旧任务特征与独立路径对应、两区间同初始梯度；端到端测试发现逐任务拟合存档目录未创建，已补建目录。另锁定representation/初始化/评价方式字段，避免配置名义改变而实际读取不变。真实预检和正式均未启动，待提交修复后重验；原失败日志保留。

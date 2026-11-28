@@ -11,3 +11,50 @@ EMOTIC seed1；90%分支用另10% TRAIN当期合法人物拟合，全TRAIN用全
 原输入来源沿用d9_equal_updates/seed1_20261119/formal、d9_sample_fusion/seed1_20261118/sample_full，原logits/名单缓存d9_summary_eight/seed1_20261127/formal，父patch缓存d9_final_patch/seed1_20261127/formal。入口CUDA_VISIBLE_DEVICES=0 bash scripts/emotic/run_d9_task_patch.sh execute；输出output/d9_task_patch/seed1_20261128，日志logs/d9_task_patch/seed1_20261128。预计正式2–4小时，须预检后校准。分支层面分折重训、更高投影维度、扩网络及新损失均等90%证据成立后再推进，本批不启动。当前静态AST/JSON/bash检查通过，Linux测试/真实预检/正式启动待完成；无main合并。
 
 
+具体配对关系（每种来源相同）：
+
+|要检查的因素|对照|新增方法|保持不变|
+|---|---|---|---|
+|比例作用于哪些分类头|最新任务比例用于全部已见头|各头使用自己任务封存的比例|4种旧方法的参数、TRAIN特征与拟合预算直接复用|
+|允许学习整体调整|特征逐图项u，无b|b+u，一起限幅|CLS/四分区/可学习patch分别配对，来源与损失不变|
+|减少辅助路的范围|辅助分数[-.25,.25]|辅助分数[-.50,.25]|同样共用或b+u方法、零起点、初始斜率.25|
+|限制逐图变化|无额外u惩罚|增加0.01×mean(u²)|同样b+u、[-.25,.25]、读法与300步预算|
+
+完整学习信号仍是当期合法TRAIN真实标签的图均衡BCE；原三路logits只用作被融合值，分类头和三路特征均冻结。任务j的新增参数、TRAIN均值与读取器拟合后封存，推理跑所有已见Task Forward，各自比例只用于该头的类别，拼接后评价全已见类。当前阶段可用性mask按人物，基础分数按原图。所有共享b都是从0学出来，没有引用固定比例。
+
+令h=b+u（没有b的对照则h=u），B为负向分数范围的正数幅度，输出为：
+\[
+a_F=1,\qquad
+a_v(h)=
+\begin{cases}
+0.25\tanh(h),&h\ge0,\\
+B\tanh(0.25h/B),&h<0.
+\end{cases}
+\]
+B=.25时恰好为原来的.25tanh(h)；B=.50时负侧范围放宽到-.50，正侧仍不超过+.25。两者在h=0输出0且导数均.25，避免把初始梯度翻倍混入比较；远离0的梯度曲线仍不同，不能声称优化过程完全相同。B=.50时Full在可靠Face情况下约51.42%–69.14%，缺Face约67.92%–81.76%，始终占主导。
+
+u是最终图像特征减TRAIN均值后的线性输出；变化惩罚作用于限幅之前的u，不是三路比例、也不惩罚共用b：
+\[
+\mathcal L=\mathcal L_{\rm BCE}
++0.001\,\mathrm{mean}(\theta^2)
++\lambda\,\mathrm{mean}_{I,v}(u_v(I)^2),\qquad \lambda\in\{0,0.01\}.
+\]
+theta是全部新增学习参数。该惩罚要检验的是减少逐图极端变化是否改善泛化，不能预先声称会提高指标。固定每组300步，未根据Test选停止时刻。只增加2个b参数的模型与旧模型不是严格等参数量，均方参数惩罚的分母也随参数量变化。
+
+预检/正式产物包括：各任务折内/最终参数、TRAIN三折预测、全部已见头对应特征、Val/Test按阶段26类拼接所需预测与分数、均值/100次交换/10次patch换图、分区位置打乱、来源哈希、Val选择封存、完整40行对比。各任务分数交换使用相同供图索引，保留一张图各头分数之间的关系；patch交换在同Face可用性原图组内按人物Face状态匹配。Test组均值只使用Val封存值。
+
+两来源同批访问Test前，所有Val与拟合哈希均须通过；同一组人群/标签/Face标记逐阶段核对。当前广播四条读出在正式阶段必须逐值重放父实验，不因新读取接口改变基准。task0时各头独立与当前广播必须相同。新archive采用prediction__与control__分别保存主预测与对照，旧有cls_mean_logits命名冲突不会进入新结果。
+
+
+
+
+## 2026-11-28 14:27 两来源40条完整八阶段正式启动
+
+实现57489e42c14aa4699f409ddcc99b6a8e55572809已按Git-only推送并同步独立服务器worktree，分支codex/d9-task-patch-fusion；启动时两端HEAD/upstream一致、服务器clean。23项Linux测试通过（10新增、13旧路径回归），配置与来源检查通过。GPU0真实预检14:22:23–14:26:02完成，219.30秒、exit0；八个任务均拟合，Val/Test检查task0与task7全部已见头。
+
+独立复算通过321个Python文件身份、36份任务特征档、16份父TRAIN特征绑定、224个最终模型、672份折内指标、160主阶段读出、144次原logits融合逐值重放、504次GPU特征到分数逐值重放、264项保存对照指标。所有最终patch模型在0基step1得到BCE梯度；两来源配对人群/标签/Face标记一致，Val封存有效。预检digest e3afb150ab6f5bdb59c3a8aa34a11a4d49c697a5930912c6c0df4c8de6db90b6。
+
+正式实验已于北京时间14:27:37启动，phase自14:27:39运行，GPU0独立tmux ml_d9_task_patch_formal_20261128。范围为两来源各20条（合计40条），全部task0–7 Val/Test；复用四个旧方法形成按头独立/当前广播配对，再检查有界b+u、负下界-.50、u均方惩罚0.01。三路和原标签协议保持，Full1/辅助0起步，300步Adam LR.001，无已知固定比例初始化。当前90%来源task0原模型重放及新增共用调整已完成，仍在拟合，未产生完整正式结果。
+
+入口CUDA_VISIBLE_DEVICES=0 bash scripts/emotic/run_d9_task_patch.sh formal，输出output/d9_task_patch/seed1_20261128/formal；日志logs/d9_task_patch/seed1_20261128/formal_launcher.log，正式启动凭据formal_launch.json，退出记录formal_exit.status。估计2–4小时，约今天16:30–18:30，待全TRAIN实际耗时校准。完成两来源全部Val并封存后才评价Test；对照33.1770/40.2083及同源固定。所有运行结果以57489e4和以上digest为准，之后文档提交与运行身份分开记录。分支层面分折重训/扩大32维投影均依前述条件待证据，不在此批启动。未合并main，未改保护test-only或服务器主工作树原有文件。
+
