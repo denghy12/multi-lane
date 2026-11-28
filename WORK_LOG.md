@@ -1,3 +1,9 @@
+## 2026-11-28 14:57 两卡接续前验证完成
+
+优化代码566115e。26项Linux测试全部通过。GPU1四任务并发真实预检14:53:04–14:56:21完成（196.867s），两来源8头均拟合、Val/Test覆盖task0/7。与旧预检独立比较：896份最终/折内状态、928个TRAIN/Val/Test数组、288个特征数组和8阶段全部指标/对照/权重统计逐值一致；两来源选择及Val均值锁相同。新代码配置digest6f44a7ec1602bd3969361acaa72d3f5ef344e59af5cad6d50a45160a64332a69。
+
+准备以SIGINT停止仅原57489e4正式进程（PID3175867），记录主动加速接续，保存其已完成候选JSON；原输出不清除。新正式入口python -m scripts.emotic.d9_task_patch_parallel --phase formal --gpus 0,1 --resume-from ../multi-lane-main-d9-task-patch-20261128/output/d9_task_patch/seed1_20261128/formal。新独立worktree multi-lane-main-d9-task-patch-speed-20261128，tmux计划ml_d9_task_patch_speed_20261128。仍两来源40行、全部8阶段Val/Test，与原实验同科学配置；最大4任务/卡。运行后以新formal_launch.json、resume_import.json、run_state和worker日志为准。
+
 ## 2026-11-28 14:52 并发测速完成，进入回归与真实预检
 
 GPU1 full/task3相同100步patch拟合：单进程7.0285s；双进程共7.6364s（吞吐1.84倍）；四进程共9.0461s（吞吐3.11倍）。7次拟合全状态SHA完全相同。选训练每卡4独立任务、两卡合计最多8任务，按剩余工作量分配；评估仍每卡1来源。6组真实TRAIN300步原/优化状态与预测逐值一致；最大patch单拟合21.7453→22.3534s，没有单进程提速，主要依靠并发；CLS3.06倍/四分区23.35倍。
