@@ -13,6 +13,7 @@ from scripts.emotic.d9_a_eight_eval import read,require_digest
 from scripts.emotic.d9_final_patch_readout import inputs,predict,subset,patch_donors,fit_one as old_fit
 from scripts.emotic.d9_summary_readout import folds,metrics,coverage,save_npz,group_mean_scores,permutation
 from scripts.emotic.d9_task_patch_extract import load_features
+from scripts.emotic.d9_task_patch_prediction import StagePredictor
 from scripts.emotic.d9_summary_eight import canonical_fixed,BENCHMARK,KEYS
 from scripts.emotic.d9_feature_bounds import summarize,select_on_val
 from scripts.emotic.d9_paired_a_evaluate import write_verified
@@ -165,9 +166,10 @@ def evaluate(cfg,name,out,split,tasks,config,smoke,device):
         for head in range(task+1):
             stage=load_features(cfg,name,out,split,task,head,smoke)
             np.testing.assert_array_equal(stage.base.person_ids,base.person_ids)
+            predictor=StagePredictor(stage,device)
             for spec in candidates():
                 key=spec['key'];own=key+'__own';gate=restore_gate(fit['stages'][head]['methods'][key]['gate'])
-                s,z,attention=predict(stage,gate,device,diagnose=True)
+                s,z,attention=predictor(gate,diagnose=True)
                 if not (s[:,0]==1).all() or (s[:,1:]< -spec['lower']-1e-6).any() or (s[:,1:]>.25+1e-6).any():
                     raise ValueError('Full1/score interval violated')
                 w=masked_weights(s[base.inverse],base.reliable)
@@ -187,13 +189,13 @@ def evaluate(cfg,name,out,split,tasks,config,smoke,device):
                     rng=np.random.default_rng(config['patch_swap_seed']);swaps=[]
                     for trial in range(config['patch_swaps']):
                         donors,_=patch_donors(stage,rng)
-                        _,wrong,_=predict(stage,gate,device,patch_donors=donors)
+                        _,wrong,_=predictor(gate,patch_donors=donors)
                         swaps.append(wrong)
                     patch_outputs.setdefault(own,[]).append(torch.stack(swaps)[:,:,start:stop])
                 if spec['reader']=='cls_regions':
                     rng=np.random.default_rng(config['spatial_seed'])
                     order=np.stack([rng.permutation(196) for _ in range(3)])
-                    _,wrong,_=predict(stage,gate,device,spatial_order=order)
+                    _,wrong,_=predictor(gate,spatial_order=order)
                     spatial_outputs.setdefault(own,[]).append(wrong[:,start:stop])
                 if head==task and key in LEGACY:
                     current=key+'__current';outputs[current]=z

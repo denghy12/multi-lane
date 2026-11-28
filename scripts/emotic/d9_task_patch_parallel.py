@@ -56,28 +56,29 @@ def import_fits(cfg,base,previous):
     print(f'IMPORTED {len(manifest)} completed candidate fits',flush=True)
 
 
-def schedule(cfg,phase,jobs,gpus,label):
+def schedule(cfg,phase,jobs,gpus,label,workers_per_gpu=1):
     logdir=Path(cfg['logs'])/phase;logdir.mkdir(parents=True,exist_ok=True)
     queue=list(jobs);active={};finished=[]
+    slots=[(gpu,slot) for slot in range(workers_per_gpu) for gpu in gpus]
     try:
         while queue or active:
-            for gpu in gpus:
-                if gpu in active or not queue:continue
+            for gpu,slot in slots:
+                if (gpu,slot) in active or not queue:continue
                 args=queue.pop(0);tag='_'.join(args)
                 logfile=logdir/(tag+'.log');stream=logfile.open('a')
                 command=[sys.executable,'-u','-m','scripts.emotic.d9_task_patch_parallel','--phase',phase,'--worker',*args]
                 env=dict(os.environ,CUDA_VISIBLE_DEVICES=str(gpu),OMP_NUM_THREADS='1',MKL_NUM_THREADS='1',
                          CUBLAS_WORKSPACE_CONFIG=':4096:8')
                 proc=subprocess.Popen(command,env=env,stdout=stream,stderr=subprocess.STDOUT)
-                active[gpu]=(proc,stream,time.monotonic(),tag,logfile)
-                print(f'START GPU{gpu} {tag} pid={proc.pid}',flush=True)
-            for gpu,(proc,stream,start,tag,logfile) in list(active.items()):
+                active[gpu,slot]=(proc,stream,time.monotonic(),tag,logfile)
+                print(f'START GPU{gpu} worker{slot} {tag} pid={proc.pid}',flush=True)
+            for (gpu,slot),(proc,stream,start,tag,logfile) in list(active.items()):
                 code=proc.poll()
                 if code is None:continue
-                stream.close();del active[gpu]
+                stream.close();del active[gpu,slot]
                 elapsed=time.monotonic()-start
                 if code:raise RuntimeError(f'{tag} exited {code}; see {logfile}')
-                finished.append(dict(job=tag,gpu=gpu,seconds=elapsed,log=str(logfile)))
+                finished.append(dict(job=tag,gpu=gpu,worker=slot,seconds=elapsed,log=str(logfile)))
                 write_json(Path(cfg['output'])/phase/(label+'_jobs.json'),dict(finished=finished))
                 print(f'DONE GPU{gpu} {tag} {elapsed:.1f}s',flush=True)
             time.sleep(.2)
@@ -104,7 +105,7 @@ def worker(phase,args):
 def run(phase,gpus,previous):
     cfg,fit,smoke,tasks=configuration(phase);base=Path(cfg['output'])/phase;base.mkdir(parents=True,exist_ok=True)
     record=protocol(cfg)
-    record['execution']=dict(gpus=list(gpus),fit_jobs='one task per worker, longest first',
+    record['execution']=dict(gpus=list(gpus),fit_jobs='four independent task workers per GPU, longest first',
         frozen_input_cache=True,roster_reduction='original CPU prefix sum, batched transfer',
         eval_jobs='one source per worker, both Val sealed before any Test')
     # GPU count is execution-only; preflight may use the idle GPU1.
@@ -119,7 +120,7 @@ def run(phase,gpus,previous):
         _,n,t=job
         remain=sum(not (base/n/'fits'/f'task{t}'/(s['key']+'.json')).exists() for s in candidates())
         return remain*(Path(cfg['parent'])/n/'features/train'/f'task{t}.npz').stat().st_size
-    schedule(cfg,phase,sorted(jobs,key=cost,reverse=True),gpus,'train')
+    schedule(cfg,phase,sorted(jobs,key=cost,reverse=True),gpus,'train',workers_per_gpu=4)
     for name in cfg['sources']:finalize_train(cfg,name,base/name,fit,smoke)
     for split in ('val','test'):
         if split=='test':

@@ -5,6 +5,9 @@ from multi_lane.track_a.task_patch_fusion import TaskPatchFusion,candidates
 from multi_lane.track_a.task_patch_execution import PreparedDescriptor
 from scripts.emotic.d9_task_patch_readout import fit_one
 from scripts.emotic.d9_task_patch_run import FIT
+from scripts.emotic.d9_task_patch_prediction import StagePredictor
+from scripts.emotic.d9_final_patch_readout import predict,patch_donors
+import numpy as np
 
 
 class ExecutionTests(unittest.TestCase):
@@ -36,5 +39,22 @@ class ExecutionTests(unittest.TestCase):
                     a=fit_one(stage,spec,dict(FIT,steps=5),device,fast=False)
                     b=fit_one(stage,spec,dict(FIT,steps=5),device,fast=True)
                     self.assertEqual(a,b,(device,spec['key']))
+
+    def test_resident_predictions_controls_and_centers_remain_exact(self):
+        for device in (['cpu','cuda'] if torch.cuda.is_available() else ['cpu']):
+            stage=population();stage.patch=stage.patch.repeat(1,1,13,1)[:,:,:196]
+            predictor=StagePredictor(stage,device)
+            donors,_=patch_donors(stage,np.random.default_rng(7))
+            order=np.stack([np.random.default_rng(i).permutation(196) for i in range(3)])
+            for spec in candidates():
+                gate=TaskPatchFusion(spec)
+                with torch.no_grad():
+                    for param in gate.parameters():param.add_(.04)
+                    gate.center.add_(.1)
+                for kwargs in ({},{'patch_donors':donors},{'spatial_order':order}):
+                    a=predict(stage,gate,device,diagnose=True,**kwargs)
+                    b=predictor(gate,diagnose=True,**kwargs)
+                    for x,y in zip(a[:2],b[:2]):torch.testing.assert_close(x,y,rtol=0,atol=0)
+                    self.assertEqual(a[2],b[2])
 
 if __name__=='__main__':unittest.main()
