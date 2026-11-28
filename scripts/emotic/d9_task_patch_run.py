@@ -27,6 +27,10 @@ def check(cfg):
     if (cfg['schema']!=1 or cfg['seed']!=1 or cfg['tasks']!=list(range(8)) or cfg['fit']!=FIT
         or cfg['candidates']!=candidates() or cfg['methods']!=list(METHODS)
         or cfg['extraction']!=dict(batch_size=64,workers=2)
+        or cfg['representation']!=dict(layer='final',task='current',patches=196,width=32,hidden=8,
+                                       projection_seed=20261128,patch_dtype='float16')
+        or cfg['initialization']!='Full1_aux0_no_prior'
+        or cfg['evaluation']!='paired_current_broadcast_and_own_task'
         or cfg['selection']!='own-task methods: Val average then final then declared order'
         or set(cfg['sources'])!={'equal90','full'}):
         raise ValueError('Declared task-head comparison changed')

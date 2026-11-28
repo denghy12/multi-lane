@@ -75,6 +75,7 @@ def train(cfg,name,out,config,smoke,device):
             key=spec['key']
             # Each fitted task is an immutable resumable unit under the locked protocol.
             saved=out/'fits'/f'task{task}'/(key+'.json')
+            saved.parent.mkdir(parents=True,exist_ok=True)
             cached=read(saved) if saved.exists() else None
             if cached:
                 if cached['spec']!=spec or cached['config']!=config or cached['features_sha256']!=stage.feature_sha256 or cached['smoke']!=smoke:
