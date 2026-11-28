@@ -28,6 +28,12 @@ class PreparedDescriptor:
             self.parts.append(g)
         self.fraction = roster_mean(flags[:, None].float(), counts)
         self.size = (counts.float()/(counts+1))[:, None]
+        self.ends = self.counts.cumsum(0)
+        prefix = torch.cat((torch.zeros(1), self.flags.float().cumsum(0)))
+        valid_counts = (prefix[self.ends]-prefix[self.ends-self.counts]).clamp_min(1)
+        width = 2*gate.width
+        self.denominator = torch.cat((self.counts[:, None].expand(-1, 2*width),
+                                      valid_counts[:, None].expand(-1, width)), 1)
 
     def __call__(self):
         if self.fixed is not None:
@@ -36,7 +42,12 @@ class PreparedDescriptor:
         for i, v in enumerate(VIEWS):
             c = self.cls[:, i]
             result, _ = self.gate.readers[v](c, self.parts[i], self.cls[:, 0])
-            # Retain the original CPU prefix-sum order and its exact gradient.
-            parts.append(roster_mean(torch.cat((c, result), 1), self.counts,
-                                     self.flags if i == 2 else None))
-        return torch.cat((*parts, self.fraction, self.size), 1)
+            features = torch.cat((c, result), 1)
+            if i == 2:
+                features = features.masked_fill(~self.flags.to(features.device)[:, None], 0)
+            parts.append(features)
+        # Same independent prefix sum per column, one transfer for all three views.
+        value = torch.cat(parts, 1).cpu()
+        prefix = torch.cat((value.new_zeros((1, value.shape[1])), value.cumsum(0)), 0)
+        pooled = ((prefix[self.ends]-prefix[self.ends-self.counts])/self.denominator).to(self.cls.device)
+        return torch.cat((pooled, self.fraction, self.size), 1)
